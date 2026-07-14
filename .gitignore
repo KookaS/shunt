@@ -31,6 +31,16 @@ index/
 # Documentation build artifacts
 site/
 
+# Internal/research artifacts — NEVER belong in the public repo
+docs/research/
+docs/internals/
+docs/notes/
+docs/wip/
+docs/drafts/
+docs/experiments/
+docs/journal/
+docs/backlog/
+
 # Editor / OS
 .vscode/
 .idea/

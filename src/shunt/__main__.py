@@ -1,6 +1,6 @@
-"""Entry point: `python -m shunt` starts the proxy server."""
+"""Entry point: `python -m shunt` — same as `shunt <subcommand>`."""
 
-from shunt.proxy.server import run
+from shunt.cli import main
 
 if __name__ == "__main__":
-    run()
+    main()

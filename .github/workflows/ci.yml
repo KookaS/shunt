@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync
+      - name: Lint
+        run: uv run ruff check src/ tests/ benchmark/routing/
+      - name: Type check
+        run: uv run mypy src/ benchmark/routing/strategies/ benchmark/routing/metrics.py benchmark/routing/run_eval.py
+      - name: Docs integrity
+        run: |
+          for d in research internals notes wip drafts experiments; do
+            if [ -d "docs/$d" ]; then
+              echo "❌ BANNED: docs/$d/ exists — internal artifacts don't belong here"
+              exit 2
+            fi
+          done
+          echo "✅ docs/ structure OK"
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync
+      - name: Test
+        run: uv run pytest tests/ -v --tb=short
