@@ -28,6 +28,9 @@ htmlcov/
 data/
 index/
 
+# Documentation build artifacts
+site/
+
 # Editor / OS
 .vscode/
 .idea/

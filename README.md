@@ -45,11 +45,13 @@ Integration:
 - **OpenAI-compatible clients:** `base_url = http://127.0.0.1:<port>/v1`
 
 Distribution: `shunt-router` on PyPI (`shunt` is taken); import as `shunt`.
+Docker: `ghcr.io/kookas/shunt-router`.
 
 ## Repo layout
 
 ```
 ├── src/shunt/             Core router engine
+│   ├── cli.py             CLI entry point (shunt start, explain, flag, version)
 │   ├── proxy/             HTTP server: /v1/chat/completions, /v1/messages, admin API
 │   ├── router/            Decision core: fastembed → hnswlib → selection rule
 │   ├── verifiers/         Async outcome backfill (output mining, auto-detected tests)
@@ -60,6 +62,9 @@ Distribution: `shunt-router` on PyPI (`shunt` is taken); import as `shunt`.
 │   └── routing/           Strategy evaluation: kNN, cascade, bandit, baselines
 ├── docs/                  Documentation (MkDocs → readthedocs)
 ├── tests/                 Test suite
+├── .github/workflows/     CI + release workflows (PyPI + Docker)
+├── Dockerfile             Production Docker image (multi-stage python build)
+├── docker-compose.yml     Quickstart: proxy + SQLite with one command
 ├── mkdocs.yaml            MkDocs configuration
 └── .readthedocs.yaml      Read the Docs build config
 ```
