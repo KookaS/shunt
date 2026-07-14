@@ -1,0 +1,34 @@
+# Byte-compiled
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Environments
+.venv/
+venv/
+.env
+.secret
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local model / index artifacts (regenerable; never commit)
+*.onnx
+*.hnsw
+data/
+index/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
