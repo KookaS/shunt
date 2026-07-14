@@ -76,8 +76,8 @@ Cost is computed from the matrix's per-model pricing plus token counts. For offl
 | Strategy | Behavior |
 |---|---|
 | **Oracle** | Cheapest model that passes each task. Upper bound. |
-| **Always-Cheap** | Always cheapest model. Lower bound — if a router can't beat this, it is pointless. |
-| **Always-Frontier** | Always claude-opus-4-6. Maximum cost baseline. |
+| **Always-Cheap** | Always cheapest model (derived from pricing matrix). Lower bound — if a router can't beat this, it is pointless. |
+| **Always-Frontier** | Always most expensive model (derived from pricing matrix). Maximum cost baseline. |
 | **Random** | Random model per task (mean over N seeds). Null baseline. |
 
 Additional strategies: kNN (in progress), cascade and bandit (gated on EPIC-3).

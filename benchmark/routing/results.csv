@@ -1,0 +1,6 @@
+strategy,n_tasks,n_pass,AvgPerf%,AvgPerf_ci_lower,AvgPerf_ci_upper,TotalCost,AvgCost,Reward,CumReg,CumReg_ci_lower,CumReg_ci_upper,rAcc,Pareto
+Oracle,5,5,100.0,100.0,100.0,0.0606,0.01212,4.9879,0.0,0.0,0.0,1.0,True
+Oracle-reward,5,5,100.0,100.0,100.0,0.0606,0.01212,4.9879,0.0,0.0,0.0,1.0,True
+Always-Frontier,5,5,100.0,100.0,100.0,0.1712,0.03424,4.9658,0.0221,0.0107,0.0323,0.2,False
+Always-Cheap,5,4,80.0,40.0,100.0,0.0065,0.0013,3.9987,0.9892,0.0,2.9675,0.2,True
+Random,5,4,80.0,40.0,100.0,0.0065,0.0013,3.9987,0.9892,0.0,2.9675,0.4,True

@@ -1,0 +1,44 @@
+{
+  "deepseek-v4-flash": {
+    "provider": "deepseek",
+    "family": "deepseek",
+    "tier": "cheap",
+    "input_cost_per_1m": 0.15,
+    "output_cost_per_1m": 0.60
+  },
+  "zai-glm-5.2": {
+    "provider": "requesty",
+    "family": "glm",
+    "tier": "mid",
+    "input_cost_per_1m": 0.50,
+    "output_cost_per_1m": 2.00
+  },
+  "qwen3.5-plus": {
+    "provider": "alibaba",
+    "family": "qwen",
+    "tier": "cheap",
+    "input_cost_per_1m": 0.11,
+    "output_cost_per_1m": 0.66
+  },
+  "Qwen3-Max": {
+    "provider": "alibaba",
+    "family": "qwen",
+    "tier": "mid",
+    "input_cost_per_1m": 0.34,
+    "output_cost_per_1m": 1.38
+  },
+  "kimi-k2.5": {
+    "provider": "moonshot",
+    "family": "kimi",
+    "tier": "mid",
+    "input_cost_per_1m": 0.01,
+    "output_cost_per_1m": 2.90
+  },
+  "claude-opus-4-6": {
+    "provider": "anthropic",
+    "family": "claude",
+    "tier": "frontier",
+    "input_cost_per_1m": 5.00,
+    "output_cost_per_1m": 25.00
+  }
+}
