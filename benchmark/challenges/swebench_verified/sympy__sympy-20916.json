@@ -1,0 +1,15 @@
+{
+  "instance_id": "sympy__sympy-20916",
+  "repo": "sympy/sympy",
+  "base_commit": "82298df6a51491bfaad0c6d1980e7e3ca808ae93",
+  "version": "1.8",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "test_super_sub"
+  ],
+  "PASS_TO_PASS": [
+    "test_requires_partial"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sympy_1776_sympy-20916:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

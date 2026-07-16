@@ -1,0 +1,20 @@
+# Build context for benchmark/Dockerfile (context = repo root). Unlike the root
+# .dockerignore, this KEEPS benchmark/ — it only strips heavy/irrelevant paths.
+.git/
+.venv/
+venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+**/.mypy_cache/
+benchmark/.runs/
+benchmark/routing/artifacts/
+benchmark/routing/reports/
+tests/
+docs/
+*.egg-info/
+build/
+dist/
+.DS_Store

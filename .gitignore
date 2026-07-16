@@ -26,6 +26,10 @@ htmlcov/
 *.onnx
 *.hnsw
 data/
+# ...but the benchmark's curated input dir is NOT an artifact — keep it tracked
+# (the generic data/ rule above would otherwise silently ignore new inputs).
+!benchmark/routing/data/
+!benchmark/routing/data/**
 index/
 
 # Documentation build artifacts
@@ -41,7 +45,21 @@ docs/experiments/
 docs/journal/
 docs/backlog/
 
+# Benchmark run artifacts (regenerable; never commit)
+# The sole committed data source of truth is routing/results.csv; everything
+# else (per-strategy summary, param sweeps, per-run eval outputs) is derived.
+# Parameterized eval outputs (results_k*_sr*_ms*.csv) and other per-run files.
+benchmark/routing/artifacts/
+results_k*_sr*_ms*.csv
+# Derived per-strategy summary — regenerated into reports/ (below); never the
+# legacy committed path.
+benchmark/routing/strategy_summary.csv
+
+# Logs
+*.log
+
 # Editor / OS
 .vscode/
 .idea/
 .DS_Store
+reports/

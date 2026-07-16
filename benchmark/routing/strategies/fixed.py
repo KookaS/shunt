@@ -1,8 +1,5 @@
-"""Fixed-model strategies: always use the cheapest or frontier model.
-
-Provides the simple baselines that any adaptive router must beat.
-The cheapest and frontier models are derived from the pricing matrix,
-not hardcoded — making the baselines self-consistent with any matrix.
+"""Fixed-model baselines (cheapest or frontier) that any adaptive router must
+beat. Both models are derived from the pricing matrix, not hardcoded.
 """
 
 from __future__ import annotations
@@ -29,7 +26,7 @@ def _model_pricing(matrix: dict) -> dict[str, float]:
             for m in models
             if m in evaluated
         }
-    # Flat pricing dict (e.g. pricing.json loaded directly)
+    # Flat pricing dict (e.g. models.json loaded directly)
     candidates = {
         k: v for k, v in matrix.items() if isinstance(v, dict) and "input_cost_per_1m" in v
     }

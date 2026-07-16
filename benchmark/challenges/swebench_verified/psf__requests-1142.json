@@ -1,0 +1,19 @@
+{
+  "instance_id": "psf__requests-1142",
+  "repo": "psf/requests",
+  "base_commit": "22623bd8c265b78b161542663ee980738441c307",
+  "version": "1.1",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "test_requests.py::RequestsTestCase::test_no_content_length"
+  ],
+  "PASS_TO_PASS": [
+    "test_requests.py::RequestsTestCase::test_basic_building",
+    "test_requests.py::RequestsTestCase::test_entry_points",
+    "test_requests.py::RequestsTestCase::test_invalid_url",
+    "test_requests.py::RequestsTestCase::test_params_are_added_before_fragment",
+    "test_requests.py::RequestsTestCase::test_path_is_not_double_encoded"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.psf_1776_requests-1142:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

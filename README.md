@@ -1,6 +1,10 @@
 # Shunt
 
-**A local router that puts a cheaper model on the routine work and keeps the expensive one for the hard tail — built to cut your coding-agent bill without you babysitting the model picker.**
+Tired of paying for multiple frontier-model subscriptions and watching your API
+bill climb every month? So are we all.
+
+Shunt is a smart, adaptable router that finds the cheapest model that can
+actually handle your task and it learns from your own experience. Plug it in with one environment variable and let it do the rest.
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Status](https://img.shields.io/badge/status-pre--alpha-orange)
@@ -11,19 +15,50 @@
 
 <!-- TODO: demo — a short asciinema cast showing Shunt routing a real request and printing the X-Shunt-Decision reason. Add before launch. -->
 
-Coding agents bill you frontier-model prices on every request, even the ones a
-small open-weight model would answer just as well. Most of the work — renaming a
-variable, writing a test, fixing an obvious type error — is routine. The expensive
-model earns its keep on the hard tail.
+## Why this project
+
+Coding agents bill you frontier-model prices on every request, even the routine
+ones a small open-weight model would answer just as well. Existing solutions are
+either cloud-only with a take-rate (OpenRouter), licensed so enterprises cannot
+touch them (NadirClaw), proxy-only with no real routing (Portkey, Kong), or
+research artifacts not built to ship (ACRouter). None are simultaneously
+cache-safe, outcome-grounded, tool-agnostic, self-hosted, and Apache 2.0.
 
 Shunt is a proxy you drop in front of the agent. It reads each task, sends the
-routine majority to a cheap model and the rest to a frontier one, and learns where
-that line falls from your own passing tests and typechecks — not from a guess. You
-point one environment variable at it, and nothing else in your setup changes.
+routine majority to a cheap model and the rest to a frontier one, and learns
+where that line falls from your own passing tests and typechecks — not from a
+guess. You point one environment variable at it, and nothing else changes.
 
-You own the whole thing: the model pool, the decision method, your API keys, and
-the data it learns from. It runs on your machine, binds to localhost, keeps no
-telemetry, and is Apache-2.0.
+**What makes it different:**
+
+- **ML-powered, not hand-coded heuristics.** At the core is a k-nearest-neighbours
+  model over task embeddings — it learns which model works for which task from
+  past verified outcomes. No brittle keyword lists, no hand-authored utterance
+  patterns, no magic-number thresholds. When kNN is uncertain, a cascade
+  mechanism tries a cheap model first, verifies the result (does it typecheck?
+  do the tests pass?), and escalates to a smarter model if the cheap answer
+  fails. The opposite of fusion or ensembling — those call multiple models and
+  cost more, which defeats the purpose. Shunt calls *one* model per request
+  and only escalates on verified need.
+- **Cache-safe by design.** Switching models mid-session re-reads the whole
+  history at full price — that alone can wipe out the savings. Shunt routes at
+  task and session boundaries and never swaps the model out from under a cached
+  conversation.
+- **Outcome-grounded, not guess-grounded.** Every decision is checked afterward
+  against a real signal — does the diff apply, does it typecheck, do the tests
+  pass. That result feeds the kNN index for the next decision.
+- **Local-first, zero telemetry, Apache 2.0.** Your data stays yours. You own
+  the model pool, the decision method, the API keys, and the learning data.
+  No phone-home, no take-rate, no CLA — a DCO sign-off is all we ask.
+
+**On cutting your bill.** Shunt reduces cost by routing verified-easy work to
+cheaper models. The published evidence shows 15–30% savings for single-turn
+code-gen tasks, but the one study isolating *agentic* Claude Code found no
+routing benefit there. Whether Shunt saves you money on agentic coding depends
+on your workflow and requires broader testing — the initial dogfood experiment
+exists to measure this honestly. We will publish the real number before asking
+you to adopt it. If agentic coding nulls, Shunt's primary wedge shifts to
+high-volume, stateless, and single-turn workloads where the evidence is positive.
 
 ## Drop-in integration
 
@@ -50,25 +85,44 @@ router sits in front of either.
 The routing is the hard part and the whole point. The multi-provider plumbing is
 becoming free; the value is in getting the *decision* right.
 
-- **It learns from outcomes, not guesses.** Every task Shunt routes gets checked
-  afterward against an objective signal — does the diff apply, does it typecheck,
-  do the touched tests pass. That result is written down next to the task, and the
-  next similar task reads it. The check runs off the hot path and never delays your
-  response.
-- **It's cache-safe by design.** Switching models mid-session throws away the
-  prompt cache and re-reads the whole history at full price — that alone can wipe
-  out the savings. Shunt routes at task and session boundaries and never swaps the
-  model out from under a cached conversation. When escalating to a stronger model
-  is worth it, the recompute cost (roughly 4× the context) is part of the decision,
-  not a surprise on your bill.
-- **The policy is yours to inspect and swap.** Rules first, because they're cheap
-  and predictable. A k-nearest-neighbours lookup over task embeddings by default.
-  A logistic-regression or an LLM-as-judge tier if you want them — the judge is
-  opt-in and never on by default. Every decision comes back with an
-  `X-Shunt-Decision` header that tells you which model was chosen and why.
-- **Secure because it holds your keys.** Localhost-bind by default, no exposed
-  control plane, keys kept out of logs, dependencies pinned and locked — the
-  posture a credential-handling tool in the request path has to be built to.
+Shunt's decision pipeline has two layers:
+
+**Primary: kNN over task embeddings (ML, not rules).** Every task is embedded
+into a vector using a local ONNX model (CPU, ~10ms). A k-nearest-neighbours
+lookup finds past tasks with verified outcomes that resemble the current one.
+If the cheap model in those neighbours has a strong success rate on similar
+work, it gets picked. No hand-authored keyword lists, no brittle heuristics,
+no regular expressions — the model learns the boundary from your actual
+outcomes.
+
+**Fallback: cascade on uncertainty.** When kNN has too few neighbours or the
+success rate is borderline, Shunt falls back to a cascade: try the cheap model,
+verify the result (does the diff apply? does it typecheck? do the tests pass?),
+and escalate to a smarter model only if verification fails. This is the
+opposite of fusion or ensembling — those call multiple models simultaneously
+and cost 4–5× more, which works against the goal of cutting your bill. Shunt
+calls *one* model per request and pays for a second only when the first one
+can't do the job.
+
+**No heuristic rule-based routing.** Other projects use complexity scoring
+(keyword counts, substring matches, `len//4` magic numbers) or hand-authored
+utterance patterns. These don't generalise across tasks, languages, or user
+workflows. Shunt uses neither.
+
+**The loop closes on every request.** After routing, an async verifier checks
+the outcome and writes it to a local store. The kNN index reads from that store
+on the next request. Over time, the router gets better at distinguishing
+routine work from the hard tail.
+
+**Cache-safe.** Switching models mid-session re-reads the whole conversation at
+full price — that alone can wipe out the savings. Shunt routes at task and
+session boundaries and never swaps the model out from under a cached
+conversation. Every decision returns an `X-Shunt-Decision` header so you know
+which model was chosen and why.
+
+**Secure because it holds your keys.** Localhost-bind by default, no exposed
+control plane, keys kept out of logs, dependencies pinned and locked — the
+posture a credential-handling tool in the request path has to be built to.
 
 ## Saving money
 
@@ -98,7 +152,7 @@ providers on demand, and a faster runtime if concurrency ever calls for it.
 
 ```
 ├── src/shunt/             Core router engine
-│   ├── cli.py             CLI entry point (shunt start, explain, flag, version)
+│   ├── cli.py             CLI entry point (shunt start, explain, version; flag planned)
 │   ├── proxy/             HTTP server: /v1/chat/completions, /v1/messages, admin API
 │   ├── router/            Decision core: embed → nearest-neighbour → selection rule
 │   ├── verifiers/         Async outcome backfill (auto-detected tests, typecheck)

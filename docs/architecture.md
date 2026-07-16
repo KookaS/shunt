@@ -5,17 +5,15 @@ description: Shunt's system architecture — proxy, router, verifiers, and store
 
 # Architecture
 
-**Pre-alpha notice: the proxy endpoints are stubs that return canned responses — no routing logic is wired yet.**
+**Status: pre-alpha.** The modules below are implemented and unit-tested, and the routing algorithm has been validated **offline** on SWE-bench Verified (deepseek-v4-flash: 8/10 passed, ~$0.03/task). It is **not yet wired end-to-end**: the proxy currently forwards requests through the OpenAI SDK to a cheap default model; kNN-based model selection runs in the offline benchmark but is not yet integrated into the live request path, and the kill-gate validation has not been run.
 
-Shunt is a single process, localhost-bound. It accepts HTTP requests on two API surfaces — OpenAI-compatible `/v1/chat/completions` and Anthropic `/v1/messages` — and proxies them to the cheapest model that can handle the task.
-
-**Status: pre-alpha.** The modules below are planned — the repo is scaffolded and under active build.
+Shunt is a single process, localhost-bound. It accepts HTTP requests on two API surfaces — OpenAI-compatible `/v1/chat/completions` and Anthropic `/v1/messages` — and proxies them to a model. The intended decision (cheapest model that can handle the task, via kNN-informed routing) is validated in the offline benchmark; wiring it into the proxy request path is the remaining integration step.
 
 ```mermaid
 graph TD
   A[Tool: Claude Code / opencode / Cursor] -->|ANTHROPIC_BASE_URL / OPENAI_BASE_URL| P
   subgraph Shunt[Shunt process · localhost:8080]
-    P[proxy/ - FastAPI + litellm] --> R[router/ - kNN decision]
+    P[proxy/ - FastAPI + OpenAI SDK] --> R[router/ - kNN decision]
     R --> D[db/ - SQLite + HNSW]
     V[verifiers/ - async outcome backfill] --> D
   end
@@ -48,7 +46,7 @@ Or with Docker:
 docker run -p 8080:8080 ghcr.io/kookas/shunt-router
 ```
 
-Config: `SHUNT_PORT`, `SHUNT_HOST`. (Provider keys: planned — see backlog.)
+Config: `SHUNT_PORT`, `SHUNT_HOST`. Provider keys are read from environment variables (e.g. `DEEPSEEK_API_KEY`, `REQUESTY_API_KEY`) by the OpenAI SDK client — each model's `base_url` and `api_key_env_var` come from the model config.
 
 ## Integration
 

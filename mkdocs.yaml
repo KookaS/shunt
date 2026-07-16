@@ -19,6 +19,7 @@ theme:
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - Decisions: decisions/index.md
   - Benchmark:
     - Overview: benchmark.md
     - Design: benchmark-design.md

@@ -1,0 +1,62 @@
+# Shunt Benchmark Configuration
+# Human-editable. Changes here propagate to all scripts.
+# All model metadata (tier, pricing, provider) lives in models.json.
+# This file only controls which models are active and how routing behaves.
+
+models:
+  deepseek-v4-flash:
+    enabled: true
+  zai-glm-5.2:
+    enabled: true
+  kimi-k2.5:
+    enabled: true
+  qwen3.7-plus:
+    enabled: true
+  gpt-5-mini:
+    enabled: true
+  claude-opus-4-6:
+    enabled: false
+
+strategies:
+  enabled:
+    - oracle              # upper bound (perfect knowledge, best quality)
+    - always_frontier     # baseline: always the most expensive model
+    - always_cheap        # baseline: always the cheapest model
+    - knn                 # shipped algorithm: predict by nearest neighbors
+    - knn_cascade         # best quality: kNN-informed try-verify-escalate
+    - external_prior      # SWE-bench leaderboard per-tier difficulty prior
+    # - oracle_reward      # same as oracle with different cost weight
+    # - random             # not useful for comparison
+  knn:
+    k: 20
+    success_rate_threshold: 0.6   # lower = more cost savings, higher = more reliability
+    min_samples: 3
+  knn_cascade:
+    max_tries: 3
+    success_rate_threshold: 0.6
+  external_prior:
+    threshold: 0.5   # escalate when external cheap-tier resolve rate < this
+  # knn_blended is NOT in `enabled` above: it embeds ~490 external statements, too
+  # heavy for the always-run simulated caching loop. Enable it explicitly for the
+  # strategy comparison (scripts/plot_external.py) — params below apply when it is.
+  knn_blended:
+    k: 20
+    success_rate_threshold: 0.5
+    min_samples: 1
+    external_weight: 0.25   # down-weight of external neighbours vs our verified runs
+
+routing:
+  default_strategy: cascade
+  control_model: claude-opus-4-6    # baseline for kill gate (can be disabled, always has data)
+  gamma: 0.1
+
+paths:
+  challenges: routing/data/challenges.json        # curated input, relative to config.py dir
+  results_csv: routing/results.csv                # generated source of truth (read-write)
+  challenge_store: challenges                     # relative to benchmark/
+
+benchmark:
+  seed: 42
+  bootstrap_iterations: 10000
+  n_default: 20
+  sample_size: 0              # 0 = all tasks, N = run only N tasks (for local debugging)

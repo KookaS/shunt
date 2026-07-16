@@ -2,3 +2,9 @@
 *.prompt
 __pycache__/
 *.pyc
+*.log
+# SWE-bench harness working dir: predictions, pulled-image logs, smoke report.
+runner/artifacts/
+# swebench writes its per-run logs relative to cwd.
+runner/logs/
+logs/

@@ -4,17 +4,12 @@ import random
 from collections import defaultdict
 from statistics import mean
 
-GAMMA = 0.1
+
+def _reward(passed: bool, cost: float, gamma: float = 0.1) -> float:
+    return 1.0 - gamma * cost if passed else 0.0 - gamma * cost
 
 
-def _reward(passed: bool, cost: float, gamma: float | None = None) -> float:
-    g = GAMMA if gamma is None else gamma
-    return 1.0 - g * cost if passed else 0.0 - g * cost
-
-
-def compute_metrics(
-    decisions: list[tuple[str, str, bool, float]], gamma: float | None = None
-) -> dict:
+def compute_metrics(decisions: list[tuple[str, str, bool, float]], gamma: float = 0.1) -> dict:
     if not decisions:
         return {}
 
@@ -38,7 +33,7 @@ def compute_metrics(
 def compare_to_oracle(
     decisions: list[tuple[str, str, bool, float]],
     oracle_decisions: list[tuple[str, str, bool, float]],
-    gamma: float | None = None,
+    gamma: float = 0.1,
 ) -> dict:
     if not decisions or not oracle_decisions:
         return {"CumReg": 0.0, "rAcc": 0.0}
@@ -59,7 +54,7 @@ def bootstrap_ci(
     strategy_decisions: list[tuple[str, str, bool, float]],
     oracle_decisions: list[tuple[str, str, bool, float]],
     n_bootstrap: int = 1000,
-    gamma: float | None = None,
+    gamma: float = 0.1,
 ) -> tuple[tuple[float, float], tuple[float, float]]:
     task_groups: dict[str, list] = defaultdict(list)
     for d in strategy_decisions:
@@ -95,6 +90,110 @@ def bootstrap_ci(
     cumreg_ci = (round(boot_cumreg[alpha], 4), round(boot_cumreg[n_bootstrap - 1 - alpha], 4))
 
     return avgperf_ci, cumreg_ci
+
+
+def compute_cost_decomposition(
+    control_decisions: list[tuple[str, str, bool, float, int, int, int]],
+    test_decisions: list[tuple[str, str, bool, float, int, int, int]],
+) -> dict:
+    """Oaxaca-Blinder decomposition of cost savings into price, volume, and
+    interaction effects (summing to frontier_cost - shunt_cost). Only tasks
+    where both arms pass are included (equal-quality comparison).
+    """
+    total_price_saving = 0.0
+    total_volume_saving = 0.0
+    total_interaction = 0.0
+    total_direct_saving = 0.0
+    n_eq_pass = 0
+
+    for cd, td in zip(control_decisions, test_decisions, strict=True):
+        if not cd[2] or not td[2]:
+            continue
+
+        f_cost = cd[3]
+        s_cost = td[3]
+        f_tok = cd[4] + cd[5]
+        s_tok = td[4] + td[5]
+
+        if f_tok <= 0 or s_tok <= 0:
+            continue
+
+        f_price = f_cost / f_tok
+        s_price = s_cost / s_tok
+
+        tok_diff = f_tok - s_tok
+        price_diff = f_price - s_price
+
+        p_save = price_diff * s_tok
+        v_save = tok_diff * s_price
+        ixn = price_diff * tok_diff
+
+        total_price_saving += p_save
+        total_volume_saving += v_save
+        total_interaction += ixn
+        total_direct_saving += f_cost - s_cost
+        n_eq_pass += 1
+
+    if n_eq_pass == 0:
+        return {
+            "n_eq_pass": 0,
+            "total_direct_saving": 0.0,
+            "price_savings": 0.0,
+            "volume_savings": 0.0,
+            "interaction": 0.0,
+            "price_pct": 0.0,
+            "volume_pct": 0.0,
+            "interaction_pct": 0.0,
+        }
+
+    decomposition = total_price_saving + total_volume_saving + total_interaction
+    price_pct = total_price_saving / decomposition * 100 if decomposition else 0.0
+    volume_pct = total_volume_saving / decomposition * 100 if decomposition else 0.0
+    ixn_pct = total_interaction / decomposition * 100 if decomposition else 0.0
+
+    return {
+        "n_eq_pass": n_eq_pass,
+        "total_direct_saving": round(total_direct_saving, 6),
+        "price_savings": round(total_price_saving, 6),
+        "volume_savings": round(total_volume_saving, 6),
+        "interaction": round(total_interaction, 6),
+        "price_pct": round(price_pct, 2),
+        "volume_pct": round(volume_pct, 2),
+        "interaction_pct": round(ixn_pct, 2),
+    }
+
+
+def compute_timing(decisions: list[tuple]) -> dict:
+    """Compute timing metrics from decision tuples with calls field.
+
+    Decision tuple: (task_id, model, passed, cost, in_tok, out_tok, calls)
+    """
+    if not decisions:
+        return {}
+    total_calls = sum(d[6] for d in decisions)
+    avg_calls = total_calls / len(decisions)
+    return {
+        "total_calls": total_calls,
+        "avg_calls_per_task": round(avg_calls, 2),
+    }
+
+
+def compute_timing_per_model(
+    strategies_decisions: dict[str, list[tuple]],
+) -> dict:
+    """Compute avg calls per model across all strategies.
+
+    Each decision tuple has calls at index 6.
+    """
+    model_calls: dict[str, int] = {}
+    model_counts: dict[str, int] = {}
+    for _strategy_name, decisions in strategies_decisions.items():
+        for d in decisions:
+            model = d[1]
+            calls = d[6]
+            model_calls[model] = model_calls.get(model, 0) + calls
+            model_counts[model] = model_counts.get(model, 0) + 1
+    return {m: round(model_calls[m] / model_counts[m], 1) for m in model_calls}
 
 
 def compute_pareto(strategies_metrics: dict[str, dict]) -> dict[str, bool]:

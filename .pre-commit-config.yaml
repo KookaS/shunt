@@ -1,0 +1,79 @@
+# Single source of truth for local + CI checks. Enforcement hooks are `local`
+# + `language: system` so they run the exact ruff/mypy pinned in the project
+# venv (pip install -e '.[dev]') — guaranteeing pre-commit ↔ local ↔ CI parity.
+# Run from the project venv:  pre-commit run --all-files
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff (lint + autofix)
+        # `"$@"` forwards the filenames pre-commit appends; the `--` makes them
+        # positional. venv-prefixed PATH so the pinned ruff runs outside an active venv.
+        entry: bash -c 'PATH="$PWD/.venv/bin:$PATH" ruff check --fix --force-exclude "$@"' --
+        language: system
+        types_or: [python, pyi]
+        require_serial: false
+      - id: ruff-format
+        name: ruff format
+        entry: bash -c 'PATH="$PWD/.venv/bin:$PATH" ruff format --force-exclude "$@"' --
+        language: system
+        types_or: [python, pyi]
+      - id: mypy
+        name: mypy (strict)
+        # Prepend the repo venv to PATH so mypy + the interpreter it imports from
+        # (pydantic/fastapi types) resolve even when `git commit` runs outside an
+        # activated venv. Falls back to PATH if .venv is absent.
+        entry: bash -c 'PATH="$PWD/.venv/bin:$PATH" mypy src/ benchmark/'
+        language: system
+        types: [python]
+        pass_filenames: false
+      # --- Custom AST checks (SH0xx): BLOCKING. A genuine exception is an
+      # explicit, greppable `# noqa: SH00x (reason)` on the line — never a
+      # blanket advisory flag. ---
+      - id: sh001-no-mutable-globals
+        name: SH001 no module-level mutable globals
+        entry: python tools/lint/check_mutable_globals.py
+        language: system
+        types: [python]
+      - id: sh002-docstring-length
+        name: SH002 docstrings <= 3 lines
+        entry: python tools/lint/check_docstring_length.py
+        language: system
+        types: [python]
+      - id: sh003-no-syspath-mutation
+        name: SH003 no sys.path mutation (advisory)
+        entry: python tools/lint/check_syspath.py --advisory
+        language: system
+        types: [python]
+        verbose: true
+      # SH004 scans the whole shipped surface (benchmark/src/docs/README) on every
+      # run — pass_filenames:false + always_run so a leak can't slip in via an
+      # unstaged file. BLOCKING.
+      - id: sh004-no-internal-refs
+        name: SH004 no internal planning-vocab leaks in shipped text
+        entry: python tools/lint/check_internal_refs.py
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: validate-benchmark-config
+        name: validate benchmark config.yaml
+        # Use the repo venv's python so `from benchmark import config` resolves the
+        # editable install even when committing outside an activated venv.
+        entry: bash -c 'PATH="$PWD/.venv/bin:$PATH" python benchmark/validate_config.py'
+        language: system
+        pass_filenames: false
+        files: ^benchmark/config\.yaml$
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.log$'   # regenerable run artifacts (kill_gate.log)
+      - id: end-of-file-fixer
+        exclude: '\.log$'
+      - id: check-yaml
+        exclude: ^mkdocs\.yaml$
+      - id: check-added-large-files
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks

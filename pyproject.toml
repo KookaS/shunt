@@ -23,18 +23,42 @@ classifiers = [
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
-  "litellm>=1.55",
+  "openai>=1.55",
   "fastembed>=0.4",
   "hnswlib>=0.8",
   "scikit-learn>=1.5",
   "pydantic>=2.9",
-  "pydantic-settings>=2.6",
-  "httpx>=0.27",
+  "numpy>=1.26",
+  "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.8", "mypy>=1.13"]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "pytest-cov>=5.0",
+  "ruff>=0.8",
+  "mypy>=1.13",
+  "pre-commit>=4.0",
+  "vulture>=2.11",
+  "deptry>=0.20",
+]
 docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
+# Extra runtime deps the eval harness (benchmark/) needs beyond the core.
+# swebench: the official SWE-bench evaluation harness (invoked via `python -m
+# swebench.harness.run_evaluation`); datasets: pulls Verified instances + gold
+# patches from Hugging Face on demand (no vendored repos); mini-swe-agent: the
+# fixed live-inference scaffold (imported as `minisweagent` in runner/infer.py;
+# the v2 API — get_model/get_agent/get_sb_environment — is what infer.py targets);
+# orjson: swe-rex's fast-JSON runtime dep, imported transitively when the agent
+# talks to its sandbox (a keyless install otherwise fails at first live call).
+benchmark = [
+    "matplotlib>=3.9",
+    "swebench>=4.1",
+    "datasets>=3.0",
+    "mini-swe-agent>=2.4",
+    "orjson>=3.10",
+]
 
 [project.urls]
 Homepage = "https://github.com/KookaS/shunt"
@@ -44,11 +68,119 @@ Repository = "https://github.com/KookaS/shunt"
 shunt = "shunt.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+# shunt is the shipped product (src layout); benchmark is the eval harness at
+# repo root, made importable so its modules use absolute imports (no sys.path).
+where = ["src", "."]
+include = ["shunt*", "benchmark*"]
+namespaces = false
+# PUBLISH-TIME CAVEAT: `benchmark*` here makes the harness importable under
+# `pip install -e .` (dev requirement) but ALSO bundles it into a built wheel.
+# Before the first PyPI publish, drop `benchmark*` from `include` (or move the
+# harness under src/) so end users of `pip install shunt-router` don't get the
+# top-level `benchmark` package (it pulls matplotlib from the `benchmark` extra).
+
+[tool.vulture]
+min_confidence = 80
+paths = ["src", "benchmark", "whitelist_vulture.py"]
+
+[tool.deptry]
+known_first_party = ["shunt", "benchmark"]
+# dev/docs extras hold tools (ruff, mypy, mkdocs, …) that aren't imported.
+optional_dependencies_dev_groups = ["dev", "docs"]
+[tool.deptry.package_module_name_map]
+# The `mini-swe-agent` distribution ships the top-level module `minisweagent`
+# (no underscores) — deptry can't infer that without the package installed.
+mini-swe-agent = ["minisweagent"]
+
+[tool.deptry.per_rule_ignores]
+# _shared is a sibling module of the tools/lint check scripts (first-party).
+DEP001 = ["_shared"]
+# matplotlib lives in the `benchmark` extra, consumed only by benchmark/ scripts.
+# swebench is invoked as a CLI (`python -m swebench…`), never imported, so deptry
+# sees it as unused — it is not.
+DEP002 = ["matplotlib", "swebench"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# vulture's whitelist is deliberately "unused" names — not real source.
+extend-exclude = ["whitelist_vulture.py"]
+
+[tool.ruff.format]
+docstring-code-format = true
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+# Blocking rules. Single source of truth; pre-commit and CI both run this.
+select = [
+  "E", "F", "I", "UP", "B", "SIM",  # base: pycodestyle, pyflakes, isort, pyupgrade, bugbear, simplify
+  "N",                               # pep8-naming
+  "T20",                             # ban print/pprint (product code only; see per-file-ignores)
+  "ERA001",                          # commented-out code
+  "ANN",                             # annotations (incl. ANN401 = ban `Any` in signatures)
+  "C901",                            # mccabe complexity
+  "PLR0915", "PLR0913", "PLR0912",   # statements / args / branches ceilings
+  "PLW0603",                         # global-statement (cheap proxy for SH001)
+  "TID251",                          # banned-api (sys.path mutation)
+  "D101", "D102", "D103", "D106",    # docstring presence (public class/method/func/nested-class)
+]
+# Custom AST checks in tools/lint/ (SH0xx) — declared external so `# noqa: SH001`
+# opt-outs coexist with ruff without tripping its invalid-noqa detection.
+external = ["SH001", "SH002", "SH003"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-statements = 40
+max-args = 6
+max-branches = 12
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"sys.path".msg = "No sys.path mutation — benchmark is an installed package (pip install -e .); use absolute imports."
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: asserts, magic numbers, loose annotations, and long fixtures/flows.
+"tests/*.py" = ["D", "ANN", "PLR2004", "PLR0915"]
+# Benchmark = CLI/analysis harness: print IS the output; scripts are loosely
+# typed by design (ANN via mypy instead) and D-docstrings not mandated. The
+# complexity ceilings (C901/PLR09xx) gate the product library (src/); the
+# harness's sequential plotting/CLI mains are long by nature — RATCHET TARGET:
+# decompose them, then drop these from the ignore.
+"benchmark/**/*.py" = ["D", "T20", "ANN", "C901", "PLR0915", "PLR0912", "PLR0913"]
+# Custom lint checks: CLI tools that print findings to stderr.
+"tools/**/*.py" = ["T20"]
+# Product docstrings enforced for classes/methods; module/package D1xx not required.
+"src/shunt/**/*.py" = ["D"]
+# The CLI entrypoint's stdout IS its output — print is not a debug leftover.
+"src/shunt/cli.py" = ["D", "T20"]
+# Proxy relays third-party streaming objects (openai/httpx) whose types are
+# genuinely dynamic; Any is the correct annotation for a pass-through relay.
+"src/shunt/proxy/router.py" = ["D", "ANN401"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true                       # disallow untyped defs, implicit Any, bare generics, etc.
+warn_unused_ignores = true
+enable_error_code = ["ignore-without-code"]
+ignore_missing_imports = true       # hnswlib / fastembed ship no stubs (openai ships types)
+# ADVISORY (not enabled): disallow_any_explicit. The proxy relays dynamically
+# typed third-party payloads; a hard no-Any ban needs real refactors. Tracked
+# as a ratchet target, not a blocking gate.
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+# benchmark/ is the analysis harness: full --strict is a Phase-2 ratchet target,
+# not yet met (89 bare-generic + untyped-script-main sites). These relaxations
+# are the current rung; tighten by removing them as the harness is annotated.
+[[tool.mypy.overrides]]
+module = "benchmark.*"
+disallow_any_generics = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+warn_return_any = false

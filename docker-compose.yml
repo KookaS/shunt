@@ -12,5 +12,20 @@ services:
       - shunt_data:/data
     restart: unless-stopped
 
+  # Reproducible benchmark runner. Code mounted READ-ONLY; only the outcome
+  # cache + plot output are writable. Simulated by default (reports gaps,
+  # fabricates nothing); pass `--live` for real Docker execution with keys.
+  benchmark:
+    build:
+      context: .
+      dockerfile: benchmark/Dockerfile
+    image: shunt-benchmark:latest
+    volumes:
+      - ./:/app:ro
+      - ./benchmark/routing/results.csv:/app/benchmark/routing/results.csv:rw
+      - ./benchmark/routing/reports:/app/benchmark/routing/reports:rw
+    command: ["--no-summary"]
+    profiles: ["benchmark"]
+
 volumes:
   shunt_data:

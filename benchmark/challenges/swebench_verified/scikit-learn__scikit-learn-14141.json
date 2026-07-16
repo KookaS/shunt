@@ -1,0 +1,16 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-14141",
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "3d997697fdd166eff428ea9fd35734b6a8ba113e",
+  "version": "0.22",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "sklearn/utils/tests/test_show_versions.py::test_get_deps_info"
+  ],
+  "PASS_TO_PASS": [
+    "sklearn/utils/tests/test_show_versions.py::test_get_sys_info",
+    "sklearn/utils/tests/test_show_versions.py::test_show_versions_with_blas"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-14141:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

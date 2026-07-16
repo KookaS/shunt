@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 env:
   PYTHON_VERSION: "3.12"
@@ -20,20 +20,23 @@ jobs:
       - name: Install dependencies
         run: |
           pip install uv
-          uv sync
-      - name: Lint
-        run: uv run ruff check src/ tests/ benchmark/routing/
-      - name: Type check
-        run: uv run mypy src/ benchmark/routing/strategies/ benchmark/routing/metrics.py benchmark/routing/run_eval.py
+          uv sync --extra dev --extra benchmark
+      # Single source of truth: the same .pre-commit-config.yaml devs run locally
+      # (ruff, ruff-format, mypy strict, the custom SH001/SH002/SH004 blocking
+      # checks + SH003 advisory, benchmark config validation, whitespace,
+      # gitleaks). Running the config here is what guarantees pre-commit ↔ CI
+      # parity — CI enforces the exact custom checks, not a drifted subset.
+      - name: pre-commit (lint, format, types, custom SH0xx checks, config validation)
+        run: uv run pre-commit run --all-files --show-diff-on-failure
       - name: Docs integrity
         run: |
           for d in research internals notes wip drafts experiments; do
             if [ -d "docs/$d" ]; then
-              echo "❌ BANNED: docs/$d/ exists — internal artifacts don't belong here"
+              echo "BANNED: docs/$d/ exists — internal artifacts don't belong here"
               exit 2
             fi
           done
-          echo "✅ docs/ structure OK"
+          echo "docs/ structure OK"
 
   test:
     runs-on: ubuntu-latest
@@ -45,6 +48,49 @@ jobs:
       - name: Install dependencies
         run: |
           pip install uv
-          uv sync
+          uv sync --extra dev --extra benchmark
       - name: Test
         run: uv run pytest tests/ -v --tb=short
+
+  # Benchmark integrity: challenge content hashes match the stored version_hash,
+  # no removed challenges, model versions current, AND the per-strategy summary
+  # derives deterministically from the results.csv source of truth. Light — no
+  # live model calls, no embedding downloads (deterministic strategies only).
+  benchmark-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --extra dev --extra benchmark
+      - name: Integrity + derived-artifact drift
+        run: uv run python benchmark/runner/check_integrity.py --check-derived
+
+  # Advisory whole-program hygiene — runs separately so its slower/noisier
+  # tools never block the fast pre-commit path. Reports, does not fail the build.
+  hygiene:
+    name: hygiene (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --extra dev --extra benchmark
+      - name: vulture (dead code)
+        continue-on-error: true
+        run: uv run vulture
+      - name: deptry (dependency hygiene)
+        continue-on-error: true
+        run: uv run deptry .
+      - name: coverage (floor advisory)
+        continue-on-error: true
+        run: uv run pytest tests/ --cov=src/shunt --cov-report=term-missing

@@ -1,0 +1,13 @@
+{
+  "instance_id": "django__django-12419",
+  "repo": "django/django",
+  "base_commit": "7fa1a93c6c8109010a6ff3f604fda83b604e0e97",
+  "version": "3.1",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "test_middleware_headers (project_template.test_settings.TestStartProjectSettings)"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-12419:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

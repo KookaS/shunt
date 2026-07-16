@@ -32,10 +32,11 @@ benchmark/
     <model>__<capability>__<task-id>/     One directory per run
 
   routing/                                Routing strategy evaluation
-    results.csv                           Committed per-strategy metrics
-    matrices/
-      pricing.json                        Model cost table
-      coderouterbench100.json             CodeRouterBench OOD176 tasks
+    results.csv                           THE committed source of truth (per-cell outcomes)
+    data/                                 Curated read-only inputs
+      models.json                         Model registry + cost table
+      challenges.json                     Challenge index + task metadata
+    reports/                              Gitignored — derived strategy_summary.csv + plots
     strategies/
       __init__.py                         Strategy protocol
       oracle.py                           Best per-task (upper bound)
@@ -64,12 +65,12 @@ The evaluator iterates tasks, calls `select()` per strategy, looks up the outcom
 | AvgPerf% | `pass_count / total_tasks × 100` | % of tasks solved |
 | TotalCost | `sum(cost of chosen model per task)` | Raw dollar cost |
 | Reward | `1.0 × pass_rate − γ × total_cost` | Cost-aware utility |
-| Perf/$ | `pass_rate / total_cost` | Efficiency ratio |
-| CumReg | `sum(oracle_reward − strategy_reward)` | Regret vs oracle (planned) |
+| CumReg | `sum(oracle_reward − strategy_reward)` | Regret vs oracle |
+| rAcc | fraction of tasks routed to the oracle's model | Routing accuracy |
 
 γ defaults to 0.1, matching the `agent-as-a-router` cost-weight baseline.
 
-Cost is computed from the matrix's per-model pricing plus token counts. For offline eval, fractional costs are estimated from wall time and public pricing. In production they come from actual API bills.
+Cost is recorded from actual model API responses: litellm's computed cost for direct routes (deepseek), and provider-returned `usage.cost` for Requesty-routed models (including cache-aware rates). For offline eval, costs come from the cached `results.csv` (recorded during live runs). In production the router records actual API costs in real time.
 
 ## Baselines
 
@@ -80,8 +81,8 @@ Cost is computed from the matrix's per-model pricing plus token counts. For offl
 | **Always-Frontier** | Always most expensive model (derived from pricing matrix). Maximum cost baseline. |
 | **Random** | Random model per task (mean over N seeds). Null baseline. |
 
-Additional strategies: kNN (in progress), cascade and bandit (gated on EPIC-3).
+Additional strategies: kNN and kNN-cascade, both implemented in `strategies/`.
 
 ## Relationship to src/shunt/
 
-The strategies in `benchmark/routing/strategies/` are evaluation copies — they consume a known matrix and compute metrics offline. They do not replace `src/shunt/router/` (the live inference server). The offline kNN strategy (in progress) is designed to mirror the live router's algorithm identically.
+The strategies in `benchmark/routing/strategies/` are evaluation copies — they consume a known matrix and compute metrics offline. They do not replace `src/shunt/router/` (the live inference server). The offline kNN strategy is designed to mirror the live router's algorithm identically.
