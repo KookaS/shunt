@@ -1,0 +1,16 @@
+{
+  "instance_id": "django__django-16877",
+  "repo": "django/django",
+  "base_commit": "98f6ada0e2058d67d91fb6c16482411ec2ca0967",
+  "version": "5.0",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "test_autoescape_off (template_tests.filter_tests.test_escapeseq.EscapeseqTests.test_autoescape_off)",
+    "test_basic (template_tests.filter_tests.test_escapeseq.EscapeseqTests.test_basic)",
+    "test_chain_join (template_tests.filter_tests.test_escapeseq.EscapeseqTests.test_chain_join)",
+    "test_chain_join_autoescape_off (template_tests.filter_tests.test_escapeseq.EscapeseqTests.test_chain_join_autoescape_off)"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-16877:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

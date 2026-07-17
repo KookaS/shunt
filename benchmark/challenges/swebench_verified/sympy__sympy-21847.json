@@ -1,0 +1,23 @@
+{
+  "instance_id": "sympy__sympy-21847",
+  "repo": "sympy/sympy",
+  "base_commit": "d9b18c518d64d0ebe8e35a98c2fb519938b9b151",
+  "version": "1.9",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "test_monomials"
+  ],
+  "PASS_TO_PASS": [
+    "test_monomial_count",
+    "test_monomial_mul",
+    "test_monomial_div",
+    "test_monomial_gcd",
+    "test_monomial_lcm",
+    "test_monomial_max",
+    "test_monomial_pow",
+    "test_monomial_min",
+    "test_monomial_divides"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sympy_1776_sympy-21847:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

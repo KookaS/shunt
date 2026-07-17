@@ -1,0 +1,25 @@
+{
+  "instance_id": "sympy__sympy-15809",
+  "repo": "sympy/sympy",
+  "base_commit": "28d913d3cead6c5646307ffa6540b21d65059dfd",
+  "version": "1.4",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "test_Min",
+    "test_Max"
+  ],
+  "PASS_TO_PASS": [
+    "test_minmax_assumptions",
+    "test_issue_8413",
+    "test_root",
+    "test_real_root",
+    "test_rewrite_MaxMin_as_Heaviside",
+    "test_rewrite_MaxMin_as_Piecewise",
+    "test_issue_11099",
+    "test_issue_12638",
+    "test_instantiation_evaluation",
+    "test_rewrite_as_Abs"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sympy_1776_sympy-15809:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

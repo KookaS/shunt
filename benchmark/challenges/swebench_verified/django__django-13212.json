@@ -1,0 +1,20 @@
+{
+  "instance_id": "django__django-13212",
+  "repo": "django/django",
+  "base_commit": "f4e93919e4608cfc50849a1f764fd856e0917401",
+  "version": "3.2",
+  "difficulty_stratum": "hard",
+  "FAIL_TO_PASS": [
+    "test_value_placeholder_with_char_field (forms_tests.tests.test_validators.ValidatorCustomMessageTests)",
+    "test_value_placeholder_with_decimal_field (forms_tests.tests.test_validators.ValidatorCustomMessageTests)",
+    "test_value_placeholder_with_file_field (forms_tests.tests.test_validators.ValidatorCustomMessageTests)",
+    "test_value_placeholder_with_integer_field (forms_tests.tests.test_validators.ValidatorCustomMessageTests)",
+    "test_value_placeholder_with_null_character (forms_tests.tests.test_validators.ValidatorCustomMessageTests)"
+  ],
+  "PASS_TO_PASS": [
+    "test_all_errors_get_reported (forms_tests.tests.test_validators.TestFieldWithValidators)",
+    "test_field_validators_can_be_any_iterable (forms_tests.tests.test_validators.TestFieldWithValidators)"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-13212:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

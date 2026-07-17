@@ -1,0 +1,18 @@
+{
+  "instance_id": "django__django-16502",
+  "repo": "django/django",
+  "base_commit": "246eb4836a6fb967880f838aa0d22ecfdca8b6f1",
+  "version": "5.0",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "test_no_body_returned_for_head_requests (servers.test_basehttp.WSGIRequestHandlerTestCase.test_no_body_returned_for_head_requests)"
+  ],
+  "PASS_TO_PASS": [
+    "test_https (servers.test_basehttp.WSGIRequestHandlerTestCase.test_https)",
+    "test_log_message (servers.test_basehttp.WSGIRequestHandlerTestCase.test_log_message)",
+    "WSGIRequestHandler ignores headers containing underscores.",
+    "WSGIServer handles broken pipe errors."
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-16502:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

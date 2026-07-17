@@ -1,0 +1,39 @@
+{
+  "instance_id": "sympy__sympy-12419",
+  "repo": "sympy/sympy",
+  "base_commit": "479939f8c65c8c2908bbedc959549a257a7c0b0b",
+  "version": "1.0",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "test_Identity"
+  ],
+  "PASS_TO_PASS": [
+    "test_shape",
+    "test_matexpr",
+    "test_subs",
+    "test_ZeroMatrix",
+    "test_ZeroMatrix_doit",
+    "test_Identity_doit",
+    "test_addition",
+    "test_multiplication",
+    "test_MatPow",
+    "test_MatrixSymbol",
+    "test_dense_conversion",
+    "test_free_symbols",
+    "test_zero_matmul",
+    "test_matadd_simplify",
+    "test_matmul_simplify",
+    "test_invariants",
+    "test_indexing",
+    "test_single_indexing",
+    "test_MatrixElement_commutative",
+    "test_MatrixSymbol_determinant",
+    "test_MatrixElement_diff",
+    "test_MatrixElement_doit",
+    "test_identity_powers",
+    "test_Zero_power",
+    "test_matrixelement_diff"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sympy_1776_sympy-12419:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

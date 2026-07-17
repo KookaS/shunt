@@ -1,0 +1,21 @@
+{
+  "instance_id": "pylint-dev__pylint-6386",
+  "repo": "pylint-dev/pylint",
+  "base_commit": "754b487f4d892e3d4872b6fc7468a71db4e31c13",
+  "version": "2.14",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "tests/config/test_config.py::test_short_verbose"
+  ],
+  "PASS_TO_PASS": [
+    "tests/config/test_config.py::test_can_read_toml_env_variable",
+    "tests/config/test_config.py::test_unknown_message_id",
+    "tests/config/test_config.py::test_unknown_option_name",
+    "tests/config/test_config.py::test_unknown_short_option_name",
+    "tests/config/test_config.py::test_unknown_confidence",
+    "tests/config/test_config.py::test_unknown_yes_no",
+    "tests/config/test_config.py::test_unknown_py_version"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.pylint-dev_1776_pylint-6386:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

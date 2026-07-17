@@ -1,0 +1,16 @@
+{
+  "instance_id": "sympy__sympy-23824",
+  "repo": "sympy/sympy",
+  "base_commit": "39de9a2698ad4bb90681c0fdb70b30a78233145f",
+  "version": "1.12",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "test_kahane_simplify1"
+  ],
+  "PASS_TO_PASS": [
+    "test_kahane_algorithm",
+    "test_gamma_matrix_class"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sympy_1776_sympy-23824:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

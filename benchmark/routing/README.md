@@ -9,7 +9,7 @@ routing/
   results.csv                 # THE committed source of truth — per-cell outcomes from live runs
   data/                       # Curated read-only inputs
     models.json               # Model registry + Requesty router pricing — model source of truth
-    challenges.json           # Index of the 10 swebench_verified specs (challenges, tasks)
+    challenges.json           # Index of the 500 swebench_verified specs (challenges, tasks)
     external_swebench.csv     # Per-instance resolve rates from SWE-bench/experiments (separate table)
   strategies/
     __init__.py               # Strategy protocol
@@ -18,8 +18,8 @@ routing/
     knn.py                    # kNN retrieval (shunt's approach)
     knn_cascade.py            # kNN-informed verify-and-escalate
     external_prior.py         # Escalate on external p_solve difficulty (in-sample lookup)
-    knn_blended.py            # kNN over our 10 ∪ external ~490 (down-weighted neighbours)
-  heldout_eval.py             # Out-of-sample generalization over the ~490 held-out instances
+    knn_blended.py            # kNN over our verified runs ∪ external Verified priors (down-weighted)
+  heldout_eval.py             # Out-of-sample generalization over held-out instances (no live result yet)
   run_eval.py                 # Evaluate all strategies
   metrics.py                  # Metric definitions
   report.py                   # Comparison tables and plots (derived from results.csv)
@@ -113,7 +113,10 @@ row:
   canonicalized content (`json.dumps(sort_keys=True)`, order-independent). Because
   the spec holds `base_commit`, `FAIL_TO_PASS`, `PASS_TO_PASS`, and
   `dataset_revision`, that hash *is* the git-pinned problem version — no directory
-  hashing. `challenge_hash(id)` / `all_hashes()` expose it.
+  hashing. **Selection metadata is excluded** (`_HASH_EXCLUDED_KEYS`, currently
+  `difficulty_stratum`): a label the model never sees is not execution identity, so
+  correcting it must not stale a paid result cell. `challenge_hash(id)` /
+  `all_hashes()` expose it.
 - **`model_version`** — the model's `version` from `models.json`.
 - **`image_digest`** — the **manifest** digest (never the config digest) of the
   instance's SWE-bench image, resolved via `docker buildx imagetools inspect`
@@ -235,9 +238,10 @@ The **sole** challenge source is **SWE-bench Verified**. Each task is a minimal
 spec under `benchmark/challenges/swebench_verified/{instance_id}.json`
 (`instance_id, repo, base_commit, version, difficulty_stratum, FAIL_TO_PASS,
 PASS_TO_PASS, image_ref, dataset_revision`) whose repo/patch content is pulled on
-demand by the official harness — nothing is vendored. The current suite is **10
-instances** across 10 repos with a spread of difficulty strata; every one has a
-verified prebuilt `swebench/sweb.eval.x86_64.*` image.
+demand by the official harness — nothing is vendored. The suite is the full **500
+instances** across 12 repos with a spread of difficulty strata; every one has a
+verified prebuilt `swebench/sweb.eval.x86_64.*` image. Live runs cover a nested
+partial subset set by `sample_size` (see the harness README).
 `integrity.swebench_spec_hash()` hashes each spec; live `(instance, model)`
 outcomes flow into `results.csv` with the spec hash as `version_hash`.
 See the benchmark README's *SWE-bench Verified execution* section for the

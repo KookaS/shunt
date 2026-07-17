@@ -5,7 +5,7 @@ description: Shunt's system architecture — proxy, router, verifiers, and store
 
 # Architecture
 
-**Status: pre-alpha.** The modules below are implemented and unit-tested, and the routing algorithm has been validated **offline** on SWE-bench Verified (deepseek-v4-flash: 8/10 passed, ~$0.03/task). It is **not yet wired end-to-end**: the proxy currently forwards requests through the OpenAI SDK to a cheap default model; kNN-based model selection runs in the offline benchmark but is not yet integrated into the live request path, and the kill-gate validation has not been run.
+**Status: pre-alpha.** The modules below are implemented and unit-tested, and the routing algorithm has been validated **offline** on the 500-task SWE-bench Verified suite (nested cost-safe sampling; a first-20 partial run: deepseek-v4-flash 16/20 passed, ~$0.01/task). It is **not yet wired end-to-end**: the proxy currently forwards requests through the OpenAI SDK to a cheap default model; kNN-based model selection runs in the offline benchmark but is not yet integrated into the live request path, and the kill-gate validation has not been run.
 
 Shunt is a single process, localhost-bound. It accepts HTTP requests on two API surfaces — OpenAI-compatible `/v1/chat/completions` and Anthropic `/v1/messages` — and proxies them to a model. The intended decision (cheapest model that can handle the task, via kNN-informed routing) is validated in the offline benchmark; wiring it into the proxy request path is the remaining integration step.
 

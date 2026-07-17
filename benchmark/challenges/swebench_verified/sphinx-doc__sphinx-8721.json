@@ -1,0 +1,17 @@
+{
+  "instance_id": "sphinx-doc__sphinx-8721",
+  "repo": "sphinx-doc/sphinx",
+  "base_commit": "82ef497a8c88f0f6e50d84520e7276bfbf65025d",
+  "version": "3.5",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "tests/test_ext_viewcode.py::test_viewcode_epub_default"
+  ],
+  "PASS_TO_PASS": [
+    "tests/test_ext_viewcode.py::test_viewcode_epub_enabled",
+    "tests/test_ext_viewcode.py::test_linkcode",
+    "tests/test_ext_viewcode.py::test_local_source_files"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8721:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

@@ -1,0 +1,18 @@
+{
+  "instance_id": "sympy__sympy-13852",
+  "repo": "sympy/sympy",
+  "base_commit": "c935e1d106743efd5bf0705fbeedbd18fadff4dc",
+  "version": "1.1",
+  "difficulty_stratum": "hard",
+  "FAIL_TO_PASS": [
+    "test_polylog_values"
+  ],
+  "PASS_TO_PASS": [
+    "test_zeta_eval",
+    "test_dirichlet_eta_eval",
+    "test_stieltjes",
+    "test_stieltjes_evalf"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sympy_1776_sympy-13852:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

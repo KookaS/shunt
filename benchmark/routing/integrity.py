@@ -43,9 +43,17 @@ DEFAULT_REASONING: Final[str] = "default"
 UNKNOWN_VERSION: Final[str] = "unknown"
 
 
+# Keys that are SELECTION metadata, not execution identity — excluded from the content
+# hash so correcting a label (e.g. difficulty_stratum) never stales a PAID result cell.
+# The task a model actually runs (repo/base_commit/version/F2P/P2P/image_ref/
+# dataset_revision) is unchanged by a relabel, so its cached outcome stays valid.
+_HASH_EXCLUDED_KEYS: Final[frozenset[str]] = frozenset({"difficulty_stratum"})
+
+
 def canonical_content(challenge: dict[str, object]) -> str:
-    """Canonical JSON of a challenge (sorted keys) — order-independent hashing."""
-    return json.dumps(challenge, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    """Canonical JSON of a challenge (sorted keys, selection-metadata excluded)."""
+    hashed = {k: v for k, v in challenge.items() if k not in _HASH_EXCLUDED_KEYS}
+    return json.dumps(hashed, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
 
 
 def hash_content(challenge: dict[str, object]) -> str:

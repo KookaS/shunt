@@ -1,0 +1,23 @@
+{
+  "instance_id": "django__django-15863",
+  "repo": "django/django",
+  "base_commit": "37c5b8c07be104fd5288cd87f101e48cb7a40298",
+  "version": "4.2",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "test_inputs (template_tests.filter_tests.test_floatformat.FunctionTests)"
+  ],
+  "PASS_TO_PASS": [
+    "test_floatformat01 (template_tests.filter_tests.test_floatformat.FloatformatTests)",
+    "test_floatformat02 (template_tests.filter_tests.test_floatformat.FloatformatTests)",
+    "test_float_dunder_method (template_tests.filter_tests.test_floatformat.FunctionTests)",
+    "test_force_grouping (template_tests.filter_tests.test_floatformat.FunctionTests)",
+    "test_infinity (template_tests.filter_tests.test_floatformat.FunctionTests)",
+    "#15789",
+    "test_negative_zero_values (template_tests.filter_tests.test_floatformat.FunctionTests)",
+    "test_unlocalize (template_tests.filter_tests.test_floatformat.FunctionTests)",
+    "test_zero_values (template_tests.filter_tests.test_floatformat.FunctionTests)"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-15863:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

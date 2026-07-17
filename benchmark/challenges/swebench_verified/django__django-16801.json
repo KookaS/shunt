@@ -1,0 +1,31 @@
+{
+  "instance_id": "django__django-16801",
+  "repo": "django/django",
+  "base_commit": "3b62d8c83e3e48d2ed61cfa32a61c56d9e030293",
+  "version": "5.0",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "test_post_init_not_connected (model_fields.test_imagefield.ImageFieldNoDimensionsTests.test_post_init_not_connected)"
+  ],
+  "PASS_TO_PASS": [
+    "Assigning ImageField to None clears dimensions.",
+    "Tests assigning an image field through the model's constructor.",
+    "Tests assigning an image in Manager.create().",
+    "The default value for an ImageField is an instance of",
+    "Dimensions are updated correctly in various situations.",
+    "Tests assignment using the field's save method and deletion using",
+    "Tests behavior when image is not passed in constructor.",
+    "test_assignment (model_fields.test_imagefield.TwoImageFieldTests.test_assignment)",
+    "test_constructor (model_fields.test_imagefield.TwoImageFieldTests.test_constructor)",
+    "test_create (model_fields.test_imagefield.TwoImageFieldTests.test_create)",
+    "test_field_save_and_delete_methods (model_fields.test_imagefield.TwoImageFieldTests.test_field_save_and_delete_methods)",
+    "test_defer (model_fields.test_imagefield.ImageFieldTests.test_defer)",
+    "Bug #8175: correctly delete an object where the file no longer",
+    "Bug #9786: Ensure '==' and '!=' work correctly.",
+    "If the underlying file is unavailable, still create instantiate the",
+    "ImageField can be pickled, unpickled, and that the image of",
+    "Bug #8534: FileField.size should not leave the file open."
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-16801:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

@@ -3,7 +3,7 @@
   "repo": "scikit-learn/scikit-learn",
   "base_commit": "3d997697fdd166eff428ea9fd35734b6a8ba113e",
   "version": "0.22",
-  "difficulty_stratum": "medium",
+  "difficulty_stratum": "easy",
   "FAIL_TO_PASS": [
     "sklearn/utils/tests/test_show_versions.py::test_get_deps_info"
   ],

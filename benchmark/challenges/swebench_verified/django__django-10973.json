@@ -1,0 +1,17 @@
+{
+  "instance_id": "django__django-10973",
+  "repo": "django/django",
+  "base_commit": "ddb293685235fd09e932805771ae97f72e817181",
+  "version": "3.0",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "test_accent (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)",
+    "test_basic (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)",
+    "test_column (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)",
+    "test_nopass (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)",
+    "SIGINT is ignored in Python and passed to psql to abort quries."
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-10973:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

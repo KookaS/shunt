@@ -1,5 +1,7 @@
 """Tests for benchmark integrity: hashing determinism, stale/missing detection, checks."""
 
+import json
+
 from benchmark import config
 from benchmark.routing import coverage, integrity
 from benchmark.routing.strategies.oracle import Oracle
@@ -23,9 +25,12 @@ class TestHashing:
         assert all(c in "0123456789abcdef" for c in h)
 
     def test_all_hashes_covers_store(self):
-        # SWE-bench Verified is the sole source: 10 materialised instance specs.
+        # SWE-bench Verified is the sole source: the store covers the full manifest
+        # (count-agnostic — the whole Verified set, >100), each a valid sha256.
+        manifest_ids = set(json.loads(config.challenges_path().read_text())["tasks"])
         hashes = integrity.all_hashes()
-        assert len(hashes) == 10
+        assert set(hashes) == manifest_ids
+        assert len(hashes) > 100
         for cid, h in hashes.items():
             assert len(h) == 64
             assert integrity.challenge_hash(cid) == h

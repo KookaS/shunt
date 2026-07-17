@@ -1,0 +1,23 @@
+{
+  "instance_id": "astropy__astropy-14182",
+  "repo": "astropy/astropy",
+  "base_commit": "a5917978be39d13cd90b517e1de4e7a539ffaa48",
+  "version": "5.1",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "astropy/io/ascii/tests/test_rst.py::test_rst_with_header_rows"
+  ],
+  "PASS_TO_PASS": [
+    "astropy/io/ascii/tests/test_rst.py::test_read_normal",
+    "astropy/io/ascii/tests/test_rst.py::test_read_normal_names",
+    "astropy/io/ascii/tests/test_rst.py::test_read_normal_names_include",
+    "astropy/io/ascii/tests/test_rst.py::test_read_normal_exclude",
+    "astropy/io/ascii/tests/test_rst.py::test_read_unbounded_right_column",
+    "astropy/io/ascii/tests/test_rst.py::test_read_unbounded_right_column_header",
+    "astropy/io/ascii/tests/test_rst.py::test_read_right_indented_table",
+    "astropy/io/ascii/tests/test_rst.py::test_trailing_spaces_in_row_definition",
+    "astropy/io/ascii/tests/test_rst.py::test_write_normal"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.astropy_1776_astropy-14182:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

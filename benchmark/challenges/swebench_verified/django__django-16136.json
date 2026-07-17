@@ -1,0 +1,22 @@
+{
+  "instance_id": "django__django-16136",
+  "repo": "django/django",
+  "base_commit": "19e6efa50b603af325e7f62058364f278596758f",
+  "version": "4.2",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "test_http_method_not_allowed_responds_correctly (async.tests.ViewTests)",
+    "test_mixed_views_raise_error (async.tests.ViewTests)"
+  ],
+  "PASS_TO_PASS": [
+    "View and by extension any subclasses that don't define handlers are",
+    "test_options_handler_responds_correctly (async.tests.ViewTests)",
+    "test_views_are_correctly_marked (async.tests.ViewTests)",
+    "test_caches_local (async.tests.CacheTest)",
+    "test_async_unsafe (async.tests.AsyncUnsafeTest)",
+    "Utility class which turns an awaitable that only works on the thread with",
+    "test_get_async_connection (async.tests.DatabaseConnectionTest)"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-16136:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

@@ -1,0 +1,13 @@
+{
+  "instance_id": "sphinx-doc__sphinx-9711",
+  "repo": "sphinx-doc/sphinx",
+  "base_commit": "81a4fd973d4cfcb25d01a7b0be62cdb28f82406d",
+  "version": "4.3",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "tests/test_extension.py::test_needs_extensions"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-9711:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

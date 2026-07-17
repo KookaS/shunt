@@ -1,0 +1,36 @@
+{
+  "instance_id": "sphinx-doc__sphinx-8265",
+  "repo": "sphinx-doc/sphinx",
+  "base_commit": "b428cd2404675475a5c3dc2a2b0790ba57676202",
+  "version": "3.3",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "tests/test_pycode_ast.py::test_unparse[(1,"
+  ],
+  "PASS_TO_PASS": [
+    "tests/test_pycode_ast.py::test_unparse[a",
+    "tests/test_pycode_ast.py::test_unparse[os.path-os.path]",
+    "tests/test_pycode_ast.py::test_unparse[1",
+    "tests/test_pycode_ast.py::test_unparse[b'bytes'-b'bytes']",
+    "tests/test_pycode_ast.py::test_unparse[object()-object()]",
+    "tests/test_pycode_ast.py::test_unparse[1234-1234_0]",
+    "tests/test_pycode_ast.py::test_unparse[{'key1':",
+    "tests/test_pycode_ast.py::test_unparse[...-...]",
+    "tests/test_pycode_ast.py::test_unparse[Tuple[int,",
+    "tests/test_pycode_ast.py::test_unparse[~",
+    "tests/test_pycode_ast.py::test_unparse[lambda",
+    "tests/test_pycode_ast.py::test_unparse[[1,",
+    "tests/test_pycode_ast.py::test_unparse[sys-sys]",
+    "tests/test_pycode_ast.py::test_unparse[1234-1234_1]",
+    "tests/test_pycode_ast.py::test_unparse[not",
+    "tests/test_pycode_ast.py::test_unparse[{1,",
+    "tests/test_pycode_ast.py::test_unparse['str'-'str']",
+    "tests/test_pycode_ast.py::test_unparse[+",
+    "tests/test_pycode_ast.py::test_unparse[-",
+    "tests/test_pycode_ast.py::test_unparse[()-()]",
+    "tests/test_pycode_ast.py::test_unparse_None",
+    "tests/test_pycode_ast.py::test_unparse_py38"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8265:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

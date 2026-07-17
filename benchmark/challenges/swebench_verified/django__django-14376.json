@@ -1,0 +1,22 @@
+{
+  "instance_id": "django__django-14376",
+  "repo": "django/django",
+  "base_commit": "d06c5b358149c02a62da8a5469264d05f29ac659",
+  "version": "4.0",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "test_options_non_deprecated_keys_preferred (dbshell.test_mysql.MySqlDbshellCommandTestCase)",
+    "test_options_override_settings_proper_values (dbshell.test_mysql.MySqlDbshellCommandTestCase)",
+    "test_parameters (dbshell.test_mysql.MySqlDbshellCommandTestCase)"
+  ],
+  "PASS_TO_PASS": [
+    "test_basic_params_specified_in_settings (dbshell.test_mysql.MySqlDbshellCommandTestCase)",
+    "test_can_connect_using_sockets (dbshell.test_mysql.MySqlDbshellCommandTestCase)",
+    "test_crash_password_does_not_leak (dbshell.test_mysql.MySqlDbshellCommandTestCase)",
+    "test_fails_with_keyerror_on_incomplete_config (dbshell.test_mysql.MySqlDbshellCommandTestCase)",
+    "test_options_charset (dbshell.test_mysql.MySqlDbshellCommandTestCase)",
+    "test_ssl_certificate_is_added (dbshell.test_mysql.MySqlDbshellCommandTestCase)"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-14376:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

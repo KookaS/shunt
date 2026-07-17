@@ -1,0 +1,19 @@
+{
+  "instance_id": "sphinx-doc__sphinx-8269",
+  "repo": "sphinx-doc/sphinx",
+  "base_commit": "1e2ccd8f0eca0870cf6f8fce6934e2da8eba9b72",
+  "version": "3.3",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "tests/test_build_linkcheck.py::test_raises_for_invalid_status"
+  ],
+  "PASS_TO_PASS": [
+    "tests/test_build_linkcheck.py::test_defaults",
+    "tests/test_build_linkcheck.py::test_defaults_json",
+    "tests/test_build_linkcheck.py::test_anchors_ignored",
+    "tests/test_build_linkcheck.py::test_auth",
+    "tests/test_build_linkcheck.py::test_linkcheck_request_headers"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8269:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

@@ -1,12 +1,13 @@
-"""Blended kNN: our verified 10-task runs + external SWE-bench as down-weighted neighbours."""
+"""Blended kNN: our verified runs + external SWE-bench as down-weighted neighbours."""
 
 from __future__ import annotations
 
 # Item-2 proper — "use the swebench values in our kNN alongside our challenge runs." Plain
-# kNN (knn.py) indexes only our 10 outcomes; at N=10 the escalate-here signal isn't
-# learnable. Here we embed our 10 descriptions AND the ~490 *other* Verified problem
-# statements (self-excluded to avoid leakage) into one HNSW index and retrieve neighbours
-# from the union. Weighting (owner's "smaller weight for their data"): our neighbours give
+# kNN (knn.py) indexes only our own verified outcomes; while live coverage is a small
+# partial subset the escalate-here signal isn't learnable from those alone. Here we embed
+# our run descriptions AND the *other* Verified problem statements (self-excluded to avoid
+# leakage) into one HNSW index and retrieve neighbours from the union. Weighting (owner's
+# "smaller weight for their data"): our neighbours give
 # a real per-model pass/fail at weight 1.0; each external neighbour gives its tier rate
 # (cheap ← p_solve, since leaderboard p_cheap is degenerate; mid/frontier ← p_frontier) at
 # external_weight < 1.0. Cost is never taken from external data. External evidence is
@@ -199,7 +200,7 @@ def _cached_embeddings(
 
 
 class kNNBlended(Strategy):  # noqa: N801 (kNN is the established algorithm name)
-    """kNN over our-10 ∪ external-490, external neighbours down-weighted."""
+    """kNN over our verified runs ∪ external Verified priors, external neighbours down-weighted."""
 
     def __init__(
         self,

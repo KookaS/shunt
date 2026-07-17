@@ -1,0 +1,22 @@
+{
+  "instance_id": "astropy__astropy-14365",
+  "repo": "astropy/astropy",
+  "base_commit": "7269fa3e33e8d02485a647da91a5a2a60a06af61",
+  "version": "5.1",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "astropy/io/ascii/tests/test_qdp.py::test_roundtrip[True]"
+  ],
+  "PASS_TO_PASS": [
+    "astropy/io/ascii/tests/test_qdp.py::test_get_tables_from_qdp_file",
+    "astropy/io/ascii/tests/test_qdp.py::test_roundtrip[False]",
+    "astropy/io/ascii/tests/test_qdp.py::test_read_example",
+    "astropy/io/ascii/tests/test_qdp.py::test_roundtrip_example",
+    "astropy/io/ascii/tests/test_qdp.py::test_roundtrip_example_comma",
+    "astropy/io/ascii/tests/test_qdp.py::test_read_write_simple",
+    "astropy/io/ascii/tests/test_qdp.py::test_read_write_simple_specify_name",
+    "astropy/io/ascii/tests/test_qdp.py::test_get_lines_from_qdp"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.astropy_1776_astropy-14365:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

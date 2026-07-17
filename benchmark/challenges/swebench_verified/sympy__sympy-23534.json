@@ -1,0 +1,25 @@
+{
+  "instance_id": "sympy__sympy-23534",
+  "repo": "sympy/sympy",
+  "base_commit": "832c24fec1046eaa544a4cab4c69e3af3e651759",
+  "version": "1.11",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "test_symbols"
+  ],
+  "PASS_TO_PASS": [
+    "test_Str",
+    "test_Symbol",
+    "test_Dummy",
+    "test_Dummy_force_dummy_index",
+    "test_lt_gt",
+    "test_no_len",
+    "test_ineq_unequal",
+    "test_Wild_properties",
+    "test_symbols_become_functions_issue_3539",
+    "test_unicode",
+    "test_uniquely_named_symbol_and_Symbol"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sympy_1776_sympy-23534:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

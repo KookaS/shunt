@@ -1,0 +1,22 @@
+{
+  "instance_id": "sphinx-doc__sphinx-11510",
+  "repo": "sphinx-doc/sphinx",
+  "base_commit": "6cb783c0024a873722952a67ebb9f41771c8eb6d",
+  "version": "7.2",
+  "difficulty_stratum": "hard",
+  "FAIL_TO_PASS": [
+    "tests/test_directive_other.py::test_include_source_read_event",
+    "tests/test_directive_other.py::test_include_source_read_event_nested_includes"
+  ],
+  "PASS_TO_PASS": [
+    "tests/test_directive_other.py::test_toctree",
+    "tests/test_directive_other.py::test_relative_toctree",
+    "tests/test_directive_other.py::test_toctree_urls_and_titles",
+    "tests/test_directive_other.py::test_toctree_glob",
+    "tests/test_directive_other.py::test_toctree_glob_and_url",
+    "tests/test_directive_other.py::test_reversed_toctree",
+    "tests/test_directive_other.py::test_toctree_twice"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-11510:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

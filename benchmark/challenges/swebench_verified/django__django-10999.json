@@ -1,0 +1,25 @@
+{
+  "instance_id": "django__django-10999",
+  "repo": "django/django",
+  "base_commit": "36300ef336e3f130a0dadc1143163ff3d23dc843",
+  "version": "3.0",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "test_negative (utils_tests.test_dateparse.DurationParseTests)",
+    "test_parse_postgresql_format (utils_tests.test_dateparse.DurationParseTests)"
+  ],
+  "PASS_TO_PASS": [
+    "test_parse_date (utils_tests.test_dateparse.DateParseTests)",
+    "test_parse_datetime (utils_tests.test_dateparse.DateParseTests)",
+    "test_parse_time (utils_tests.test_dateparse.DateParseTests)",
+    "test_days (utils_tests.test_dateparse.DurationParseTests)",
+    "test_fractions_of_seconds (utils_tests.test_dateparse.DurationParseTests)",
+    "test_hours_minutes_seconds (utils_tests.test_dateparse.DurationParseTests)",
+    "test_iso_8601 (utils_tests.test_dateparse.DurationParseTests)",
+    "test_minutes_seconds (utils_tests.test_dateparse.DurationParseTests)",
+    "test_parse_python_format (utils_tests.test_dateparse.DurationParseTests)",
+    "test_seconds (utils_tests.test_dateparse.DurationParseTests)"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-10999:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

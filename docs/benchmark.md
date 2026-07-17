@@ -20,8 +20,11 @@ with human-verified test sets. Each task is a minimal spec under
 pinned `dataset_revision`. Repo and patch content are pulled on demand by the
 official harness — nothing is vendored.
 
-The current suite is **10 instances** across 10 repos, spanning a spread of
-difficulty strata, each with a verified prebuilt SWE-bench image. Provenance:
+The challenge suite is the full **500-instance** SWE-bench Verified set across 12
+repos, spanning a spread of difficulty strata, each with a verified prebuilt
+SWE-bench image. Live results cover a **nested partial subset** (set by
+`sample_size`): the run order is diversity-first and nested, so raising the sample
+`10 → 20 → 200 → 500` only adds tasks and reuses already-computed cells. Provenance:
 [`princeton-nlp/SWE-bench_Verified`](https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified),
 dataset revision `c104f840`.
 
@@ -123,9 +126,10 @@ Metrics per strategy:
   can't prove a good one works in production. The kill gate — beat a fixed-frontier
   baseline (the most expensive enabled model, currently kimi-k3) with caching at
   equal quality — must be measured on a real workflow, not in the benchmark.
-- **Small sample, single run**: results are a pilot — few tasks (all Python), one
-  stochastic run per cell (pass@1), and only ~15–20% of tasks carry routing
-  headroom. See the benchmark harness README for the full limitations.
+- **Small measured sample, single run**: the suite is 500 tasks but live results
+  cover only a nested partial subset so far (all Python), with one stochastic run
+  per cell (pass@1), and only ~15–20% of tasks carry routing headroom. See the
+  benchmark harness README for the full limitations.
 
 ## Citation
 

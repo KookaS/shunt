@@ -1,0 +1,39 @@
+{
+  "instance_id": "pytest-dev__pytest-7205",
+  "repo": "pytest-dev/pytest",
+  "base_commit": "5e7f1ab4bf58e473e5d7f878eb2b499d7deabd29",
+  "version": "5.4",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "testing/test_setuponly.py::test_show_fixtures_with_parameters[--setup-only]",
+    "testing/test_setuponly.py::test_show_fixtures_with_parameter_ids[--setup-only]",
+    "testing/test_setuponly.py::test_show_fixtures_with_parameter_ids_function[--setup-only]",
+    "testing/test_setuponly.py::test_show_fixtures_with_parameters[--setup-plan]",
+    "testing/test_setuponly.py::test_show_fixtures_with_parameter_ids[--setup-plan]",
+    "testing/test_setuponly.py::test_show_fixtures_with_parameter_ids_function[--setup-plan]",
+    "testing/test_setuponly.py::test_show_fixtures_with_parameters[--setup-show]",
+    "testing/test_setuponly.py::test_show_fixtures_with_parameter_ids[--setup-show]",
+    "testing/test_setuponly.py::test_show_fixtures_with_parameter_ids_function[--setup-show]",
+    "testing/test_setuponly.py::test_show_fixture_action_with_bytes"
+  ],
+  "PASS_TO_PASS": [
+    "testing/test_setuponly.py::test_show_only_active_fixtures[--setup-only]",
+    "testing/test_setuponly.py::test_show_different_scopes[--setup-only]",
+    "testing/test_setuponly.py::test_show_nested_fixtures[--setup-only]",
+    "testing/test_setuponly.py::test_show_fixtures_with_autouse[--setup-only]",
+    "testing/test_setuponly.py::test_show_only_active_fixtures[--setup-plan]",
+    "testing/test_setuponly.py::test_show_different_scopes[--setup-plan]",
+    "testing/test_setuponly.py::test_show_nested_fixtures[--setup-plan]",
+    "testing/test_setuponly.py::test_show_fixtures_with_autouse[--setup-plan]",
+    "testing/test_setuponly.py::test_show_only_active_fixtures[--setup-show]",
+    "testing/test_setuponly.py::test_show_different_scopes[--setup-show]",
+    "testing/test_setuponly.py::test_show_nested_fixtures[--setup-show]",
+    "testing/test_setuponly.py::test_show_fixtures_with_autouse[--setup-show]",
+    "testing/test_setuponly.py::test_dynamic_fixture_request",
+    "testing/test_setuponly.py::test_capturing",
+    "testing/test_setuponly.py::test_show_fixtures_and_execute_test",
+    "testing/test_setuponly.py::test_setup_show_with_KeyboardInterrupt_in_test"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-7205:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

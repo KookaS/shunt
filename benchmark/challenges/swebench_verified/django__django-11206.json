@@ -1,0 +1,19 @@
+{
+  "instance_id": "django__django-11206",
+  "repo": "django/django",
+  "base_commit": "571ab44e8a8936014c22e7eebe4948d9611fd7ce",
+  "version": "3.0",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "test_decimal_numbers (utils_tests.test_numberformat.TestNumberFormat)",
+    "test_decimal_subclass (utils_tests.test_numberformat.TestNumberFormat)"
+  ],
+  "PASS_TO_PASS": [
+    "test_float_numbers (utils_tests.test_numberformat.TestNumberFormat)",
+    "test_format_number (utils_tests.test_numberformat.TestNumberFormat)",
+    "test_format_string (utils_tests.test_numberformat.TestNumberFormat)",
+    "test_large_number (utils_tests.test_numberformat.TestNumberFormat)"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-11206:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

@@ -1,0 +1,22 @@
+{
+  "instance_id": "sympy__sympy-12489",
+  "repo": "sympy/sympy",
+  "base_commit": "aa9780761ad8c3c0f68beeef3a0ce5caac9e100b",
+  "version": "1.0",
+  "difficulty_stratum": "hard",
+  "FAIL_TO_PASS": [
+    "test_Permutation_subclassing"
+  ],
+  "PASS_TO_PASS": [
+    "test_Permutation",
+    "test_josephus",
+    "test_ranking",
+    "test_mul",
+    "test_args",
+    "test_Cycle",
+    "test_from_sequence",
+    "test_printing_cyclic"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sympy_1776_sympy-12489:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

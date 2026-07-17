@@ -1,0 +1,21 @@
+{
+  "instance_id": "sympy__sympy-16766",
+  "repo": "sympy/sympy",
+  "base_commit": "b8fe457a02cc24b3470ff678d0099c350b7fef43",
+  "version": "1.5",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "test_PythonCodePrinter"
+  ],
+  "PASS_TO_PASS": [
+    "test_MpmathPrinter",
+    "test_NumPyPrinter",
+    "test_SciPyPrinter",
+    "test_pycode_reserved_words",
+    "test_printmethod",
+    "test_codegen_ast_nodes",
+    "test_issue_14283"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sympy_1776_sympy-16766:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

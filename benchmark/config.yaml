@@ -61,4 +61,4 @@ benchmark:
   seed: 42
   bootstrap_iterations: 10000
   n_default: 20
-  sample_size: 0              # 0 = all tasks, N = run only N tasks (for local debugging)
+  sample_size: 20             # 0 = all tasks, N = first N tasks in the nested order (cost-safe partial run)

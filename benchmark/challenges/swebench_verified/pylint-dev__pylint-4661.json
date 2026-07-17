@@ -1,0 +1,13 @@
+{
+  "instance_id": "pylint-dev__pylint-4661",
+  "repo": "pylint-dev/pylint",
+  "base_commit": "1d1619ef913b99b06647d2030bddff4800abdf63",
+  "version": "2.10",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "tests/lint/unittest_lint.py::test_pylint_home"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.pylint-dev_1776_pylint-4661:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

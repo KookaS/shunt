@@ -292,17 +292,33 @@ def load_matrix(path: str | Path | None = None) -> dict:
     return matrix
 
 
-def sample_tasks(tasks: list[str], seed: int = 42) -> list[str]:
-    """Subsample tasks based on config sample_size (0 = all tasks)."""
-    sample = sample_size()
-    if sample <= 0 or sample >= len(tasks):
-        return tasks
+def _ordered_tasks(tasks: list[str], seed: int) -> list[str]:
+    """Canonical, diversity-first, nested run order for ``tasks`` (seeded-shuffle fallback)."""
+    # Stratified (repo × difficulty) hash order so partial runs nest (sample_size 10 ⊂ 20 ⊂
+    # 200); falls back to a seeded shuffle only when the manifest lacks repo metadata.
+    from benchmark.runner import sampling
+
+    try:
+        manifest = load_challenges()
+    except (FileNotFoundError, ValueError):
+        manifest = {}
+    ordered = sampling.order_from_manifest(sorted(tasks), manifest)
+    if ordered is not None:
+        return ordered
     import random
 
-    rng = random.Random(seed)
     shuffled = sorted(tasks)
-    rng.shuffle(shuffled)
-    return shuffled[:sample]
+    random.Random(seed).shuffle(shuffled)
+    return shuffled
+
+
+def sample_tasks(tasks: list[str], seed: int = 42) -> list[str]:
+    """First ``sample_size`` tasks in canonical nested order (0 = all tasks)."""
+    ordered = _ordered_tasks(tasks, seed)
+    sample = sample_size()
+    if sample <= 0 or sample >= len(ordered):
+        return ordered
+    return ordered[:sample]
 
 
 # ---------------------------------------------------------------------------

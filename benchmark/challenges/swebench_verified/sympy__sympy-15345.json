@@ -1,0 +1,22 @@
+{
+  "instance_id": "sympy__sympy-15345",
+  "repo": "sympy/sympy",
+  "base_commit": "9ef28fba5b4d6d0168237c9c005a550e6dc27d81",
+  "version": "1.4",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "test_Function"
+  ],
+  "PASS_TO_PASS": [
+    "test_Integer",
+    "test_Rational",
+    "test_Pow",
+    "test_Mul",
+    "test_constants",
+    "test_containers",
+    "test_Integral",
+    "test_Derivative"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sympy_1776_sympy-15345:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

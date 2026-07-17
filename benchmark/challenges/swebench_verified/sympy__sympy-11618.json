@@ -1,0 +1,18 @@
+{
+  "instance_id": "sympy__sympy-11618",
+  "repo": "sympy/sympy",
+  "base_commit": "360290c4c401e386db60723ddb0109ed499c9f6e",
+  "version": "1.0",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "test_issue_11617"
+  ],
+  "PASS_TO_PASS": [
+    "test_point3D",
+    "test_Point2D",
+    "test_issue_9214",
+    "test_transform"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sympy_1776_sympy-11618:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

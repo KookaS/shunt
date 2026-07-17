@@ -1,0 +1,26 @@
+{
+  "instance_id": "sphinx-doc__sphinx-7440",
+  "repo": "sphinx-doc/sphinx",
+  "base_commit": "9bb204dcabe6ba0fc422bf4a45ad0c79c680d90b",
+  "version": "3.0",
+  "difficulty_stratum": "easy",
+  "FAIL_TO_PASS": [
+    "tests/test_domain_std.py::test_glossary"
+  ],
+  "PASS_TO_PASS": [
+    "tests/test_domain_std.py::test_process_doc_handle_figure_caption",
+    "tests/test_domain_std.py::test_process_doc_handle_table_title",
+    "tests/test_domain_std.py::test_get_full_qualified_name",
+    "tests/test_domain_std.py::test_glossary_warning",
+    "tests/test_domain_std.py::test_glossary_comment",
+    "tests/test_domain_std.py::test_glossary_comment2",
+    "tests/test_domain_std.py::test_glossary_sorted",
+    "tests/test_domain_std.py::test_glossary_alphanumeric",
+    "tests/test_domain_std.py::test_glossary_conflicted_labels",
+    "tests/test_domain_std.py::test_cmdoption",
+    "tests/test_domain_std.py::test_multiple_cmdoptions",
+    "tests/test_domain_std.py::test_disabled_docref"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-7440:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

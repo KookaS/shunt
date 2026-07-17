@@ -1,0 +1,24 @@
+{
+  "instance_id": "django__django-12050",
+  "repo": "django/django",
+  "base_commit": "b93a0e34d9b9b99d41103782b7e7aeabf47517e3",
+  "version": "3.1",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "test_iterable_lookup_value (queries.test_query.TestQuery)"
+  ],
+  "PASS_TO_PASS": [
+    "test_clone_select_related (queries.test_query.TestQuery)",
+    "test_complex_query (queries.test_query.TestQuery)",
+    "test_foreign_key (queries.test_query.TestQuery)",
+    "test_foreign_key_exclusive (queries.test_query.TestQuery)",
+    "test_foreign_key_f (queries.test_query.TestQuery)",
+    "test_multiple_fields (queries.test_query.TestQuery)",
+    "test_negated_nullable (queries.test_query.TestQuery)",
+    "test_simple_query (queries.test_query.TestQuery)",
+    "test_simplecol_query (queries.test_query.TestQuery)",
+    "test_transform (queries.test_query.TestQuery)"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-12050:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}

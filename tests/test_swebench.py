@@ -9,6 +9,7 @@ from typing import Final
 
 import pytest
 
+from benchmark import config
 from benchmark.routing import integrity
 from benchmark.runner import infer, run_matrix, select_swebench, swebench_harness, swebench_specs
 
@@ -18,17 +19,6 @@ SMOKE_IDS: Final = [
     "pytest-dev__pytest-5809",
     "pylint-dev__pylint-6903",
     "pallets__flask-5014",
-]
-
-# The full materialised set: 5 original + 5 diverse repos added in the ood176→
-# SWE-bench migration (each verified to have a prebuilt swebench Docker image).
-ALL_IDS: Final = [
-    *SMOKE_IDS,
-    "django__django-12419",
-    "sympy__sympy-20916",
-    "scikit-learn__scikit-learn-14141",
-    "pydata__xarray-3677",
-    "sphinx-doc__sphinx-8595",
 ]
 
 
@@ -68,9 +58,17 @@ class TestSpecs:
             assert spec is not None
             assert spec.fail_to_pass  # F2P is non-empty for every Verified task
 
-    def test_store_holds_exactly_ten_specs(self):
-        ids = {s.instance_id for s in swebench_specs.all_specs()}
-        assert ids == set(ALL_IDS)
+    def test_store_holds_full_verified_set(self):
+        # Count-agnostic: the spec store must exactly cover the manifest's tasks,
+        # be the full Verified set (>100), load, and carry the dataset revision.
+        manifest_ids = set(json.loads(config.challenges_path().read_text())["tasks"])
+        specs = swebench_specs.all_specs()
+        stored = {s.instance_id for s in specs}
+        assert stored == manifest_ids
+        assert len(stored) > 100
+        for spec in specs:
+            assert swebench_specs.load_spec(spec.instance_id) is not None
+            assert spec.dataset_revision == swebench_specs.DATASET_REVISION
 
     def test_every_spec_carries_dataset_revision(self):
         for spec in swebench_specs.all_specs():
@@ -116,6 +114,19 @@ class TestSpecHashing:
         d = spec.to_dict()
         reordered = dict(reversed(list(d.items())))
         assert integrity.hash_content(d) == integrity.hash_content(reordered)
+
+    def test_difficulty_stratum_excluded_from_hash(self):
+        # A selection-metadata relabel must NOT change the content hash — otherwise
+        # correcting a difficulty label stales (re-spends) valid PAID result cells.
+        spec = swebench_specs.load_spec("psf__requests-1142")
+        assert spec is not None
+        base = spec.to_dict()
+        other = "hard" if base["difficulty_stratum"] != "hard" else "easy"
+        relabeled = {**base, "difficulty_stratum": other}
+        assert integrity.hash_content(base) == integrity.hash_content(relabeled)
+        # But a real execution-identity change (base_commit) MUST change the hash.
+        changed_commit = {**base, "base_commit": "deadbeef"}
+        assert integrity.hash_content(base) != integrity.hash_content(changed_commit)
 
 
 class TestGoldPredictions:

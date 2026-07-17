@@ -3,7 +3,7 @@
   "repo": "pydata/xarray",
   "base_commit": "ef6e6a7b86f8479b9a1fecf15ad5b88a2326b31e",
   "version": "0.12",
-  "difficulty_stratum": "hard",
+  "difficulty_stratum": "medium",
   "FAIL_TO_PASS": [
     "xarray/tests/test_merge.py::TestMergeMethod::test_merge_dataarray"
   ],

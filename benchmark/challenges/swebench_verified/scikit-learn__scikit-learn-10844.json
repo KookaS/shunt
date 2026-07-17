@@ -1,0 +1,30 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-10844",
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "97523985b39ecde369d83352d7c3baf403b60a22",
+  "version": "0.20",
+  "difficulty_stratum": "medium",
+  "FAIL_TO_PASS": [
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_int_overflow_mutual_info_fowlkes_mallows_score"
+  ],
+  "PASS_TO_PASS": [
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_error_messages_on_wrong_input",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_perfect_matches",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_homogeneous_but_not_complete_labeling",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_complete_but_not_homogeneous_labeling",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_not_complete_and_not_homogeneous_labeling",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_non_consicutive_labels",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_adjustment_for_chance",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_adjusted_mutual_info_score",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_expected_mutual_info_overflow",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_entropy",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_contingency_matrix",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_contingency_matrix_sparse",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_exactly_zero_info_score",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_v_measure_and_mutual_information",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_fowlkes_mallows_score",
+    "sklearn/metrics/cluster/tests/test_supervised.py::test_fowlkes_mallows_score_properties"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-10844:latest",
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+}
