@@ -1,0 +1,28 @@
+# shunt-ci: skip
+# Local (Ollama / vLLM) — a model on your own machine.
+#
+# Marked `skip`, not `probe`, and deliberately absent from the shipped registry
+# in src/shunt/models/default_config.yaml. A local server needs no key, so the
+# thing to check is reachability, not authentication — and `auth_probe` only
+# knows how to assert "this rejected me correctly". Rather than invent a
+# signature this file omits `auth_probe` entirely: no probe is honest, a
+# fabricated one is not. Point `base_url` at your own server and it works.
+#
+# Start Ollama first:  ollama serve && ollama pull qwen3-coder
+providers:
+  local:
+    # vLLM: usually http://localhost:8000/v1
+    base_url: http://localhost:11434/v1
+    # Unused by a local server, but the field is required. Leave the variable
+    # unset — shunt sends a placeholder token, which Ollama and vLLM ignore.
+    api_key_env_var: LOCAL_API_KEY
+    litellm_prefix: openai
+
+models:
+  qwen3-coder-local:
+    # Whatever `ollama list` shows, or vLLM's --served-model-name.
+    model_id: qwen3-coder
+    tier: cheap
+    provider: local
+    supports_streaming: true
+    supports_cache_control: false

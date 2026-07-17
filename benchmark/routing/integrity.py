@@ -98,7 +98,7 @@ def swebench_spec_hash(instance_id: str) -> str:
 
 
 def model_versions() -> dict[str, str]:
-    """Map each priced model to its declared ``version`` string (from models.json)."""
+    """Map each priced model to its declared ``version`` string (from the registry)."""
     pricing = config.load_pricing()
     out: dict[str, str] = {}
     for model, info in pricing.items():

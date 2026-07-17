@@ -1,0 +1,16 @@
+# shunt-ci: probe
+# Nebius AI Studio — open-weight serving. Set NEBIUS_API_KEY, then paste this
+# into ~/.config/shunt/models.yaml. See ../../docs/configuration.md.
+providers:
+  nebius:
+    base_url: https://api.studio.nebius.ai/v1
+    api_key_env_var: NEBIUS_API_KEY
+    litellm_prefix: nebius
+
+models:
+  gpt-oss-120b-nebius:
+    model_id: openai/gpt-oss-120b
+    tier: cheap
+    provider: nebius
+    supports_streaming: true
+    supports_cache_control: false

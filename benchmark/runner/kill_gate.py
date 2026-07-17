@@ -593,7 +593,7 @@ def main(config_path: str = "benchmark/config.yaml") -> None:
 
     matrix = config.load_matrix(matrix_path)
 
-    # Pricing from config, not models.json
+    # Pricing from config, not the model registry
     pricing = config.enabled_pricing()
 
     frontier = config.frontier_model()

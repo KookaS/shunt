@@ -323,6 +323,14 @@ def main(config_path: str = "benchmark/config.yaml"):
     knn_pass = sum(
         1 for tid in task_ids if results[tid].get(selections[tid], {}).get("pass", False)
     )
+    # Phantom-baseline guard (matches report.py::_frontier_coverage): the frontier
+    # bar sums cost over only the tasks the frontier model actually ran. If that is
+    # a subset of n, "saves X% vs frontier" compares kNN-over-n against
+    # frontier-over-few — apples to oranges. Suppress the claim and flag it.
+    frontier_covered = (
+        sum(1 for tid in task_ids if frontier_model in results[tid]) if frontier_model else 0
+    )
+    phantom_frontier = bool(frontier_model) and frontier_covered < n
     savings_pct = (1 - knn_total / frontier_cost) * 100 if frontier_cost else 0.0
 
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -340,11 +348,26 @@ def main(config_path: str = "benchmark/config.yaml"):
             fontweight="bold",
         )
     ax.set_ylabel("Total cost across tasks ($)")
-    ax.set_title(
-        f"kNN Routing Cost Across {n} Tasks (k={k_neighbors})\n"
-        f"pass {knn_pass}/{n} ({knn_pass / n * 100:.0f}%), "
-        f"saves {savings_pct:.0f}% vs frontier"
-    )
+    if phantom_frontier:
+        title_tail = f"pass {knn_pass}/{n} ({knn_pass / n * 100:.0f}%) — frontier savings N/A"
+    else:
+        title_tail = (
+            f"pass {knn_pass}/{n} ({knn_pass / n * 100:.0f}%), saves {savings_pct:.0f}% vs frontier"
+        )
+    ax.set_title(f"kNN Routing Cost Across {n} Tasks (k={k_neighbors})\n{title_tail}")
+    if phantom_frontier:
+        ax.text(
+            0.5,
+            0.95,
+            f"⚠ PHANTOM BASELINE — {frontier_model} evaluated on {frontier_covered}/{n} "
+            f"tasks;\nits bar sums only those, so a 'vs frontier' saving is not comparable",
+            transform=ax.transAxes,
+            ha="center",
+            va="top",
+            fontsize=9,
+            color="#B00020",
+            fontweight="bold",
+        )
     ax.grid(True, axis="y", alpha=0.3)
     ax.set_axisbelow(True)
     fig.tight_layout()
@@ -352,10 +375,15 @@ def main(config_path: str = "benchmark/config.yaml"):
     print("Saved knn_cost_comparison.png")
     plt.close(fig)
 
+    savings_str = (
+        "frontier savings N/A (phantom baseline)"
+        if phantom_frontier
+        else f"saves {savings_pct:.1f}% vs frontier"
+    )
     print(
         f"Cost across {n} tasks: cheapest ${cheap_cost:.4f}, kNN ${knn_total:.4f}, "
-        f"frontier ${frontier_cost:.4f}; kNN pass {knn_pass}/{n}, "
-        f"saves {savings_pct:.1f}% vs frontier"
+        f"frontier ${frontier_cost:.4f} ({frontier_covered}/{n} tasks); "
+        f"kNN pass {knn_pass}/{n}, {savings_str}"
     )
 
 

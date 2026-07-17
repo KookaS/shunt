@@ -1,0 +1,18 @@
+# shunt-ci: probe
+# Requesty — aggregator; one key reaches many vendors. Set REQUESTY_API_KEY,
+# then paste this into ~/.config/shunt/models.yaml. See ../../docs/configuration.md.
+providers:
+  requesty:
+    base_url: https://router.requesty.ai/v1
+    api_key_env_var: REQUESTY_API_KEY
+    # A generic OpenAI-compatible surface, so the generic prefix — the vendor
+    # lives in the model id (`moonshot/kimi-k2.5`), not in the prefix.
+    litellm_prefix: openai
+
+models:
+  kimi-k2.5:
+    model_id: moonshot/kimi-k2.5
+    tier: mid
+    provider: requesty
+    supports_streaming: true
+    supports_cache_control: false

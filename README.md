@@ -132,7 +132,11 @@ and typechecks, so a cheaper answer that breaks the build gets escalated instead
 shipped.
 
 Bring your own keys. Shunt routes through your own provider accounts, so you keep
-full control of spend and nothing is replayed or resold.
+full control of spend and nothing is replayed or resold. Set one environment
+variable per provider you use, and add models with a few lines of YAML —
+[`docs/configuration.md`](docs/configuration.md) walks through both, and
+[`examples/providers/`](examples/providers/README.md) has a ready-to-copy config
+for each supported provider.
 
 ## Roadmap
 
@@ -161,6 +165,7 @@ providers on demand, and a faster runtime if concurrency ever calls for it.
 │   └── models/            Provider config, capability tiers, fallback chain
 ├── benchmark/             Model-capability and routing evaluation
 ├── docs/                  User documentation (MkDocs)
+├── examples/providers/    Copy-paste registry config, one file per provider
 └── tests/                 Test suite
 ```
 

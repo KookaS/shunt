@@ -1,0 +1,16 @@
+# shunt-ci: probe
+# xAI — first-party. Set XAI_API_KEY, then paste this into
+# ~/.config/shunt/models.yaml. See ../../docs/configuration.md.
+providers:
+  xai:
+    base_url: https://api.x.ai/v1
+    api_key_env_var: XAI_API_KEY
+    litellm_prefix: xai
+
+models:
+  grok-4.5:
+    model_id: grok-4.5
+    tier: frontier
+    provider: xai
+    supports_streaming: true
+    supports_cache_control: false

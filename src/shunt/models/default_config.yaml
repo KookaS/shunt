@@ -1,49 +1,151 @@
+# The model/provider registry — the single source of truth for both the router
+# and the benchmark.
+#
+# ORDER IS SEMANTIC, NOT STYLE. `SelectionRule._escalate` returns
+# `get_tier_models(tier)[-1]` — the LAST row of a tier IN FILE ORDER. Reordering
+# model rows silently changes routing. Never re-serialize this file with a
+# key-sorting dumper. `tests/router/test_selection.py` pins the current order.
+
+# ── providers ────────────────────────────────────────────────────────────────
+# One row per ACCESS CHANNEL. Every provider is bearer-token + OpenAI-compatible
+# `POST /v1/chat/completions`, so a provider is DATA: a base_url, a key env var,
+# and a litellm prefix. No provider class, no factory.
+#
+# ONLY the providers a shipped model routes to live here — deepseek and requesty.
+# The wider provider catalog (openai, groq, xai, fireworks, …) lives in
+# examples/providers/*.yaml, copy-paste fragments the router never loads. The
+# keyless auth-rejection signatures used to validate wiring live once in
+# tools/provider_auth_signatures.yaml — validation metadata, not runtime config.
+providers:
+  requesty:
+    base_url: https://router.requesty.ai/v1
+    api_key_env_var: REQUESTY_API_KEY
+    litellm_prefix: openai            # generic OpenAI-compatible surface
+  deepseek:
+    base_url: https://api.deepseek.com/v1
+    api_key_env_var: DEEPSEEK_API_KEY
+    litellm_prefix: deepseek          # litellm's own provider id
+# ── models ───────────────────────────────────────────────────────────────────
+# Required core (model_id, tier, provider, supports_streaming,
+# supports_cache_control) makes a model routable. The optional `pricing` block
+# makes it benchmarkable — absent pricing means the benchmark cannot see it and
+# so can never score it against a fabricated price.
 models:
   qwen3.7-plus:
     model_id: alibaba/qwen3.7-plus
     tier: cheap
     provider: requesty
-    base_url: https://router.requesty.ai/v1
-    api_key_env_var: REQUESTY_API_KEY
     supports_streaming: true
     supports_cache_control: false
+    pricing:
+      input_cost_per_1m: 0.32
+      output_cost_per_1m: 1.28
+      cache_read_cost_per_1m: 0.032
+      cache_write_cost_per_1m: 0.4
+      version: qwen3.7-plus
+      price_provider: requesty
+      price_source: https://requesty.ai/router
+      price_as_of: "2026-07-15"
+      price_note: Requesty router listing (qwen3.7-plus, alibaba). $0.40/M cache-write, $0.032/M cache-read.
   deepseek-v4-flash:
     model_id: deepseek-v4-flash
     tier: cheap
     provider: deepseek
-    base_url: https://api.deepseek.com/v1
-    api_key_env_var: DEEPSEEK_API_KEY
     supports_streaming: true
     supports_cache_control: false
+    pricing:
+      input_cost_per_1m: 0.14
+      output_cost_per_1m: 0.28
+      cache_read_cost_per_1m: 0.0028
+      version: deepseek-v4-flash
+      price_provider: requesty
+      price_source: https://requesty.ai/router
+      price_as_of: "2026-07-15"
+      price_note: Requesty router listing; paid directly via the DeepSeek API. $0.0028/M cache-read.
   gpt-5-mini:
     model_id: openai/gpt-5-mini
     tier: mid
     provider: requesty
-    base_url: https://router.requesty.ai/v1
-    api_key_env_var: REQUESTY_API_KEY
     supports_streaming: true
     supports_cache_control: false
+    pricing:
+      input_cost_per_1m: 0.25
+      output_cost_per_1m: 2.0
+      cache_read_cost_per_1m: 0.025
+      version: gpt-5-mini
+      price_provider: requesty
+      price_source: https://requesty.ai/router
+      price_as_of: "2026-07-16"
+      price_note: >-
+        Requesty router listing (openai/gpt-5-mini, OpenAI first-party). $0.025/M cache-read
+        (no separate cache-write charge). Replaced qwen3-max, which reports supports_caching:true
+        but has NO cache-read price (resends full context at full input price every turn — a
+        budget bomb). Chosen from a different provider than the existing qwen3.7-plus for pool
+        diversity.
   zai-glm-5.2:
-    model_id: fireworks/glm-5.2
-    tier: frontier
+    model_id: fireworks/glm-5.2      # requesty's serving path, not the origin vendor
+    tier: frontier                   # was `high` in the benchmark registry (ADR-0002)
     provider: requesty
-    base_url: https://router.requesty.ai/v1
-    api_key_env_var: REQUESTY_API_KEY
     supports_streaming: true
     supports_cache_control: true
+    pricing:
+      input_cost_per_1m: 1.4
+      output_cost_per_1m: 4.4
+      cache_read_cost_per_1m: 0.14
+      version: glm-5.2
+      price_provider: requesty
+      price_source: https://requesty.ai/router
+      price_as_of: "2026-07-16"
+      price_note: Requesty router listing (fireworks/glm-5.2). $0.14/M cache-read (live catalog; was 0.260, corrected 2026-07-16).
   kimi-k2.5:
     model_id: moonshot/kimi-k2.5
     tier: mid
     provider: requesty
-    base_url: https://router.requesty.ai/v1
-    api_key_env_var: REQUESTY_API_KEY
     supports_streaming: true
     supports_cache_control: false
+    pricing:
+      input_cost_per_1m: 0.6
+      output_cost_per_1m: 3.0
+      cache_read_cost_per_1m: 0.1
+      version: kimi-k2.5
+      price_provider: requesty
+      price_source: https://requesty.ai/router
+      price_as_of: "2026-07-15"
+      price_note: Requesty router listing (kimi-k2.5, moonshot). $0.100/M cache-read.
+  kimi-k3:
+    model_id: moonshot/kimi-k3
+    tier: frontier
+    provider: requesty
+    supports_streaming: true
+    # Conservative: mirrors kimi-k2.5 (same provider/family). Not verified against
+    # a live response — sending unsupported cache_control breakpoints risks a 400.
+    supports_cache_control: false
+    pricing:
+      input_cost_per_1m: 3.0
+      output_cost_per_1m: 15.0
+      cache_read_cost_per_1m: 0.3
+      version: kimi-k3
+      price_provider: requesty
+      price_source: https://www.requesty.ai/models/moonshot/kimi-k3
+      price_as_of: "2026-07-17"
+      price_note: >-
+        Requesty router listing (moonshot/kimi-k3, released 2026-07-16). $3/M in, $15/M out,
+        $0.30/M cache-read, 1M context. The cheapest-frontier model, and the benchmark's
+        kill-gate control baseline (claude-opus-4-6 is enabled:false in the benchmark; it
+        stays in the router registry as the top escalation target).
   claude-opus-4-6:
     model_id: anthropic/claude-opus-4-6
     tier: frontier
     provider: requesty
-    base_url: https://router.requesty.ai/v1
-    api_key_env_var: REQUESTY_API_KEY
     supports_streaming: true
     supports_cache_control: true
+    pricing:
+      input_cost_per_1m: 5.0
+      output_cost_per_1m: 25.0
+      cache_read_cost_per_1m: 0.5
+      cache_write_cost_per_1m: 6.25
+      version: claude-opus-4-6
+      price_provider: requesty
+      price_source: https://requesty.ai/router
+      price_as_of: "2026-07-15"
+      price_note: Requesty router listing (claude-opus-4-6, anthropic). $6.25/M cache-write, $0.500/M cache-read.

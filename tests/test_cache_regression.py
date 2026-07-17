@@ -221,10 +221,18 @@ class TestClassifyEdgeCases:
 
 class TestLitellmRouting:
     def test_direct_returns_route_and_empty_kwargs(self, monkeypatch):
+        # A provider with its own litellm prefix: litellm reads the key from env.
         monkeypatch.setattr(
             config,
             "load_pricing",
-            lambda *a, **k: {"m": {"access_via": "direct", "route": "deepseek/x"}},
+            lambda *a, **k: {
+                "m": {
+                    "provider": "deepseek",
+                    "route": "deepseek/x",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "api_key_env_var": "DEEPSEEK_API_KEY",
+                }
+            },
         )
         assert infer.litellm_model_target("m") == ("deepseek/x", {})
 
@@ -232,19 +240,33 @@ class TestLitellmRouting:
         monkeypatch.setattr(
             config,
             "load_pricing",
-            lambda *a, **k: {"m": {"access_via": "requesty", "route": "openai/p/x"}},
+            lambda *a, **k: {
+                "m": {
+                    "provider": "requesty",
+                    "route": "openai/p/x",
+                    "base_url": "https://router.requesty.ai/v1",
+                    "api_key_env_var": "REQUESTY_API_KEY",
+                }
+            },
         )
         monkeypatch.setenv("REQUESTY_API_KEY", "secret")
         route, kwargs = infer.litellm_model_target("m")
         assert route == "openai/p/x"
-        assert kwargs["api_base"] == infer._REQUESTY_BASE
+        assert kwargs["api_base"] == "https://router.requesty.ai/v1"
         assert kwargs["api_key"] == "secret"
 
     def test_requesty_without_key_raises(self, monkeypatch):
         monkeypatch.setattr(
             config,
             "load_pricing",
-            lambda *a, **k: {"m": {"access_via": "requesty", "route": "openai/p/x"}},
+            lambda *a, **k: {
+                "m": {
+                    "provider": "requesty",
+                    "route": "openai/p/x",
+                    "base_url": "https://router.requesty.ai/v1",
+                    "api_key_env_var": "REQUESTY_API_KEY",
+                }
+            },
         )
         monkeypatch.delenv("REQUESTY_API_KEY", raising=False)
         with pytest.raises(infer.MissingApiKeysError):
@@ -255,14 +277,23 @@ class TestLitellmRouting:
         with pytest.raises(KeyError):
             infer.litellm_model_target("nope")
 
-    def test_unknown_access_via_raises_notimplemented(self, monkeypatch):
+    def test_unknown_provider_prefix_routes_without_kwargs(self, monkeypatch):
+        # An unknown access channel is no longer representable: `provider` is a
+        # pydantic-validated FK into the registry's provider table, so a bad one
+        # fails at load. A non-`openai/` prefix is dialled by litellm directly.
         monkeypatch.setattr(
             config,
             "load_pricing",
-            lambda *a, **k: {"m": {"access_via": "openrouter", "route": "foo/bar"}},
+            lambda *a, **k: {
+                "m": {
+                    "provider": "groq",
+                    "route": "groq/bar",
+                    "base_url": "https://api.groq.com/openai/v1",
+                    "api_key_env_var": "GROQ_API_KEY",
+                }
+            },
         )
-        with pytest.raises(NotImplementedError):
-            infer.litellm_model_target("m")
+        assert infer.litellm_model_target("m") == ("groq/bar", {})
 
     def test_missing_route_raises(self, monkeypatch):
         # No explicit route => KeyError (no guessing: requesty serving-provider
@@ -270,9 +301,7 @@ class TestLitellmRouting:
         monkeypatch.setattr(
             config,
             "load_pricing",
-            lambda *a, **k: {
-                "m": {"access_via": "direct", "provider": "deepseek", "version": "vv"}
-            },
+            lambda *a, **k: {"m": {"provider": "deepseek", "version": "vv"}},
         )
         with pytest.raises(KeyError):
             infer.litellm_model_target("m")

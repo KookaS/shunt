@@ -34,7 +34,6 @@ benchmark/
   routing/                                Routing strategy evaluation
     results.csv                           THE committed source of truth (per-cell outcomes)
     data/                                 Curated read-only inputs
-      models.json                         Model registry + cost table
       challenges.json                     Challenge index + task metadata
     reports/                              Gitignored — derived strategy_summary.csv + plots
     strategies/

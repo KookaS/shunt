@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from shunt.models import ModelPool
 from shunt.router.selection import NeighborResult, SelectionRule
 
 from .conftest import FakeModel, FakeModelPool
@@ -197,6 +198,22 @@ class TestEscalation:
         model, reason = rule.select(neighbors, pool, cold_start_active=False)
         assert model == "fronty"
         assert reason == "safe_fallback"
+
+    def test_safe_fallback_on_the_real_pool_is_opus(self):
+        # _escalate returns get_tier_models(tier)[-1] — the LAST FRONTIER ROW IN
+        # YAML ORDER, not the smartest model. The two coincide only because
+        # claude-opus-4-6 is last in default_config.yaml. Appending a frontier
+        # model after it would silently redirect every safe_fallback to it, and
+        # the single-model-per-tier fakes above cannot catch that. This pins it.
+        rule = SelectionRule()
+        pool = ModelPool()
+        names = [m.name for t in ("cheap", "mid", "frontier") for m in pool.get_tier_models(t)]
+        neighbors = [
+            _neighbor(n, outcome=False, cost=1.0, confidence=0.9) for n in names for _ in range(5)
+        ]
+        model, reason = rule.select(neighbors, pool, cold_start_active=False)
+        assert reason == "safe_fallback"
+        assert model == "claude-opus-4-6"
 
 
 class TestConfidenceWeighting:

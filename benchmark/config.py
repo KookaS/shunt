@@ -5,6 +5,14 @@ from pathlib import Path
 
 import yaml
 
+from shunt.models.config import (
+    ModelConfig,
+    Pricing,
+    default_registry_path,
+    load_registry,
+    resolve_models,
+)
+
 _config: dict | None = None
 _pricing: dict | None = None
 
@@ -26,28 +34,46 @@ def get() -> dict:
 
 
 def _pricing_path() -> Path:
-    return Path(__file__).resolve().parent / "routing" / "data" / "models.json"
+    """Path to the unified registry (packaged with the router, not benchmark-local)."""
+    return default_registry_path()
+
+
+def _flatten(model: ModelConfig, pricing: Pricing) -> dict:
+    """Flatten one priced registry row into the flat dict benchmark consumers read."""
+    return {
+        "tier": model.tier,
+        "provider": model.provider,
+        "route": model.route,
+        "base_url": model.base_url,
+        "api_key_env_var": model.api_key_env_var,
+        **pricing.model_dump(exclude_none=True),
+    }
 
 
 def load_pricing(path: str | Path | None = None) -> dict:
+    """Priced models from the registry, keyed by name. Unpriced models are absent.
+
+    A model without a `pricing` block is routable but invisible here, so it can
+    never enter a cost comparison with a fabricated price.
+    """
     global _pricing  # noqa: PLW0603, SH001 (module load-once pricing cache)
     if _pricing is not None:
         return _pricing
-    p = Path(path) if path else _pricing_path()
-    if p.exists():
-        with open(p) as f:
-            _pricing = json.load(f)
-    else:
-        _pricing = {}
+    registry = load_registry(path if path else _pricing_path())
+    _pricing = {
+        name: _flatten(model, model.pricing)
+        for name, model in resolve_models(registry).items()
+        if model.pricing is not None
+    }
     return _pricing
 
 
 def _tier_order(tier: str) -> int:
-    return {"cheap": 0, "mid": 1, "high": 2, "frontier": 3}.get(tier, 99)
+    return {"cheap": 0, "mid": 1, "frontier": 2}.get(tier, 99)
 
 
 def _pricing_dict() -> dict:
-    """Return pricing as {model: {input, output}} for all models in models.json."""
+    """Return pricing as {model: {input, output}} for every priced registry model."""
     pricing = load_pricing()
     result = {}
     for m, p in pricing.items():
@@ -247,7 +273,7 @@ def load_results(path: str | Path | None = None) -> dict:
 
 
 def models_matrix(results: dict | None = None) -> dict:
-    """Return {model: pricing} from models.json, optionally filtered to
+    """Return {model: pricing} from the registry, optionally filtered to
     evaluated-and-enabled models.
     """
     pricing = load_pricing()
@@ -280,7 +306,7 @@ def load_challenges() -> dict:
 
 
 def load_matrix(path: str | Path | None = None) -> dict:
-    """Load challenges.json and stitch back ``models`` (from models.json) and
+    """Load challenges.json and stitch back ``models`` (from the registry) and
     ``results`` (from routing/results.csv) into the dict shape consumers expect
     (``matrix["models"]``, ``matrix["results"]``, ``matrix["tasks"]``).
     """
@@ -324,48 +350,21 @@ def sample_tasks(tasks: list[str], seed: int = 42) -> list[str]:
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
-_REQUIRED_PRICING_FIELDS = (
-    "tier",
-    "input_cost_per_1m",
-    "output_cost_per_1m",
-    "price_provider",
-    "price_source",
-    "price_as_of",
-    "access_via",
-)
-_VALID_ACCESS_VIA = ("direct", "requesty")
-
-
-def _validate_pricing_entry(name: str, info: dict, errors: list[str]) -> None:
-    """Check one models.json model has the required canonical + provenance fields."""
-    for field in _REQUIRED_PRICING_FIELDS:
-        if field not in info:
-            errors.append(f"Model '{name}' in models.json missing '{field}'")
-    access = info.get("access_via")
-    if access is not None and access not in _VALID_ACCESS_VIA:
-        errors.append(
-            f"Model '{name}' has invalid access_via '{access}' (expected direct|requesty)"
-        )
-
-
 def validate(config_path: str | Path | None = None) -> list[str]:
-    """Validate config.yaml against models.json. Returns list of errors (empty = valid)."""
+    """Validate config.yaml against the registry. Returns list of errors (empty = valid).
+
+    Registry *schema* (required fields, tier vocabulary, provider FK) is enforced
+    by pydantic at load; this checks only config.yaml's references into it.
+    """
     errors: list[str] = []
     cfg = load(config_path)
     pricing = load_pricing()
 
-    # Check models in config exist in models.json
+    # Check models in config are priced registry models
     models_cfg = cfg.get("models", {})
     for name in models_cfg:
         if name not in pricing:
-            errors.append(f"Model '{name}' in config.yaml not found in models.json")
-
-    # Check enabled models have required fields
-    pricing_items = {
-        k: v for k, v in pricing.items() if isinstance(v, dict) and not k.startswith("_")
-    }
-    for name, info in pricing_items.items():
-        _validate_pricing_entry(name, info, errors)
+            errors.append(f"Model '{name}' in config.yaml not found in the model registry")
 
     # Check strategies
     strat_cfg = cfg.get("strategies", {})
@@ -387,6 +386,6 @@ def validate(config_path: str | Path | None = None) -> list[str]:
     # Check control_model
     control = cfg.get("routing", {}).get("control_model")
     if control and control not in pricing:
-        errors.append(f"control_model '{control}' not found in models.json")
+        errors.append(f"control_model '{control}' not found in the model registry")
 
     return errors

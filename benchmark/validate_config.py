@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate benchmark config.yaml against models.json (``--config PATH`` to
+"""Validate benchmark config.yaml against the model registry (``--config PATH`` to
 override the default path). Exit 0 = valid, 1 = validation errors found.
 """
 

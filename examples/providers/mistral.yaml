@@ -1,0 +1,16 @@
+# shunt-ci: probe
+# Mistral — first-party. Set MISTRAL_API_KEY, then paste this into
+# ~/.config/shunt/models.yaml. See ../../docs/configuration.md.
+providers:
+  mistral:
+    base_url: https://api.mistral.ai/v1
+    api_key_env_var: MISTRAL_API_KEY
+    litellm_prefix: mistral
+
+models:
+  codestral:
+    model_id: codestral-latest
+    tier: cheap
+    provider: mistral
+    supports_streaming: true
+    supports_cache_control: false

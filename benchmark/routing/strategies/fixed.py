@@ -26,7 +26,7 @@ def _model_pricing(matrix: dict) -> dict[str, float]:
             for m in models
             if m in evaluated
         }
-    # Flat pricing dict (e.g. models.json loaded directly)
+    # Flat pricing dict (e.g. config.load_pricing() loaded directly)
     candidates = {
         k: v for k, v in matrix.items() if isinstance(v, dict) and "input_cost_per_1m" in v
     }

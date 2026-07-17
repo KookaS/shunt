@@ -11,9 +11,18 @@ you get it right the first time.
   imports only: `from benchmark import config`, never `sys.path` hacks.
 - `tools/lint/` — the custom `SH0xx` AST checks.
 - `tests/` — pytest suite.
+- `examples/providers/` — one copy-paste registry fragment per provider. Adding a
+  provider or model? Read `examples/providers/README.md` and `docs/configuration.md`
+  first; the registry is `src/shunt/models/default_config.yaml` and its row order
+  is semantic.
 
 Install once: `pip install -e '.[dev,benchmark]'` — then `benchmark` imports
 resolve everywhere with no path munging.
+
+**Run everything through `uv run` — never bare `python3`.** In a worktree, bare
+`python3 -m pytest` resolves `import shunt` to a *different* worktree's source and
+reports pass/fail for code you aren't editing. Check with
+`uv run python -c "import shunt.models as m; print(m.__file__)"`.
 
 ## The rules (enforced by ruff + mypy — one manifest in `pyproject.toml`)
 

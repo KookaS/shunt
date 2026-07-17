@@ -1,0 +1,18 @@
+# shunt-ci: probe
+# Fireworks — open-weight serving. Set FIREWORKS_API_KEY, then paste this into
+# ~/.config/shunt/models.yaml. See ../../docs/configuration.md.
+providers:
+  fireworks:
+    base_url: https://api.fireworks.ai/inference/v1
+    api_key_env_var: FIREWORKS_API_KEY
+    # litellm's provider id is `fireworks_ai`, not `fireworks`.
+    litellm_prefix: fireworks_ai
+
+models:
+  glm-5.2-fireworks:
+    # Fireworks model ids are fully qualified: accounts/<account>/models/<name>.
+    model_id: accounts/fireworks/models/glm-5.2
+    tier: frontier
+    provider: fireworks
+    supports_streaming: true
+    supports_cache_control: true

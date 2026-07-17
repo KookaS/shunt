@@ -1,0 +1,16 @@
+# shunt-ci: probe
+# Groq — fast open-weight serving. Set GROQ_API_KEY, then paste this into
+# ~/.config/shunt/models.yaml. See ../../docs/configuration.md.
+providers:
+  groq:
+    base_url: https://api.groq.com/openai/v1
+    api_key_env_var: GROQ_API_KEY
+    litellm_prefix: groq
+
+models:
+  gpt-oss-120b-groq:
+    model_id: openai/gpt-oss-120b
+    tier: cheap
+    provider: groq
+    supports_streaming: true
+    supports_cache_control: false

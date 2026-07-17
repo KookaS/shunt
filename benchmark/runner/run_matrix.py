@@ -131,7 +131,7 @@ def _build_row(
     real_cost = float(outcome.get("real_cost", 0.0))
     estimated_cost = integrity.estimated_cost(model, in_tok, out_tok, pricing)
     # `cost` is what every metric/strategy/kill-gate reads. Prefer the litellm-measured
-    # (cache-aware) real_cost, but fall back to the models.json listing estimate when
+    # (cache-aware) real_cost, but fall back to the registry's listing estimate when
     # litellm can't price the route (e.g. requesty `openai/<provider>/<model>` strings)
     # — otherwise those cells would cache cost=0 and score as free. NOTE: this makes the
     # basis mixed (measured for litellm-priceable models, listing-estimate otherwise) —
@@ -190,7 +190,7 @@ def run_live_cells(
     if uncached:
         raise ValueError(
             f"benchmark refuses to run uncached models (no cache-read discount): {uncached}. "
-            "Remove them or give them cache_read_cost_per_1m in models.json."
+            "Remove them or give them cache_read_cost_per_1m in the model registry."
         )
 
     work_dir = Path.cwd() / "benchmark" / "runner" / "artifacts"
@@ -396,7 +396,7 @@ def main(config_path: str = "benchmark/config.yaml") -> int:
             print(
                 f"  REFUSING --live: enabled models without caching {uncached} would burn "
                 "uncached budget (full-context resend every turn). Disable them in "
-                "config.yaml or add cache_read_cost_per_1m in models.json.",
+                "config.yaml or add cache_read_cost_per_1m to the model registry.",
                 file=sys.stderr,
             )
             return 2

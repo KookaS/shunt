@@ -1,0 +1,16 @@
+# shunt-ci: probe
+# OpenAI — first-party. Set OPENAI_API_KEY, then paste this into
+# ~/.config/shunt/models.yaml. See ../../docs/configuration.md.
+providers:
+  openai:
+    base_url: https://api.openai.com/v1
+    api_key_env_var: OPENAI_API_KEY
+    litellm_prefix: openai
+
+models:
+  gpt-5-mini:
+    model_id: gpt-5-mini
+    tier: mid
+    provider: openai
+    supports_streaming: true
+    supports_cache_control: false

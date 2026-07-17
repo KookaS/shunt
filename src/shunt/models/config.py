@@ -7,15 +7,127 @@ from pathlib import Path
 from typing import Any, ClassVar, Final, Literal
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
+
+class _NoDuplicateKeyLoader(yaml.SafeLoader):  # type: ignore[misc] # SafeLoader is untyped
+    """SafeLoader that rejects duplicate mapping keys instead of silently keeping the last."""
+
+
+def _construct_mapping_no_dups(loader: yaml.SafeLoader, node: yaml.MappingNode) -> dict[str, Any]:
+    """Reject a duplicate key, then build the mapping normally (nesting handled recursively)."""
+    seen: set[Any] = set()
+    for key_node, _ in node.value:
+        key = loader.construct_object(key_node, deep=True)
+        if key in seen:
+            line = key_node.start_mark.line + 1
+            raise ValueError(f"duplicate key {key!r} in YAML mapping at line {line}")
+        seen.add(key)
+    return yaml.SafeLoader.construct_mapping(loader, node, deep=True)  # type: ignore[no-any-return]
+
+
+_NoDuplicateKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping_no_dups
+)
+
+
+def strict_yaml_load(text: str) -> dict[str, Any]:
+    """Like ``yaml.safe_load``, but a duplicate mapping key is an error, not silent last-wins.
+
+    Config files with a copy-pasted duplicate provider/model row would otherwise
+    silently shadow the earlier one — the exact class of silent config bug to reject.
+    """
+    data: dict[str, Any] = yaml.load(text, Loader=_NoDuplicateKeyLoader)  # noqa: S506 - SafeLoader subclass
+    return data
+
 
 Tier = Literal["cheap", "mid", "frontier"]
 
 TIER_ORDER: Final[list[Tier]] = ["cheap", "mid", "frontier"]
 
+DEFAULT_PROBE_ENDPOINT: Final[str] = "/v1/chat/completions"
+# The authenticated (200) check GETs this — a model listing, billed to no one.
+# Overridden per-provider where the default is public (OpenRouter) or set to None
+# where no free authenticated endpoint exists (Requesty).
+DEFAULT_POSITIVE_ENDPOINT: Final[str] = "/v1/models"
+
+
+class AuthProbe(BaseModel):
+    """Measured auth behaviour (rejection + acceptance) — validation-only, never runtime."""
+
+    # Not a Provider field: the signature lives in tools/provider_auth_signatures.yaml
+    # and is read only by the probe and its tests, not the router. Kept here as an
+    # importable schema so both the probe's loader and the test mock validate against
+    # one definition.
+    model_config = ConfigDict(extra="forbid")
+
+    # Per-provider, because neither status nor endpoint is universal: Requesty
+    # answers 403, xAI 400, and Fireworks only signals auth on /v1/models.
+    endpoint: str = DEFAULT_PROBE_ENDPOINT
+    expect_status: list[int] = [401]  # noqa: RUF012, SH001 (pydantic field default, copied per-instance)
+    expect_body_pattern: str | None = None
+    measured_as_of: str | None = None
+    # Positive (authenticated) check: with a REAL key, prove the provider ACCEPTS
+    # it (200) — the complement of the keyless rejection above. This endpoint is
+    # GET-only and must never bill: `/v1/models` for most, `/v1/auth/key` for
+    # OpenRouter (whose /v1/models is a public catalog). `None` means the provider
+    # exposes no free authenticated endpoint (Requesty), so its positive check is
+    # skipped rather than run a billable completion. Used only in --authenticated.
+    positive_endpoint: str | None = DEFAULT_POSITIVE_ENDPOINT
+
+
+class Provider(BaseModel):
+    """One access channel: where to send a request and how to authenticate it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: str
+    api_key_env_var: str
+    litellm_prefix: str
+
+
+class Pricing(BaseModel):
+    """Benchmark-only list prices + provenance. Absent ⇒ routable but unscored."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_cost_per_1m: float
+    output_cost_per_1m: float
+    cache_read_cost_per_1m: float | None = None
+    cache_write_cost_per_1m: float | None = None
+    version: str
+    price_provider: str
+    price_source: str
+    price_as_of: str
+    price_note: str | None = None
+
+
+class ModelEntry(BaseModel):
+    """A model row as written in the registry file (`provider` is an FK)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_id: str
+    tier: Tier
+    provider: str
+    supports_streaming: bool = True
+    supports_cache_control: bool = False
+    pricing: Pricing | None = None
+
+
+class Registry(BaseModel):
+    """The parsed registry file: a provider table and a model table."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    providers: dict[str, Provider]
+    models: dict[str, ModelEntry]
+
 
 class ModelConfig(BaseModel):
-    """Configuration for a single model in the pool."""
+    """A model with its provider row resolved onto it — the runtime view."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     model_id: str | None = None
@@ -23,8 +135,62 @@ class ModelConfig(BaseModel):
     provider: str
     base_url: str
     api_key_env_var: str
+    litellm_prefix: str = "openai"
     supports_streaming: bool = True
     supports_cache_control: bool = False
+    pricing: Pricing | None = None
+
+    @property
+    def route(self) -> str:
+        """The litellm target string: `<litellm_prefix>/<model_id>`."""
+        return f"{self.litellm_prefix}/{self.model_id or self.name}"
+
+
+def parse_registry(data: dict[str, Any]) -> Registry:
+    """Parse + validate registry data, resolving every model's provider FK."""
+    registry = Registry.model_validate(data)
+    for name, entry in registry.models.items():
+        if entry.provider not in registry.providers:
+            known = ", ".join(sorted(registry.providers))
+            raise ValueError(
+                f"model {name!r} names unknown provider {entry.provider!r} (known: {known})"
+            )
+    return registry
+
+
+def resolve_models(registry: Registry) -> dict[str, ModelConfig]:
+    """Flatten the registry into ModelConfigs, preserving registry file order."""
+    resolved: dict[str, ModelConfig] = {}
+    for name, entry in registry.models.items():
+        provider = registry.providers[entry.provider]
+        resolved[name] = ModelConfig(
+            name=name,
+            model_id=entry.model_id,
+            tier=entry.tier,
+            provider=entry.provider,
+            base_url=provider.base_url,
+            api_key_env_var=provider.api_key_env_var,
+            litellm_prefix=provider.litellm_prefix,
+            supports_streaming=entry.supports_streaming,
+            supports_cache_control=entry.supports_cache_control,
+            pricing=entry.pricing,
+        )
+    return resolved
+
+
+def default_registry_path() -> Path:
+    """Path to the registry file shipped inside the package."""
+    import importlib.resources
+
+    ref = importlib.resources.files("shunt.models") / "default_config.yaml"
+    with importlib.resources.as_file(ref) as path:
+        return Path(path)
+
+
+def load_registry(path: str | Path | None = None) -> Registry:
+    """Load + validate the registry file (defaults to the packaged one)."""
+    path_obj = Path(path) if path is not None else default_registry_path()
+    return parse_registry(strict_yaml_load(path_obj.read_text()))
 
 
 class ModelPool:
@@ -55,23 +221,14 @@ class ModelPool:
                 path = str(Path.home() / ".config" / "shunt" / self.DEFAULT_CONFIG_FILENAME)
 
         path_obj = Path(path)
+        source = path_obj if path_obj.exists() else default_registry_path()
 
-        if path_obj.exists():
-            with open(path_obj) as f:
-                data = yaml.safe_load(f)
-        else:
-            import importlib.resources
-
-            ref = importlib.resources.files("shunt.models") / "default_config.yaml"
-            with importlib.resources.as_file(ref) as default_path, open(default_path) as f:
-                data = yaml.safe_load(f)
-
-        self._parse_config(data)
+        self._parse_config(strict_yaml_load(source.read_text()))
 
     def _parse_config(self, data: dict[str, Any]) -> None:
-        models_data = data.get("models", {})
-        for name, cfg in models_data.items():
-            self._config[name] = ModelConfig(name=name, **cfg)
+        # extra="forbid" makes a stale-schema config fail loudly here, at boot,
+        # naming the offending key — never silently at request time.
+        self._config = resolve_models(parse_registry(data))
 
         with self._lock:
             for name in self._config:

@@ -1,0 +1,75 @@
+name: Provider auth check (authenticated, opt-in)
+
+# THE POSITIVE COMPLEMENT to provider-probe.yml. That workflow sends a BOGUS key
+# and proves a provider REJECTS it (wiring is correct). This one sends a REAL key
+# and proves the provider ACCEPTS it (200) — that the credential actually works.
+#
+# WHY A SEPARATE, SECRETS-GATED WORKFLOW:
+#   - It needs real API keys as secrets. Secrets are NOT exposed to fork PRs, so
+#     this cannot live in the keyless workflow (which must stay fork-safe) or in
+#     ci.yml. Opt-in is structural: no push/pull_request trigger, ci.yml never
+#     calls it.
+#   - It is secret-OPTIONAL per provider: a provider whose key secret is unset is
+#     SKIPped (a visible warning), not failed. So it runs wherever a secret is
+#     present and coverage grows as keys are added, with no code change.
+#   - Cost is ZERO. It only ever GETs a provider's positive_endpoint — a model
+#     listing, or OpenRouter's /v1/auth/key — never a billed completion. A
+#     provider with no free authenticated endpoint (Requesty, whose /v1/models is
+#     public) is skipped rather than billed. It cannot charge you.
+#
+# Add a provider's key here by adding its `api_key_env_var` (from the examples
+# fragment) to the env block below, wired to a repo secret of the same name.
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Check only this provider (blank = all with a key set)"
+        required: false
+        type: string
+  schedule:
+    # Weekly, Monday 04:31 UTC. Off-peak, off-the-hour, and offset from the
+    # keyless probe (04:17) so the two do not contend.
+    - cron: "31 4 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  # Every provider's api_key_env_var, wired to a repo secret of the SAME name. A
+  # secret you have not created arrives here as an empty string, which the probe
+  # treats as "no key" and SKIPs (a visible warning, never a failure) — so add
+  # keys gradually by just creating the secret; no edit here is needed. Requesty
+  # is always skipped regardless (its positive check would require a billed
+  # completion — see provider_auth_signatures.yaml).
+  DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+  REQUESTY_API_KEY: ${{ secrets.REQUESTY_API_KEY }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+  XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+  GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+  TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+  CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+  NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
+  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+  FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+
+jobs:
+  auth-check:
+    name: authenticated 200 check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --extra dev
+      - name: Check providers accept a real key (200)
+        run: |
+          uv run python tools/provider_probe.py --authenticated \
+            ${{ inputs.provider && format('--provider {0}', inputs.provider) || '' }}

@@ -32,7 +32,7 @@ dataset revision `c104f840`.
 
 Prices below are the **Requesty router listing** rates (as of mid-July 2026), in
 USD per 1M tokens; each entry carries its own `price_as_of`, `price_note`, and
-cache-read/write rate in `models.json`. Four tiers — cheap → mid → high → frontier.
+cache-read/write rate in the model registry (`src/shunt/models/default_config.yaml`). Three tiers — cheap → mid → frontier.
 
 | Model | Tier | Input $/1M | Output $/1M |
 |-------|------|-----------:|------------:|
@@ -40,12 +40,12 @@ cache-read/write rate in `models.json`. Four tiers — cheap → mid → high �
 | qwen3.7-plus | cheap | 0.32 | 1.28 |
 | gpt-5-mini | mid | 0.25 | 2.00 |
 | kimi-k2.5 | mid | 0.60 | 3.00 |
-| zai-glm-5.2 | high | 1.40 | 4.40 |
+| zai-glm-5.2 | frontier | 1.40 | 4.40 |
 | kimi-k3 | frontier | 3.00 | 15.00 |
 
 Spread: ~21x input, ~54x output between the cheapest and the frontier model.
-`models.json` is the single source of truth — the table above is a snapshot of it.
-(claude-opus-4-6 is priced in `models.json` for provenance but is `enabled: false`
+The model registry (`src/shunt/models/default_config.yaml`) is the single source of truth — the table above is a
+snapshot of it. (claude-opus-4-6 is priced in the registry for provenance but is `enabled: false`
 — excluded from runs; kimi-k3 is the frontier baseline.)
 
 ## Benchmark execution
@@ -59,7 +59,7 @@ Docker job:
 3. Run the coding agent with the target model against the task.
 4. Run the deterministic judge (the spec's `FAIL_TO_PASS` / `PASS_TO_PASS` tests).
 5. Record the verified pass/fail, real cost (from the API response), estimated
-   cost (from `models.json` × token counts), and token usage.
+   cost (from the registry's prices × token counts), and token usage.
 
 Per-challenge images give reproducibility, isolation, and parallelization. Only
 model API costs enter routing metrics; judging costs are excluded.
@@ -121,7 +121,7 @@ Metrics per strategy:
   LLM-judged tasks. This rules out judge noise but limits task types.
 - **Pricing** is taken from the Requesty router listing (2026-07-15); each model
   records its rate, cache-read/write rate, and source in a `price_note` in
-  `models.json`.
+  the model registry.
 - **Benchmark ≠ production**: the benchmark can reject bad routing strategies but
   can't prove a good one works in production. The kill gate — beat a fixed-frontier
   baseline (the most expensive enabled model, currently kimi-k3) with caching at

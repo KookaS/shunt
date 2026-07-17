@@ -1,0 +1,16 @@
+# shunt-ci: probe
+# Cerebras — very high tokens/sec. Set CEREBRAS_API_KEY, then paste this into
+# ~/.config/shunt/models.yaml. See ../../docs/configuration.md.
+providers:
+  cerebras:
+    base_url: https://api.cerebras.ai/v1
+    api_key_env_var: CEREBRAS_API_KEY
+    litellm_prefix: cerebras
+
+models:
+  gpt-oss-120b-cerebras:
+    model_id: gpt-oss-120b
+    tier: cheap
+    provider: cerebras
+    supports_streaming: true
+    supports_cache_control: false

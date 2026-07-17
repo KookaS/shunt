@@ -5,9 +5,10 @@ import tempfile
 from pathlib import Path
 from typing import Final
 
+import pytest
 import yaml
 
-from shunt.models.config import ModelConfig, ModelPool
+from shunt.models.config import TIER_ORDER, ModelConfig, ModelPool, strict_yaml_load
 
 
 def _write_yaml(path: str, data: dict) -> str:
@@ -22,8 +23,26 @@ DEFAULT_MODEL_NAMES: Final = [
     "gpt-5-mini",
     "zai-glm-5.2",
     "kimi-k2.5",
+    "kimi-k3",
     "claude-opus-4-6",
 ]
+
+
+class TestStrictYamlLoad:
+    def test_duplicate_top_level_key_is_rejected(self) -> None:
+        # A copy-pasted duplicate provider/model row must fail loudly, not silently
+        # shadow the earlier one (yaml.safe_load keeps last-wins).
+        with pytest.raises(ValueError, match="duplicate key 'requesty'"):
+            strict_yaml_load("providers:\n  requesty: {base_url: a}\n  requesty: {base_url: b}\n")
+
+    def test_duplicate_nested_key_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="duplicate key 'tier'"):
+            strict_yaml_load("models:\n  m:\n    tier: cheap\n    tier: mid\n")
+
+    def test_valid_yaml_still_loads(self) -> None:
+        assert strict_yaml_load("models:\n  m: {tier: cheap}\n") == {
+            "models": {"m": {"tier": "cheap"}}
+        }
 
 
 class TestModelConfig:
@@ -65,14 +84,20 @@ class TestModelPoolLoad:
 
     def test_custom_config_path(self) -> None:
         data = {
-            "models": {
-                "test-model": {
-                    "tier": "cheap",
-                    "provider": "test",
+            "providers": {
+                "test": {
                     "base_url": "https://test.ai/v1",
                     "api_key_env_var": "TEST_KEY",
+                    "litellm_prefix": "openai",
                 }
-            }
+            },
+            "models": {
+                "test-model": {
+                    "model_id": "test-model",
+                    "tier": "cheap",
+                    "provider": "test",
+                }
+            },
         }
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             path = _write_yaml(f.name, data)
@@ -87,14 +112,20 @@ class TestModelPoolLoad:
 
     def test_env_config_dir(self) -> None:
         data = {
-            "models": {
-                "env-model": {
-                    "tier": "mid",
-                    "provider": "env",
+            "providers": {
+                "env": {
                     "base_url": "https://env.ai/v1",
                     "api_key_env_var": "ENV_KEY",
+                    "litellm_prefix": "openai",
                 }
-            }
+            },
+            "models": {
+                "env-model": {
+                    "model_id": "env-model",
+                    "tier": "mid",
+                    "provider": "env",
+                }
+            },
         }
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "models.yaml"
@@ -138,17 +169,30 @@ class TestTierLookup:
 
     def test_get_tier_models(self) -> None:
         pool = ModelPool()
-        cheap = pool.get_tier_models("cheap")
-        assert len(cheap) == 2
-        assert all(m.tier == "cheap" for m in cheap)
+        for tier in TIER_ORDER:
+            models = pool.get_tier_models(tier)
+            assert models, f"tier {tier} has no models"
+            assert all(m.tier == tier for m in models)
 
-        mid = pool.get_tier_models("mid")
-        assert len(mid) == 2
-        assert all(m.tier == "mid" for m in mid)
+    def test_pool_roster_is_exactly_the_declared_default(self) -> None:
+        # DEFAULT_MODEL_NAMES pins the roster in BOTH directions: the per-name
+        # checks catch a model that vanished, this catches one that appeared.
+        # Deriving both sides from the pool would be self-referential.
+        pool = ModelPool()
+        assert _all_model_names(pool) == set(DEFAULT_MODEL_NAMES)
 
-        frontier = pool.get_tier_models("frontier")
-        assert len(frontier) == 2
-        assert all(m.tier == "frontier" for m in frontier)
+    def test_tiers_partition_the_pool(self) -> None:
+        # Every model belongs to exactly one tier — no model is stranded in an
+        # unknown tier, none is double-counted.
+        pool = ModelPool()
+        by_tier = [{m.name for m in pool.get_tier_models(t)} for t in TIER_ORDER]
+        for i, left in enumerate(by_tier):
+            for right in by_tier[i + 1 :]:
+                assert not (left & right)
+
+
+def _all_model_names(pool: ModelPool) -> set[str]:
+    return {m.name for tier in TIER_ORDER for m in pool.get_tier_models(tier)}
 
 
 class TestFallbackChain:
@@ -159,8 +203,9 @@ class TestFallbackChain:
         assert chain[0] == "qwen3.7-plus"
         # deepseek-v4-flash is the other cheap model
         assert "deepseek-v4-flash" in chain[:3]
-        # All models should be in the chain
-        assert len(chain) == 6
+        # Exhaustive and duplicate-free, whatever the pool holds
+        assert chain == list(dict.fromkeys(chain))
+        assert set(chain) == _all_model_names(pool)
 
     def test_fallback_chain_same_tier_first(self) -> None:
         pool = ModelPool()
@@ -173,8 +218,8 @@ class TestFallbackChain:
         pool = ModelPool()
         chain = pool.fallback_chain("claude-opus-4-6")
         assert chain[0] == "claude-opus-4-6"
-        # Should contain all models
-        assert len(chain) == 6
+        assert chain == list(dict.fromkeys(chain))
+        assert set(chain) == _all_model_names(pool)
 
     def test_unknown_model_returns_empty(self) -> None:
         pool = ModelPool()

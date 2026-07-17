@@ -8,7 +8,6 @@ Evaluates routing strategies against a task×model performance matrix to answer:
 routing/
   results.csv                 # THE committed source of truth — per-cell outcomes from live runs
   data/                       # Curated read-only inputs
-    models.json               # Model registry + Requesty router pricing — model source of truth
     challenges.json           # Index of the 500 swebench_verified specs (challenges, tasks)
     external_swebench.csv     # Per-instance resolve rates from SWE-bench/experiments (separate table)
   strategies/
@@ -40,27 +39,35 @@ regenerable, never committed**: the **per-strategy** summary
 `report.py`, `run_matrix.py`, `run_eval.py`) and written to the gitignored
 `reports/` dir; plots and parameter sweeps likewise regenerate from `results.csv`.
 
-## Model registry (`data/models.json`) — the cost + routing source of truth
+## Model registry (`src/shunt/models/default_config.yaml`) — the cost + routing source of truth
 
-`models.json` is the model registry **and** the cost source of truth. Prices are
-the **Requesty router listing** (the rate actually paid for `access_via: requesty`
-models; direct providers list the same published rate). Every model carries its
-provenance:
+The model registry is shared with the shipped router: one `providers` table (access
+channels) and one `models` table. It is the cost source of truth. Prices are the
+**Requesty router listing** (the rate actually paid for requesty-routed models;
+direct providers list the same published rate).
+
+A model's **required core** — `model_id`, `tier`, `provider`, `supports_streaming`,
+`supports_cache_control` — makes it routable. The **optional `pricing` block** makes it
+benchmarkable: a model with no `pricing` is routable but invisible here, so it can never
+be scored against a fabricated price.
 
 | Field | Meaning |
 |-------|---------|
-| `provider` / `family` / `tier` | Model identity + routing tier (cheap/mid/high/frontier) |
-| `input_cost_per_1m` / `output_cost_per_1m` | Price, USD per 1M tokens (Requesty router listing) |
-| `cache_read_cost_per_1m` / `cache_write_cost_per_1m` | Optional — cache-read/write rate where the provider lists one |
-| `context_length` / `max_output_tokens` | Context window + max output, in tokens (Requesty classification) |
-| `capabilities` | List of capability tags, e.g. `vision`, `tools`, `cache`, `think`, `web`, `json` |
-| `price_provider` | Where the price is quoted from (`requesty` — the router listing) |
-| `price_source` | The pricing-listing URL the number came from |
-| `price_as_of` | Date the price was recorded |
-| `price_note` | Provenance note — the listing the rate came from + cache rates |
-| `access_via` | How Shunt actually reaches the model: `direct` or `requesty` |
-| `route` | The **litellm** model string the benchmark's live inference (mini-swe-agent) calls, e.g. `deepseek/deepseek-v4-flash`, `openai/alibaba/qwen3.7-plus`. (The shipped router uses `model_id` in `src/shunt/models/default_config.yaml` instead — the same id minus the litellm `openai/` prefix.) |
-| `version` | Stable model-version string (feeds `results.csv` `model_version` staleness) |
+| `model_id` / `tier` / `provider` | Model identity, routing tier (cheap/mid/frontier), and the `providers` row used to reach it |
+| `pricing.input_cost_per_1m` / `.output_cost_per_1m` | Price, USD per 1M tokens (Requesty router listing) |
+| `pricing.cache_read_cost_per_1m` / `.cache_write_cost_per_1m` | Optional — cache-read/write rate where the provider lists one |
+| `pricing.price_provider` | Where the price is quoted from (`requesty` — the router listing) |
+| `pricing.price_source` | The pricing-listing URL the number came from |
+| `pricing.price_as_of` | Date the price was recorded |
+| `pricing.price_note` | Provenance note — the listing the rate came from + cache rates |
+| `pricing.version` | Stable model-version string (feeds `results.csv` `model_version` staleness) |
+
+The **litellm route is derived**, not stored: `<litellm_prefix>/<model_id>`, e.g.
+`deepseek/deepseek-v4-flash`, `openai/alibaba/qwen3.7-plus`. `base_url` and
+`api_key_env_var` come from the model's `providers` row.
+
+**Model row order is semantic** — `SelectionRule._escalate` returns the last row of a
+tier in file order. Never re-serialize the registry with a key-sorting dumper.
 
 **Cost model.** `config._pricing_dict` / `config.models_matrix` /
 `integrity.estimated_cost` read `input_cost_per_1m` / `output_cost_per_1m` × token
@@ -86,13 +93,13 @@ row per key; superseded rows move to the history log, below):
 | Column | Meaning |
 |--------|---------|
 | `challenge_id` | Instance id = spec file stem under `challenges/swebench_verified/` |
-| `model` | Model key (matches `models.json`) |
+| `model` | Model key (matches the model registry) |
 | `reasoning` | Reasoning arm; defaults to `"default"` (full support is a later story) |
 | `pass` / `cost` / `in_tok` / `out_tok` / `calls` | Verified outcome + token usage |
 | `version_hash` | SHA256 of the instance spec's canonical content **at compute time** (staleness anchor) |
-| `model_version` | The model's `version` (from `models.json`) **at compute time** (staleness anchor) |
+| `model_version` | The model's `pricing.version` (from the registry) **at compute time** (staleness anchor) |
 | `real_cost` | Actual measured cost (USD); equals `cost` for cached rows |
-| `estimated_cost` | Cost derived from `models.json` × token counts |
+| `estimated_cost` | Cost derived from the registry's prices × token counts |
 | `timeout_flag` | True if the run hit the per-cell timeout |
 | `image_digest` | Canonical **manifest** digest (`sha256:…`) of the SWE-bench image the cell was produced with (staleness anchor) |
 | `computed_at` | ISO-8601 timestamp the row was computed — **AUDIT ONLY, never a staleness key** |
@@ -117,7 +124,7 @@ row:
   `difficulty_stratum`): a label the model never sees is not execution identity, so
   correcting it must not stale a paid result cell. `challenge_hash(id)` /
   `all_hashes()` expose it.
-- **`model_version`** — the model's `version` from `models.json`.
+- **`model_version`** — the model's `pricing.version` from the registry.
 - **`image_digest`** — the **manifest** digest (never the config digest) of the
   instance's SWE-bench image, resolved via `docker buildx imagetools inspect`
   (registry query, **no pull**) and canonicalized to a bare `sha256:…`. The
@@ -254,8 +261,8 @@ The canonical index is `benchmark/routing/data/challenges.json`:
 
 Model pricing and per-model outcomes are kept **out** of challenges.json to
 avoid duplication:
-- **Model pricing** is sourced from `data/models.json` (the single source of
-  truth). `config.load_matrix()` reads it and exposes it as `matrix["models"]`
+- **Model pricing** is sourced from the model registry (`src/shunt/models/default_config.yaml` —
+  the single source of truth). `config.load_matrix()` reads it and exposes it as `matrix["models"]`
   (`{model: {input_price, output_price}}`) for backward compatibility.
 - **Per-model outcomes** live in `results.csv` (long/tidy).
   `config.load_matrix()` reconstructs them as `matrix["results"]`. **Until a live

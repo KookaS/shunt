@@ -95,7 +95,7 @@ class TestExternalPrior:
     """Route cheap unless the external field-wide rate (p_solve) is low, then escalate."""
 
     def _matrix(self):
-        # Real model names so tier lookup (models.json) resolves cheap vs mid.
+        # Real model names so tier lookup (the registry) resolves cheap vs mid.
         return {
             "models": {
                 "deepseek-v4-flash": {"input_price": 0.14, "output_price": 0.28},

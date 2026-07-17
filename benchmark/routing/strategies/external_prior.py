@@ -61,6 +61,6 @@ class ExternalPriorCascade(Strategy):
 
 
 def _tier_of(model: str) -> str:
-    """Tier for *model* from the pricing registry (models.json), 'cheap' if unknown."""
+    """Tier for *model* from the model registry, 'cheap' if unknown."""
     info = config.load_pricing().get(model)
     return info.get("tier", "cheap") if isinstance(info, dict) else "cheap"

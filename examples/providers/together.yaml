@@ -1,0 +1,17 @@
+# shunt-ci: probe
+# Together — open-weight serving. Set TOGETHER_API_KEY, then paste this into
+# ~/.config/shunt/models.yaml. See ../../docs/configuration.md.
+providers:
+  together:
+    base_url: https://api.together.xyz/v1
+    api_key_env_var: TOGETHER_API_KEY
+    # litellm's provider id is `together_ai`, not `together`.
+    litellm_prefix: together_ai
+
+models:
+  gpt-oss-120b-together:
+    model_id: openai/gpt-oss-120b
+    tier: cheap
+    provider: together
+    supports_streaming: true
+    supports_cache_control: false

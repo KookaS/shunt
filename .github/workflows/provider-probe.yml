@@ -1,0 +1,63 @@
+name: Provider probe (live, opt-in)
+
+# WHY THIS IS A SEPARATE WORKFLOW, AND WHY IT MUST STAY ONE.
+#
+# This job talks to eleven third-party APIs. The status codes it asserts were
+# measured once (2026-07-17) and are PERISHABLE: providers change rejection
+# codes without notice or announcement. If this ran on push/pull_request, the
+# day Requesty switches 403→401 every unrelated PR in the repo turns red for a
+# reason no contributor caused and none can fix.
+#
+# So opt-in is STRUCTURAL, not a marker someone remembers to set: there is no
+# `push:` or `pull_request:` trigger here, and ci.yml never calls this file.
+# A green PR therefore never depended on a provider being up. Deleting the two
+# triggers below is the only way to disable it; adding `push:` is the mistake
+# this comment exists to stop.
+#
+# It needs NO SECRETS — that is the entire point. The probe sends a deliberately
+# invalid key and asserts an auth-shaped rejection, so it is free (auth fails
+# before billing) and safe on fork PRs. Do not add an api-key secret here; if
+# someone ever does, this stops being a wiring check and starts being a spend.
+#
+# A failure here means one of: a provider moved its base_url, changed its
+# rejection code/message, or is down. Triage by re-measuring, then update that
+# provider's signature in tools/provider_auth_signatures.yaml (status/body/
+# endpoint) along with its `measured_as_of` date. A moved base_url is fixed in
+# the provider's examples/providers/<name>.yaml fragment instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Probe only this provider (blank = all)"
+        required: false
+        type: string
+  schedule:
+    # Weekly, Monday 04:17 UTC. Off-peak and off-the-hour: a cron on :00 is
+    # where every scheduled job on GitHub piles up and gets delayed.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  probe:
+    name: keyless auth-probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --extra dev
+      - name: Probe providers with a bogus key
+        run: |
+          uv run python tools/provider_probe.py \
+            ${{ inputs.provider && format('--provider {0}', inputs.provider) || '' }}

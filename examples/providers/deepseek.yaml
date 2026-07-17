@@ -1,0 +1,16 @@
+# shunt-ci: probe
+# DeepSeek — first-party. Set DEEPSEEK_API_KEY, then paste this into
+# ~/.config/shunt/models.yaml. See ../../docs/configuration.md.
+providers:
+  deepseek:
+    base_url: https://api.deepseek.com/v1
+    api_key_env_var: DEEPSEEK_API_KEY
+    litellm_prefix: deepseek
+
+models:
+  deepseek-v4-flash:
+    model_id: deepseek-v4-flash
+    tier: cheap
+    provider: deepseek
+    supports_streaming: true
+    supports_cache_control: false

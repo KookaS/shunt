@@ -1,0 +1,16 @@
+# shunt-ci: probe
+# OpenRouter — aggregator. Set OPENROUTER_API_KEY, then paste this into
+# ~/.config/shunt/models.yaml. See ../../docs/configuration.md.
+providers:
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env_var: OPENROUTER_API_KEY
+    litellm_prefix: openrouter
+
+models:
+  kimi-k3-openrouter:
+    model_id: moonshotai/kimi-k3
+    tier: frontier
+    provider: openrouter
+    supports_streaming: true
+    supports_cache_control: false

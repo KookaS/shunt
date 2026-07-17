@@ -23,10 +23,14 @@ from benchmark.routing.strategies.oracle import Oracle, OracleRewardAware
 matplotlib.use("Agg")
 
 CB_PALETTE: Final = {
-    "claude-opus-4-6": "#0072B2",
-    "kimi-k2.5": "#D55E00",
-    "qwen3-max": "#009E73",
+    # Current enabled pool (6 models). Unlisted models fall back to gray via
+    # CB_PALETTE.get(m, "#999999"); keep this in step with default_config.yaml.
+    "deepseek-v4-flash": "#0072B2",
     "qwen3.7-plus": "#56B4E9",
+    "gpt-5-mini": "#009E73",
+    "kimi-k2.5": "#D55E00",
+    "zai-glm-5.2": "#CC79A7",
+    "kimi-k3": "#E69F00",
     "oracle": "#0072B2",
     "oracle_reward": "#56B4E9",
     "always_cheap": "#009E73",

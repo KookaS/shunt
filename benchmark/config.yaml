@@ -1,6 +1,7 @@
 # Shunt Benchmark Configuration
 # Human-editable. Changes here propagate to all scripts.
-# All model metadata (tier, pricing, provider) lives in models.json.
+# All model metadata (tier, pricing, provider) lives in the model registry
+# (src/shunt/models/default_config.yaml).
 # This file only controls which models are active and how routing behaves.
 
 models:

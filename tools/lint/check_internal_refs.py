@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""SH004: scan shipped text (benchmark/src/docs/README) for internal planning
-vocab so backlog/journal references never leak into the public repo.
-"""
+"""SH004: scan shipped text for internal planning vocab so it never leaks to the public repo."""
 
 from __future__ import annotations
 
@@ -15,8 +13,12 @@ _CODE = "SH004"
 # check_internal_refs.py lives at <repo>/tools/lint/, so the repo root is two
 # levels up (parents[2]); the default targets are resolved against it.
 _ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_TARGETS = ("benchmark", "src", "docs", "README.md")
-_SCAN_SUFFIXES = frozenset({".py", ".md"})
+# `examples/` ships to users and is config, not prose — so it was scanned by
+# NOTHING before: this checker skipped the tree and the suffix, and the docs
+# integrity script only walks docs/*.md. gitleaks would catch a pasted key
+# there, but not an internal-vocab leak, which is this gate's job.
+_DEFAULT_TARGETS = ("benchmark", "examples", "src", "docs", "README.md")
+_SCAN_SUFFIXES = frozenset({".py", ".md", ".yaml"})
 
 # Internal planning vocab that must not appear in shipped text.
 _PATTERNS = (

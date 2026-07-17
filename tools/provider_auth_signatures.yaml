@@ -1,0 +1,79 @@
+# Provider auth signatures — validation metadata for tools/provider_probe.py.
+# Both directions: how a bogus key is REJECTED (keyless), and the free endpoint a
+# real key is ACCEPTED on (positive_endpoint, --authenticated).
+#
+# One block per MEASURED provider (live, keyless, 2026-07-17). Keyed by provider
+# name; connection facts (base_url) are NOT here — they live once in
+# examples/providers/<name>.yaml, the single owner. The probe merges a provider's
+# connection row (from the examples catalog) with its signature (from this file)
+# by name. `local` is absent on purpose: a local server needs no key, so there is
+# no auth rejection to measure.
+#
+# Fields per block: endpoint (default /v1/chat/completions), expect_status,
+# expect_body_pattern, measured_as_of — all for the KEYLESS rejection check. Plus
+# positive_endpoint for the AUTHENTICATED acceptance check (--authenticated,
+# secrets-gated): the GET-only, ALWAYS-FREE endpoint a real key must answer 200 on.
+# Default /v1/models; overridden where that is public (OpenRouter -> /v1/auth/key);
+# `null` where the provider has no free authenticated endpoint (Requesty), so its
+# positive check is skipped rather than billed. The authenticated check NEVER runs
+# a completion — it must not cost anything.
+# Triage on a live failure: re-measure, update the block + its measured_as_of.
+
+requesty:
+  # Measured live, keyless: requesty rejects a bogus token with 403, not 401.
+  expect_status: [403]
+  expect_body_pattern: Invalid authorization token
+  measured_as_of: "2026-07-17"
+  # Requesty's /v1/models is a public 200 catalog and it exposes no free auth
+  # endpoint (measured: /v1/credits, /v1/user, … all 404), so the only positive
+  # check would be a billed completion. null -> skip it; stay strictly free.
+  positive_endpoint: null
+deepseek:
+  # Default positive_endpoint /v1/models: DeepSeek authenticates GET /v1/models,
+  # so a real key returns 200 for free (no completion billed).
+  expect_status: [401]
+  measured_as_of: "2026-07-17"
+openai:
+  expect_status: [401]
+  measured_as_of: "2026-07-17"
+groq:
+  expect_status: [401]
+  measured_as_of: "2026-07-17"
+mistral:
+  expect_status: [401]
+  measured_as_of: "2026-07-17"
+together:
+  expect_status: [401]
+  measured_as_of: "2026-07-17"
+cerebras:
+  expect_status: [401]
+  measured_as_of: "2026-07-17"
+nebius:
+  expect_status: [401]
+  measured_as_of: "2026-07-17"
+openrouter:
+  # Keyless: default endpoint deliberately. OpenRouter serves /v1/models as a
+  # PUBLIC catalog (measured: 200, no auth) — probing there passes green on a
+  # completely broken key, the exact failure the probe exists to catch.
+  expect_status: [401]
+  measured_as_of: "2026-07-17"
+  # Positive: /v1/models is public, so it cannot prove the key. /v1/auth/key
+  # requires auth and returns key/credit info at zero cost (measured: 401 keyless).
+  positive_endpoint: /v1/auth/key
+xai:
+  # Measured: xAI validates the model id BEFORE auth on chat/completions, so a
+  # bogus key returns `Model not found` — even with a real model id. On
+  # /v1/models it returns 400 carrying an auth message. Non-auth status code,
+  # auth-shaped body: only the body pattern distinguishes it.
+  endpoint: /v1/models
+  expect_status: [400]
+  expect_body_pattern: Incorrect API key provided
+  measured_as_of: "2026-07-17"
+fireworks:
+  # Measured: with a bad key every Fireworks model reads as "inaccessible", so
+  # chat/completions answers 404 — the SAME status as a wrong base_url, which
+  # is what the probe is for. Holds with a real model id and with no auth
+  # header at all. /v1/models is the only clean auth signal Fireworks offers.
+  endpoint: /v1/models
+  expect_status: [401]
+  measured_as_of: "2026-07-17"

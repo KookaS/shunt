@@ -21,9 +21,6 @@ from benchmark.runner import image_version, swebench_harness, swebench_specs
 # cost_limit never trips).
 _AGENT_WALL_LIMIT_S: Final[int] = 1800
 
-# OpenAI-compatible endpoint for requesty-routed models (key: REQUESTY_API_KEY).
-_REQUESTY_BASE: Final[str] = "https://router.requesty.ai/v1"
-
 GOLD_MODEL_NAME: Final[str] = "gold"
 LIVE_SCAFFOLD: Final[str] = "mini-swe-agent"
 
@@ -134,27 +131,22 @@ def generate_patch_live(
 def litellm_model_target(model: str) -> tuple[str, dict[str, Any]]:
     """Map an internal model alias to a litellm ``(model_string, model_kwargs)`` pair.
 
-    ``route`` in models.json is the litellm string; ``direct`` models read their own
-    env key, ``requesty`` routes carry the shared base_url + REQUESTY_API_KEY.
+    Route, base_url, and key env var all come from the registry's provider row.
     """
     info = config.load_pricing().get(model)
     if not isinstance(info, dict):
-        raise KeyError(f"model {model!r} not in models.json")
-    route = info.get("route")
-    if not route:
-        # No guessing: the requesty serving-provider prefix (e.g. fireworks/glm-5.2)
-        # does not match the model's origin provider, so a derived route would be wrong.
-        raise KeyError(f"model {model!r} has no explicit 'route' in models.json")
-    route = str(route)
-    access = info.get("access_via")
-    if access == "direct":
+        raise KeyError(f"model {model!r} not in the model registry")
+    route = str(info["route"])
+    # A provider with its own litellm prefix (e.g. `deepseek/`) is dialled by
+    # litellm directly, which reads that provider's key from the env by its
+    # canonical name. A generic `openai/` surface needs base_url + key passed.
+    if not route.startswith("openai/"):
         return route, {}
-    if access == "requesty":
-        key = os.environ.get("REQUESTY_API_KEY")
-        if not key:
-            raise MissingApiKeysError(f"requesty routing for {model!r} needs REQUESTY_API_KEY")
-        return route, {"api_base": _REQUESTY_BASE, "api_key": key}
-    raise NotImplementedError(f"no litellm route for {model!r} (access_via={access!r})")
+    key_env = str(info["api_key_env_var"])
+    key = os.environ.get(key_env)
+    if not key:
+        raise MissingApiKeysError(f"routing {model!r} via {info['provider']} needs {key_env}")
+    return route, {"api_base": str(info["base_url"]), "api_key": key}
 
 
 @functools.lru_cache(maxsize=1)

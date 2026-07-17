@@ -87,6 +87,7 @@ def plot_pareto(
     display_name_key: dict[str, str] | None = None,
     colors: dict[str, str] | None = None,
     markers: dict[str, str] | None = None,
+    warning: str | None = None,
 ) -> None:
     if display_name_key is None:
         display_name_key = {
@@ -217,6 +218,23 @@ def plot_pareto(
     ax.grid(True, alpha=0.3, which="both")
     ax.set_axisbelow(True)
 
+    if warning:
+        # Sparse-frontier honesty: a fixed-frontier strategy auto-fails every task
+        # its model never ran on, dragging its pass rate to a phantom value.
+        ax.annotate(
+            warning,
+            xy=(0.5, 0.02),
+            xycoords="axes fraction",
+            fontsize=9,
+            fontweight="bold",
+            color="#B00020",
+            ha="center",
+            va="bottom",
+            bbox=dict(
+                boxstyle="round,pad=0.3", facecolor="#FDECEA", edgecolor="#B00020", alpha=0.9
+            ),
+        )
+
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
@@ -276,8 +294,22 @@ def main(config_path: str = "benchmark/config.yaml") -> None:
             f"cost=${metrics['TotalCost']:<8.4f}"
         )
 
+    # Phantom-frontier guard (matches report.py::_frontier_coverage): the fixed
+    # Always-Frontier strategy auto-fails every task its model never ran on, so a
+    # sparsely-covered frontier model produces a misleadingly low pass rate.
+    pricing = config.enabled_pricing()
+    warning = None
+    if pricing:
+        frontier_model = max(pricing, key=lambda m: config.cost_per_1m(m, pricing))
+        covered = sum(1 for tid in tasks if frontier_model in matrix["results"].get(tid, {}))
+        if covered < len(tasks):
+            warning = (
+                f"⚠ PHANTOM BASELINE — Always-Frontier ({frontier_model}) ran on "
+                f"{covered}/{len(tasks)} tasks; the rest auto-fail, so its pass rate is not real"
+            )
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    plot_pareto(results, out_path)
+    plot_pareto(results, out_path, warning=warning)
     print(f"\nPlot saved to {out_path}")
 
 

@@ -23,7 +23,12 @@ repos:
         # Prepend the repo venv to PATH so mypy + the interpreter it imports from
         # (pydantic/fastapi types) resolve even when `git commit` runs outside an
         # activated venv. Falls back to PATH if .venv is absent.
-        entry: bash -c 'PATH="$PWD/.venv/bin:$PATH" mypy src/ benchmark/'
+        #
+        # tools/ is in scope: it holds the SH0xx gates and the provider probe's
+        # signature matching (status sets, optional body patterns, None-able
+        # rows) — branchy comparison logic where a type error IS the bug, and
+        # which no test can be trusted to cover exhaustively.
+        entry: bash -c 'PATH="$PWD/.venv/bin:$PATH" mypy src/ benchmark/ tools/'
         language: system
         types: [python]
         pass_filenames: false
@@ -52,6 +57,15 @@ repos:
       - id: sh004-no-internal-refs
         name: SH004 no internal planning-vocab leaks in shipped text
         entry: python tools/lint/check_internal_refs.py
+        language: system
+        pass_filenames: false
+        always_run: true
+      # SH005 scans all of src/shunt/ on every run — same rationale as SH004:
+      # pass_filenames:false + always_run so a pricing read can't slip in via an
+      # unstaged file. BLOCKING.
+      - id: sh005-pricing-isolation
+        name: SH005 router must not read benchmark pricing
+        entry: python tools/lint/check_pricing_isolation.py
         language: system
         pass_filenames: false
         always_run: true
