@@ -261,7 +261,25 @@ def plot_cumulative_regret(
     return path
 
 
-def plot_cost_savings(results: list[dict[str, str]], out_dir: Path) -> Path:
+def _frontier_coverage(matrix: dict | None) -> tuple[str, int, int] | None:
+    """(frontier_model, tasks_with_data, total_tasks) for the most expensive
+    evaluated model — the Always-Frontier / kill-gate baseline. ``None`` if no
+    matrix. Exposes the sparse-frontier artifact that makes that baseline invalid.
+    """
+    if not matrix or not matrix.get("models"):
+        return None
+    results_data = matrix.get("results", {})
+    total = len(results_data)
+    if total == 0:
+        return None
+    frontier = max(matrix["models"], key=lambda m: _model_total_price(matrix["models"], m))
+    covered = sum(1 for tr in results_data.values() if frontier in tr)
+    return frontier, covered, total
+
+
+def plot_cost_savings(
+    results: list[dict[str, str]], out_dir: Path, matrix: dict | None = None
+) -> Path:
     names = [r["strategy"] for r in results]
     costs = [float(r["TotalCost"]) for r in results]
     perfs = [float(r["AvgPerf%"]) for r in results]
@@ -293,13 +311,14 @@ def plot_cost_savings(results: list[dict[str, str]], out_dir: Path) -> Path:
     ax.set_title("Cost Comparison by Strategy (Cost annotated with pass rate)")
     ax.grid(True, axis="y", alpha=0.3)
 
-    if len(names) >= 2:
-        ref_name = "Always-Frontier"
-        ref_cost = None
-        for r in results:
-            if r["strategy"] == ref_name:
-                ref_cost = float(r["TotalCost"])
-                break
+    cov = _frontier_coverage(matrix)
+    phantom = cov is not None and cov[1] < cov[2]
+    if len(names) >= 2 and not phantom:
+        # Only draw the frontier reference line when the frontier baseline is
+        # actually measured on every task — otherwise it is not a valid reference.
+        ref_cost = next(
+            (float(r["TotalCost"]) for r in results if r["strategy"] == "Always-Frontier"), None
+        )
         if ref_cost is not None:
             ax.axhline(
                 y=ref_cost,
@@ -307,9 +326,28 @@ def plot_cost_savings(results: list[dict[str, str]], out_dir: Path) -> Path:
                 linestyle=":",
                 linewidth=1,
                 alpha=0.7,
-                label=f"{ref_name} cost = ${ref_cost:.4f}",
+                label=f"Always-Frontier cost = ${ref_cost:.4f}",
             )
             ax.legend()
+
+    if phantom:
+        assert cov is not None
+        frontier, covered, total = cov
+        if "Always-Frontier" in names:
+            i = names.index("Always-Frontier")
+            ax.annotate(
+                f"⚠ PHANTOM BASELINE\n{frontier} evaluated on {covered}/{total} tasks —\n"
+                f"the other {total - covered} count as free $0 failures.\n"
+                "Not comparable; the kill-gate is unmeasurable here.",
+                xy=(i, costs[i]),
+                xytext=(0.5, 0.72),
+                textcoords="axes fraction",
+                ha="center",
+                fontsize=8,
+                color="#B71C1C",
+                arrowprops=dict(arrowstyle="->", color="#B71C1C", lw=1.0),
+                bbox=dict(boxstyle="round,pad=0.35", fc="#FFEBEE", ec="#B71C1C", alpha=0.95),
+            )
 
     path = out_dir / "cost_savings.png"
     fig.savefig(path, dpi=150, bbox_inches="tight")
@@ -317,62 +355,113 @@ def plot_cost_savings(results: list[dict[str, str]], out_dir: Path) -> Path:
     return path
 
 
+def _cap_names(names: list[str], k: int = 6) -> str:
+    """Join names, capping the list so titles can't explode at 500 tasks."""
+    if not names:
+        return "none"
+    if len(names) <= k:
+        return ", ".join(names)
+    return ", ".join(names[:k]) + f" (+{len(names) - k} more)"
+
+
+def _model_total_price(models: dict, name: str) -> float:
+    info = models.get(name, {})
+    return float(info.get("input_price", 0)) + float(info.get("output_price", 0))
+
+
 def plot_heatmap(matrix_path: Path, out_dir: Path) -> Path:
+    """Task × model outcome matrix — shows every cell so genuine
+    complementarity and sparse coverage are visible.
+    """
     matrix = load_matrix(matrix_path)
     if matrix is None:
         raise FileNotFoundError(f"Cannot load matrix from {matrix_path}")
 
-    models = list(matrix["models"].keys())
+    models_meta = matrix["models"]
     results_data = matrix.get("results", {})
+    tasks = sorted(results_data.keys())
+    models = sorted(models_meta.keys(), key=lambda m: _model_total_price(models_meta, m))
+    if not models or not tasks:
+        raise ValueError("No models or tasks found in matrix")
 
-    tasks_by_language: dict[str, list[str]] = {}
-    for tid, meta in matrix.get("tasks", {}).items():
-        lang = meta.get("language", "unknown")
-        tasks_by_language.setdefault(lang, []).append(tid)
+    # 1 = pass, 0 = fail, NaN = not evaluated (distinct from a real failure).
+    grid = np.full((len(tasks), len(models)), np.nan, dtype=float)
+    for i, tid in enumerate(tasks):
+        task_results = results_data.get(tid, {})
+        for j, model in enumerate(models):
+            outcome = task_results.get(model, {})
+            if "pass" in outcome:
+                grid[i, j] = 1.0 if outcome["pass"] else 0.0
 
-    languages = sorted(tasks_by_language.keys())
-    n_models = len(models)
-    n_langs = len(languages)
+    from matplotlib.colors import ListedColormap
+    from matplotlib.patches import Patch
 
-    if n_models == 0 or n_langs == 0:
-        raise ValueError("No models or languages found in matrix")
+    n_tasks, n_models = len(tasks), len(models)
+    # Dynamic canvas: grows with the matrix but capped so it stays a usable image
+    # at 500+ tasks / 20+ models rather than a fixed 9x7 that crushes everything.
+    fig_w = min(24.0, max(8.0, 1.1 * n_models + 3.0))
+    fig_h = min(32.0, max(5.0, 0.32 * n_tasks + 2.0))
 
-    heat = np.zeros((n_models, n_langs), dtype=float)
-    counts = np.zeros((n_models, n_langs), dtype=int)
+    # 0=fail red, 1=pass green, NaN(not evaluated)=gray
+    cmap = ListedColormap(["#C62828", "#2E7D32"]).with_extremes(bad="#E0E0E0")
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    ax.imshow(grid, cmap=cmap, aspect="auto", vmin=0, vmax=1)
 
-    for j, lang in enumerate(languages):
-        for tid in tasks_by_language[lang]:
-            task_results = results_data.get(tid, {})
-            for i, model in enumerate(models):
-                outcome = task_results.get(model, {})
-                if "pass" in outcome:
-                    heat[i, j] += int(outcome["pass"])
-                    counts[i, j] += 1
+    coverage = np.sum(~np.isnan(grid), axis=0)
+    passes = np.nansum(grid, axis=0)
+    col_labels = [f"{m}\n{int(passes[j])}/{int(coverage[j])} pass" for j, m in enumerate(models)]
+    ax.set_xticks(range(n_models))
+    ax.set_xticklabels(col_labels, fontsize=8, rotation=30, ha="right")
 
-    mask = counts > 0
-    heat[mask] = heat[mask] / counts[mask]
-    heat[~mask] = np.nan
+    # Thin task labels when there are too many to read; show ~40 evenly spaced.
+    ystep = max(1, int(np.ceil(n_tasks / 40)))
+    yticks = list(range(0, n_tasks, ystep))
+    ax.set_yticks(yticks)
+    ax.set_yticklabels([tasks[i].split("__")[-1] for i in yticks], fontsize=7)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    cmap = plt.colormaps["YlGn"]
-    cmap.set_bad("lightgray")
-    im = ax.imshow(heat, cmap=cmap, aspect="auto", vmin=0, vmax=1)
+    # Per-cell glyphs only when cells are big enough to read; else colour-only + legend.
+    glyphs = n_tasks <= 40 and n_models <= 20
+    if glyphs:
+        for i in range(n_tasks):
+            for j in range(n_models):
+                if np.isnan(grid[i, j]):
+                    ax.text(j, i, "n/a", ha="center", va="center", fontsize=7, color="#616161")
+                else:
+                    mark = "✓" if grid[i, j] == 1.0 else "✗"
+                    ax.text(j, i, mark, ha="center", va="center", fontsize=10, color="white")
+    else:
+        ax.legend(
+            handles=[
+                Patch(color="#2E7D32", label="pass"),
+                Patch(color="#C62828", label="fail"),
+                Patch(color="#E0E0E0", label="not evaluated"),
+            ],
+            loc="upper left",
+            bbox_to_anchor=(1.005, 1.0),
+            fontsize=8,
+            frameon=False,
+        )
 
-    lang_labels = [f"{lang}\n(n={len(tasks_by_language[lang])})" for lang in languages]
-    ax.set_xticks(range(n_langs))
-    ax.set_xticklabels(lang_labels, fontsize=9)
-    ax.set_yticks(range(n_models))
-    ax.set_yticklabels(models, fontsize=9)
-
-    for i in range(n_models):
-        for j in range(n_langs):
-            if not np.isnan(heat[i, j]):
-                cell = f"{heat[i, j]:.0%}" if heat[i, j] > 0 else "0%"
-                color = "white" if heat[i, j] > 0.5 else "black"
-                ax.text(j, i, cell, ha="center", va="center", fontsize=8, color=color)
-
-    ax.set_title("Model Complementarity — Pass Rate by Language")
-    fig.colorbar(im, ax=ax, label="Pass Rate", fraction=0.046, pad=0.04)
+    # Data-driven subtitle so it stays correct on every regen: which tasks split the
+    # field (models disagree), which none solve, and the frontier model's coverage.
+    # Names are capped so the title can't explode at 500 tasks.
+    split, none_solve = [], []
+    for i, tid in enumerate(tasks):
+        seen = grid[i, ~np.isnan(grid[i])]
+        if seen.size and seen.min() != seen.max():
+            split.append(tid.split("__")[-1])
+        elif seen.size and seen.max() == 0.0:
+            none_solve.append(tid.split("__")[-1])
+    frontier = models[-1]  # most expensive (models are price-sorted)
+    glyph_note = "" if glyphs else "  (colour-only at scale — see legend)"
+    ax.set_title(
+        f"Task × model outcomes — ✓ pass · ✗ fail · gray = not evaluated{glyph_note}\n"
+        f"models disagree on {len(split)} task(s): {_cap_names(split)} · "
+        f"solved by none: {_cap_names(none_solve)} · "
+        f"frontier {frontier} on {int(coverage[-1])}/{n_tasks}",
+        fontsize=9,
+    )
+    fig.tight_layout()
 
     path = out_dir / "model_complementarity_heatmap.png"
     fig.savefig(path, dpi=150, bbox_inches="tight")
@@ -474,7 +563,8 @@ def main(config_path: str = "benchmark/config.yaml") -> None:
     )
     print(f"  Regret       : {p2}")
 
-    p3 = plot_cost_savings(results, out_dir)
+    matrix_for_plots = load_matrix(matrix_path) if matrix_path and matrix_path.exists() else None
+    p3 = plot_cost_savings(results, out_dir, matrix_for_plots)
     print(f"  Cost savings : {p3}")
 
     if matrix_path is not None:

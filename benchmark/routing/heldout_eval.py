@@ -30,11 +30,26 @@ class RouterRow:
 @dataclass(frozen=True)
 class HeldoutReport:
     rows: list[RouterRow]
-    corr: float  # corr(neighbour-mean p_solve, own p_solve) — the generalization signal
+    corr: float  # corr(k-neighbour-mean p_solve, own p_solve) — inflated by regression-to-mean
+    corr_ci: tuple[float, float]  # Fisher-z 95% CI on ``corr`` (the finding is underpowered)
+    corr_k1: float  # corr at k=1 — the HONEST nearest-neighbour clustering test (~0 here)
     auc: float  # rank-AUC: does a low neighbour-mean flag an own-hard instance? (0.5 = none)
     n: int
     n_hard: int  # instances with own p_solve < threshold
     neighbour_escalations: int  # how often the neighbour predictor actually fired
+    own_psolve: np.ndarray  # per-instance own p_solve (for the headline scatter)
+    nbr_psolve: np.ndarray  # per-instance k-neighbour-mean p_solve (aligned to own_psolve)
+
+
+def _fisher_ci(r: float, n: int, alpha: float = 0.05) -> tuple[float, float]:
+    """Fisher-z 95% CI for a Pearson correlation ``r`` over ``n`` points."""
+    if abs(r) >= 1.0 or n < 4:
+        return (float("nan"), float("nan"))
+    from scipy.stats import norm
+
+    z, se = np.arctanh(r), 1.0 / np.sqrt(n - 3)
+    zc = float(norm.ppf(1 - alpha / 2))
+    return (float(np.tanh(z - zc * se)), float(np.tanh(z + zc * se)))
 
 
 def _tier_costs() -> tuple[float, float]:
@@ -112,6 +127,9 @@ def evaluate_heldout(
     index = _build_hnsw(ext.embeddings)
 
     nbr_mean = np.array([_neighbour_mean(index, ext.embeddings, i, k, psolve) for i in range(n)])
+    # k=1 is the honest clustering test: does the *single* nearest statement predict
+    # difficulty? Larger k inflates corr via regression-to-global-mean, not real signal.
+    nbr_k1 = np.array([_neighbour_mean(index, ext.embeddings, i, 1, psolve) for i in range(n)])
     names = ("Always-Cheap", "Neighbour", "Oracle-tier-acc", "Reward-Oracle")
     hits = dict.fromkeys(names, 0)
     rew = dict.fromkeys(names, 0.0)
@@ -127,13 +145,18 @@ def evaluate_heldout(
             rew[name] += r_cheap if tier == "cheap" else r_esc
     rows = [RouterRow(nm, hits[nm] / n, rew[nm] / n) for nm in names]
     hard = (psolve < threshold).astype(int)
+    corr = float(np.corrcoef(nbr_mean, psolve)[0, 1])
     return HeldoutReport(
         rows=rows,
-        corr=float(np.corrcoef(nbr_mean, psolve)[0, 1]),
+        corr=corr,
+        corr_ci=_fisher_ci(corr, n),
+        corr_k1=float(np.corrcoef(nbr_k1, psolve)[0, 1]),
         auc=_rank_auc(nbr_mean, hard),
         n=n,
         n_hard=int(hard.sum()),
         neighbour_escalations=escalations,
+        own_psolve=psolve,
+        nbr_psolve=nbr_mean,
     )
 
 
@@ -142,7 +165,9 @@ def main() -> int:
     rep = evaluate_heldout()
     print(f"Held-out generalization over {rep.n} external instances (leave-one-out, k=20):\n")
     print(
-        f"  GENERALIZATION SIGNAL (threshold-free): corr(neighbour p_solve, own) = {rep.corr:.3f}, "
+        f"  GENERALIZATION SIGNAL (threshold-free): corr(k=1 nearest, own) = {rep.corr_k1:.3f} "
+        f"[the honest test]; corr(k=20 mean, own) = {rep.corr:.3f} "
+        f"95%CI[{rep.corr_ci[0]:.3f},{rep.corr_ci[1]:.3f}] (regression-to-mean inflated); "
         f"rank-AUC(neighbour flags own-hard) = {rep.auc:.3f}  [0.5 = no signal]"
     )
     print(

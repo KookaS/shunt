@@ -207,7 +207,10 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
         dim = self._embeddings.shape[1]
         index = hnswlib.Index(space="cosine", dim=dim)
         index.init_index(max_elements=len(task_ids), ef_construction=100, M=16)
-        index.add_items(self._embeddings, np.arange(len(task_ids)))
+        # num_threads=1: pin the neighbour graph so regenerated metrics/plots are
+        # bit-reproducible (multi-threaded add_items wobbles at ~1e-4), matching
+        # knn_blended._build_hnsw.
+        index.add_items(self._embeddings, np.arange(len(task_ids)), num_threads=1)
         index.set_ef(50)
         self._index = index
 

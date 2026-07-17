@@ -8,7 +8,7 @@ Evaluates routing strategies against a task×model performance matrix to answer:
 routing/
   results.csv                 # THE committed source of truth — per-cell outcomes from live runs
   data/                       # Curated read-only inputs
-    models.json               # Model registry + first-party canonical pricing — model source of truth
+    models.json               # Model registry + Requesty router pricing — model source of truth
     challenges.json           # Index of the 10 swebench_verified specs (challenges, tasks)
     external_swebench.csv     # Per-instance resolve rates from SWE-bench/experiments (separate table)
   strategies/
@@ -49,7 +49,7 @@ provenance:
 
 | Field | Meaning |
 |-------|---------|
-| `provider` / `family` / `tier` | Model identity + routing tier (cheap/mid/frontier) |
+| `provider` / `family` / `tier` | Model identity + routing tier (cheap/mid/high/frontier) |
 | `input_cost_per_1m` / `output_cost_per_1m` | Price, USD per 1M tokens (Requesty router listing) |
 | `cache_read_cost_per_1m` / `cache_write_cost_per_1m` | Optional — cache-read/write rate where the provider lists one |
 | `context_length` / `max_output_tokens` | Context window + max output, in tokens (Requesty classification) |

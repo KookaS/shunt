@@ -363,3 +363,45 @@ class TestSelect:
         table = select_swebench.load_experiments_resolves(tmp_path)
         assert table["a__b-1"]["opus-run"] is True
         assert table["c__d-2"]["opus-run"] is False
+
+
+class TestRoutingHeadroom:
+    def test_zero_at_ceiling_and_floor(self):
+        # Everyone solves (ceiling) and nobody solves (floor) → no routing value.
+        assert select_swebench.routing_headroom(p_solve=0.98, p_frontier=0.99) < 0.05
+        assert select_swebench.routing_headroom(p_solve=0.0, p_frontier=0.0) == 0.0
+
+    def test_peaks_in_routable_band(self):
+        # Field mostly fails but a frontier model solves → high headroom.
+        assert select_swebench.routing_headroom(p_solve=0.2, p_frontier=0.7) == pytest.approx(0.5)
+
+    def test_never_negative(self):
+        # A task where the frontier cohort underperforms the field mean clamps to 0.
+        assert select_swebench.routing_headroom(p_solve=0.9, p_frontier=0.6) == 0.0
+
+    def test_rank_orders_by_headroom_then_id(self):
+        rates = {
+            "z__z-1": (0.9, 0.95),  # headroom 0.05
+            "a__a-1": (0.2, 0.7),  # headroom 0.50
+            "m__m-1": (0.2, 0.7),  # headroom 0.50 — tie, id-sorted after a__a-1
+        }
+        ranked = select_swebench.rank_by_headroom(rates)
+        assert [r[0] for r in ranked] == ["a__a-1", "m__m-1", "z__z-1"]
+        assert ranked[0][1] == pytest.approx(0.5)
+
+    def test_load_external_rates_missing_file_is_empty(self, tmp_path):
+        assert select_swebench.load_external_rates(tmp_path / "nope.csv") == {}
+
+    def test_enrich_challenges_adds_derived_rates(self, tmp_path, monkeypatch):
+        manifest = tmp_path / "challenges.json"
+        manifest.write_text(json.dumps({"tasks": {"a__b-1": {"language": "python"}}}))
+        monkeypatch.setattr(
+            select_swebench,
+            "load_external_rates",
+            lambda *a, **k: {"a__b-1": (0.3, 0.8)},
+        )
+        select_swebench.enrich_challenges_with_rates(manifest)
+        task = json.loads(manifest.read_text())["tasks"]["a__b-1"]
+        assert task["p_solve"] == 0.3
+        assert task["p_frontier"] == 0.8
+        assert task["routing_headroom"] == pytest.approx(0.5)

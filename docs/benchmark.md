@@ -27,9 +27,9 @@ dataset revision `c104f840`.
 
 ## Model pool
 
-Prices below are the **Requesty router listing** rates (2026-07-15), in USD per
-1M tokens; each entry carries its `price_note` and cache-read/write rate in
-`models.json`.
+Prices below are the **Requesty router listing** rates (as of mid-July 2026), in
+USD per 1M tokens; each entry carries its own `price_as_of`, `price_note`, and
+cache-read/write rate in `models.json`. Four tiers — cheap → mid → high → frontier.
 
 | Model | Tier | Input $/1M | Output $/1M |
 |-------|------|-----------:|------------:|
@@ -37,11 +37,13 @@ Prices below are the **Requesty router listing** rates (2026-07-15), in USD per
 | qwen3.7-plus | cheap | 0.32 | 1.28 |
 | gpt-5-mini | mid | 0.25 | 2.00 |
 | kimi-k2.5 | mid | 0.60 | 3.00 |
-| zai-glm-5.2 | frontier | 1.40 | 4.40 |
-| claude-opus-4-6 | frontier | 5.00 | 25.00 |
+| zai-glm-5.2 | high | 1.40 | 4.40 |
+| kimi-k3 | frontier | 3.00 | 15.00 |
 
-Spread: ~36x input, ~89x output between the cheapest and most expensive model.
+Spread: ~21x input, ~54x output between the cheapest and the frontier model.
 `models.json` is the single source of truth — the table above is a snapshot of it.
+(claude-opus-4-6 is priced in `models.json` for provenance but is `enabled: false`
+— excluded from runs; kimi-k3 is the frontier baseline.)
 
 ## Benchmark execution
 
@@ -118,9 +120,12 @@ Metrics per strategy:
   records its rate, cache-read/write rate, and source in a `price_note` in
   `models.json`.
 - **Benchmark ≠ production**: the benchmark can reject bad routing strategies but
-  can't prove a good one works in production. The kill gate — beat
-  fixed-Opus-with-caching at equal quality — must be measured on a real workflow,
-  not in the benchmark.
+  can't prove a good one works in production. The kill gate — beat a fixed-frontier
+  baseline (the most expensive enabled model, currently kimi-k3) with caching at
+  equal quality — must be measured on a real workflow, not in the benchmark.
+- **Small sample, single run**: results are a pilot — few tasks (all Python), one
+  stochastic run per cell (pass@1), and only ~15–20% of tasks carry routing
+  headroom. See the benchmark harness README for the full limitations.
 
 ## Citation
 

@@ -86,6 +86,10 @@ class TestFullEval:
         assert by["Reward-Oracle"].avg_reward >= by["Always-Cheap"].avg_reward
         # Tier-accuracy-oracle is perfect on accuracy by construction.
         assert by["Oracle-tier-acc"].accuracy == pytest.approx(1.0)
-        # The honest finding: difficulty does NOT cluster → near-zero predictive signal.
+        # The honest finding: difficulty does NOT usefully cluster. The k=20 mean corr
+        # is regression-to-mean inflated (~0.11 at the 4000-char cap) yet still below any
+        # routing-useful bar; the honest k=1 nearest-neighbour test is ~0/negative.
         assert abs(rep.corr) < 0.25
+        assert rep.corr_k1 < 0.1  # single nearest statement carries no positive signal
+        assert rep.corr_ci[0] < 0.25  # even the CI upper bound stays weak
         assert rep.auc < 0.6

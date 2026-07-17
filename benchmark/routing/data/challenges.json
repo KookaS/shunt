@@ -78,7 +78,10 @@
       "base_commit": "26d147868f8a891a6009a25cd6a8576d2e1bd747",
       "difficulty_stratum": "easy",
       "source_dataset": "SWE-bench_Verified",
-      "spec": "challenges/swebench_verified/astropy__astropy-7166.json"
+      "spec": "challenges/swebench_verified/astropy__astropy-7166.json",
+      "p_solve": 0.9217,
+      "p_frontier": 0.9677,
+      "routing_headroom": 0.046
     },
     "django__django-12419": {
       "description": "django/django@7fa1a93c6c81 \u2014 resolve test_middleware_headers (project_template.test_settings.TestStartProjectSettings)",
@@ -91,7 +94,10 @@
       "base_commit": "7fa1a93c6c8109010a6ff3f604fda83b604e0e97",
       "difficulty_stratum": "easy",
       "source_dataset": "SWE-bench_Verified",
-      "spec": "challenges/swebench_verified/django__django-12419.json"
+      "spec": "challenges/swebench_verified/django__django-12419.json",
+      "p_solve": 0.9453,
+      "p_frontier": 0.9697,
+      "routing_headroom": 0.0244
     },
     "pallets__flask-5014": {
       "description": "pallets/flask@7ee9ceb71e86 \u2014 resolve tests/test_blueprints.py::test_empty_name_not_allowed",
@@ -104,7 +110,10 @@
       "base_commit": "7ee9ceb71e868944a46e1ff00b506772a53a4f1d",
       "difficulty_stratum": "easy",
       "source_dataset": "SWE-bench_Verified",
-      "spec": "challenges/swebench_verified/pallets__flask-5014.json"
+      "spec": "challenges/swebench_verified/pallets__flask-5014.json",
+      "p_solve": 0.9457,
+      "p_frontier": 0.9677,
+      "routing_headroom": 0.022
     },
     "psf__requests-1142": {
       "description": "psf/requests@22623bd8c265 \u2014 resolve test_requests.py::RequestsTestCase::test_no_content_length",
@@ -117,7 +126,10 @@
       "base_commit": "22623bd8c265b78b161542663ee980738441c307",
       "difficulty_stratum": "easy",
       "source_dataset": "SWE-bench_Verified",
-      "spec": "challenges/swebench_verified/psf__requests-1142.json"
+      "spec": "challenges/swebench_verified/psf__requests-1142.json",
+      "p_solve": 0.8571,
+      "p_frontier": 0.9167,
+      "routing_headroom": 0.0596
     },
     "pydata__xarray-3677": {
       "description": "pydata/xarray@ef6e6a7b86f8 \u2014 resolve xarray/tests/test_merge.py::TestMergeMethod::test_merge_dataarray",
@@ -130,7 +142,10 @@
       "base_commit": "ef6e6a7b86f8479b9a1fecf15ad5b88a2326b31e",
       "difficulty_stratum": "hard",
       "source_dataset": "SWE-bench_Verified",
-      "spec": "challenges/swebench_verified/pydata__xarray-3677.json"
+      "spec": "challenges/swebench_verified/pydata__xarray-3677.json",
+      "p_solve": 0.9206,
+      "p_frontier": 0.9375,
+      "routing_headroom": 0.0169
     },
     "pylint-dev__pylint-6903": {
       "description": "pylint-dev/pylint@ca80f03a43bc \u2014 resolve tests/test_pylint_runners.py::test_pylint_run_jobs_equal_zero_dont_crash_with_cpu_fraction",
@@ -143,7 +158,10 @@
       "base_commit": "ca80f03a43bc39e4cc2c67dc99817b3c9f13b8a6",
       "difficulty_stratum": "easy",
       "source_dataset": "SWE-bench_Verified",
-      "spec": "challenges/swebench_verified/pylint-dev__pylint-6903.json"
+      "spec": "challenges/swebench_verified/pylint-dev__pylint-6903.json",
+      "p_solve": 0.9627,
+      "p_frontier": 1.0,
+      "routing_headroom": 0.0373
     },
     "pytest-dev__pytest-5809": {
       "description": "pytest-dev/pytest@8aba863a634f \u2014 resolve testing/test_pastebin.py::TestPaste::test_create_new_paste",
@@ -156,7 +174,10 @@
       "base_commit": "8aba863a634f40560e25055d179220f0eefabe9a",
       "difficulty_stratum": "easy",
       "source_dataset": "SWE-bench_Verified",
-      "spec": "challenges/swebench_verified/pytest-dev__pytest-5809.json"
+      "spec": "challenges/swebench_verified/pytest-dev__pytest-5809.json",
+      "p_solve": 0.9552,
+      "p_frontier": 0.9697,
+      "routing_headroom": 0.0145
     },
     "scikit-learn__scikit-learn-14141": {
       "description": "scikit-learn/scikit-learn@3d997697fdd1 \u2014 resolve sklearn/utils/tests/test_show_versions.py::test_get_deps_info",
@@ -169,7 +190,10 @@
       "base_commit": "3d997697fdd166eff428ea9fd35734b6a8ba113e",
       "difficulty_stratum": "medium",
       "source_dataset": "SWE-bench_Verified",
-      "spec": "challenges/swebench_verified/scikit-learn__scikit-learn-14141.json"
+      "spec": "challenges/swebench_verified/scikit-learn__scikit-learn-14141.json",
+      "p_solve": 0.9612,
+      "p_frontier": 0.9697,
+      "routing_headroom": 0.0085
     },
     "sphinx-doc__sphinx-8595": {
       "description": "sphinx-doc/sphinx@b19bce971e82 \u2014 resolve tests/test_ext_autodoc_automodule.py::test_empty_all",
@@ -182,7 +206,10 @@
       "base_commit": "b19bce971e82f2497d67fdacdeca8db08ae0ba56",
       "difficulty_stratum": "hard",
       "source_dataset": "SWE-bench_Verified",
-      "spec": "challenges/swebench_verified/sphinx-doc__sphinx-8595.json"
+      "spec": "challenges/swebench_verified/sphinx-doc__sphinx-8595.json",
+      "p_solve": 0.9151,
+      "p_frontier": 0.9091,
+      "routing_headroom": 0.0
     },
     "sympy__sympy-20916": {
       "description": "sympy/sympy@82298df6a514 \u2014 resolve test_super_sub",
@@ -195,7 +222,10 @@
       "base_commit": "82298df6a51491bfaad0c6d1980e7e3ca808ae93",
       "difficulty_stratum": "medium",
       "source_dataset": "SWE-bench_Verified",
-      "spec": "challenges/swebench_verified/sympy__sympy-20916.json"
+      "spec": "challenges/swebench_verified/sympy__sympy-20916.json",
+      "p_solve": 0.3158,
+      "p_frontier": 0.5,
+      "routing_headroom": 0.1842
     }
   }
 }

@@ -30,7 +30,15 @@ _CACHE_DIR = Path(__file__).resolve().parents[1] / "artifacts"
 # of KB, and the embedder does not truncate — a single long text pads the whole
 # batch and blows the ONNX attention matrix (seq² memory) to tens of GB. The router
 # embeds a bounded prompt anyway, so the head of the statement is the right signal.
-_MAX_STATEMENT_CHARS = 600
+# 4000 chars (~1k tokens) keeps ~all difficulty-bearing content — median Verified
+# statement is ~1.2k chars, p90 ~3.2k — while a small embed batch (below) bounds the
+# seq² memory. An earlier 600-char cap discarded ~79% of statements and *confounded*
+# the held-out difficulty-clustering finding (k=20 corr 0.068 → 0.113 at 4000 chars);
+# see docs/benchmark-knn-analysis-2026-07.md.
+_MAX_STATEMENT_CHARS = 4000
+# Embed batch size: small enough that the ONNX attention seq² matrix stays bounded at
+# the 4000-char cap (a 64-wide batch of ~1k-token texts OOMs a CPU box).
+_EMBED_BATCH = 8
 
 
 @dataclass(frozen=True)
@@ -171,15 +179,19 @@ def _load_problem_statements(iids: list[str]) -> dict[str, str]:
 def _cached_embeddings(
     iids: list[str], statements: dict[str, str], embed: Callable[[list[str]], np.ndarray]
 ) -> np.ndarray:
-    """Embed ``iids`` (in order), caching to a gitignored npz keyed by the id set."""
+    """Embed ``iids`` (in order), caching to a gitignored npz keyed by (ids, cap)."""
     import hashlib
 
-    key = hashlib.sha256("\n".join(iids).encode()).hexdigest()[:16]
+    # Key on the id set AND the truncation cap: a cap change alters every embedding,
+    # so it MUST bust the cache (keying on ids alone silently served stale 600-char
+    # vectors after the cap was raised).
+    key = hashlib.sha256(f"{_MAX_STATEMENT_CHARS}\n".join(iids).encode()).hexdigest()[:16]
     cache = _CACHE_DIR / f"external_emb_{key}.npz"
     if cache.exists():
         return np.load(cache)["emb"].astype(np.float32)
     # Chunk the embed so peak memory stays flat regardless of instance count.
-    chunks = [embed([statements[i] for i in iids[j : j + 64]]) for j in range(0, len(iids), 64)]
+    step = _EMBED_BATCH
+    chunks = [embed([statements[i] for i in iids[j : j + step]]) for j in range(0, len(iids), step)]
     emb = np.vstack(chunks).astype(np.float32) if chunks else np.empty((0, 0), np.float32)
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     np.savez(cache, emb=emb)

@@ -1,18 +1,24 @@
-"""Select the discriminating 100 SWE-bench Verified tasks for the routing run.
+"""Select the discriminating SWE-bench Verified tasks for the routing run.
 
-Ranks Verified instances by ``p_frontier - p_cheap`` resolve gap (from public
-``SWE-bench/experiments`` data), stratified ~30/50/20 easy/medium/hard.
+Uses ``routing_headroom`` (``max(0, p_frontier - p_solve)``) as the
+selection signal — never the degenerate ``p_cheap`` from the leaderboard.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Final
 
+from benchmark import config
 from benchmark.runner import swebench_specs
+
+_EXT_CSV: Final = (
+    Path(__file__).resolve().parent.parent / "routing" / "data" / "external_swebench.csv"
+)
 
 # Substring cohorts for classifying an experiments submission dir by model tier.
 DEFAULT_CHEAP_MARKERS = ("deepseek", "qwen", "qwen3", "kimi", "glm", "codestral", "mistral")
@@ -40,6 +46,37 @@ def discrimination_gap(
     if p_cheap is None or p_frontier is None:
         return 0.0
     return p_frontier - p_cheap
+
+
+def routing_headroom(p_solve: float, p_frontier: float) -> float:
+    """Escalation value: ``max(0, p_frontier - p_solve)`` — peaks in the routable middle band."""
+    return max(0.0, p_frontier - p_solve)
+
+
+def load_external_rates(csv_path: Path = _EXT_CSV) -> dict[str, tuple[float, float]]:
+    """{instance_id: (p_solve, p_frontier)} from the corrected external CSV."""
+    out: dict[str, tuple[float, float]] = {}
+    if not csv_path.exists():
+        return out
+    with csv_path.open(newline="") as f:
+        for row in csv.DictReader(f):
+            ps, pf = row.get("p_solve", ""), row.get("p_frontier", "")
+            if not (ps and pf):
+                continue
+            try:  # skip a malformed row rather than aborting the whole load
+                out[row["instance_id"]] = (float(ps), float(pf))
+            except ValueError:
+                continue
+    return out
+
+
+def rank_by_headroom(
+    rates: dict[str, tuple[float, float]],
+) -> list[tuple[str, float, float, float]]:
+    """(instance_id, headroom, p_solve, p_frontier) sorted by descending headroom
+    (ties broken by instance_id for determinism)."""
+    scored = [(iid, routing_headroom(ps, pf), ps, pf) for iid, (ps, pf) in rates.items()]
+    return sorted(scored, key=lambda t: (-t[1], t[0]))
 
 
 def classify_submissions(
@@ -119,13 +156,83 @@ def _difficulty_map_from_hf() -> dict[str, str]:
     }
 
 
+def _current_task_ids() -> list[str]:
+    """Instance ids in the committed challenges manifest (empty if unreadable)."""
+    try:
+        return sorted(json.loads(config.challenges_path().read_text()).get("tasks", {}))
+    except (FileNotFoundError, ValueError, KeyError):
+        return []
+
+
+def headroom_dry_run(top_n: int = 10) -> int:
+    """Print the top-N routing-headroom tasks and the current selection's headroom,
+    so the owner can compare without re-running the (costly) live matrix."""
+    rates = load_external_rates()
+    if not rates:
+        print(f"No external rates at {_EXT_CSV} — cannot rank by headroom.")
+        return 1
+    ranked = rank_by_headroom(rates)
+    current = set(_current_task_ids())
+    print(f"Top {top_n} by routing_headroom = max(0, p_frontier - p_solve):")
+    for iid, hr, ps, pf in ranked[:top_n]:
+        mark = "  <-- already selected" if iid in current else ""
+        print(f"  {iid:34} headroom={hr:.2f}  p_solve={ps:.2f} p_frontier={pf:.2f}{mark}")
+    if current:
+        picked = [(i, *rates[i]) for i in sorted(current) if i in rates]
+        cur_mean = sum(routing_headroom(ps, pf) for _, ps, pf in picked) / max(1, len(picked))
+        top_mean = sum(hr for _, hr, _, _ in ranked[:top_n]) / max(1, top_n)
+        print(f"\nCurrent selection mean headroom: {cur_mean:.3f}  (n={len(picked)})")
+        print(
+            f"Headroom-optimized top-{top_n} mean: {top_mean:.3f}  "
+            f"→ {top_mean / cur_mean:.1f}x more routable"
+            if cur_mean
+            else ""
+        )
+    return 0
+
+
+def enrich_challenges_with_rates(path: Path | None = None) -> int:
+    """Add derived ``p_solve``/``p_frontier`` to each task in the challenges manifest
+    (join on instance_id; re-runnable). These are DERIVED from external_swebench.csv —
+    regenerate whenever that CSV changes; never hand-edit."""
+    manifest_path = path or config.challenges_path()
+    rates = load_external_rates()
+    data = json.loads(manifest_path.read_text())
+    n = 0
+    for iid, task in data.get("tasks", {}).items():
+        if iid in rates:
+            ps, pf = rates[iid]
+            task["p_solve"], task["p_frontier"] = round(ps, 4), round(pf, 4)
+            task["routing_headroom"] = round(routing_headroom(ps, pf), 4)
+            n += 1
+    manifest_path.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n")
+    print(f"Enriched {n} tasks with derived p_solve/p_frontier/routing_headroom → {manifest_path}")
+    return 0
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Select the discriminating 100 Verified tasks.")
-    ap.add_argument("experiments_root", type=Path, help="Local clone of SWE-bench/experiments")
+    ap = argparse.ArgumentParser(description="Select the discriminating Verified tasks.")
+    ap.add_argument(
+        "experiments_root", type=Path, nargs="?", help="Local SWE-bench/experiments clone"
+    )
     ap.add_argument("--subset", default="verified", help="experiments subset dir")
     ap.add_argument("--materialize", action="store_true", help="Write specs for the selection")
     ap.add_argument("--namespace", default=swebench_specs.DEFAULT_NAMESPACE)
+    ap.add_argument(
+        "--headroom", type=int, metavar="N", help="Dry-run: rank top-N by routing headroom"
+    )
+    ap.add_argument(
+        "--enrich-challenges", action="store_true", help="Add derived p_solve to challenges.json"
+    )
     args = ap.parse_args()
+
+    config.load()
+    if args.headroom is not None:
+        return headroom_dry_run(args.headroom)
+    if args.enrich_challenges:
+        return enrich_challenges_with_rates()
+    if args.experiments_root is None:
+        ap.error("experiments_root is required unless --headroom/--enrich-challenges is given")
 
     table = load_experiments_resolves(args.experiments_root, args.subset)
     cheap, frontier = classify_submissions({s for row in table.values() for s in row})

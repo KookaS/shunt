@@ -23,7 +23,7 @@
   "zai-glm-5.2": {
     "provider": "zhipu",
     "family": "glm",
-    "tier": "frontier",
+    "tier": "high",
     "input_cost_per_1m": 1.4,
     "output_cost_per_1m": 4.4,
     "cache_read_cost_per_1m": 0.14,
@@ -114,6 +114,30 @@
     "access_via": "requesty",
     "version": "kimi-k2.5",
     "route": "openai/moonshot/kimi-k2.5"
+  },
+  "kimi-k3": {
+    "provider": "moonshot",
+    "family": "kimi",
+    "tier": "frontier",
+    "input_cost_per_1m": 3.0,
+    "output_cost_per_1m": 15.0,
+    "cache_read_cost_per_1m": 0.3,
+    "context_length": 1048576,
+    "max_output_tokens": 1048576,
+    "capabilities": [
+      "vision",
+      "tools",
+      "cache",
+      "think",
+      "json"
+    ],
+    "price_provider": "requesty",
+    "price_source": "https://www.requesty.ai/models/moonshot/kimi-k3",
+    "price_as_of": "2026-07-17",
+    "price_note": "Requesty router listing (moonshot/kimi-k3, released 2026-07-16). $3/M in, $15/M out, $0.30/M cache-read, 1M context. The cheapest-frontier baseline, replacing claude-opus-4-6 (opus excluded).",
+    "access_via": "requesty",
+    "version": "kimi-k3",
+    "route": "openai/moonshot/kimi-k3"
   },
   "claude-opus-4-6": {
     "provider": "anthropic",

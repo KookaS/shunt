@@ -43,7 +43,7 @@ def load_pricing(path: str | Path | None = None) -> dict:
 
 
 def _tier_order(tier: str) -> int:
-    return {"cheap": 0, "mid": 1, "frontier": 2}.get(tier, 99)
+    return {"cheap": 0, "mid": 1, "high": 2, "frontier": 3}.get(tier, 99)
 
 
 def _pricing_dict() -> dict:
@@ -247,9 +247,8 @@ def load_results(path: str | Path | None = None) -> dict:
 
 
 def models_matrix(results: dict | None = None) -> dict:
-    """Return {model: {input_price, output_price}} from models.json (field
-    names mirror the legacy ``models`` block). When ``results`` is given, only
-    evaluated models are included.
+    """Return {model: pricing} from models.json, optionally filtered to
+    evaluated-and-enabled models.
     """
     pricing = load_pricing()
     priced = {
@@ -265,7 +264,14 @@ def models_matrix(results: dict | None = None) -> dict:
     evaluated: set[str] = set()
     for task_results in results.values():
         evaluated.update(task_results.keys())
-    return {m: priced[m] for m in priced if m in evaluated}
+    # Respect `enabled: false`: a disabled model is excluded even if it has a
+    # historical results row (defense-by-construction against silent leakage).
+    models_cfg = get().get("models", {})
+    return {
+        m: priced[m]
+        for m in priced
+        if m in evaluated and models_cfg.get(m, {}).get("enabled", True)
+    }
 
 
 def load_challenges() -> dict:
