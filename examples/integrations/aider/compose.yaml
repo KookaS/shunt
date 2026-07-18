@@ -1,0 +1,29 @@
+# aider → Shunt handshake. The leg's exit code IS the verdict: aider exits 0 iff it
+# reached Shunt and got a routed completion. Best-effort: aider is a full agent
+# with many moving parts, so this leg is the most fragile in CI. It runs in a fresh
+# empty temp dir with git/analytics/update-checks all disabled.
+include:
+  - ../compose.base.yaml
+
+services:
+  aider:
+    image: python:3.12-slim
+    depends_on:
+      shunt:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+    environment:
+      OPENAI_API_BASE: http://shunt:8080/v1
+      OPENAI_API_KEY: dummy
+    command:
+      - |
+        set -eu
+        pip install --quiet --disable-pip-version-check aider-chat
+        work="$$(mktemp -d)"
+        cd "$$work"
+        aider --model openai/auto --message "say hi" \
+          --yes-always --no-git --no-auto-commits \
+          --no-check-update --no-analytics
+        echo "OK: aider handshake passed"

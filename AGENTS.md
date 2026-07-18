@@ -15,6 +15,11 @@ you get it right the first time.
   provider or model? Read `examples/providers/README.md` and `docs/configuration.md`
   first; the registry is `src/shunt/models/default_config.yaml` and its row order
   is semantic.
+- `examples/integrations/` — one directory per external tool (Claude Code, opencode,
+  aider, LangChain, n8n, …): a README with the copy-paste config, plus a `compose.yaml`
+  + `handshake.yaml` that dry-run the tool → Shunt roundtrip. Adding or using an
+  integration? Read `examples/integrations/README.md` first — it covers how to hook
+  any tool up and how the shared handshake harness (`tests/integrations/`) works.
 
 Install once: `pip install -e '.[dev,benchmark]'` — then `benchmark` imports
 resolve everywhere with no path munging.

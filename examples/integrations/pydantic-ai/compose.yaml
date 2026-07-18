@@ -1,0 +1,29 @@
+# pydantic-ai → Shunt handshake. The leg's exit code IS the verdict: it fails unless
+# Shunt returns the routed completion. Best-effort: the pydantic-ai model/provider
+# API shifts across versions, so this wiring can need updates on upgrade.
+include:
+  - ../compose.base.yaml
+
+services:
+  pydantic-ai:
+    image: python:3.12-slim
+    depends_on:
+      shunt:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        set -eu
+        pip install --quiet --disable-pip-version-check "pydantic-ai-slim[openai]"
+        python - <<'PY'
+        from pydantic_ai import Agent
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+        m = OpenAIChatModel("auto", provider=OpenAIProvider(
+            base_url="http://shunt:8080/v1", api_key="ignored"))
+        out = Agent(m).run_sync("say hi").output
+        assert "ok" in out, out
+        print("OK: pydantic-ai handshake passed")
+        PY

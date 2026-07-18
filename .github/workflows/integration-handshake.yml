@@ -1,0 +1,108 @@
+name: Integration handshake
+
+# Opt-in, hermetic dry-run of each tool → Shunt integration. NO real model is
+# called, NO secret is needed: a per-tier fake upstream stands in for providers, so
+# a green leg proves the wiring (tool reaches Shunt, Shunt routes and returns, the
+# X-Shunt-Decision header rides back) — not model quality. The always-on, no-Docker
+# proof lives in the normal test job (tests/integrations/test_handshake.py); this
+# workflow adds the real-tool legs over Docker.
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  pull_request:
+    paths:
+      - "examples/integrations/**"
+      - "tests/integrations/**"
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "src/shunt/models/default_config.yaml"
+      - ".github/workflows/integration-handshake.yml"
+
+jobs:
+  # Discover legs from the filesystem: a tool is CI-eligible iff it ships a
+  # handshake.yaml. No central list to keep in sync.
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: set
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import glob, json, os, yaml
+          items = []
+          for path in sorted(glob.glob("examples/integrations/*/handshake.yaml")):
+              spec = yaml.safe_load(open(path))
+              items.append({
+                  "tool": os.path.basename(os.path.dirname(path)),
+                  "service": spec["service"],
+                  "best_effort": bool(spec.get("best_effort", False)),
+              })
+          print("matrix=" + json.dumps({"include": items}))
+          PY
+
+  # Build the Shunt image once and share it as an artifact, so the matrix legs
+  # don't each recompile the (heavy) dependency stack.
+  build-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Shunt image
+        run: docker build -t shunt-router:handshake -f Dockerfile .
+      # Boot the PLAIN product image with NO external config, so it must load the
+      # registry BAKED INTO THE WHEEL. Catches the packaging gap (default_config.yaml
+      # missing from the wheel) that an editable install and the config-injected
+      # handshake legs both hide — the exact crash `release.yml` would otherwise ship.
+      - name: Boot smoke — bundled default registry loads
+        run: |
+          docker run -d --name shunt-boot shunt-router:handshake
+          ok=0
+          for _ in $(seq 1 20); do
+            # Probe from INSIDE the container — proves the app booted and the
+            # bundled registry parsed, without assuming host↔container port routing.
+            if docker exec shunt-boot python -c \
+              "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" 2>/dev/null; then
+              echo "boot OK"; ok=1; break
+            fi
+            sleep 1
+          done
+          docker logs shunt-boot
+          docker rm -f shunt-boot >/dev/null 2>&1 || true
+          test "$ok" = "1"
+      - name: Save image
+        run: docker save shunt-router:handshake | gzip > /tmp/shunt-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shunt-image
+          path: /tmp/shunt-image.tar.gz
+          retention-days: 1
+
+  handshake:
+    needs: [discover, build-image]
+    runs-on: ubuntu-latest
+    # Best-effort legs (real CLI/service onboarding is brittle) never fail the run;
+    # the verified legs (best_effort: false) are required and turn the run red.
+    continue-on-error: ${{ matrix.best_effort }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+    name: ${{ matrix.tool }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: shunt-image
+          path: /tmp
+      - name: Load Shunt image
+        run: gunzip -c /tmp/shunt-image.tar.gz | docker load
+      - name: Handshake
+        run: |
+          docker compose -f "examples/integrations/${{ matrix.tool }}/compose.yaml" \
+            up --build --abort-on-container-exit --exit-code-from "${{ matrix.service }}"
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f "examples/integrations/${{ matrix.tool }}/compose.yaml" down -v || true

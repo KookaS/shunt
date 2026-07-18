@@ -286,6 +286,10 @@ class ModelPool:
             for name in self._config:
                 self._health[name] = {"healthy": True, "last_failure": None}
 
+    def model_names(self) -> list[str]:
+        """Return every registered model name, in config order."""
+        return list(self._config)
+
     def get_model(self, name: str) -> ModelConfig | None:
         """Look up a model by name, returning None if unknown."""
         return self._config.get(name)

@@ -1,0 +1,51 @@
+# Shared handshake substrate — Shunt in front of a FAKE upstream, no real model,
+# no key, no cost. Every per-tool compose file `include:`s this and adds ONE
+# service that drives Shunt at http://shunt:8080. This is the single wiring
+# source, so a per-tool file only describes the tool (no Shunt/upstream repeated).
+#
+# Requires Docker Compose >= 2.20 (top-level `include:`). Build context is the
+# shunt repo root so the shared Dockerfiles and fake_registry.yaml resolve.
+services:
+  fake-upstream:
+    build:
+      context: ../../tests/integrations
+      dockerfile: Dockerfile.fake
+    expose:
+      - "9099"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:9099/v1/models')
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  shunt:
+    # The fake registry is BAKED into this image (Dockerfile.shunt), not bind-
+    # mounted — a self-contained handshake image is robust in any CI. Build the
+    # product base image first: `docker build -t shunt-router:handshake -f Dockerfile .`
+    build:
+      context: ../../tests/integrations
+      dockerfile: Dockerfile.shunt
+      args:
+        SHUNT_BASE_IMAGE: ${SHUNT_BASE_IMAGE:-shunt-router:handshake}
+    environment:
+      SHUNT_HOST: 0.0.0.0
+      SHUNT_PORT: "8080"
+      FAKE_UPSTREAM_API_KEY: dummy
+    depends_on:
+      fake-upstream:
+        condition: service_healthy
+    expose:
+      - "8080"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8080/health')
+      interval: 2s
+      timeout: 3s
+      retries: 20

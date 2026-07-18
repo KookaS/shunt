@@ -1,0 +1,42 @@
+# flowise → Shunt handshake (BEST-EFFORT scaffold). A chatflow must be seeded in
+# Flowise before the prediction API can answer, so the `client` leg cannot pass
+# from a cold start with no pre-imported flow. The CI matrix runs this leg
+# `continue-on-error`. The real, supported path is the README below.
+include:
+  - ../compose.base.yaml
+
+services:
+  flowise:
+    image: flowiseai/flowise
+    depends_on:
+      shunt:
+        condition: service_healthy
+    environment:
+      PORT: "3000"
+    expose:
+      - "3000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -q -O /dev/null http://localhost:3000/api/v1/ping || exit 1"
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  client:
+    image: curlimages/curl:8.11.1
+    depends_on:
+      flowise:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        # Requires a chatflow seeded in Flowise; replace SEEDED_FLOW_ID with its id.
+        curl -sf http://flowise:3000/api/v1/prediction/SEEDED_FLOW_ID \
+          -H "Content-Type: application/json" \
+          -d '{"question":"hi"}' \
+          | tee /tmp/resp.txt
+        grep -q 'ok' /tmp/resp.txt
+        echo "OK: flowise handshake passed"

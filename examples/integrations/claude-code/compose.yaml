@@ -1,0 +1,30 @@
+# claude-code → Shunt handshake. The leg's exit code IS the verdict: it fails
+# unless Claude Code reaches Shunt and prints the routed completion. Anthropic
+# wire = http://shunt:8080 (NO /v1); auth via ANTHROPIC_AUTH_TOKEN (a bearer
+# token) — ANTHROPIC_API_KEY would send x-api-key and 401. Best-effort: the CI
+# matrix runs this leg continue-on-error.
+include:
+  - ../compose.base.yaml
+
+services:
+  claude-code:
+    image: node:22-slim
+    depends_on:
+      shunt:
+        condition: service_healthy
+    environment:
+      ANTHROPIC_BASE_URL: http://shunt:8080
+      ANTHROPIC_AUTH_TOKEN: shunt-local
+      HOME: /tmp/cc
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        set -eu
+        npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
+        mkdir -p /tmp/cc
+        out=$$(claude -p "say hi" --output-format text --dangerously-skip-permissions)
+        printf '%s\n' "$$out"
+        printf '%s' "$$out" | grep -qi ok
+        echo "OK: claude-code handshake passed"

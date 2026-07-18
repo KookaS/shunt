@@ -1,0 +1,10 @@
+# CI handshake spec. This file's PRESENCE makes the tool CI-eligible — the matrix
+# in .github/workflows/integration-handshake.yml globs examples/integrations/*/handshake.yaml
+# and runs one matrix leg per file. `service` names the compose service whose exit
+# code is the verdict; `expected_tier` must name a tier present in
+# tests/integrations/fake_registry.yaml (checked by tests/test_integrations_sync.py).
+tool: curl
+wire: openai
+service: curl
+expected_tier: cheap
+best_effort: false   # required leg — must pass

@@ -1,0 +1,29 @@
+# anthropic-python → Shunt handshake. The leg's exit code IS the verdict: it fails
+# unless Shunt returns the routed completion AND the x-shunt-decision header rides
+# back on the raw response. Anthropic wire = http://shunt:8080 (NO /v1).
+include:
+  - ../compose.base.yaml
+
+services:
+  anthropic-python:
+    image: python:3.12-slim
+    depends_on:
+      shunt:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        set -eu
+        pip install --quiet --disable-pip-version-check "anthropic>=0.40"
+        python - <<'PY'
+        from anthropic import Anthropic
+        c = Anthropic(base_url="http://shunt:8080", api_key="ignored")
+        r = c.messages.with_raw_response.create(
+            model="auto", max_tokens=64,
+            messages=[{"role": "user", "content": "hi"}])
+        assert any(k.lower() == "x-shunt-decision" for k in r.headers), dict(r.headers)
+        assert r.parse().content[0].text == "ok"
+        print("OK: anthropic-python handshake passed")
+        PY

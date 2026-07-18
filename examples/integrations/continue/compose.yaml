@@ -1,0 +1,48 @@
+# continue → Shunt handshake. The leg's exit code IS the verdict: it fails unless
+# the Continue CLI (cn) reaches Shunt and prints the routed completion. The config
+# registers Shunt as an openai provider on the OpenAI wire (http://shunt:8080/v1).
+# Delivered as a Compose `config` (inline content), not a single-file bind mount
+# (unreliable across hosts). Needs Compose >= 2.23. Best-effort: the CI matrix runs
+# this leg continue-on-error.
+include:
+  - ../compose.base.yaml
+
+configs:
+  continue_config:
+    content: |
+      name: shunt
+      version: 0.0.1
+      schema: v1
+      models:
+        - name: auto
+          provider: openai
+          model: auto
+          apiBase: http://shunt:8080/v1
+          apiKey: dummy
+          roles:
+            - chat
+
+services:
+  continue:
+    image: node:22-slim
+    depends_on:
+      shunt:
+        condition: service_healthy
+    environment:
+      HOME: /tmp/cn
+    working_dir: /work
+    configs:
+      - source: continue_config
+        target: /work/config.yaml
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        set -eu
+        npm install -g @continuedev/cli >/dev/null 2>&1
+        mkdir -p /tmp/cn
+        out=$$(cn -p "say hi" --config /work/config.yaml)
+        printf '%s\n' "$$out"
+        printf '%s' "$$out" | grep -qi ok
+        echo "OK: continue handshake passed"

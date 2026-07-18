@@ -106,6 +106,21 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/v1/models")
+async def list_models(request: Request) -> dict[str, object]:
+    """OpenAI-shaped model list so clients that auto-discover models don't 404.
+
+    A stub over the local registry — no auth, no upstream call. Anthropic clients
+    read the same ``data[].id`` field, so one shape serves both wires.
+    """
+    pool: ModelPool = request.app.state.model_pool
+    data = [
+        {"id": name, "object": "model", "created": 0, "owned_by": "shunt"}
+        for name in pool.model_names()
+    ]
+    return {"object": "list", "data": data}
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request) -> Response:
     body = await request.json()

@@ -1,0 +1,27 @@
+# litellm-sdk → Shunt handshake. The leg's exit code IS the verdict: it fails unless
+# Shunt returns the routed completion. The model needs the `openai/` prefix so
+# LiteLLM speaks the OpenAI wire to Shunt.
+include:
+  - ../compose.base.yaml
+
+services:
+  litellm-sdk:
+    image: python:3.12-slim
+    depends_on:
+      shunt:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        set -eu
+        pip install --quiet --disable-pip-version-check litellm
+        python - <<'PY'
+        import litellm
+        r = litellm.completion(
+            model="openai/auto", api_base="http://shunt:8080/v1", api_key="ignored",
+            messages=[{"role": "user", "content": "hi"}])
+        assert r.choices[0].message.content == "ok"
+        print("OK: litellm-sdk handshake passed")
+        PY

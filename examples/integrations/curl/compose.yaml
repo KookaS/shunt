@@ -1,0 +1,23 @@
+# curl → Shunt handshake. The leg's exit code IS the verdict: it fails unless
+# Shunt returns 200 AND the X-Shunt-Decision header rides back.
+include:
+  - ../compose.base.yaml
+
+services:
+  curl:
+    image: curlimages/curl:8.11.1
+    depends_on:
+      shunt:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        curl -sf -D - http://shunt:8080/v1/chat/completions \
+          -H "Authorization: Bearer ignored" \
+          -H "Content-Type: application/json" \
+          -d '{"model":"auto","messages":[{"role":"user","content":"hi"}]}' \
+          | tee /tmp/resp.txt
+        grep -qi '^x-shunt-decision:' /tmp/resp.txt
+        echo "OK: curl handshake passed"

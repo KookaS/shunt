@@ -1,0 +1,49 @@
+# opencode → Shunt handshake. The leg's exit code IS the verdict: it fails unless
+# opencode reaches Shunt and prints the routed completion. The opencode config
+# registers Shunt as an OpenAI-compatible provider on the OpenAI wire
+# (http://shunt:8080/v1). It is delivered as a Compose `config` (inline content),
+# not a single-file bind mount (unreliable across hosts). Needs Compose >= 2.23.
+# Best-effort: the CI matrix runs this leg continue-on-error.
+include:
+  - ../compose.base.yaml
+
+configs:
+  opencode_config:
+    content: |
+      {
+        "$$schema": "https://opencode.ai/config.json",
+        "provider": {
+          "shunt": {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "Shunt",
+            "options": { "baseURL": "http://shunt:8080/v1", "apiKey": "ignored" },
+            "models": { "auto": { "name": "auto (Shunt-routed)" } }
+          }
+        }
+      }
+
+services:
+  opencode:
+    image: node:22-slim
+    depends_on:
+      shunt:
+        condition: service_healthy
+    environment:
+      HOME: /tmp/oc
+      OPENCODE_CONFIG: /work/opencode.json
+    working_dir: /work
+    configs:
+      - source: opencode_config
+        target: /work/opencode.json
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        set -eu
+        npm install -g opencode-ai >/dev/null 2>&1
+        mkdir -p /tmp/oc
+        out=$$(opencode run --model shunt/auto "say hi")
+        printf '%s\n' "$$out"
+        printf '%s' "$$out" | grep -qi ok
+        echo "OK: opencode handshake passed"

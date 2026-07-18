@@ -1,0 +1,11 @@
+# Handshake Shunt image — the router plus the hermetic fake registry, baked in.
+# Self-contained on purpose: no bind mount, so the harness is robust in any CI
+# (single-file bind mounts are unreliable across hosts/daemons). Build context is
+# THIS directory (tests/integrations/), whose files are NOT .dockerignore'd.
+#
+# Layered on the product image. Build the base first:
+#   docker build -t shunt-router:handshake -f Dockerfile .
+ARG SHUNT_BASE_IMAGE=shunt-router:handshake
+FROM ${SHUNT_BASE_IMAGE}
+COPY fake_registry.yaml /shunt-harness/fake_registry.yaml
+ENV SHUNT_MODEL_CONFIG_PATH=/shunt-harness/fake_registry.yaml

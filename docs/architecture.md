@@ -7,11 +7,11 @@ description: Shunt's system architecture — proxy, router, verifiers, and store
 
 **Status: pre-alpha.** The modules below are implemented and unit-tested, and the routing algorithm has been validated **offline** on the 500-task SWE-bench Verified suite (nested cost-safe sampling; a first-20 partial run: deepseek-v4-flash 16/20 passed, ~$0.01/task). It is **not yet wired end-to-end**: the proxy currently forwards requests through the OpenAI SDK to a cheap default model; kNN-based model selection runs in the offline benchmark but is not yet integrated into the live request path, and the kill-gate validation has not been run.
 
-Shunt is a single process, localhost-bound. It accepts HTTP requests on two API surfaces — OpenAI-compatible `/v1/chat/completions` and Anthropic `/v1/messages` — and proxies them to a model. The intended decision (cheapest model that can handle the task, via kNN-informed routing) is validated in the offline benchmark; wiring it into the proxy request path is the remaining integration step.
+Shunt is a single process, localhost-bound. It accepts HTTP requests on two API surfaces — OpenAI-compatible `/v1/chat/completions` and Anthropic `/v1/messages` — and proxies them to a model. It also exposes a `/v1/models` stub so clients that auto-discover model lists don't 404. The intended decision (cheapest model that can handle the task, via kNN-informed routing) is validated in the offline benchmark; wiring it into the proxy request path is the remaining integration step.
 
 ```mermaid
 graph TD
-  A[Tool: Claude Code / opencode / Cursor] -->|ANTHROPIC_BASE_URL / OPENAI_BASE_URL| P
+  A[Tool: Claude Code / opencode / aider] -->|ANTHROPIC_BASE_URL / OPENAI_BASE_URL| P
   subgraph Shunt[Shunt process · localhost:8080]
     P[proxy/ - FastAPI + OpenAI SDK] --> R[router/ - kNN decision]
     R --> D[db/ - SQLite + HNSW]
@@ -24,7 +24,7 @@ graph TD
 
 | Module | Role |
 |---|---|
-| **proxy/** | HTTP server: `/v1/chat/completions`, `/v1/messages`, streaming passthrough, admin API (`/api/admin/*`), dashboard (`/dashboard/*`) |
+| **proxy/** | HTTP server: `/health`, `/v1/chat/completions`, `/v1/messages`, `/v1/models` (stub), streaming passthrough |
 | **router/** | Decision core: embed prompt via fastembed, kNN retrieval via hnswlib, selection rule → cheapest capable model |
 | **verifiers/** | Async outcome verification: output mining, auto-detected tests |
 | **db/** | SQLite persistence for sessions, outcomes, HNSW index |
@@ -56,7 +56,7 @@ Point your tool at Shunt:
 |---|---|
 | Claude Code | `ANTHROPIC_BASE_URL=http://localhost:8080` |
 | opencode | `OPENAI_BASE_URL=http://localhost:8080` |
-| Cursor | Settings → API endpoint |
+| aider | `OPENAI_API_BASE=http://localhost:8080/v1` |
 | n8n / LangChain | `baseURL: http://localhost:8080` |
 
 ## Properties

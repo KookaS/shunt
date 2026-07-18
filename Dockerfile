@@ -1,19 +1,32 @@
 FROM python:3.12-slim AS builder
 
+# build-essential compiles the deps that ship no cp312 wheel (e.g. hnswlib, a C++
+# extension). Kept in the builder ONLY — the runtime image copies the finished
+# venv, so no compiler bloats the shipped image.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /build
 COPY --link uv.lock pyproject.toml ./
 
+# --no-emit-project: export third-party deps only. The project itself is a `-e .`
+# self-reference that `pip install -r` would try to build before src/ is copied
+# (it fails: "does not appear to be a Python project"). The package is installed
+# into the venv separately below, after its source lands.
 RUN pip install --no-cache-dir uv \
- && uv export --no-dev --no-hashes --output-file=requirements.txt
+ && uv export --no-dev --no-hashes --no-emit-project --output-file=requirements.txt
+
+COPY --link src/ src/
+RUN python -m venv /venv \
+ && /venv/bin/pip install --no-cache-dir -r requirements.txt \
+ && /venv/bin/pip install --no-cache-dir .
 
 FROM python:3.12-slim
 
 WORKDIR /app
-COPY --link --from=builder /build/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY --link src/ src/ pyproject.toml ./
-RUN pip install --no-cache-dir .
+COPY --link --from=builder /venv /venv
+ENV PATH="/venv/bin:$PATH"
 
 EXPOSE 8080
 

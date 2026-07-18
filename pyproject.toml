@@ -73,6 +73,17 @@ shunt = "shunt.cli:main"
 where = ["src", "."]
 include = ["shunt*", "benchmark*"]
 namespaces = false
+
+[tool.setuptools.package-data]
+# The bundled registry is loaded at startup via importlib.resources
+# (models/config.py). Without this it is excluded from the wheel, so a real
+# install (`pip install`, the Docker image) crashes on boot with
+# FileNotFoundError — editable installs and an external SHUNT_MODEL_CONFIG_PATH
+# both hide the gap. This is the shipped `shunt` product's ONLY bundled data file.
+# (The co-shipped `benchmark` harness also reads bundled data at runtime but is
+# slated to be dropped from the wheel before the first PyPI publish — see the
+# packages.find note above — rather than packaged here.)
+"shunt.models" = ["*.yaml"]
 # PUBLISH-TIME CAVEAT: `benchmark*` here makes the harness importable under
 # `pip install -e .` (dev requirement) but ALSO bundles it into a built wheel.
 # Before the first PyPI publish, drop `benchmark*` from `include` (or move the

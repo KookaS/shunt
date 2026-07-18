@@ -1,0 +1,36 @@
+# Hermetic handshake registry — every model routes to the FAKE upstream, never a
+# real provider. No key, no cost, no network beyond the stub.
+#
+# One model per tier. The cheap row is keyed `qwen3.7-plus` on purpose: the
+# router's cold-start default (`_DEFAULT_MODEL` in src/shunt/proxy/router.py) locks
+# a fresh session to that name, so a handshake always exercises it. The mid and
+# frontier rows exist so the pool spans every tier (fallback-chain coverage).
+#
+# The Docker harness reaches the stub at host `fake-upstream:9099` (the compose
+# service name). The in-process test (tests/integrations/test_handshake.py)
+# rewrites this base_url to the ephemeral stub port before loading the pool.
+providers:
+  fake:
+    base_url: http://fake-upstream:9099/v1
+    api_key_env_var: FAKE_UPSTREAM_API_KEY
+    litellm_prefix: openai
+
+models:
+  qwen3.7-plus:
+    model_id: fake/cheap
+    tier: cheap
+    provider: fake
+    supports_streaming: true
+    supports_cache_control: false
+  fake-mid:
+    model_id: fake/mid
+    tier: mid
+    provider: fake
+    supports_streaming: true
+    supports_cache_control: false
+  fake-frontier:
+    model_id: fake/frontier
+    tier: frontier
+    provider: fake
+    supports_streaming: true
+    supports_cache_control: false

@@ -1,10 +1,10 @@
 # Shunt
 
-Tired of paying for multiple frontier-model subscriptions and watching your API
-bill climb every month? So are we all.
-
-Shunt is a smart, adaptable router that finds the cheapest model that can
-actually handle your task and it learns from your own experience. Plug it in with one environment variable and let it do the rest.
+Your coding agent pays frontier prices for every request — even the routine ones a
+small open-weight model would nail. Shunt is a local router that sends the easy
+majority to a cheap model and the hard tail to a frontier one. It's built to learn
+that line from your own passing tests, and never breaks your prompt cache doing it.
+One environment variable, and nothing else changes. (Pre-alpha — see status below.)
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Status](https://img.shields.io/badge/status-pre--alpha-orange)
@@ -17,17 +17,15 @@ actually handle your task and it learns from your own experience. Plug it in wit
 
 ## Why this project
 
-Coding agents bill you frontier-model prices on every request, even the routine
-ones a small open-weight model would answer just as well. Existing solutions are
-either cloud-only with a take-rate (OpenRouter), licensed so enterprises cannot
-touch them (NadirClaw), proxy-only with no real routing (Portkey, Kong), or
-research artifacts not built to ship (ACRouter). None are simultaneously
-cache-safe, outcome-grounded, tool-agnostic, self-hosted, and Apache 2.0.
+Existing routers make you choose: cloud-only with a take-rate (OpenRouter),
+licensed so enterprises can't touch them (NadirClaw), proxy-only with no real
+routing (Portkey, Kong), or a research artifact never built to ship (ACRouter).
+None are cache-safe, outcome-grounded, tool-agnostic, self-hosted, and Apache 2.0
+at once. Shunt is all five.
 
-Shunt is a proxy you drop in front of the agent. It reads each task, sends the
-routine majority to a cheap model and the rest to a frontier one, and learns
-where that line falls from your own passing tests and typechecks — not from a
-guess. You point one environment variable at it, and nothing else changes.
+The hard part is the *decision*, not the plumbing — which model handles which
+task. Shunt learns that from your own verified outcomes, and everything below is
+in service of getting it right.
 
 **What makes it different:**
 
@@ -51,39 +49,59 @@ guess. You point one environment variable at it, and nothing else changes.
   the model pool, the decision method, the API keys, and the learning data.
   No phone-home, no take-rate, no CLA — a DCO sign-off is all we ask.
 
-**On cutting your bill.** Shunt reduces cost by routing verified-easy work to
-cheaper models. The published evidence shows 15–30% savings for single-turn
-code-gen tasks, but the one study isolating *agentic* Claude Code found no
-routing benefit there. Whether Shunt saves you money on agentic coding depends
-on your workflow and requires broader testing — the initial dogfood experiment
-exists to measure this honestly. We will publish the real number before asking
-you to adopt it. If agentic coding nulls, Shunt's primary wedge shifts to
-high-volume, stateless, and single-turn workloads where the evidence is positive.
+**Measured, not marketed.** The decision is the whole product, so Shunt ships a
+benchmark that scores it. Six models from cheap to frontier — over 50× apart on
+output price — are scored against the 500-task SWE-bench Verified suite, each task
+judged by its own tests (partial live coverage so far, and growing). Every routing
+strategy is scored offline on reward (quality minus cost), with bootstrap
+confidence intervals and a Pareto check against a perfect-oracle baseline. No
+cherry-picked demo.
 
-## Drop-in integration
+And we name the bar we have to clear: beat fixed-frontier-with-caching at equal
+quality on a real workflow, or don't ship. Published evidence puts single-turn
+code-gen savings at 15–30%; the one study on *agentic* Claude Code found no
+benefit, so we measure our own workflow before quoting you a number. Zero
+telemetry, and we publish the real result — honesty is the feature.
 
-The integration is a one-line change.
+## Works with the tools you already use
 
-**Claude Code**
+One line, and your agent talks to Shunt instead of the model API. Shunt speaks both
+wire formats and translates between them, so the same router sits in front of
+either.
+
+**Claude Code** — and any Anthropic-wire client:
 
 ```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:<port>
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8080
 ```
 
-**opencode, aider, Cursor, and other OpenAI-compatible clients**
+**opencode, aider, Continue** — and any OpenAI-compatible client:
 
 ```
-base_url = http://127.0.0.1:<port>/v1
+base_url = http://127.0.0.1:8080/v1
 ```
 
-Your agent talks to Shunt exactly as it talked to the model API. Shunt speaks both
-the Anthropic and OpenAI wire formats and translates between them, so the same
-router sits in front of either.
+That one change covers the whole ecosystem: coding agents (Claude Code, opencode,
+aider, Continue, Cline, Zed), agent frameworks (LangChain, Pydantic AI, LiteLLM —
+and LlamaIndex, CrewAI, or AutoGen with a one-line adapter), no-code builders (n8n,
+Flowise), and any raw SDK or `curl`. Clients that auto-discover models hit a
+`/v1/models` endpoint and just work.
+
+Copy-paste config for each tool — plus a dry-run handshake that proves the wiring
+end-to-end without spending a cent — lives in
+[`examples/integrations/`](examples/integrations/README.md). The verified
+integrations gate CI; the third-party-CLI legs run best-effort. Either way, the
+examples that matter don't rot.
 
 ## How it decides
 
 The routing is the hard part and the whole point. The multi-provider plumbing is
 becoming free; the value is in getting the *decision* right.
+
+> **Pre-alpha status.** The pipeline below is implemented and validated *offline*
+> against the benchmark. In the live proxy today, routing forwards to a cheap
+> default; the kNN decision path is **not yet** wired into the request path —
+> [`docs/architecture.md`](docs/architecture.md) tracks exactly what runs live.
 
 Shunt's decision pipeline has two layers:
 
@@ -124,18 +142,13 @@ which model was chosen and why.
 control plane, keys kept out of logs, dependencies pinned and locked — the
 posture a credential-handling tool in the request path has to be built to.
 
-## Saving money
+## Bring your own keys
 
-Shunt cuts cost by routing the verified-easy work to a cheaper model and keeping
-the frontier model for the hard tail — measured *at equal quality*, gated on tests
-and typechecks, so a cheaper answer that breaks the build gets escalated instead of
-shipped.
-
-Bring your own keys. Shunt routes through your own provider accounts, so you keep
-full control of spend and nothing is replayed or resold. Set one environment
-variable per provider you use, and add models with a few lines of YAML —
-[`docs/configuration.md`](docs/configuration.md) walks through both, and
-[`examples/providers/`](examples/providers/README.md) has a ready-to-copy config
+Shunt routes through your own provider accounts, so you keep full control of spend
+and nothing is replayed or resold. Set one environment variable per provider, add a
+model with a few lines of YAML, and you're done.
+[`docs/configuration.md`](docs/configuration.md) walks through both;
+[`examples/providers/`](examples/providers/README.md) ships a ready-to-copy config
 for each supported provider.
 
 ## Roadmap
@@ -157,7 +170,7 @@ providers on demand, and a faster runtime if concurrency ever calls for it.
 ```
 ├── src/shunt/             Core router engine
 │   ├── cli.py             CLI entry point (shunt start, explain, version; flag planned)
-│   ├── proxy/             HTTP server: /v1/chat/completions, /v1/messages, admin API
+│   ├── proxy/             HTTP server: /health, /v1/chat/completions, /v1/messages, /v1/models
 │   ├── router/            Decision core: embed → nearest-neighbour → selection rule
 │   ├── verifiers/         Async outcome backfill (auto-detected tests, typecheck)
 │   ├── db/                SQLite persistence for sessions, outcomes, index
@@ -166,6 +179,7 @@ providers on demand, and a faster runtime if concurrency ever calls for it.
 ├── benchmark/             Model-capability and routing evaluation
 ├── docs/                  User documentation (MkDocs)
 ├── examples/providers/    Copy-paste registry config, one file per provider
+├── examples/integrations/ Tool integration examples (CLI agents, frameworks, gateways)
 └── tests/                 Test suite
 ```
 

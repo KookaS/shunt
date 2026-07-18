@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from shunt.models.config import ModelPool
 from shunt.proxy.router import (
+    _DEFAULT_MODEL,
     ProxyRouter,
     UpstreamError,
     _anthropic_request_to_openai,
@@ -622,6 +623,52 @@ def test_health_endpoint() -> None:
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+def test_models_endpoint_lists_registry() -> None:
+    """GET /v1/models returns an OpenAI-shaped list over the local registry."""
+    with TestClient(app) as client:
+        resp = client.get("/v1/models")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["object"] == "list"
+    ids = [row["id"] for row in payload["data"]]
+    # The shipped registry is non-empty; every row carries the OpenAI shape.
+    assert ids, "registry should list at least one model"
+    assert all(row["object"] == "model" and row["owned_by"] == "shunt" for row in payload["data"])
+
+
+def test_models_endpoint_needs_no_auth() -> None:
+    """The stub is unauthenticated — clients discover models before they hold a key."""
+    with TestClient(app) as client:
+        resp = client.get("/v1/models")  # no Authorization / x-api-key header
+    assert resp.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [{}, {"Authorization": "Bearer dummy"}, {"x-api-key": ""}],
+    ids=["absent", "dummy-bearer", "empty-x-api-key"],
+)
+def test_requests_route_without_client_api_key(headers: dict[str, str]) -> None:
+    """Shunt holds the real provider keys, so an absent/dummy/empty client key still routes.
+
+    Locks the contract on the ROUTING path (not just /v1/models): a client may send a
+    dummy key or none at all, and neither may be rejected.
+    """
+    body = {"messages": [{"role": "user", "content": "Hi"}], "stream": False}
+    with patch(_ACOMPLETION_PATCH, new_callable=AsyncMock) as mock_acompletion:
+        mock_acompletion.return_value = _make_mock_chat_response()
+        with TestClient(app) as client:
+            resp = client.post("/v1/chat/completions", json=body, headers=headers)
+    assert resp.status_code == 200
+    assert "X-Shunt-Decision" in resp.headers
+
+
+def test_cold_start_default_model_is_in_the_shipped_registry() -> None:
+    """The hardcoded cold-start default must exist in the registry, or a fresh session
+    locks to an unknown model and every first request fails at routing time."""
+    assert _DEFAULT_MODEL in ModelPool().model_names()
 
 
 def _make_mock_chat_response() -> MagicMock:

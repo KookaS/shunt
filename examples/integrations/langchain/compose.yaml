@@ -1,0 +1,25 @@
+# langchain → Shunt handshake. The leg's exit code IS the verdict: it fails unless
+# Shunt returns the routed completion. LangChain hides response headers, so this
+# leg asserts the content only — the header check lives in the raw-SDK legs.
+include:
+  - ../compose.base.yaml
+
+services:
+  langchain:
+    image: python:3.12-slim
+    depends_on:
+      shunt:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        set -eu
+        pip install --quiet --disable-pip-version-check langchain-openai langchain-core
+        python - <<'PY'
+        from langchain_openai import ChatOpenAI
+        llm = ChatOpenAI(model="auto", base_url="http://shunt:8080/v1", api_key="ignored")
+        assert llm.invoke("hi").content == "ok"
+        print("OK: langchain handshake passed")
+        PY

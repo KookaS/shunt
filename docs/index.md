@@ -27,7 +27,7 @@ No shipped OSS project simultaneously gives you pluggable policy, outcome ground
 ## Design center
 
 - **Cache-boundary-aware routing** — controls `cache_control` placement, never switches models mid-session. Post-hoc `usage.cache_read_input_tokens` measures the switch tax but does not decide.
-- **Pluggable, inspectable policy** — rule-first (cheap, trustworthy), kNN default. Every decision emits an `X-Shunt-Decision` header.
+- **Pluggable, inspectable policy** — kNN over verified outcomes, no brittle rule tier. Every decision emits an `X-Shunt-Decision` header.
 - **OpenAI ↔ Anthropic translation** — these two first, not 100+ providers.
 - **Verifier + memory loop** — log `(task → model → verified outcome)` and learn from it. Verification is async/backfill, never on the hot path.
 - **Secure by default** — localhost-bind, no exposed control plane, no key logging. Apache-2.0, zero telemetry.
@@ -51,7 +51,7 @@ Point your tool at localhost:8080:
 |---|---|
 | Claude Code | `ANTHROPIC_BASE_URL=http://localhost:8080` |
 | opencode | `OPENAI_BASE_URL=http://localhost:8080` |
-| Cursor | Settings → API endpoint |
+| aider | `OPENAI_API_BASE=http://localhost:8080/v1` |
 | n8n / LangChain | `baseURL: http://localhost:8080` |
 
 ## Contents
