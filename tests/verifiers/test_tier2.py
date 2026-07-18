@@ -82,14 +82,21 @@ class TestAutoDetectVerifier:
             assert "no test framework detected" in result.detail
 
     def test_timeout_becomes_infra_failure(self) -> None:
+        # Use the always-present pytest runner (sys.executable) with a slow test and
+        # a sub-second timeout, so the TIMEOUT path is exercised deterministically on
+        # every machine. (A cargo/rust fixture would fall back to the "runner not
+        # found" branch wherever cargo is absent, greening the test without ever
+        # hitting the timeout it is meant to guard — the exact gap that let the
+        # self._timeout regression pass local checks.)
         with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "Cargo.toml").write_text('[package]\nname = "x"\n')
-            v = AutoDetectVerifier(timeout=0.000001)
-            result = v.verify(work_dir=tmpdir)
-            ok = (result.outcome == "unknown" and result.is_infra_failure) or (
-                result.outcome == "unknown" and "not found" in result.detail
+            (Path(tmpdir) / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+            (Path(tmpdir) / "test_slow.py").write_text(
+                "import time\n\n\ndef test_slow() -> None:\n    time.sleep(30)\n"
             )
-            assert ok, f"expected infra failure, got {result}"
+            result = AutoDetectVerifier(timeout=0.001).verify(work_dir=tmpdir)
+            assert result.outcome == "unknown", f"expected timeout→unknown, got {result}"
+            assert result.is_infra_failure, f"expected infra failure, got {result}"
+            assert "timed out" in result.detail, f"expected timeout detail, got {result}"
 
     def test_detect_vitest_as_typescript(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

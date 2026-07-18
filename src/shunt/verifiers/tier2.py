@@ -47,29 +47,29 @@ def _has_rust(work_dir: str) -> bool:
 
 
 _PYTEST_CMD: Final = [sys.executable, "-m", "pytest", "-x", "--tb=short", "-q"]
-_LANGUAGE_DETECTORS: Final[list[tuple[str, str, list[str], int]]] = [
-    ("python", "pytest", _PYTEST_CMD, _DEFAULT_TIMEOUT),
-    ("typescript", "jest", ["npx", "jest", "--passWithNoTests"], _DEFAULT_TIMEOUT),
-    ("go", "go-test", ["go", "test", "./..."], _DEFAULT_TIMEOUT),
-    ("rust", "cargo-test", ["cargo", "test"], _DEFAULT_TIMEOUT),
+_LANGUAGE_DETECTORS: Final[list[tuple[str, str, list[str]]]] = [
+    ("python", "pytest", _PYTEST_CMD),
+    ("typescript", "jest", ["npx", "jest", "--passWithNoTests"]),
+    ("go", "go-test", ["go", "test", "./..."]),
+    ("rust", "cargo-test", ["cargo", "test"]),
 ]
 
 
-def _detect(work_dir: str) -> tuple[str, list[str], int] | None:
-    for lang_name, _framework, cmd, timeout in _LANGUAGE_DETECTORS:
+def _detect(work_dir: str) -> tuple[str, list[str]] | None:
+    for lang_name, _framework, cmd in _LANGUAGE_DETECTORS:
         if lang_name == "python" and _has_pytest(work_dir):
-            return (lang_name, cmd, timeout)
+            return (lang_name, cmd)
         if lang_name == "typescript" and _has_typescript(work_dir):
-            return (lang_name, cmd, timeout)
+            return (lang_name, cmd)
         if lang_name == "go" and _has_go(work_dir):
-            return (lang_name, cmd, timeout)
+            return (lang_name, cmd)
         if lang_name == "rust" and _has_rust(work_dir):
-            return (lang_name, cmd, timeout)
+            return (lang_name, cmd)
     return None
 
 
 class AutoDetectVerifier(Verifier):
-    def __init__(self, timeout: int = _DEFAULT_TIMEOUT) -> None:
+    def __init__(self, timeout: float = _DEFAULT_TIMEOUT) -> None:
         self._timeout = timeout
 
     def detect(self, work_dir: str) -> str | None:
@@ -94,14 +94,14 @@ class AutoDetectVerifier(Verifier):
                 detail="no test framework detected",
             )
 
-        lang_name, cmd, timeout = detected
+        lang_name, cmd = detected
         try:
             result = subprocess.run(
                 cmd,
                 cwd=work_dir,
                 capture_output=True,
                 text=True,
-                timeout=timeout,
+                timeout=self._timeout,
             )
         except FileNotFoundError:
             return VerifierResult(
@@ -114,7 +114,7 @@ class AutoDetectVerifier(Verifier):
             return VerifierResult(
                 outcome="unknown",
                 confidence=0.0,
-                detail=f"{lang_name} tests timed out after {timeout}s",
+                detail=f"{lang_name} tests timed out after {self._timeout}s",
                 is_infra_failure=True,
             )
 
