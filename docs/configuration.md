@@ -109,7 +109,41 @@ without a date is a number you can't audit.
 Watch for models with no cache-read discount. They resend the full context at
 full price every turn, which shows up as a benchmark bill rather than an error.
 
-## Check your setup
+### Reasoning effort (optional)
+
+Some models expose a reasoning/thinking effort knob, and each one exposes it
+differently — a label (`reasoning_effort: high`), a boolean (`thinking: {type:
+enabled}`), or a mix. Rather than invent a fake shared scale, a model lists its own
+**arms**: each arm is a named effort level with the exact request params to send and
+a `rank` (0 = least effort) that orders arms *within that model only*. Arms are not
+comparable across models — one model's `high` is not another's.
+
+```yaml
+models:
+  gpt-oss-120b-groq:
+    model_id: openai/gpt-oss-120b
+    tier: cheap
+    provider: groq
+    reasoning:
+      default_arm: medium          # must match one arm id below; used when nothing else decides
+      arms:
+        - id: low
+          rank: 0
+          api: { reasoning_effort: low }     # merged verbatim into the request
+        - id: medium
+          rank: 1
+          api: { reasoning_effort: medium }
+        - id: high
+          rank: 2
+          api: { reasoning_effort: high }
+```
+
+A model with no `reasoning:` block runs at a single implicit `default` arm, exactly
+as before — the field is optional and backward-compatible. The benchmark scores each
+`(model, arm)` as its own cell, so `results.csv` keys on `(challenge, model,
+reasoning)`; `default_arm` is the arm a new model routes to until real outcomes
+accumulate. Effort is chosen once per task and held for the session — never switched
+mid-conversation, which would break the provider's prompt cache.
 
 ```bash
 shunt start

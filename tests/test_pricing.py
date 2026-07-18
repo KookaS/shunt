@@ -207,3 +207,47 @@ class TestValidatorChecksConfigReferences:
 class TestRegistryShipsWithThePackage:
     def test_default_registry_path_exists(self):
         assert default_registry_path().exists()
+
+
+# ---------------------------------------------------------------------------
+# D2/D4 — reasoning-arm accessors on benchmark/config.py
+# ---------------------------------------------------------------------------
+
+
+class TestReasoningConfigsAccessor:
+    def test_every_registry_model_has_a_reasoning_block(self):
+        cfgs = config.reasoning_configs()
+        for name in _models():
+            assert cfgs.get(name) is not None, f"{name} missing reasoning block"
+
+    def test_deepseek_bracket_matches_adr(self):
+        cfg = config.reasoning_configs()["deepseek-v4-flash"]
+        assert cfg.default_arm == "high"
+        assert {a.id for a in cfg.arms} == {"nothink", "high", "max"}
+
+    def test_kimi_k3_bracket_collapses_to_one_arm(self):
+        cfg = config.reasoning_configs()["kimi-k3"]
+        assert cfg.default_arm == "max"
+        assert [a.id for a in cfg.arms] == ["max"]
+
+
+class TestDefaultArmIds:
+    def test_registry_model_resolves_its_declared_default(self):
+        ids = config.default_arm_ids(["deepseek-v4-flash", "gpt-5-mini"])
+        assert ids == {"deepseek-v4-flash": "high", "gpt-5-mini": "medium"}
+
+    def test_unknown_model_falls_back_to_legacy_default_literal(self):
+        assert config.default_arm_ids(["not-a-real-model"]) == {"not-a-real-model": "default"}
+
+
+class TestArmSamplingWeights:
+    def test_returns_declared_config_weights(self):
+        config.load("benchmark/config.yaml")
+        weights = config.arm_sampling_weights()
+        assert weights and all(0.0 <= w <= 1.0 for w in weights)
+        assert weights == sorted(weights, reverse=True), "weight must decrease with rank"
+
+    def test_falls_back_to_sane_defaults_when_unconfigured(self, monkeypatch):
+        monkeypatch.setattr(config, "_config", {})
+        weights = config.arm_sampling_weights()
+        assert weights == list(config.DEFAULT_ARM_SAMPLING_WEIGHTS)

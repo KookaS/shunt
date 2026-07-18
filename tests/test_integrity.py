@@ -57,12 +57,16 @@ class TestModelVersions:
 
 
 def _cache(version_hash="h1", model_version="v1", image_digest="sha256:d1"):
+    # 3-level (challenge x model x reasoning-arm) — m1 is unregistered, so its
+    # sole cell lives under the legacy literal "default" key.
     return {
         "c1": {
             "m1": {
-                "version_hash": version_hash,
-                "model_version": model_version,
-                "image_digest": image_digest,
+                "default": {
+                    "version_hash": version_hash,
+                    "model_version": model_version,
+                    "image_digest": image_digest,
+                }
             }
         },
     }
@@ -76,7 +80,7 @@ class TestResultsSchema:
     def test_header_matches_expected_order(self):
         assert ",".join(integrity.RESULTS_FIELDS) == (
             "challenge_id,model,reasoning,pass,cost,in_tok,out_tok,calls,"
-            "version_hash,model_version,real_cost,estimated_cost,timeout_flag,"
+            "version_hash,model_version,arm_hash,real_cost,estimated_cost,timeout_flag,"
             "image_digest,computed_at"
         )
 
@@ -114,9 +118,10 @@ class TestLoadResultsEmpty:
     def test_reasoning_reconstructed_with_default(self, tmp_path):
         p = tmp_path / "results.csv"
         header = ",".join(integrity.RESULTS_FIELDS)
-        # A row that omits the reasoning value must reconstruct as "default".
-        p.write_text(header + "\n" + "c1,m1,,True,0.1,10,2,1,h,v,0.1,0.1,False\n")
-        cell = config.load_results(p)["c1"]["m1"]
+        # A row that omits the reasoning value must reconstruct as "default"
+        # (m1 is not a registry model, so the legacy literal is never aliased).
+        p.write_text(header + "\n" + "c1,m1,,True,0.1,10,2,1,h,v,,0.1,0.1,False\n")
+        cell = config.load_results(p)["c1"]["m1"]["default"]
         assert cell["reasoning"] == "default"
         assert cell["pass"] is True
 
@@ -129,19 +134,19 @@ class TestClassifyCells:
 
     def test_missing_when_no_row(self):
         status = run_matrix.classify_cells(["c1"], ["m2"], _cache(), {"c1": "h1"}, {"m2": "v1"})
-        assert status.missing == [("c1", "m2")]
+        assert status.missing == [("c1", "m2", "default")]
 
     def test_stale_on_hash_mismatch(self):
         status = run_matrix.classify_cells(
             ["c1"], ["m1"], _cache(), {"c1": "DIFFERENT"}, {"m1": "v1"}
         )
-        assert status.stale == [("c1", "m1")]
+        assert status.stale == [("c1", "m1", "default")]
 
     def test_stale_on_model_version_mismatch(self):
         status = run_matrix.classify_cells(
             ["c1"], ["m1"], _cache(), {"c1": "h1"}, {"m1": "DIFFERENT"}
         )
-        assert status.stale == [("c1", "m1")]
+        assert status.stale == [("c1", "m1", "default")]
 
 
 class TestStalenessAnchors:
@@ -164,32 +169,45 @@ class TestStalenessAnchors:
         status = run_matrix.classify_cells(
             ["c1"], ["m1"], _cache(), {"c1": "DIFFERENT"}, {"m1": "v1"}, self._digests()
         )
-        assert status.stale == [("c1", "m1")]
+        assert status.stale == [("c1", "m1", "default")]
 
     def test_changed_image_digest_is_stale(self):
         status = run_matrix.classify_cells(
             ["c1"], ["m1"], _cache(), {"c1": "h1"}, {"m1": "v1"}, self._digests("sha256:OTHER")
         )
-        assert status.stale == [("c1", "m1")]
+        assert status.stale == [("c1", "m1", "default")]
 
     def test_bumped_model_version_stales_only_that_model(self):
         # A model bump invalidates only that model's cells, not the challenge's others.
         cache = {
             "c1": {
-                "m1": {"version_hash": "h1", "model_version": "v1", "image_digest": "sha256:d1"},
-                "m2": {"version_hash": "h1", "model_version": "v1", "image_digest": "sha256:d1"},
+                "m1": {
+                    "default": {
+                        "version_hash": "h1",
+                        "model_version": "v1",
+                        "image_digest": "sha256:d1",
+                    }
+                },
+                "m2": {
+                    "default": {
+                        "version_hash": "h1",
+                        "model_version": "v1",
+                        "image_digest": "sha256:d1",
+                    }
+                },
             }
         }
         status = run_matrix.classify_cells(
             ["c1"], ["m1", "m2"], cache, {"c1": "h1"}, {"m1": "BUMPED", "m2": "v1"}, self._digests()
         )
-        assert status.stale == [("c1", "m1")]
+        assert status.stale == [("c1", "m1", "default")]
         assert status.present == 1
 
     def test_empty_stored_digest_is_not_stale(self):
         # First-live cell: stored digest "" + a resolving registry digest must NOT
         # stale — else the paid cell recomputes forever (mirrors check_image_digests).
-        cache = {"c1": {"m1": {"version_hash": "h1", "model_version": "v1", "image_digest": ""}}}
+        cell = {"version_hash": "h1", "model_version": "v1", "image_digest": ""}
+        cache = {"c1": {"m1": {"default": cell}}}
         status = run_matrix.classify_cells(
             ["c1"], ["m1"], cache, {"c1": "h1"}, {"m1": "v1"}, self._digests("sha256:x")
         )
@@ -199,11 +217,11 @@ class TestStalenessAnchors:
     def test_nonempty_stored_digest_mismatch_is_stale(self):
         # A non-empty stored digest that differs from the resolved one IS stale.
         cell = {"version_hash": "h1", "model_version": "v1", "image_digest": "sha256:a"}
-        cache = {"c1": {"m1": cell}}
+        cache = {"c1": {"m1": {"default": cell}}}
         status = run_matrix.classify_cells(
             ["c1"], ["m1"], cache, {"c1": "h1"}, {"m1": "v1"}, self._digests("sha256:b")
         )
-        assert status.stale == [("c1", "m1")]
+        assert status.stale == [("c1", "m1", "default")]
 
     def test_resolution_failure_is_not_stale(self):
         # Digest resolves to None (offline/yanked) ⇒ image axis skipped, NOT stale.
@@ -216,15 +234,27 @@ class TestStalenessAnchors:
     def test_image_rebuild_invalidates_all_models_for_challenge(self):
         cache = {
             "c1": {
-                "m1": {"version_hash": "h1", "model_version": "v1", "image_digest": "sha256:old"},
-                "m2": {"version_hash": "h1", "model_version": "v1", "image_digest": "sha256:old"},
+                "m1": {
+                    "default": {
+                        "version_hash": "h1",
+                        "model_version": "v1",
+                        "image_digest": "sha256:old",
+                    }
+                },
+                "m2": {
+                    "default": {
+                        "version_hash": "h1",
+                        "model_version": "v1",
+                        "image_digest": "sha256:old",
+                    }
+                },
             }
         }
         digests = {"c1": "sha256:new"}
         status = run_matrix.classify_cells(
             ["c1"], ["m1", "m2"], cache, {"c1": "h1"}, {"m1": "v1", "m2": "v1"}, digests
         )
-        assert set(status.stale) == {("c1", "m1"), ("c1", "m2")}
+        assert set(status.stale) == {("c1", "m1", "default"), ("c1", "m2", "default")}
 
 
 class TestCacheKeyIsolation:
@@ -268,18 +298,22 @@ class TestCacheKeyIsolation:
         status = run_matrix.classify_cells(
             ["c1"], ["m1"], _cache(), {"c1": "h1"}, {"m1": "v1@2026-07-16"}
         )
-        assert status.stale == [("c1", "m1")]
+        assert status.stale == [("c1", "m1", "default")]
 
     def test_model_rename_orphans_old_row_and_new_name_is_missing(self):
         # results.csv still holds a row under the OLD name; the enabled model is the
         # NEW name. The old row must NOT satisfy the new cell ⇒ new name is missing.
         cache = {
-            "c1": {"old-name": {"version_hash": "h1", "model_version": "v1", "image_digest": ""}}
+            "c1": {
+                "old-name": {
+                    "default": {"version_hash": "h1", "model_version": "v1", "image_digest": ""}
+                }
+            }
         }
         status = run_matrix.classify_cells(
             ["c1"], ["new-name"], cache, {"c1": "h1"}, {"new-name": "v1"}
         )
-        assert status.missing == [("c1", "new-name")]
+        assert status.missing == [("c1", "new-name", "default")]
         assert status.present == 0
 
 
@@ -337,7 +371,7 @@ class TestHistoryArchiving:
         hist_text = history.read_text()
         assert "old" in hist_text
         assert "superseded_at" in hist_text.splitlines()[0]
-        current = config.load_results(results)["c1"]["m1"]
+        current = config.load_results(results)["c1"]["m1"]["default"]
         assert current["version_hash"] == "new"
 
     def test_identical_rewrite_does_not_archive(self, tmp_path):
@@ -359,7 +393,7 @@ class TestAtomicWrite:
         path = tmp_path / "results.csv"
         run_matrix._write_raw_rows(self._rows(), path)
         loaded = config.load_results(path)
-        assert loaded["c1"]["m1"]["pass"] is True
+        assert loaded["c1"]["m1"]["default"]["pass"] is True
         assert not (tmp_path / "results.csv.tmp").exists()
 
     def test_uses_temp_then_replace(self, tmp_path, monkeypatch):

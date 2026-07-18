@@ -64,6 +64,15 @@ class TestEmbeddingCompareNeighbors:
 class TestReportRegretFactories:
     """report.py must not silently drop the headline kNN routers."""
 
+    # The old ImportError-degradation path this class used to also cover was
+    # dropped: _build_strategy_factories now single-sources the enabled
+    # strategy set from run_eval.get_strategies, and fastembed/hnswlib are
+    # unconditional base dependencies (pyproject.toml [project.dependencies],
+    # not a benchmark-only extra) — "embedding deps unavailable" is not a
+    # reachable state to degrade for. See
+    # test_report_plots.py::TestStrategyFactoriesMatchEnabledSet for the
+    # config-enabled-set coverage the refactor introduced.
+
     def test_knn_strategies_present_in_factory_map(self):
         from benchmark.routing.report import _build_strategy_factories
 
@@ -73,22 +82,3 @@ class TestReportRegretFactories:
         assert "kNN-cascade" in factories
         assert factories["kNN"]().name == "kNN"
         assert factories["kNN-cascade"]().name == "kNN-cascade"
-
-    def test_import_failure_warns_and_omits(self, monkeypatch, capsys):
-        """If embedding deps are unavailable, warn — do not crash or silently omit."""
-        import builtins
-
-        from benchmark.routing import report
-
-        real_import = builtins.__import__
-
-        def _fail_knn_import(name, *args, **kwargs):
-            if name.endswith("strategies.knn") or name.endswith("strategies.knn_cascade"):
-                raise ImportError("simulated missing embedding deps")
-            return real_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", _fail_knn_import)
-        factories = report._build_strategy_factories(gamma=0.1)
-        assert "kNN" not in factories
-        assert "kNN-cascade" not in factories
-        assert "Warning" in capsys.readouterr().err

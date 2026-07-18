@@ -43,20 +43,27 @@ _KEY_ENV: Final[tuple[str, ...]] = (
 
 @dataclass
 class CellStatus:
-    """Classification of every (challenge, model) cell against the cache."""
+    """Classification of every (challenge, model, reasoning-arm) cell."""
 
-    missing: list[tuple[str, str]] = field(default_factory=list)
-    stale: list[tuple[str, str]] = field(default_factory=list)
+    missing: list[tuple[str, str, str]] = field(default_factory=list)
+    stale: list[tuple[str, str, str]] = field(default_factory=list)
     present: int = 0
 
     @property
-    def to_run(self) -> list[tuple[str, str]]:
+    def to_run(self) -> list[tuple[str, str, str]]:
         """Cells needing (re)computation: missing plus stale."""
         return self.missing + self.stale
 
 
 def _has_keys() -> bool:
     return any(os.environ.get(k) for k in _KEY_ENV)
+
+
+def _default_selected_arms(tasks: list[str], models: list[str]) -> dict[tuple[str, str], list[str]]:
+    """Back-compat fallback: check every cell only at its declared default arm."""
+    defaults = config.default_arm_ids(models)
+    fallback = {model: [defaults.get(model, integrity.DEFAULT_REASONING)] for model in models}
+    return {(cid, model): fallback[model] for cid in tasks for model in models}
 
 
 def classify_cells(
@@ -66,22 +73,28 @@ def classify_cells(
     hashes: dict[str, str],
     versions: dict[str, str],
     digests: dict[str, str | None] | None = None,
+    selected_arms: dict[tuple[str, str], list[str]] | None = None,
+    arm_hash_map: dict[str, dict[str, str]] | None = None,
 ) -> CellStatus:
-    """Split cells into missing / stale / present by anchor string-equality.
-
-    Stale iff spec hash, image digest, or model version drifted; missing iff no
-    row. ``digests`` None-valued (unresolved) never marks a cell stale.
-    """
+    """Split (challenge, model, reasoning-arm) cells into missing / stale / present."""
+    # `cache` is 3-level: challenge_id -> model -> arm_id -> row.
+    # `selected_arms` restricts each (challenge, model) to its sampled arms;
+    # absent, every cell is checked only at its declared default arm
+    # (config.default_arm_ids), reproducing the single-cell-per-model
+    # behaviour from before arm sampling existed. Stale iff spec hash, image digest,
+    # model version, or the arm's own api-param hash drifted; missing iff no row for that arm.
+    arms_by_cell = selected_arms or _default_selected_arms(tasks, models)
     status = CellStatus()
     for cid in tasks:
         for model in models:
-            cell = cache.get(cid, {}).get(model)
-            if cell is None:
-                status.missing.append((cid, model))
-            elif _is_stale(cell, cid, model, hashes, versions, digests):
-                status.stale.append((cid, model))
-            else:
-                status.present += 1
+            for arm in arms_by_cell.get((cid, model), [integrity.DEFAULT_REASONING]):
+                cell = cache.get(cid, {}).get(model, {}).get(arm)
+                if cell is None:
+                    status.missing.append((cid, model, arm))
+                elif _is_stale(cell, cid, model, arm, hashes, versions, digests, arm_hash_map):
+                    status.stale.append((cid, model, arm))
+                else:
+                    status.present += 1
     return status
 
 
@@ -89,16 +102,39 @@ def _is_stale(
     cell: dict,
     cid: str,
     model: str,
+    arm: str,
     hashes: dict[str, str],
     versions: dict[str, str],
     digests: dict[str, str | None] | None,
+    arm_hash_map: dict[str, dict[str, str]] | None = None,
 ) -> bool:
-    """A cell is stale iff its stored spec hash, image digest, or model version drifted."""
+    """Stale iff stored spec hash, model version, arm-param hash, or image digest drifted."""
     if cell.get("version_hash") != hashes.get(cid):
         return True
     if cell.get("model_version") != versions.get(model):
         return True
+    if _arm_stale(cell, model, arm, arm_hash_map):
+        return True
     return _image_stale(cell, cid, digests)
+
+
+def _arm_stale(
+    cell: dict, model: str, arm: str, arm_hash_map: dict[str, dict[str, str]] | None
+) -> bool:
+    """Stale iff a NON-EMPTY stored arm_hash resolves AND differs — else never stales."""
+    # Mirrors the digest-axis guard (_image_stale): no resolved anchor (arm_hash_map
+    # absent, or the model/arm missing from it — e.g. a model with no reasoning block)
+    # never marks a cell stale.
+    if arm_hash_map is None:
+        return False
+    expected = arm_hash_map.get(model, {}).get(arm)
+    if expected is None:
+        return False
+    # Guard on non-empty stored (like _image_stale): a legacy row (pre-arm-hash) has no
+    # arm_hash column (""), so it degrades to a no-op instead of recomputing the
+    # PAID cell. A genuinely new arm is MISSING (no row), not present-with-empty-hash.
+    stored = str(cell.get("arm_hash", ""))
+    return bool(stored) and stored != expected
 
 
 def _image_stale(cell: dict, cid: str, digests: dict[str, str | None] | None) -> bool:
@@ -125,6 +161,8 @@ def _build_row(
     versions: dict[str, str],
     pricing: dict[str, dict[str, float]],
     digests: dict[str, str | None] | None = None,
+    arm: str = integrity.DEFAULT_REASONING,
+    arm_hash_map: dict[str, dict[str, str]] | None = None,
 ) -> dict:
     in_tok = int(outcome.get("in_tok", 0))
     out_tok = int(outcome.get("out_tok", 0))
@@ -140,7 +178,11 @@ def _build_row(
     return {
         "challenge_id": cid,
         "model": model,
-        "reasoning": outcome.get("reasoning", integrity.DEFAULT_REASONING),
+        # The row's arm identity comes from the caller (the (cid, model, arm) cell
+        # classify_cells decided was missing/stale), not the harness outcome — the
+        # scaffold does not yet vary its request by arm (a known gap), so the
+        # outcome dict carries no reliable "reasoning" of its own.
+        "reasoning": arm,
         "pass": outcome.get("pass", False),
         "cost": cost,
         "in_tok": in_tok,
@@ -148,6 +190,7 @@ def _build_row(
         "calls": int(outcome.get("calls", 0)),
         "version_hash": hashes.get(cid, ""),
         "model_version": versions.get(model, integrity.UNKNOWN_VERSION),
+        "arm_hash": (arm_hash_map or {}).get(model, {}).get(arm, ""),
         "real_cost": real_cost,
         "estimated_cost": estimated_cost,
         "timeout_flag": bool(outcome.get("timeout_flag", False)),
@@ -167,18 +210,22 @@ def _row_digest(cid: str, outcome: dict, digests: dict[str, str | None] | None) 
 
 
 def run_live_cells(
-    cells: list[tuple[str, str]],
+    cells: list[tuple[str, str, str]],
     matrix: dict,  # noqa: ARG001 (kept for signature stability; spec is loaded per-cell)
     hashes: dict[str, str],
     versions: dict[str, str],
     timeout: int,
     verbose: bool,
     digests: dict[str, str | None] | None = None,
+    arm_hash_map: dict[str, dict[str, str]] | None = None,
 ) -> list[dict]:
-    """Delegate each cell to the real SWE-bench harness executor (one
-    (instance, model) run scored by the harness; version_hash from the spec
-    content hash). Cells with no materialised spec or no keys are skipped.
-    """
+    """Delegate each (challenge, model, arm) cell to the real SWE-bench harness executor."""
+    # One (instance, model) run scored by the harness; version_hash from the spec
+    # content hash. Cells with no materialised spec or no keys are skipped. The arm
+    # identity is cached (reasoning/arm_hash columns) but NOT yet sent to the harness
+    # as a distinct request — the scaffold sends one fixed request per (instance,
+    # model) regardless of arm: wiring divergent live execution per arm
+    # is an explicit follow-up, gated on the Requesty label-vs-reality probe.
     from benchmark.routing import integrity
     from benchmark.runner import infer
 
@@ -186,7 +233,7 @@ def run_live_cells(
     # model resends the full context every agent turn at full input price — a cell that
     # churns then fails still bills for all of it (qwen3-max billed 50x its recorded
     # cost). main() checks this too; this backstop protects any other run_live_cells caller.
-    uncached = config.models_missing_cache(sorted({m for _, m in cells}))
+    uncached = config.models_missing_cache(sorted({m for _, m, _ in cells}))
     if uncached:
         raise ValueError(
             f"benchmark refuses to run uncached models (no cache-read discount): {uncached}. "
@@ -196,36 +243,49 @@ def run_live_cells(
     work_dir = Path.cwd() / "benchmark" / "runner" / "artifacts"
     pricing = config._pricing_dict()
     rows: list[dict] = []
-    for cid, model in cells:
+    for cid, model, arm in cells:
         try:
             outcome = infer.run_live_cell(
-                cid, model, work_dir=work_dir, run_id=f"live-{cid}-{model}", timeout=timeout
+                cid, model, work_dir=work_dir, run_id=f"live-{cid}-{model}-{arm}", timeout=timeout
             )
         except Exception as exc:  # noqa: BLE001 (per-cell isolation: skip one, never fabricate)
             # ANY failure (missing spec/keys, harness infra crash, import, network)
             # skips just this cell and leaves it MISSING to recompute — the batch
             # continues and nothing is fabricated into the paid cache.
-            print(f"  skip {cid}:{model} — {exc}", file=sys.stderr)
+            print(f"  skip {cid}:{model}:{arm} — {exc}", file=sys.stderr)
             continue
         cell_hashes = {**hashes, cid: integrity.swebench_spec_hash(cid) or hashes.get(cid, "")}
-        rows.append(_build_row(cid, model, outcome, cell_hashes, versions, pricing, digests))
+        row = _build_row(
+            cid, model, outcome, cell_hashes, versions, pricing, digests, arm, arm_hash_map
+        )
+        rows.append(row)
     return rows
 
 
-def _read_raw_rows(path: Path) -> dict[tuple[str, str], dict]:
-    rows: dict[tuple[str, str], dict] = {}
+def _row_key(row: dict) -> tuple[str, str, str]:
+    """The results.csv cache key: (challenge_id, model, reasoning)."""
+    # Literal string-equality on whatever `reasoning` the row carries (no alias
+    # resolution here — that is a read-time concern, config.load_results). Two
+    # distinct arm values for the same (challenge, model) are DISTINCT keys, so
+    # they never collide or archive one another as history.
+    reasoning = str(row.get("reasoning") or integrity.DEFAULT_REASONING)
+    return (row["challenge_id"], row["model"], reasoning)
+
+
+def _read_raw_rows(path: Path) -> dict[tuple[str, str, str], dict]:
+    rows: dict[tuple[str, str, str], dict] = {}
     if not path.exists():
         return rows
     with path.open(newline="") as f:
         for row in csv.DictReader(f):
-            rows[(row["challenge_id"], row["model"])] = row
+            rows[_row_key(row)] = row
     return rows
 
 
-def _write_raw_rows(rows: dict[tuple[str, str], dict], path: Path) -> None:
+def _write_raw_rows(rows: dict[tuple[str, str, str], dict], path: Path) -> None:
     """Atomically rewrite results.csv: write a sibling temp, then os.replace onto target."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    ordered = sorted(rows.values(), key=lambda r: (r["challenge_id"], r["model"]))
+    ordered = sorted(rows.values(), key=lambda r: _row_key(r))
     tmp = path.with_name(path.name + ".tmp")
     with tmp.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(integrity.RESULTS_FIELDS))
@@ -263,16 +323,16 @@ def _append_history(rows: list[dict], path: Path) -> None:
 
 
 def merge_rows(new_rows: list[dict], path: Path, history_path: Path | None = None) -> int:
-    """Upsert cells into results.csv (keyed by challenge×model); archive superseded rows.
-
-    A replaced row (same key, changed content) is moved to the append-only
-    history log — nothing is discarded. results.csv keeps only current rows.
-    """
+    """Upsert cells into results.csv (keyed by challenge×model×reasoning-arm)."""
+    # A replaced row (same key, changed content) is moved to the append-only
+    # history log — nothing is discarded. results.csv keeps only current rows.
+    # Two arms of the same (challenge, model) are DISTINCT keys: a
+    # new arm never collides with, or archives, a sibling arm's row.
     existing = _read_raw_rows(path)
     superseded: list[dict] = []
     for row in new_rows:
-        key = (row["challenge_id"], row["model"])
         norm = {k: row.get(k, "") for k in integrity.RESULTS_FIELDS}
+        key = _row_key(norm)
         if key in existing and _row_differs(existing[key], norm):
             superseded.append(existing[key])
         existing[key] = norm
@@ -325,13 +385,48 @@ def regenerate_plots() -> None:
 def _print_status(status: CellStatus, n_tasks: int, n_models: int) -> None:
     total = n_tasks * n_models
     print(
-        f"Cells: {total} total ({n_tasks} challenges x {n_models} models)  "
+        f"Cells: {total}+ base ({n_tasks} challenges x {n_models} models; "
+        f"reasoning-arm sampling adds non-default-arm cells)  "
         f"present={status.present}  missing={len(status.missing)}  stale={len(status.stale)}"
     )
     for label, cells in (("missing", status.missing), ("stale", status.stale)):
         if cells:
-            sample = ", ".join(f"{c}:{m}" for c, m in cells[:3])
+            sample = ", ".join(f"{c}:{m}:{a}" for c, m, a in cells[:3])
             print(f"  {label}: {len(cells)} — e.g. {sample}{' ...' if len(cells) > 3 else ''}")
+
+
+def _arm_context(
+    tasks: list[str], models: list[str]
+) -> tuple[dict[tuple[str, str], list[str]], dict[str, dict[str, str]]]:
+    """Selected arms per (challenge, model) + each model's arm-hash anchors."""
+    resolved = config.resolved_models()
+    arm_hash_map = integrity.arm_hashes(resolved)
+    if not config.arm_sampling_enabled():
+        # Gate OFF (default): the live executor doesn't yet send a distinct
+        # request per arm (run_live_cell sends one fixed request regardless of
+        # arm), so sweeping arms here would bill duplicate identical requests
+        # under fake arm labels. Stay on the single-default-arm-per-cell path —
+        # arm_hash_map is still built (harmless, no extra cells result from it).
+        return _default_selected_arms(tasks, models), arm_hash_map
+    return _sampled_selected_arms(tasks, models, resolved), arm_hash_map
+
+
+def _sampled_selected_arms(
+    tasks: list[str], models: list[str], resolved: dict
+) -> dict[tuple[str, str], list[str]]:
+    """Multi-arm p(arm|model) sweep — gated behind ``arm_sampling.enabled``."""
+    from benchmark.runner import sampling
+
+    weights = config.arm_sampling_weights()
+    selected: dict[tuple[str, str], list[str]] = {}
+    for model in models:
+        bracket = resolved[model].reasoning if model in resolved else None
+        for cid in tasks:
+            if bracket is None:
+                selected[(cid, model)] = [integrity.DEFAULT_REASONING]
+            else:
+                selected[(cid, model)] = sampling.select_arms(cid, model, bracket, weights)
+    return selected
 
 
 def _add_args(ap: argparse.ArgumentParser, config_path: str) -> None:
@@ -381,7 +476,10 @@ def main(config_path: str = "benchmark/config.yaml") -> int:
         else None
     )
 
-    status = classify_cells(tasks, models, cache, hashes, versions, digests)
+    selected_arms, arm_hash_map = _arm_context(tasks, models)
+    status = classify_cells(
+        tasks, models, cache, hashes, versions, digests, selected_arms, arm_hash_map
+    )
     _print_status(status, len(tasks), len(models))
 
     live = args.live and _has_keys()
@@ -403,7 +501,14 @@ def main(config_path: str = "benchmark/config.yaml") -> int:
 
     if status.to_run and live:
         new_rows = run_live_cells(
-            status.to_run, matrix, hashes, versions, args.timeout, args.verbose, digests
+            status.to_run,
+            matrix,
+            hashes,
+            versions,
+            args.timeout,
+            args.verbose,
+            digests,
+            arm_hash_map,
         )
         n = merge_rows(new_rows, config.results_csv_path())
         print(f"  live: wrote {n} cell(s) to {config.results_csv_path()}")

@@ -81,7 +81,7 @@ class TestRoundTripPresent:
         results = tmp_path / "results.csv"
         run_matrix.merge_rows([_typed_row(real_cost=0.005347154400000002)], results, None)
         cache = config.load_results(results)
-        cell = cache["c1"]["m1"]
+        cell = cache["c1"]["m1"]["default"]
         assert cell["real_cost"] == pytest.approx(0.005347154400000002)
         status = run_matrix.classify_cells(
             ["c1"], ["m1"], cache, {"c1": "a" * 64}, {"m1": "v1"}, {"c1": "sha256:abc"}
@@ -121,22 +121,25 @@ class TestRealCacheSecondRun:
 
         present_models = sorted({m for cell in cache.values() for m in cell})
         assert present_models, "expected committed results in the cache"
-        # The set of cells that ACTUALLY have a committed row (a model may be
-        # partially covered by design — e.g. claude-opus-4-6 runs one challenge).
-        existing = {(cid, m) for cid, cell in cache.items() for m in cell}
+        # The set of (challenge, model, arm) cells that ACTUALLY have a committed
+        # row (a model may be partially covered by design — e.g. claude-opus-4-6
+        # runs one challenge; and a cell may hold more than one arm going forward).
+        existing = {
+            (cid, m, arm) for cid, cell in cache.items() for m, arms in cell.items() for arm in arms
+        }
         st_present = run_matrix.classify_cells(tasks, present_models, cache, hashes, versions)
         # Run-twice-zero guarantee: no COMMITTED cell recomputes. Nothing is stale,
         # and every to_run cell is one that genuinely has no committed row (not a
         # re-run of an existing cell). This survives partial coverage.
         assert st_present.stale == [], "committed cells must not go stale (0 recompute)"
-        assert all((cid, m) not in existing for cid, m in st_present.to_run), (
+        assert all((cid, m, arm) not in existing for cid, m, arm in st_present.to_run), (
             "no committed cell may re-classify as missing/stale"
         )
 
         # A synthetic never-run model: every cell missing, none stale.
         absent = "no-such-model-xyz"
         st_absent = run_matrix.classify_cells(tasks, [absent], cache, hashes, {absent: "v"})
-        assert {m for _, m in st_absent.missing} == {absent}
+        assert {m for _, m, _ in st_absent.missing} == {absent}
         assert st_absent.stale == []
 
 
@@ -162,7 +165,7 @@ class TestMergeHistoryArchival:
         run_matrix.merge_rows([_typed_row(**{"pass": False})], results, history)
         assert history.exists()
         assert "superseded_at" in history.read_text().splitlines()[0]
-        assert config.load_results(results)["c1"]["m1"]["pass"] is False
+        assert config.load_results(results)["c1"]["m1"]["default"]["pass"] is False
 
     def test_changed_hash_archives_and_updates_current(self, tmp_path):
         results = tmp_path / "results.csv"
@@ -172,7 +175,7 @@ class TestMergeHistoryArchival:
         run_matrix.merge_rows([r1], results, history)
         run_matrix.merge_rows([r2], results, history)
         assert "h1" in history.read_text()
-        assert config.load_results(results)["c1"]["m1"]["version_hash"] == "h2"
+        assert config.load_results(results)["c1"]["m1"]["default"]["version_hash"] == "h2"
 
     def test_second_model_added_leaves_first_present_and_unarchived(self, tmp_path):
         # Adding qwen must not touch the deepseek row or write history.
@@ -201,17 +204,23 @@ class TestClassifyEdgeCases:
     def test_unknown_model_not_in_versions_marks_present_row_stale(self):
         # A cached row whose model has no declared version (versions.get -> None)
         # must NOT silently pass: stored "v1" != None => stale, forcing recompute.
-        cache = {"c1": {"m1": {"version_hash": "h1", "model_version": "v1", "image_digest": ""}}}
+        cell = {"version_hash": "h1", "model_version": "v1", "image_digest": ""}
+        cache = {"c1": {"m1": {"default": cell}}}
         st = run_matrix.classify_cells(["c1"], ["m1"], cache, {"c1": "h1"}, {})
-        assert st.stale == [("c1", "m1")]
+        assert st.stale == [("c1", "m1", "default")]
 
     def test_partial_coverage_mix(self):
-        cache = {"c1": {"m1": {"version_hash": "h1", "model_version": "v1", "image_digest": ""}}}
+        cell = {"version_hash": "h1", "model_version": "v1", "image_digest": ""}
+        cache = {"c1": {"m1": {"default": cell}}}
         st = run_matrix.classify_cells(
             ["c1", "c2"], ["m1", "m2"], cache, {"c1": "h1", "c2": "h2"}, {"m1": "v1", "m2": "v2"}
         )
         assert st.present == 1
-        assert set(st.missing) == {("c1", "m2"), ("c2", "m1"), ("c2", "m2")}
+        assert set(st.missing) == {
+            ("c1", "m2", "default"),
+            ("c2", "m1", "default"),
+            ("c2", "m2", "default"),
+        }
 
 
 # ---------------------------------------------------------------------------

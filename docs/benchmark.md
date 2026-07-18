@@ -50,8 +50,9 @@ snapshot of it. (claude-opus-4-6 is priced in the registry for provenance but is
 
 ## Benchmark execution
 
-The live harness runs each `(challenge, model)` cell as an isolated, reproducible
-Docker job:
+The live harness runs each `(challenge, model, reasoning-arm)` cell as an isolated,
+reproducible Docker job (by default one arm per model — the model's declared default
+reasoning arm):
 
 1. Resolve the challenge spec at its pinned `base_commit` and dataset revision.
 2. Pull the challenge's prebuilt SWE-bench image (per-challenge, by manifest
@@ -79,7 +80,8 @@ pip install -e '.[dev,benchmark]'
 python3 benchmark/routing/run_eval.py
 ```
 
-It scores each strategy by looking up cached `(challenge × model)` cells. A
+It scores each strategy by looking up cached `(challenge × model)` cells (the
+evaluator uses each model's default reasoning arm). A
 strategy whose decision needs an uncached cell is flagged (it can't be
 backtested) rather than silently skipped. With an empty cache the evaluator
 prints *"no results yet — run the live matrix"* and exits cleanly.

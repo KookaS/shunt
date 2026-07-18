@@ -307,7 +307,7 @@ class TestInfraFailure:
         # This test is about infra isolation, not the caching gate — neutralise the gate.
         monkeypatch.setattr(run_matrix.config, "models_missing_cache", lambda *a, **k: [])
         rows = run_matrix.run_live_cells(
-            [("bad__cell-1", "m"), ("good__cell-1", "m")],
+            [("bad__cell-1", "m", "default"), ("good__cell-1", "m", "default")],
             {},
             {"bad__cell-1": "h", "good__cell-1": "h"},
             {"m": "v"},
@@ -326,7 +326,7 @@ class TestInfraFailure:
         monkeypatch.setattr(infer, "run_live_cell", fake)
         monkeypatch.setattr(run_matrix.config, "models_missing_cache", lambda *a, **k: [])
         rows = run_matrix.run_live_cells(
-            [("bad__cell-1", "m"), ("good__cell-1", "m")],
+            [("bad__cell-1", "m", "default"), ("good__cell-1", "m", "default")],
             {},
             {"bad__cell-1": "h", "good__cell-1": "h"},
             {"m": "v"},

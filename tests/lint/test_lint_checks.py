@@ -38,7 +38,7 @@ def test_sh001_ignores_final_annotated_container(tmp_path: Path) -> None:
 
 def test_sh004_catches_planted_story_ref(tmp_path: Path) -> None:
     f = tmp_path / "leak.py"
-    f.write_text("# tracked in STORY-9.9\nx = 1\n")
+    f.write_text("# tracked in STORY-9.9\nx = 1\n")  # noqa: SHUNT-ISO
     assert _run("check_internal_refs.py", str(f)) == 1
 
 
@@ -54,7 +54,7 @@ def test_sh004_default_tree_is_clean() -> None:
 
 def test_sh004_scans_yaml_when_walking_a_directory(tmp_path: Path) -> None:
     f = tmp_path / "provider.yaml"
-    f.write_text("# see backlog for the rollout\nbase_url: https://example.com/v1\n")
+    f.write_text("# see backlog for the rollout\nbase_url: https://example.com/v1\n")  # noqa: SHUNT-ISO
     assert _run("check_internal_refs.py", str(tmp_path)) == 1
 
 
@@ -67,7 +67,7 @@ def test_sh004_default_scan_covers_examples() -> None:
     created = not examples.exists()
     examples.mkdir(parents=True, exist_ok=True)
     planted = examples / "_sh004_contract_probe.yaml"
-    planted.write_text("# see backlog\n")
+    planted.write_text("# see backlog\n")  # noqa: SHUNT-ISO
     try:
         assert _run("check_internal_refs.py") == 1
     finally:

@@ -47,6 +47,18 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"
       price_note: Requesty router listing (qwen3.7-plus, alibaba). $0.40/M cache-write, $0.032/M cache-read.
+    # Bracket: realizable {none,low,med,high} dedupes to {none,high}
+    # (default thinking-on ≈ max). NOTE: Qwen has a known requires_stream quirk on
+    # thinking-on requests — YAGNI for this scope, not modeled as a schema field.
+    reasoning:
+      default_arm: think
+      arms:
+        - id: nothink
+          rank: 0
+          api: {enable_thinking: false}
+        - id: think
+          rank: 1
+          api: {enable_thinking: true}
   deepseek-v4-flash:
     model_id: deepseek-v4-flash
     tier: cheap
@@ -62,6 +74,20 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"
       price_note: Requesty router listing; paid directly via the DeepSeek API. $0.0028/M cache-read.
+    # Bracket: realizable {none,high,max} — low/med alias to high on DeepSeek and
+    # are excluded (would create duplicate bandit arms scoring identically).
+    reasoning:
+      default_arm: high
+      arms:
+        - id: nothink
+          rank: 0
+          api: {thinking: {type: disabled}}
+        - id: high
+          rank: 1
+          api: {thinking: {type: enabled}, reasoning_effort: high}
+        - id: max
+          rank: 2
+          api: {thinking: {type: enabled}, reasoning_effort: max}
   gpt-5-mini:
     model_id: openai/gpt-5-mini
     tier: mid
@@ -82,9 +108,23 @@ models:
         but has NO cache-read price (resends full context at full input price every turn — a
         budget bomb). Chosen from a different provider than the existing qwen3.7-plus for pool
         diversity.
+    # Bracket: realizable {minimal,low,med,high} dedupes to {minimal,medium,high}
+    # — no true off; minimal is the floor.
+    reasoning:
+      default_arm: medium
+      arms:
+        - id: minimal
+          rank: 0
+          api: {reasoning_effort: minimal}
+        - id: medium
+          rank: 1
+          api: {reasoning_effort: medium}
+        - id: high
+          rank: 2
+          api: {reasoning_effort: high}
   zai-glm-5.2:
     model_id: fireworks/glm-5.2      # requesty's serving path, not the origin vendor
-    tier: frontier                   # was `high` in the benchmark registry (ADR-0002)
+    tier: frontier                   # was `high` in an earlier tier vocabulary
     provider: requesty
     supports_streaming: true
     supports_cache_control: true
@@ -97,6 +137,16 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-16"
       price_note: Requesty router listing (fireworks/glm-5.2). $0.14/M cache-read (live catalog; was 0.260, corrected 2026-07-16).
+    # Bracket: realizable {none,low,med,high} dedupes to {none,high} — default thinking-on.
+    reasoning:
+      default_arm: think
+      arms:
+        - id: nothink
+          rank: 0
+          api: {thinking: {type: disabled}}
+        - id: think
+          rank: 1
+          api: {thinking: {type: enabled}}
   kimi-k2.5:
     model_id: moonshot/kimi-k2.5
     tier: mid
@@ -112,6 +162,16 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"
       price_note: Requesty router listing (kimi-k2.5, moonshot). $0.100/M cache-read.
+    # Bracket: realizable {off,on} — binary, no effort gradation.
+    reasoning:
+      default_arm: think
+      arms:
+        - id: nothink
+          rank: 0
+          api: {thinking: {type: disabled}}
+        - id: think
+          rank: 1
+          api: {thinking: {type: enabled}}
   kimi-k3:
     model_id: moonshot/kimi-k3
     tier: frontier
@@ -133,6 +193,13 @@ models:
         $0.30/M cache-read, 1M context. The cheapest-frontier model, and the benchmark's
         kill-gate control baseline (claude-opus-4-6 is enabled:false in the benchmark; it
         stays in the router registry as the top escalation target).
+    # Bracket: realizable {max} — always-on; bracket collapses to a single arm.
+    reasoning:
+      default_arm: max
+      arms:
+        - id: max
+          rank: 0
+          api: {reasoning_effort: max}
   claude-opus-4-6:
     model_id: anthropic/claude-opus-4-6
     tier: frontier
@@ -149,3 +216,17 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"
       price_note: Requesty router listing (claude-opus-4-6, anthropic). $6.25/M cache-write, $0.500/M cache-read.
+    # Bracket: realizable {none,low,med,high,max} dedupes to {none,high,max} —
+    # off by default; added for completeness (benchmark-disabled, see config.yaml).
+    reasoning:
+      default_arm: nothink
+      arms:
+        - id: nothink
+          rank: 0
+          api: {thinking: {type: disabled}}
+        - id: high
+          rank: 1
+          api: {thinking: {type: enabled}, output_config: {effort: high}}
+        - id: max
+          rank: 2
+          api: {thinking: {type: enabled}, output_config: {effort: max}}

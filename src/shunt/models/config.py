@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Final, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class _NoDuplicateKeyLoader(yaml.SafeLoader):  # type: ignore[misc] # SafeLoader is untyped
@@ -102,6 +102,40 @@ class Pricing(BaseModel):
     price_note: str | None = None
 
 
+class ReasoningArm(BaseModel):
+    """One native reasoning setting for a model: id, within-model rank, raw API params."""
+
+    # `api` stays a free dict[str, Any] blob deliberately un-typed — the four
+    # provider forms (boolean flag, effort label, thinking object, hybrid) are
+    # genuinely heterogeneous.
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    rank: int
+    api: dict[str, Any]  # noqa: ANN401 (heterogeneous provider params)
+
+
+class ReasoningConfig(BaseModel):
+    """A model's reasoning bracket: its declared arms + which one is the default."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    default_arm: str
+    arms: list[ReasoningArm]
+
+    @model_validator(mode="after")
+    def _check_arms(self) -> ReasoningConfig:
+        ids = [arm.id for arm in self.arms]
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        if dupes:
+            raise ValueError(f"duplicate reasoning arm id(s): {dupes}")
+        if self.default_arm not in ids:
+            raise ValueError(
+                f"default_arm {self.default_arm!r} does not match any arm id in {sorted(ids)}"
+            )
+        return self
+
+
 class ModelEntry(BaseModel):
     """A model row as written in the registry file (`provider` is an FK)."""
 
@@ -113,6 +147,7 @@ class ModelEntry(BaseModel):
     supports_streaming: bool = True
     supports_cache_control: bool = False
     pricing: Pricing | None = None
+    reasoning: ReasoningConfig | None = None
 
 
 class Registry(BaseModel):
@@ -139,6 +174,7 @@ class ModelConfig(BaseModel):
     supports_streaming: bool = True
     supports_cache_control: bool = False
     pricing: Pricing | None = None
+    reasoning: ReasoningConfig | None = None
 
     @property
     def route(self) -> str:
@@ -174,8 +210,24 @@ def resolve_models(registry: Registry) -> dict[str, ModelConfig]:
             supports_streaming=entry.supports_streaming,
             supports_cache_control=entry.supports_cache_control,
             pricing=entry.pricing,
+            reasoning=entry.reasoning,
         )
     return resolved
+
+
+def arm_api_params(model: ModelConfig, arm_id: str) -> dict[str, Any]:
+    """Resolve one model's reasoning arm to its verbatim request params."""
+    # {} for the implicit "default" arm of a model with no declared reasoning
+    # block (back-compat); raises for any other unknown arm id — this is the
+    # EXTRACT seam shared by the benchmark runner and (later) the production router.
+    if model.reasoning is None:
+        if arm_id == "default":
+            return {}
+        raise ValueError(f"unknown reasoning arm {arm_id!r} for model {model.name!r}")
+    for arm in model.reasoning.arms:
+        if arm.id == arm_id:
+            return dict(arm.api)
+    raise ValueError(f"unknown reasoning arm {arm_id!r} for model {model.name!r}")
 
 
 def default_registry_path() -> Path:

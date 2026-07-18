@@ -10,8 +10,8 @@ def _r(**passes: bool) -> dict:
 class TestTierBuckets:
     def test_frontier_bucket_includes_glm(self) -> None:
         # zai-glm-5.2 used to carry tier "high", which matched NO bucket here, so
-        # its results were silently dropped from every pattern. ADR-0002 folded
-        # high into frontier; this pins that it now counts.
+        # its results were silently dropped from every pattern. An earlier tier
+        # vocabulary migration folded high into frontier; this pins that it now counts.
         assert _models_by_tier("frontier") == {"kimi-k3", "zai-glm-5.2"}
 
     def test_buckets_are_disjoint_and_cover_the_enabled_pool(self) -> None:

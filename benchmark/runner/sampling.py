@@ -6,6 +6,11 @@ from collections import defaultdict
 from collections.abc import Iterable
 
 from benchmark.runner.calibration import holdout_score
+from shunt.models.config import ReasoningConfig
+
+# Salt namespace for arm-sampling draws — distinct from ORDER_SALT
+# (run order) and calibration.DEFAULT_SALT (holdout), so the three draws don't alias.
+ARM_SALT_PREFIX = "arm-v1"
 
 # A single canonical order whose every prefix spreads across repos and difficulty strata
 # and whose prefixes *nest* — ``order[:10] ⊂ order[:20] ⊂ order[:200]`` for a fixed set —
@@ -77,3 +82,28 @@ def order_from_manifest(ids: list[str], manifest: dict, salt: str = ORDER_SALT) 
         stratum = str(task.get("difficulty_stratum") or task.get("difficulty") or "medium")
         triples.append((iid, repo, stratum))
     return stratified_order(triples, salt)
+
+
+def _arm_weight(rank: int, weights: list[float]) -> float:
+    """The sampling fraction for a given rank; ranks beyond the list reuse the last."""
+    if not weights:
+        return 0.0
+    return weights[rank] if rank < len(weights) else weights[-1]
+
+
+def select_arms(
+    challenge_id: str, model_name: str, bracket: ReasoningConfig, weights: list[float]
+) -> list[str]:
+    """Which reasoning arms run for one (challenge, model) cell."""
+    # The bracket's default_arm always runs (comparable baseline + cold-start).
+    # Each other arm of rank r runs iff holdout_score(challenge_id, salt) < w(r),
+    # reusing the churn-free hash primitive (no new RNG) so a re-run selects the
+    # identical arms — cache-stable and reproducible.
+    selected = [bracket.default_arm]
+    for arm in bracket.arms:
+        if arm.id == bracket.default_arm:
+            continue
+        salt = f"{ARM_SALT_PREFIX}:{model_name}:{arm.id}"
+        if holdout_score(challenge_id, salt) < _arm_weight(arm.rank, weights):
+            selected.append(arm.id)
+    return selected

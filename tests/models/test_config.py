@@ -5,10 +5,20 @@ import tempfile
 from pathlib import Path
 from typing import Final
 
+import pydantic
 import pytest
 import yaml
 
-from shunt.models.config import TIER_ORDER, ModelConfig, ModelPool, strict_yaml_load
+from shunt.models.config import (
+    TIER_ORDER,
+    ModelConfig,
+    ModelEntry,
+    ModelPool,
+    ReasoningArm,
+    ReasoningConfig,
+    arm_api_params,
+    strict_yaml_load,
+)
 
 
 def _write_yaml(path: str, data: dict) -> str:
@@ -256,3 +266,122 @@ class TestHealthTracking:
         pool = ModelPool()
         pool.mark_unhealthy("nonexistent")
         assert pool.is_healthy("nonexistent") is False
+
+
+# ---------------------------------------------------------------------------
+# ReasoningArm / ReasoningConfig schema
+# ---------------------------------------------------------------------------
+
+
+def _arm(id_: str, rank: int, **api: object) -> ReasoningArm:
+    return ReasoningArm(id=id_, rank=rank, api=dict(api))
+
+
+class TestReasoningConfigSchema:
+    def test_valid_reasoning_block_parses(self) -> None:
+        cfg = ReasoningConfig(
+            default_arm="high",
+            arms=[_arm("none", 0, enable_thinking=False), _arm("high", 1, enable_thinking=True)],
+        )
+        assert cfg.default_arm == "high"
+        assert [a.id for a in cfg.arms] == ["none", "high"]
+
+    def test_unknown_default_arm_rejected(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="default_arm"):
+            ReasoningConfig(default_arm="nope", arms=[_arm("none", 0), _arm("high", 1)])
+
+    def test_duplicate_arm_id_rejected(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="duplicate"):
+            ReasoningConfig(default_arm="high", arms=[_arm("high", 0), _arm("high", 1)])
+
+    def test_extra_field_forbidden(self) -> None:
+        with pytest.raises(pydantic.ValidationError):
+            ReasoningConfig.model_validate(
+                {"default_arm": "high", "arms": [], "bogus": 1},
+            )
+
+    def test_absent_reasoning_is_none_on_model_entry(self) -> None:
+        entry = ModelEntry(model_id="m", tier="cheap", provider="p")
+        assert entry.reasoning is None
+
+    def test_model_entry_accepts_reasoning_block(self) -> None:
+        cfg = ReasoningConfig(default_arm="high", arms=[_arm("none", 0), _arm("high", 1)])
+        entry = ModelEntry(model_id="m", tier="cheap", provider="p", reasoning=cfg)
+        assert entry.reasoning is not None
+        assert entry.reasoning.default_arm == "high"
+
+    def test_model_config_mirrors_reasoning(self) -> None:
+        cfg = ReasoningConfig(default_arm="high", arms=[_arm("none", 0), _arm("high", 1)])
+        mc = ModelConfig(
+            name="m",
+            tier="cheap",
+            provider="p",
+            base_url="https://x/v1",
+            api_key_env_var="X",
+            reasoning=cfg,
+        )
+        assert mc.reasoning is not None and mc.reasoning.default_arm == "high"
+
+    def test_absent_reasoning_is_none_on_model_config(self) -> None:
+        mc = ModelConfig(
+            name="m", tier="cheap", provider="p", base_url="https://x/v1", api_key_env_var="X"
+        )
+        assert mc.reasoning is None
+
+
+class TestDefaultRegistryHasReasoning:
+    def test_every_default_model_declares_a_reasoning_block(self) -> None:
+        # D2: all 7 registry models (6 benchmark-enabled + opus) get a bracket.
+        pool = ModelPool()
+        for name in DEFAULT_MODEL_NAMES:
+            model = pool.get_model(name)
+            assert model is not None
+            assert model.reasoning is not None, f"{name} missing reasoning block"
+            assert model.reasoning.default_arm in {a.id for a in model.reasoning.arms}
+
+
+# ---------------------------------------------------------------------------
+# D2 — arm_api_params resolver (the EXTRACT seam: benchmark + prod router)
+# ---------------------------------------------------------------------------
+
+
+class TestArmApiParams:
+    def _model(self) -> ModelConfig:
+        cfg = ReasoningConfig(
+            default_arm="high",
+            arms=[
+                _arm("none", 0, enable_thinking=False),
+                _arm("high", 1, enable_thinking=True),
+            ],
+        )
+        return ModelConfig(
+            name="m",
+            tier="cheap",
+            provider="p",
+            base_url="https://x/v1",
+            api_key_env_var="X",
+            reasoning=cfg,
+        )
+
+    def test_resolves_each_declared_arm(self) -> None:
+        model = self._model()
+        assert arm_api_params(model, "none") == {"enable_thinking": False}
+        assert arm_api_params(model, "high") == {"enable_thinking": True}
+
+    def test_unknown_arm_id_raises(self) -> None:
+        model = self._model()
+        with pytest.raises(ValueError, match="unknown reasoning arm"):
+            arm_api_params(model, "max")
+
+    def test_none_reasoning_returns_empty_for_default(self) -> None:
+        mc = ModelConfig(
+            name="m", tier="cheap", provider="p", base_url="https://x/v1", api_key_env_var="X"
+        )
+        assert arm_api_params(mc, "default") == {}
+
+    def test_none_reasoning_raises_for_non_default_arm(self) -> None:
+        mc = ModelConfig(
+            name="m", tier="cheap", provider="p", base_url="https://x/v1", api_key_env_var="X"
+        )
+        with pytest.raises(ValueError, match="unknown reasoning arm"):
+            arm_api_params(mc, "high")

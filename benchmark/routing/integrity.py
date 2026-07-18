@@ -10,14 +10,18 @@ import json
 from typing import Final
 
 from benchmark import config
+from shunt.models.config import ModelConfig, arm_api_params
 
 # Columns added to results.csv beyond the original 7 (pass/cost/tokens).
 # ``image_digest`` (canonical manifest sha256 of the SWE-bench image the cell was
-# produced with) is a staleness anchor; ``computed_at`` (ISO timestamp) is
-# AUDIT-ONLY and is NEVER a staleness key.
+# produced with) is a staleness anchor; ``arm_hash`` (sha256 of the reasoning
+# arm's resolved API params) is too — re-mapping an arm's native
+# params recomputes rather than serving a stale outcome. ``computed_at`` (ISO
+# timestamp) is AUDIT-ONLY and is NEVER a staleness key.
 CACHE_COLUMNS: Final[tuple[str, ...]] = (
     "version_hash",
     "model_version",
+    "arm_hash",
     "real_cost",
     "estimated_cost",
     "timeout_flag",
@@ -25,8 +29,10 @@ CACHE_COLUMNS: Final[tuple[str, ...]] = (
     "computed_at",
 )
 # Full results.csv header, original outcome columns first for backward-compat.
-# ``reasoning`` follows ``model`` (default below); full reasoning-arm support is
-# planned for a later release — the column is plumbed defaulted for forward-compat.
+# ``reasoning`` follows ``model`` and, together with them, forms the cache key:
+# (challenge_id, model, reasoning). Legacy rows carry the literal
+# "default" and alias-resolve to their model's declared default_arm at read time
+# (`config.load_results` / `config.default_arm_ids`).
 RESULTS_FIELDS: Final[tuple[str, ...]] = (
     "challenge_id",
     "model",
@@ -105,6 +111,32 @@ def model_versions() -> dict[str, str]:
         if not isinstance(info, dict) or model.startswith("_"):
             continue
         out[model] = str(info.get("version", UNKNOWN_VERSION))
+    return out
+
+
+def arm_hash_value(model: ModelConfig, arm_id: str) -> str:
+    """SHA256 of an arm's resolved API params — used as a staleness anchor.
+
+    Re-mapping an arm's native request params (e.g. changing a budget) changes
+    this hash, so `_is_stale` recomputes instead of serving a stale outcome.
+    """
+    params = arm_api_params(model, arm_id)
+    canonical = json.dumps(params, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def arm_hashes(models: dict[str, ModelConfig]) -> dict[str, dict[str, str]]:
+    """Map each model to {arm_id: arm_hash} for all its declared arms (staleness anchor).
+
+    A model with no declared ``reasoning`` block maps to ``{}`` (no arm axis to
+    anchor — the implicit default arm carries no per-arm params to hash).
+    """
+    out: dict[str, dict[str, str]] = {}
+    for name, model in models.items():
+        if model.reasoning is None:
+            out[name] = {}
+            continue
+        out[name] = {arm.id: arm_hash_value(model, arm.id) for arm in model.reasoning.arms}
     return out
 
 

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Final
 
 import yaml
 
 from shunt.models.config import (
     ModelConfig,
     Pricing,
+    ReasoningConfig,
     default_registry_path,
     load_registry,
     resolve_models,
@@ -15,6 +17,16 @@ from shunt.models.config import (
 
 _config: dict | None = None
 _pricing: dict | None = None
+
+# Cost-weighted p(arm|model) fractions, indexed by within-model
+# rank (index 0 = cheapest rank). Decreasing so a cheaper arm samples more often
+# than a pricier one; overridable via `arm_sampling.weights` in config.yaml.
+DEFAULT_ARM_SAMPLING_WEIGHTS: Final[tuple[float, ...]] = (0.5, 0.35, 0.25)
+
+# Legacy literal every pre-arm-hash results.csv row was written under (mirrors
+# `benchmark.routing.integrity.DEFAULT_REASONING` — duplicated here, not imported,
+# because integrity.py depends on this module and not vice versa).
+_LEGACY_DEFAULT_REASONING: Final[str] = "default"
 
 
 def load(path: str | Path | None = None) -> dict:
@@ -66,6 +78,52 @@ def load_pricing(path: str | Path | None = None) -> dict:
         if model.pricing is not None
     }
     return _pricing
+
+
+def resolved_models() -> dict[str, ModelConfig]:
+    """All registry models resolved (name -> ModelConfig), including `reasoning`.
+
+    Unlike `load_pricing()`, this is not filtered to priced models — the
+    reasoning bracket is a routing/benchmark-arm concern, not a cost concern.
+    """
+    return resolve_models(load_registry(_pricing_path()))
+
+
+def reasoning_configs() -> dict[str, ReasoningConfig | None]:
+    """Every registry model's reasoning bracket (arms + default), keyed by name."""
+    return {name: model.reasoning for name, model in resolved_models().items()}
+
+
+def default_arm_ids(models: list[str] | None = None) -> dict[str, str]:
+    """Map each model to its declared default reasoning-arm id."""
+    # A model with no declared `reasoning` block (or not in the registry at all)
+    # falls back to the legacy literal "default" placeholder — the alias every
+    # legacy (pre-arm-hash) results.csv row was written under, so cached rows keep resolving.
+    cfgs = reasoning_configs()
+    names = models if models is not None else list(cfgs.keys())
+    result: dict[str, str] = {}
+    for name in names:
+        cfg = cfgs.get(name)
+        result[name] = cfg.default_arm if cfg is not None else _LEGACY_DEFAULT_REASONING
+    return result
+
+
+def arm_sampling_weights() -> list[float]:
+    """Cost-weighted p(arm|model) fractions, indexed by within-model rank."""
+    cfg = get()
+    weights = cfg.get("arm_sampling", {}).get("weights")
+    return [float(w) for w in weights] if weights else list(DEFAULT_ARM_SAMPLING_WEIGHTS)
+
+
+def arm_sampling_enabled() -> bool:
+    """Gate for the multi-arm sweep — default False."""
+    # The live executor sends one fixed request per (challenge, model)
+    # regardless of arm (a known gap — see run_matrix.run_live_cell's
+    # docstring), so sweeping arms before that lands would bill duplicate
+    # identical requests cached under fake arm labels. False reproduces the
+    # default-arm-only behavior from before arm sampling existed.
+    cfg = get()
+    return bool(cfg.get("arm_sampling", {}).get("enabled", False))
 
 
 def _tier_order(tier: str) -> int:
@@ -240,22 +298,37 @@ def _bool_field(value: object) -> bool:
     return str(value or "").strip().lower() in ("true", "1", "yes")
 
 
-def load_results(path: str | Path | None = None) -> dict:
-    """Reconstruct the per-model outcome cache (keyed by challenge×model) from
-    routing/results.csv. ``reasoning`` defaults to ``"default"``.
+def _arm_key(model: str, stored: str, defaults: dict[str, str]) -> str:
+    """Alias a legacy ``"default"`` row to the model's declared default_arm.
+
+    A non-"default" stored value (a real arm id from a live/simulated run) is
+    never rewritten — only the legacy placeholder is aliased.
     """
+    if stored != _LEGACY_DEFAULT_REASONING:
+        return stored
+    return defaults.get(model, _LEGACY_DEFAULT_REASONING)
+
+
+def load_results(path: str | Path | None = None) -> dict:
+    """Reconstruct the outcome cache from results.csv, keyed challenge x model x arm."""
+    # A legacy reasoning="default" row aliases to its model's declared default_arm
+    # (falling back to the literal "default" key for a model with no declared
+    # reasoning block, or one absent from the current registry).
     import csv
 
     p = Path(path) if path else results_csv_path()
-    results: dict[str, dict] = {}
+    results: dict[str, dict[str, dict[str, dict]]] = {}
     if not p.exists():
         return results
+    defaults = default_arm_ids()
     with open(p, newline="") as f:
         for row in csv.DictReader(f):
             cid = row["challenge_id"]
             model = row["model"]
-            results.setdefault(cid, {})[model] = {
-                "reasoning": str(row.get("reasoning") or "default"),
+            stored = str(row.get("reasoning") or _LEGACY_DEFAULT_REASONING)
+            arm = _arm_key(model, stored, defaults)
+            results.setdefault(cid, {}).setdefault(model, {})[arm] = {
+                "reasoning": arm,
                 "pass": _bool_field(row.get("pass", "")),
                 "cost": float(row.get("cost") or 0.0),
                 "in_tok": int(row.get("in_tok") or 0),
@@ -263,6 +336,7 @@ def load_results(path: str | Path | None = None) -> dict:
                 "calls": int(row.get("calls") or 0),
                 "version_hash": str(row.get("version_hash") or ""),
                 "model_version": str(row.get("model_version") or ""),
+                "arm_hash": str(row.get("arm_hash") or ""),
                 "real_cost": float(row.get("real_cost") or row.get("cost") or 0.0),
                 "estimated_cost": float(row.get("estimated_cost") or 0.0),
                 "timeout_flag": _bool_field(row.get("timeout_flag", "")),
@@ -270,6 +344,38 @@ def load_results(path: str | Path | None = None) -> dict:
                 "computed_at": str(row.get("computed_at") or ""),
             }
     return results
+
+
+def _pick_default_row(
+    model: str, per_arm: dict[str, dict], defaults: dict[str, str]
+) -> dict | None:
+    """The row strategies/coverage should see for one (challenge, model) cell."""
+    # Prefers the model's declared default_arm; falls back to the sole cached arm
+    # when only one is present (e.g. a partially-sampled non-default-only cell);
+    # else None (no canonical single-outcome row exists for this cell yet).
+    default_arm = defaults.get(model, _LEGACY_DEFAULT_REASONING)
+    if default_arm in per_arm:
+        return per_arm[default_arm]
+    if len(per_arm) == 1:
+        return next(iter(per_arm.values()))
+    return None
+
+
+def flatten_default_arm(results: dict) -> dict:
+    """Collapse the 3-level (challenge x model x arm) cache to challenge x model."""
+    # Strategy/coverage/summary consumers (oracle, kNN, cascade, ...) score ONE
+    # canonical outcome per (challenge, model) cell — the reasoning-arm axis is a
+    # benchmark-cache concern, not yet a strategy input (that lands with the
+    # production router). This is the back-compat view
+    # `load_matrix()` feeds them, picking each model's default_arm row.
+    defaults = default_arm_ids()
+    flat: dict[str, dict[str, dict]] = {}
+    for cid, per_model in results.items():
+        for model, per_arm in per_model.items():
+            row = _pick_default_row(model, per_arm, defaults)
+            if row is not None:
+                flat.setdefault(cid, {})[model] = row
+    return flat
 
 
 def models_matrix(results: dict | None = None) -> dict:
@@ -306,14 +412,16 @@ def load_challenges() -> dict:
 
 
 def load_matrix(path: str | Path | None = None) -> dict:
-    """Load challenges.json and stitch back ``models`` (from the registry) and
-    ``results`` (from routing/results.csv) into the dict shape consumers expect
-    (``matrix["models"]``, ``matrix["results"]``, ``matrix["tasks"]``).
-    """
+    """Load challenges.json and stitch back ``models``/``results`` from the registry
+    and results.csv into the dict shape consumers expect."""
+    # matrix["results"] is the challenge x model view (each model's default_arm
+    # row) that strategies/coverage/summary score — load_results()'s full
+    # challenge x model x arm cache is a benchmark-cache concern, flattened
+    # here so the strategy layer is unaffected by the reasoning-arm axis.
     p = Path(path) if path else challenges_path()
     matrix = json.loads(Path(p).read_text())
     results = load_results()
-    matrix["results"] = results
+    matrix["results"] = flatten_default_arm(results)
     matrix["models"] = models_matrix(results)
     return matrix
 

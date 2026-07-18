@@ -84,17 +84,18 @@ The file is populated by live matrix runs (`run_matrix.py --live`), which append
 Header:
 
 ```
-challenge_id,model,reasoning,pass,cost,in_tok,out_tok,calls,version_hash,model_version,real_cost,estimated_cost,timeout_flag,image_digest,computed_at
+challenge_id,model,reasoning,pass,cost,in_tok,out_tok,calls,version_hash,model_version,arm_hash,real_cost,estimated_cost,timeout_flag,image_digest,computed_at
 ```
 
-One row per **current** `(challenge, model)` cell (the cache is upserted — one
-row per key; superseded rows move to the history log, below):
+One row per **current** `(challenge, model, reasoning)` cell (the cache is upserted —
+one row per key; superseded rows move to the history log, below):
 
 | Column | Meaning |
 |--------|---------|
 | `challenge_id` | Instance id = spec file stem under `challenges/swebench_verified/` |
 | `model` | Model key (matches the model registry) |
-| `reasoning` | Reasoning arm; defaults to `"default"` (full support is a later story) |
+| `reasoning` | Reasoning arm id (per-model effort level); `"default"` on legacy rows aliases to the model's default arm |
+| `arm_hash` | Hash of the arm's request params — a staleness anchor; a re-mapped arm recomputes |
 | `pass` / `cost` / `in_tok` / `out_tok` / `calls` | Verified outcome + token usage |
 | `version_hash` | SHA256 of the instance spec's canonical content **at compute time** (staleness anchor) |
 | `model_version` | The model's `pricing.version` (from the registry) **at compute time** (staleness anchor) |
@@ -166,7 +167,8 @@ history later.
 ## Caching loop (`../runner/run_matrix.py`)
 
 The benchmark is a **backtest over the cache**: strategies are scored by looking
-up cached `(challenge × model)` cells. `run_matrix.py` keeps the cache current:
+up cached `(challenge × model)` cells (flattened to each model's default reasoning
+arm). `run_matrix.py` keeps the cache current:
 
 1. Compute current challenge hashes + read current model versions.
 2. Load the `results.csv` cache.
