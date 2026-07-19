@@ -16,8 +16,14 @@ than a pitch.
 ![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)
 
 <p align="center">
-  <img src="docs/assets/hero.svg" alt="Coding agents (Claude Code, Cursor, n8n, and more) route through Shunt to model providers (DeepSeek, OpenAI, Claude, and more)" width="860">
+  <picture>
+    <source srcset="docs/assets/routing.webp" type="image/webp">
+    <img src="docs/assets/hero.svg" alt="Agentic platforms (Claude Code, Cursor, n8n, and more) route through Shunt to model providers (DeepSeek, OpenAI, Claude, and more)" width="860">
+  </picture>
 </p>
+<!-- Animated WebP where supported (GitHub renders it); the static hero.svg is the fallback/placeholder. -->
+
+
 
 ## The bet
 
