@@ -1,0 +1,36 @@
+name: Docs
+
+# Build the mkdocs site and publish it to the gh-pages branch. GitHub Pages then
+# serves it at https://kookas.github.io/shunt/. Runs only when the docs or their
+# config change, so unrelated pushes don't redeploy.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write # gh-deploy pushes the built site to the gh-pages branch
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gh-deploy needs history to update the gh-pages branch
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install docs dependencies
+        run: pip install -r docs/requirements.txt
+      - name: Build (strict — broken links / nav fail the build)
+        run: mkdocs build --strict
+      - name: Deploy to gh-pages
+        run: mkdocs gh-deploy --force --no-history

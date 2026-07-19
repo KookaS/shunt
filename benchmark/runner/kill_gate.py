@@ -62,8 +62,11 @@ def select_tasks(matrix: dict[str, Any], n: int, seed: int = 42) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-Decision = tuple[str, str, bool, float, int, int, int]
-# Fields: task_id, model_name, passed, cost, in_tok, out_tok, calls
+Decision = tuple[str, str, bool, float, int, int, int, bool]
+# Fields: task_id, model_name, passed, cost, in_tok, out_tok, calls, scorable
+# ``scorable`` is False when the chosen (task, model) cell was never measured — a
+# coverage gap. Such a decision is NOT a real fail@$0 and must be excluded from the
+# equal-quality cost comparison, not silently paired as a fake-cheap datapoint.
 
 
 def _get_outcome(matrix: dict[str, Any], tid: str, model: str) -> dict[str, Any]:
@@ -71,6 +74,8 @@ def _get_outcome(matrix: dict[str, Any], tid: str, model: str) -> dict[str, Any]
 
 
 def _make_decision(tid: str, model: str, outcome: dict[str, Any]) -> Decision:
+    # An empty outcome dict means the cell has no measured row (sparse coverage,
+    # not a bug — the matrix is intentionally sparse), so the decision is unscorable.
     return (
         tid,
         model,
@@ -79,6 +84,7 @@ def _make_decision(tid: str, model: str, outcome: dict[str, Any]) -> Decision:
         outcome.get("in_tok", 0),
         outcome.get("out_tok", 0),
         outcome.get("calls", 0),
+        bool(outcome),
     )
 
 
@@ -96,34 +102,24 @@ def evaluate_control(
 def evaluate_test(
     matrix: dict[str, Any], task_ids: list[str], pricing: dict[str, Any]
 ) -> list[Decision]:
-    """Test arm: cheapest passing model per task (perfect-information baseline)."""
+    """Oracle reference arm: cheapest passing model per task (perfect-information
+    upper bound). NOT the verdict arm — see :func:`run_kill_gate`.
+    """
     model_order = _model_order(pricing)
     decisions: list[Decision] = []
     for tid in task_ids:
         task_results = matrix.get("results", {}).get(tid, {})
         chosen_model = model_order[-1] if model_order else ""
-        chosen_pass = False
 
         for model in model_order:
             outcome = task_results.get(model, {})
             if outcome.get("pass", False):
                 chosen_model = model
-                chosen_pass = True
-                chosen_cost = outcome.get("cost", 0.0)
-                chosen_in = outcome.get("in_tok", 0)
-                chosen_out = outcome.get("out_tok", 0)
-                chosen_calls = outcome.get("calls", 0)
                 break
         else:
             outcome = task_results.get(chosen_model, {})
-            chosen_cost = outcome.get("cost", 0.0)
-            chosen_in = outcome.get("in_tok", 0)
-            chosen_out = outcome.get("out_tok", 0)
-            chosen_calls = outcome.get("calls", 0)
 
-        decisions.append(
-            (tid, chosen_model, chosen_pass, chosen_cost, chosen_in, chosen_out, chosen_calls)
-        )
+        decisions.append(_make_decision(tid, chosen_model, outcome))
     return decisions
 
 
@@ -155,6 +151,7 @@ def evaluate_knn_cascade(
                 outcome.get("in_tok", 0) if outcome else 0,
                 outcome.get("out_tok", 0) if outcome else 0,
                 outcome.get("calls", 0) if outcome else 0,
+                strategy.cascade_scorable,
             )
         )
     return decisions
@@ -191,13 +188,34 @@ def compute_cache_costs(
 # ---------------------------------------------------------------------------
 
 
+def _scorable_pair(cd: Decision, td: Decision) -> bool:
+    """A task pair enters the equal-quality comparison only when BOTH arms landed
+    on a measured cell. A coverage gap in either arm makes the pair unscorable."""
+    return bool(cd[7]) and bool(td[7])
+
+
+def _scorable_subset(
+    control: list[Decision], test: list[Decision]
+) -> tuple[list[Decision], list[Decision]]:
+    """Positionally-aligned pairs where BOTH arms landed on a measured cell."""
+    # The cache-aware cost basis must drop unscorable ($0 coverage-gap) cells exactly
+    # like the bootstrap pairing does: a task measured in one arm but not the other
+    # biases the cache-aware ratio and can flip the verdict (see run_kill_gate).
+    pairs = [(cd, td) for cd, td in zip(control, test, strict=True) if _scorable_pair(cd, td)]
+    return [cd for cd, _ in pairs], [td for _, td in pairs]
+
+
 def bootstrap_cost_delta(
     control: list[Decision],
     test: list[Decision],
     n_iterations: int = 10000,
     seed: int = 42,
 ) -> dict[str, float]:
-    pairs = [(td[3], cd[3]) for cd, td in zip(control, test, strict=True) if cd[2] == td[2]]
+    pairs = [
+        (td[3], cd[3])
+        for cd, td in zip(control, test, strict=True)
+        if _scorable_pair(cd, td) and cd[2] == td[2]
+    ]
     if not pairs:
         return {"mean": 0.0, "std": 0.0, "ci_lower": 0.0, "ci_upper": 0.0, "n_eq": 0}
 
@@ -229,12 +247,13 @@ def bootstrap_pass_rate_delta(
     n_iterations: int = 10000,
     seed: int = 42,
 ) -> dict[str, float]:
-    n = len(control)
+    scorable = [(cd, td) for cd, td in zip(control, test, strict=True) if _scorable_pair(cd, td)]
+    n = len(scorable)
     if n == 0:
         return {"mean": 0.0, "std": 0.0, "ci_lower": 0.0, "ci_upper": 0.0}
 
-    control_pass = [1 if d[2] else 0 for d in control]
-    test_pass = [1 if d[2] else 0 for d in test]
+    control_pass = [1 if cd[2] else 0 for cd, _ in scorable]
+    test_pass = [1 if td[2] else 0 for _, td in scorable]
     observed_mean = (sum(test_pass) - sum(control_pass)) / n
 
     rng = random.Random(seed)
@@ -266,7 +285,9 @@ def bootstrap_cost_ratio(
     seed: int = 42,
 ) -> dict[str, float]:
     pairs = [
-        (td[3], cd[3]) for cd, td in zip(control, test, strict=True) if cd[2] == td[2] and cd[3] > 0
+        (td[3], cd[3])
+        for cd, td in zip(control, test, strict=True)
+        if _scorable_pair(cd, td) and cd[2] == td[2] and cd[3] > 0
     ]
     if not pairs:
         return {"mean": 1.0, "std": 0.0, "ci_lower": 1.0, "ci_upper": 1.0, "n_eq": 0}
@@ -298,20 +319,51 @@ def bootstrap_cost_ratio(
 # ---------------------------------------------------------------------------
 
 
+def _cache_aware_ratio(
+    cache_control: tuple[float, float], cache_router: tuple[float, float]
+) -> float:
+    """router cache-aware cost / control cache-aware cost. A zero-cost control
+    yields +inf, which the guard treats as 'not cheaper' (conservative)."""
+    control_cache = cache_control[1]
+    router_cache = cache_router[1]
+    return router_cache / control_cache if control_cache else float("inf")
+
+
 def decide_verdict(
     cost_delta: dict[str, float],
     pr_delta: dict[str, float],
     verifier_threshold: float,
     n: int,
+    cache_aware_ratio: float,
 ) -> tuple[int, str]:
+    # The cost_delta / cost_ratio bootstrap CIs are on NAIVE per-task cost. The
+    # kill-gate criterion is "beat fixed-frontier-WITH-caching", so a naive PASS is
+    # gated below by a hard cache-aware guard. We deliberately do NOT bootstrap a CI
+    # on cache-aware cost: cache savings are adjacency-dependent (they depend on
+    # which model immediately preceded which), and paired bootstrap resampling
+    # reshuffles the task sequence, destroying the very adjacency the savings are
+    # computed from \u2014 a resampled "cache-aware cost" is not a well-defined
+    # statistic. Hence the guard is a point-estimate comparison, applied only in the
+    # PASS branch so it can only ever make the gate STRICTER, never spuriously fail
+    # a genuinely-cheaper router.
     if cost_delta["ci_lower"] < 0 < cost_delta["ci_upper"]:
         return (2, f"INCONCLUSIVE \u2014 extend N by 10 (current N={n})")
 
     if cost_delta["ci_upper"] < 0:
         quality_ok = pr_delta["ci_lower"] >= -verifier_threshold
-        if quality_ok:
-            return (0, "PASS \u2014 Shunt cheaper at equal or better quality")
-        return (1, "FAIL \u2014 Shunt pass rate too low vs baseline")
+        if not quality_ok:
+            return (1, "FAIL \u2014 Shunt pass rate too low vs baseline")
+        if cache_aware_ratio >= 1.0:
+            return (
+                1,
+                f"FAIL \u2014 cheaper on naive cost but not once caching is priced "
+                f"(cache-aware ratio {cache_aware_ratio:.4f} \u2265 1.0)",
+            )
+        return (
+            0,
+            f"PASS \u2014 Shunt cheaper at equal or better quality "
+            f"(cache-aware ratio {cache_aware_ratio:.4f})",
+        )
 
     if cost_delta["ci_lower"] > 0:
         return (1, "FAIL \u2014 Shunt is more expensive at equal quality")
@@ -328,116 +380,118 @@ def decide_verdict(
 # ---------------------------------------------------------------------------
 
 
+def _arm_switches(decisions: list[Decision]) -> int:
+    return sum(1 for i in range(1, len(decisions)) if decisions[i][1] != decisions[i - 1][1])
+
+
 def _format_report(  # noqa: PLR0913
     control: list[Decision],
-    test: list[Decision],
-    pricing: dict[str, Any],
+    router: list[Decision],
+    oracle: list[Decision],
     n: int,
     verifier_threshold: float,
     cost_delta: dict[str, float],
     pr_delta: dict[str, float],
     cost_ratio: dict[str, float],
     cache_control: tuple[float, float],
-    cache_test: tuple[float, float],
+    cache_router: tuple[float, float],
+    cache_oracle: tuple[float, float],
     frontier_model: str,
+    n_unscorable: int,
+    cache_aware_ratio: float,
     decomposition: dict[str, float] | None = None,
-    knn_cascade: list[Decision] | None = None,
-    cache_knn: tuple[float, float] | None = None,
 ) -> str:
     n_actual = len(control)
     control_pass = sum(1 for d in control if d[2])
-    test_pass = sum(1 for d in test if d[2])
-    control_switches = sum(1 for i in range(1, len(control)) if control[i][1] != control[i - 1][1])
-    test_switches = sum(1 for i in range(1, len(test)) if test[i][1] != test[i - 1][1])
+    router_pass = sum(1 for d in router if d[2])
+    oracle_pass = sum(1 for d in oracle if d[2])
+    control_switches = _arm_switches(control)
+    router_switches = _arm_switches(router)
+    oracle_switches = _arm_switches(oracle)
 
     control_naive, control_cache = cache_control
-    test_naive, test_cache = cache_test
-
-    knn_naive, knn_cache = cache_knn if cache_knn else (0.0, 0.0)
-    knn_pass = sum(1 for d in knn_cascade) if knn_cascade else 0
-    knn_switches = (
-        sum(1 for i in range(1, len(knn_cascade)) if knn_cascade[i][1] != knn_cascade[i - 1][1])
-        if knn_cascade and len(knn_cascade) > 1
-        else 0
-    )
+    router_naive, router_cache = cache_router
+    oracle_naive, oracle_cache = cache_oracle
 
     lines: list[str] = []
     lines.append("=" * 72)
-    lines.append(f"KILL GATE REPORT \u2014 Shunt vs Always-Frontier ({frontier_model})")
+    lines.append(f"KILL GATE REPORT \u2014 Shunt router vs Always-Frontier ({frontier_model})")
     lines.append("=" * 72)
     lines.append("")
     lines.append(f"Tasks               : {n_actual} (requested: {n})")
     lines.append(f"Verifier threshold  : {verifier_threshold}")
+    lines.append(f"Unscorable (cov gap): {n_unscorable}")
     lines.append("")
     lines.append("\u2500" * 72)
     lines.append(
         "  "
-        + f"{'Arm':<16} {'Pass Rate':<12} {'Naive Cost':<14}"
+        + f"{'Arm':<18} {'Pass Rate':<12} {'Naive Cost':<14}"
         + f" {'Cache-Aware Cost':<18} {'Switches':<10}"
     )
     lines.append("\u2500" * 72)
-    lines.append(
-        "  "
-        + f"{'Control':<16} {control_pass:>2}/{n_actual:<3}"
-        + f" ({control_pass / n_actual * 100:>5.1f}%)  "
-        + f"${control_naive:<10.6f}  ${control_cache:<14.6f}"
-        + f"  {control_switches:<10}"
-    )
-    lines.append(
-        "  "
-        + f"{'Test (cascade)':<16} {test_pass:>2}/{n_actual:<3}"
-        + f" ({test_pass / n_actual * 100:>5.1f}%)  "
-        + f"${test_naive:<10.6f}  ${test_cache:<14.6f}"
-        + f"  {test_switches:<10}"
-    )
-    if knn_cascade is not None:
-        lines.append(
+
+    def _arm_line(label: str, passes: int, naive: float, cache: float, switches: int) -> str:
+        return (
             "  "
-            + f"{'Test (kNN-casc)':<16} {knn_pass:>2}/{n_actual:<3}"
-            + f" ({knn_pass / n_actual * 100:>5.1f}%)  "
-            + f"${knn_naive:<10.6f}  ${knn_cache:<14.6f}"
-            + f"  {knn_switches:<10}"
+            + f"{label:<18} {passes:>2}/{n_actual:<3}"
+            + f" ({passes / n_actual * 100:>5.1f}%)  "
+            + f"${naive:<10.6f}  ${cache:<14.6f}"
+            + f"  {switches:<10}"
+        )
+
+    lines.append(_arm_line("Control", control_pass, control_naive, control_cache, control_switches))
+    lines.append(
+        _arm_line("Router (kNN-casc)", router_pass, router_naive, router_cache, router_switches)
+    )
+    lines.append(
+        _arm_line("Oracle (ref)", oracle_pass, oracle_naive, oracle_cache, oracle_switches)
+    )
+    lines.append("  (Oracle = perfect-information upper bound; reference only, not the verdict.)")
+    if n_unscorable:
+        lines.append(
+            f"  (Naive/Cache-Aware Cost exclude {n_unscorable} unscorable coverage-gap "
+            f"task(s); pass counts are over all {n_actual}.)"
         )
 
     lines.append("")
     lines.append("Switch-tax detail:")
     items: list[tuple[str, float, float]] = [
         ("Control", control_naive, control_cache),
-        ("Test", test_naive, test_cache),
+        ("Router", router_naive, router_cache),
+        ("Oracle", oracle_naive, oracle_cache),
     ]
-    if knn_cascade is not None:
-        items.append(("kNN-casc", knn_naive, knn_cache))
     for label, naive_amt, cache_amt in items:
         switch_tax = naive_amt - cache_amt
         pct = (switch_tax / naive_amt * 100) if naive_amt else 0.0
         lines.append(f"  {label:<20} switch-tax = ${switch_tax:<10.6f} ({pct:.2f}% of naive)")
 
     control_st = control_naive - control_cache
-    test_st = test_naive - test_cache
-    cmp = "more" if test_st > control_st else "less"
-    delta_st = abs(test_st - control_st)
-    lines.append(f"  {'Switch-tax delta':<20} ${delta_st:<10.6f} (test pays {cmp})")
+    router_st = router_naive - router_cache
+    cmp = "more" if router_st > control_st else "less"
+    delta_st = abs(router_st - control_st)
+    lines.append(f"  {'Switch-tax delta':<20} ${delta_st:<10.6f} (router pays {cmp})")
 
-    cache_ratio = test_cache / control_cache if control_cache else float("inf")
-    naive_ratio = test_naive / control_naive if control_naive else float("inf")
-    lines.append(f"  {'Cost ratio (cache-aware)':<20} {cache_ratio:<8.4f}")
-    lines.append(f"  {'Cost ratio (naive)':<20} {naive_ratio:<8.4f}")
-
-    if knn_cascade is not None and control_cache > 0:
-        knn_cache_ratio = knn_cache / control_cache
-        lines.append(f"  {'kNN-casc ratio (cache)':<20} {knn_cache_ratio:<8.4f}")
+    naive_ratio = router_naive / control_naive if control_naive else float("inf")
+    lines.append(
+        f"  {'Cost ratio (cache-aware)':<26} {cache_aware_ratio:<8.4f}"
+        "  <- REAL kill-gate criterion (< 1.0 to pass)"
+    )
+    lines.append(f"  {'Cost ratio (naive)':<26} {naive_ratio:<8.4f}")
 
     lines.append("")
     lines.append("\u2500" * 72)
-    lines.append("  Comparison Metrics (90% CI, bootstrap)")
+    lines.append("  Comparison Metrics (90% CI, bootstrap) \u2014 on NAIVE cost")
+    lines.append("  (Bootstrap CIs are on naive cost only; cache-aware cost is not")
+    lines.append("   bootstrappable \u2014 savings are adjacency-dependent. The cache-aware")
+    lines.append("   ratio above is the real gate criterion; naive CIs are diagnostic.)")
     lines.append("\u2500" * 72)
     lines.append("")
-    lines.append("  Cost delta per task (test \u2212 control, equal quality):")
+    lines.append("  Cost delta per task (router \u2212 control, equal quality, NAIVE):")
     lines.append(f"    Mean    : ${cost_delta['mean']:.6f}")
     lines.append(f"    90% CI  : [${cost_delta['ci_lower']:.6f}, ${cost_delta['ci_upper']:.6f}]")
     lines.append(f"    N eq-q  : {cost_delta['n_eq']}")
     lines.append("")
-    lines.append("  Cost ratio per task (test / control, equal quality):")
+    lines.append("  Cost ratio per task (router / control, equal quality):")
     lines.append(f"    Mean    : {cost_ratio['mean']:.4f}")
     lines.append(f"    90% CI  : [{cost_ratio['ci_lower']:.4f}, {cost_ratio['ci_upper']:.4f}]")
     lines.append(f"    N eq-q  : {cost_ratio['n_eq']}")
@@ -445,7 +499,7 @@ def _format_report(  # noqa: PLR0913
     pr_pct = pr_delta["mean"] * 100
     pr_lo = pr_delta["ci_lower"] * 100
     pr_hi = pr_delta["ci_upper"] * 100
-    lines.append("  Pass rate delta (test \u2212 control):")
+    lines.append("  Pass rate delta (router \u2212 control):")
     lines.append(f"    Mean    : {pr_delta['mean']:.4f} ({pr_pct:.1f}%)")
     lines.append(
         f"    90% CI  : [{pr_delta['ci_lower']:.4f}, {pr_delta['ci_upper']:.4f}] "
@@ -479,7 +533,9 @@ def _format_report(  # noqa: PLR0913
     lines.append("  DATA CAVEAT: model availability determined by config.yaml.")
     lines.append("  Models absent from config.yaml's `models` list are excluded.")
     lines.append("\u2500" * 72)
-    verdict_code, verdict_label = decide_verdict(cost_delta, pr_delta, verifier_threshold, n)
+    _, verdict_label = decide_verdict(
+        cost_delta, pr_delta, verifier_threshold, n, cache_aware_ratio
+    )
     lines.append(f"  Verdict : {verdict_label}")
     lines.append("\u2500" * 72)
     lines.append("")
@@ -501,46 +557,56 @@ def run_kill_gate(
     n_iterations: int = 10000,
 ) -> tuple[int, str]:
     control = evaluate_control(matrix, task_ids, frontier_model)
-    test = evaluate_test(matrix, task_ids, pricing)
 
-    cost_delta = bootstrap_cost_delta(control, test, n_iterations=n_iterations)
-    pr_delta = bootstrap_pass_rate_delta(control, test, n_iterations=n_iterations)
-    cost_ratio = bootstrap_cost_ratio(control, test, n_iterations=n_iterations)
+    # The shipped kNN-cascade router is the VERDICT arm: the gate asks whether the
+    # real router beats fixed-frontier-with-caching at equal quality. A router error
+    # must surface as a real failure — no try/except swallowing it into a warning.
+    router = evaluate_knn_cascade(matrix, task_ids)
 
-    cache_control = compute_cache_costs(control, pricing)
-    cache_test = compute_cache_costs(test, pricing)
+    # Oracle (cheapest-passing) is a labelled reference upper bound only — it does
+    # NOT drive the verdict.
+    oracle = evaluate_test(matrix, task_ids, pricing)
 
-    decomposition = _compute_cost_decomposition(control, test)
+    cost_delta = bootstrap_cost_delta(control, router, n_iterations=n_iterations)
+    pr_delta = bootstrap_pass_rate_delta(control, router, n_iterations=n_iterations)
+    cost_ratio = bootstrap_cost_ratio(control, router, n_iterations=n_iterations)
 
-    # kNN-cascade arm
-    try:
-        knn_decisions = evaluate_knn_cascade(matrix, task_ids)
-        cache_knn = compute_cache_costs(knn_decisions, pricing)
-    except Exception as exc:
-        # Optional arm — must not abort the gate, but a dropped arm must be
-        # visible, not silent (that silence hid the config.knn_params() bug).
-        print(f"WARNING: kNN-cascade arm skipped: {exc!r}", file=sys.stderr)
-        knn_decisions = None
-        cache_knn = None
+    # Cache-aware costs gate the PASS branch, so they MUST be measured over the same
+    # scorable-pair set as the bootstraps — a $0 coverage-gap cell in either arm would
+    # otherwise contaminate the ratio (see _scorable_subset).
+    scorable_control, scorable_router = _scorable_subset(control, router)
+    cache_control = compute_cache_costs(scorable_control, pricing)
+    cache_router = compute_cache_costs(scorable_router, pricing)
+    cache_oracle = compute_cache_costs(oracle, pricing)
+    cache_aware_ratio = _cache_aware_ratio(cache_control, cache_router)
+
+    decomposition = _compute_cost_decomposition(control, router)
+
+    n_unscorable = sum(
+        1 for cd, rd in zip(control, router, strict=True) if not _scorable_pair(cd, rd)
+    )
 
     report = _format_report(
         control=control,
-        test=test,
-        pricing=pricing,
+        router=router,
+        oracle=oracle,
         n=len(task_ids),
         verifier_threshold=verifier_threshold,
         cost_delta=cost_delta,
         pr_delta=pr_delta,
         cost_ratio=cost_ratio,
         cache_control=cache_control,
-        cache_test=cache_test,
+        cache_router=cache_router,
+        cache_oracle=cache_oracle,
         frontier_model=frontier_model,
+        n_unscorable=n_unscorable,
+        cache_aware_ratio=cache_aware_ratio,
         decomposition=decomposition,
-        knn_cascade=knn_decisions,
-        cache_knn=cache_knn,
     )
 
-    exit_code, _ = decide_verdict(cost_delta, pr_delta, verifier_threshold, len(task_ids))
+    exit_code, _ = decide_verdict(
+        cost_delta, pr_delta, verifier_threshold, len(task_ids), cache_aware_ratio
+    )
     return exit_code, report
 
 

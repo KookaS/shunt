@@ -182,8 +182,8 @@ def bootstrap_ci(
 
 
 def compute_cost_decomposition(
-    control_decisions: list[tuple[str, str, bool, float, int, int, int]],
-    test_decisions: list[tuple[str, str, bool, float, int, int, int]],
+    control_decisions: list[tuple[str, str, bool, float, int, int, int, bool]],
+    test_decisions: list[tuple[str, str, bool, float, int, int, int, bool]],
 ) -> dict:
     """Oaxaca-Blinder decomposition of cost savings into price, volume, and
     interaction effects (summing to frontier_cost - shunt_cost). Only tasks

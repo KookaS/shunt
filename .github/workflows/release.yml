@@ -17,12 +17,72 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+      - name: Set package version from tag
+        # pyproject pins a static version; the release version is the git tag
+        # (v1.2.3 -> 1.2.3). Inject it before building so the wheel/sdist carry the
+        # tagged version instead of the placeholder — otherwise every release would
+        # publish the same placeholder and collide on PyPI.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "RELEASE_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          python - "$VERSION" <<'PY'
+          import re, sys, pathlib
+          version = sys.argv[1]
+          p = pathlib.Path("pyproject.toml")
+          text = p.read_text()
+          new, n = re.subn(r'(?m)^version = ".*"$', f'version = "{version}"', text, count=1)
+          if n != 1:
+              sys.exit(f"expected exactly one static version line, patched {n}")
+          p.write_text(new)
+          print(f"pyproject version set to {version}")
+          PY
       - name: Build
         run: |
           pip install build
           python -m build
+      - name: Verify built version matches the tag
+        # Guard against a version/tag mismatch reaching PyPI — the artifact
+        # filename must carry the tagged version.
+        run: |
+          ls dist/
+          test -f "dist/shunt_router-${RELEASE_VERSION}.tar.gz" \
+            || { echo "::error::sdist for ${RELEASE_VERSION} not found"; exit 1; }
+          test -n "$(ls dist/shunt_router-${RELEASE_VERSION}-*.whl 2>/dev/null)" \
+            || { echo "::error::wheel for ${RELEASE_VERSION} not found"; exit 1; }
+      - name: Boot-smoke the built wheel
+        # Install the built wheel into a CLEAN venv (not the build env) and boot
+        # it. Catches the "ships but crashes on import" class — e.g. bundled
+        # package-data missing from the wheel — before it reaches PyPI.
+        run: |
+          python -m venv /tmp/boot-smoke
+          /tmp/boot-smoke/bin/pip install dist/*.whl
+          /tmp/boot-smoke/bin/shunt version
+          /tmp/boot-smoke/bin/python -c "import shunt; print('shunt import OK')"
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Confirm the release is live on PyPI
+        # PyPI's index is eventually consistent — the release API lags the upload by
+        # seconds to a minute — so poll rather than check once. Confirms both that
+        # the version is indexed AND that it installs cleanly from the real index.
+        run: |
+          echo "Waiting for shunt-router==${RELEASE_VERSION} to appear on PyPI..."
+          for i in $(seq 1 20); do
+            if curl -sf "https://pypi.org/pypi/shunt-router/${RELEASE_VERSION}/json" >/dev/null; then
+              echo "PyPI reports shunt-router ${RELEASE_VERSION} (attempt ${i})."
+              break
+            fi
+            if [ "$i" -eq 20 ]; then
+              echo "::error::shunt-router ${RELEASE_VERSION} not on PyPI after ~5 min"; exit 1
+            fi
+            sleep 15
+          done
+          python -m venv /tmp/pypi-check
+          /tmp/pypi-check/bin/pip install --no-cache-dir "shunt-router==${RELEASE_VERSION}"
+          INSTALLED=$(/tmp/pypi-check/bin/python -c "import importlib.metadata as m; print(m.version('shunt-router'))")
+          echo "Installed from PyPI: ${INSTALLED}"
+          test "${INSTALLED}" = "${RELEASE_VERSION}" \
+            || { echo "::error::PyPI installed ${INSTALLED}, expected ${RELEASE_VERSION}"; exit 1; }
+          echo "✅ shunt-router ${RELEASE_VERSION} is live and installable from PyPI."
 
   docker:
     runs-on: ubuntu-latest

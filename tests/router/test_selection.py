@@ -199,12 +199,15 @@ class TestEscalation:
         assert model == "fronty"
         assert reason == "safe_fallback"
 
-    def test_safe_fallback_on_the_real_pool_is_opus(self):
+    def test_safe_fallback_on_the_real_pool_is_verified_opus(self):
         # _escalate returns get_tier_models(tier)[-1] — the LAST FRONTIER ROW IN
-        # YAML ORDER, not the smartest model. The two coincide only because
-        # claude-opus-4-6 is last in default_config.yaml. Appending a frontier
-        # model after it would silently redirect every safe_fallback to it, and
-        # the single-model-per-tier fakes above cannot catch that. This pins it.
+        # YAML ORDER, not the smartest model. As of 2026-07-18 the frontier tail
+        # gained router-only escalation targets (gemini-3.1-pro, gpt-5.6-sol,
+        # claude-fable-5, claude-opus-4-8) with research-estimated, unverified IDs.
+        # claude-opus-4-6 is deliberately kept LAST — the only frontier model with a
+        # verified live Requesty listing — so the safe_fallback ("don't fail" path)
+        # never depends on an unverified ID (see default_config.yaml comment).
+        # This pins that ordering so a future append can't silently redirect it.
         rule = SelectionRule()
         pool = ModelPool()
         names = [m.name for t in TIER_ORDER for m in pool.get_tier_models(t)]

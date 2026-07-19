@@ -40,6 +40,11 @@ DEFAULT_MODEL_NAMES: Final = [
     "claude-fable-5",
     "claude-opus-4-8",
     "claude-opus-4-6",
+    # Frontier escalation tail added 2026-07-18 (router-only; benchmark-disabled).
+    "gemini-3.1-pro",
+    "gpt-5.6-sol",
+    "claude-fable-5",
+    "claude-opus-4-8",
 ]
 
 

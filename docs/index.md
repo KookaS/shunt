@@ -1,38 +1,67 @@
 ---
 title: Shunt
-description: Tool-agnostic, cache-safe LLM router that routes coding agent requests to the cheapest capable model.
+description: Pre-alpha cache-safe LLM proxy that today forwards to a cheap default; kNN outcome-based routing is designed and offline-validated but not yet live.
 ---
 
 # Shunt
 
-A tool-agnostic, cache-safe LLM router. Shunt sits between your coding agent and the model API. It decides which model handles each request, learns from verified outcomes, and never switches models mid-session.
-
-Cheap models handle the routine ~70-80% of work. Frontier models are reserved for the hard tail. You configure both the model pool and the decision method.
+**Pre-alpha.** Shunt is a local, cache-safe proxy between your coding agent and
+the model API. The goal is a router that sends routine work to a cheap model and
+the hard tail to a frontier one, learning that line from your own passing tests.
+**That routing is not live yet.** What runs today is the proxy: it speaks both
+the OpenAI and Anthropic wire formats and forwards every request to a single
+cheap default model.
 
 ```mermaid
 graph LR
-  A[Agent] -->|base_url| B[Shunt]
-  B --> C{Cheapest capable?}
-  C -->|Yes| D[Cheap model]
-  C -->|No| E[Frontier model]
-  D --> F[Verified outcome]
-  E --> F
-  F -.->|learns| B
+  A[Agent] -->|base_url| B[Shunt proxy]
+  B -->|today: always| D[Cheap default model]
+  B -.->|roadmap| C{kNN over verified outcomes}
+  C -.-> D
+  C -.-> E[Frontier model]
 ```
 
-## Why it's different
+The solid path is what runs. The dashed path — per-task model selection over
+verified outcomes — is designed and validated offline, but is **not** on the live
+request path.
 
-No shipped OSS project simultaneously gives you pluggable policy, outcome grounding, tool-agnostic design, and cache-safe routing. Each incumbent hits 2-3 of those at best. The hard part is the decision — which task needs the smart model — not the multi-provider plumbing.
+## An honest result
 
-## Design center
+We tested the core idea (embed a task, find similar past tasks with known
+outcomes, pick the cheapest model that succeeded) offline before shipping it.
+On QA and reasoning-style workloads the embedding difficulty signal carries and
+there is routing headroom. On the agentic-coding workload we actually target it
+did **not** clear our viability bar: ranking hard tasks from easy ones off the
+prompt embedding came out near chance. We publish that because it scopes the
+project — it does not kill the cache-safe proxy or the verify-and-escalate path,
+which does not depend on that signal, but it means we do not claim live
+coding-task routing we cannot yet back with evidence.
 
-- **Cache-boundary-aware routing** — controls `cache_control` placement, never switches models mid-session. Post-hoc `usage.cache_read_input_tokens` measures the switch tax but does not decide.
-- **Pluggable, inspectable policy** — kNN over verified outcomes, no brittle rule tier. Every decision emits an `X-Shunt-Decision` header.
+## What runs today
+
+- **A drop-in OpenAI/Anthropic-compatible proxy** — one env var and your agent
+  talks to Shunt instead of the provider; Shunt translates between wire formats.
+- **Cache-safe forwarding** — no mid-session model switch, so no silent full-price
+  re-read of a cached conversation. With a fixed default there is nothing to
+  switch; the future routing is being built to keep that guarantee.
+- **A visible `X-Shunt-Decision` header** — names the model and the reason; today
+  the reason is always the cold-start default.
+- **Bring-your-own keys, zero telemetry** — nothing phoned home, replayed, or resold.
+
+## Design center (what the roadmap is being built toward)
+
+- **Cache-boundary-aware routing** — decisions at task/session boundaries only,
+  never mid-cached-turn.
+- **Pluggable, inspectable policy** — kNN over verified outcomes, no brittle rule
+  tier; every decision surfaced in a header.
 - **OpenAI ↔ Anthropic translation** — these two first, not 100+ providers.
-- **Verifier + memory loop** — log `(task → model → verified outcome)` and learn from it. Verification is async/backfill, never on the hot path.
-- **Secure by default** — localhost-bind, no exposed control plane, no key logging. Apache-2.0, zero telemetry.
+- **Verifier + memory loop** — log `(task → model → verified outcome)` and learn
+  from it; verification stays async/backfill, never on the hot path.
+- **Secure by default** — localhost-bind, no exposed control plane, no key logging.
 
 ## Quickstart
+
+The package is published; install it directly.
 
 ```bash
 pip install shunt-router
@@ -45,7 +74,8 @@ Or with Docker:
 docker run -p 8080:8080 ghcr.io/kookas/shunt-router
 ```
 
-Point your tool at localhost:8080:
+Point your tool at localhost:8080 (today, every request forwards to the cheap
+default):
 
 | Tool | Env var |
 |---|---|
@@ -56,12 +86,18 @@ Point your tool at localhost:8080:
 
 ## Contents
 
-- [Architecture](architecture.md) — modules, flow, integration
-- [Benchmark](benchmark.md) — run model-capability and routing evals
-- [Benchmark Design](benchmark-design.md) — two-tree structure, strategy interface
+- [Architecture](architecture.md) — what runs live vs what is built but unwired
+- [Configuration](configuration.md) — add provider keys and register models
+- [Benchmark](benchmark.md) — run the offline model-capability and routing evals
+- [Benchmark design](benchmark-design.md) — two-tree structure, strategy interface
 
 ## Status
 
-Pre-alpha. The hypothesis — cheap-first routing beats always-frontier at equal quality — is unproven. If it doesn't hold, the project stops.
+Pre-alpha. The core hypothesis — cheap-first routing beats always-frontier at
+equal quality on agentic coding — is unproven and, on the coding workload, the
+embedding difficulty signal did not clear the bar. The kill gate (beat
+fixed-frontier-with-caching at equal quality on a real workflow) has not been
+run. If it does not hold, the router does not ship.
 
 Apache-2.0. Import as `shunt` (`shunt-router` on PyPI — `shunt` is taken).
+</content>

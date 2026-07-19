@@ -71,9 +71,13 @@ repos:
         always_run: true
       - id: validate-benchmark-config
         name: validate benchmark config.yaml
-        # Use the repo venv's python so `from benchmark import config` resolves the
-        # editable install even when committing outside an activated venv.
-        entry: bash -c 'PATH="$PWD/.venv/bin:$PATH" python benchmark/validate_config.py'
+        # Run as a module from the repo root (pre-commit's cwd) so `from benchmark
+        # import config` resolves the harness via sys.path[0], not an installed
+        # package — benchmark is deliberately NOT installed/shipped (see
+        # pyproject.toml packages.find). `-m` puts cwd on the path; no PYTHONPATH
+        # or sys.path mutation (SH003). Use the repo venv's python even when
+        # committing outside an activated venv.
+        entry: bash -c 'PATH="$PWD/.venv/bin:$PATH" python -m benchmark.validate_config'
         language: system
         pass_filenames: false
         files: ^benchmark/config\.yaml$
@@ -85,7 +89,10 @@ repos:
       - id: end-of-file-fixer
         exclude: '\.log$'
       - id: check-yaml
-        exclude: ^mkdocs\.yaml$
+        # mkdocs config carries a `!!python/name:` tag (mermaid superfence) that
+        # check-yaml's safe loader can't construct; the file is validated by
+        # `mkdocs build --strict` in the Docs workflow instead.
+        exclude: ^mkdocs\.ya?ml$
       - id: check-added-large-files
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2

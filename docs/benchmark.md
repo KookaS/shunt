@@ -144,6 +144,23 @@ Metrics per strategy:
 | kNN | Embed task → retrieve similar → cheapest capable model |
 | kNN-cascade | kNN-informed try-verify-escalate |
 
+These last two are **offline evaluation strategies**, not live product behavior —
+the proxy today forwards to a cheap default and calls neither. The cascade
+(try-verify-escalate) exists only here in the benchmark; it is not implemented on
+the live request path.
+
+### What the offline eval found about routing
+
+Scored offline, the embedding-based routing strategies split by workload:
+
+- On **QA and reasoning-style** tasks, the task embedding separates
+  cheap-solvable from frontier-only work, so kNN has signal to route on.
+- On the **agentic-coding** tasks this benchmark targets, it did **not** clear
+  our viability bar. Ranking hard tasks from easy ones off the prompt embedding
+  came out near chance, so a kNN router has little to exploit. That is the load-
+  bearing reason routing is not yet wired into the live proxy — we do not ship a
+  decision the evidence does not support.
+
 ## Deciding the kill-gate on partial frontier coverage
 
 Running the most expensive ("frontier") model on every task is costly, so Shunt can

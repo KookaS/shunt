@@ -244,6 +244,53 @@ class TestComputeCascadeOrder:
         assert len(order) == 2
 
 
+class TestCascadeCheapFirstOrdering:
+    """BUG 2: within an equal-quality tolerance the cheaper model must rank first,
+    yet a genuine (beyond-tolerance) quality gap must still let the better win.
+    """
+
+    @staticmethod
+    def _outcomes(n_pass: int, n_fail: int) -> list[tuple[float, bool]]:
+        # All neighbours at distance 0 (conf 1.0) so weighted_rate == pass fraction.
+        return [(0.0, True)] * n_pass + [(0.0, False)] * n_fail
+
+    def test_within_tolerance_prefers_cheaper(self):
+        # cheap rate 0.70, expensive rate 0.75 -> within tolerance (tol=0.1),
+        # so the cheaper model must be tried first despite lower success rate.
+        pricing = {"cheap": 1.0, "expensive": 5.0}
+        neighbor_results = {
+            "cheap": self._outcomes(7, 3),  # 0.70
+            "expensive": self._outcomes(3, 1),  # 0.75
+        }
+        order = compute_cascade_order(
+            neighbor_results,
+            pricing,
+            max_tries=2,
+            min_samples=1,
+            success_rate_threshold=0.0,
+            success_tolerance=0.1,
+        )
+        assert [m for m, _ in order][0] == "cheap"
+
+    def test_large_quality_gap_prefers_better(self):
+        # cheap rate 0.50 vs expensive rate 0.90 -> gap far beyond tolerance,
+        # so the genuinely better (expensive) model must win despite its price.
+        pricing = {"cheap": 0.2, "expensive": 10.0}
+        neighbor_results = {
+            "cheap": self._outcomes(1, 1),  # 0.50
+            "expensive": self._outcomes(9, 1),  # 0.90
+        }
+        order = compute_cascade_order(
+            neighbor_results,
+            pricing,
+            max_tries=2,
+            min_samples=1,
+            success_rate_threshold=0.0,
+            success_tolerance=0.05,
+        )
+        assert [m for m, _ in order][0] == "expensive"
+
+
 class TestkNNCascadeStrategy:
     """Tests for kNNCascadeStrategy integration (uses mock/synthetic matrix)."""
 

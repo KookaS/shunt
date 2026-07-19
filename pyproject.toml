@@ -68,11 +68,23 @@ Repository = "https://github.com/KookaS/shunt"
 shunt = "shunt.cli:main"
 
 [tool.setuptools.packages.find]
-# shunt is the shipped product (src layout); benchmark is the eval harness at
-# repo root, made importable so its modules use absolute imports (no sys.path).
-where = ["src", "."]
-include = ["shunt*", "benchmark*"]
+# shunt is the shipped product (src layout). The benchmark eval harness lives at
+# repo root and is deliberately NOT shipped in the wheel — it is dev/CI-only.
+# Keeping it out of `include` means `pip install shunt-router` ships only the
+# product: no top-level `benchmark` package, no matplotlib pull, and no bundled
+# benchmark runtime data to go missing. Tests import the harness via the repo
+# root on sys.path (see [tool.pytest.ini_options].pythonpath below); running it
+# directly works from the repo root (cwd on sys.path). No sys.path mutation.
+where = ["src"]
+include = ["shunt*"]
 namespaces = false
+
+[tool.pytest.ini_options]
+# The benchmark harness is not an installed package (see packages.find above),
+# so tests reach it via the repo root on sys.path rather than an editable
+# package mapping. This keeps `benchmark` out of the wheel without an in-test
+# sys.path mutation (which SH003/TID251 ban).
+pythonpath = ["."]
 
 [tool.setuptools.package-data]
 # The bundled registry is loaded at startup via importlib.resources
@@ -80,15 +92,7 @@ namespaces = false
 # install (`pip install`, the Docker image) crashes on boot with
 # FileNotFoundError — editable installs and an external SHUNT_MODEL_CONFIG_PATH
 # both hide the gap. This is the shipped `shunt` product's ONLY bundled data file.
-# (The co-shipped `benchmark` harness also reads bundled data at runtime but is
-# slated to be dropped from the wheel before the first PyPI publish — see the
-# packages.find note above — rather than packaged here.)
 "shunt.models" = ["*.yaml"]
-# PUBLISH-TIME CAVEAT: `benchmark*` here makes the harness importable under
-# `pip install -e .` (dev requirement) but ALSO bundles it into a built wheel.
-# Before the first PyPI publish, drop `benchmark*` from `include` (or move the
-# harness under src/) so end users of `pip install shunt-router` don't get the
-# top-level `benchmark` package (it pulls matplotlib from the `benchmark` extra).
 
 [tool.vulture]
 min_confidence = 80

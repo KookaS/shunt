@@ -4,6 +4,8 @@ them in cascade until one passes.
 
 from __future__ import annotations
 
+import math
+
 import hnswlib
 import numpy as np
 
@@ -31,18 +33,31 @@ def _embed_texts(texts: list[str]) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Pure cascade-order algorithm (testable without ML)
 # ---------------------------------------------------------------------------
+# Default equal-quality band: models whose distance-weighted neighbour success
+# rate falls in the same ``success_tolerance``-wide bucket are treated as tied on
+# quality, so the cheaper one is tried first (cheap-first discipline). 0.05 = 5
+# percentage points, within the noise floor of a kNN estimate from a handful of
+# neighbours (min_samples ~3, k ~20); a gap wider than one bucket is a genuine
+# quality signal that must win.
+_DEFAULT_SUCCESS_TOLERANCE: float = 0.05
+# The price term is bounded to half a bucket so it can only reorder *within* an
+# equal-quality band, never cross a full bucket and override a real quality gap.
+_PRICE_PENALTY_WEIGHT: float = 0.5
+
+
 def compute_cascade_order(
     neighbor_results: dict[str, list[tuple[float, bool]]],
     pricing: dict[str, float],
     max_tries: int = 3,
     min_samples: int = 3,
     success_rate_threshold: float = 0.7,
+    success_tolerance: float = _DEFAULT_SUCCESS_TOLERANCE,
 ) -> list[tuple[str, float]]:
-    """Compute cascade order from per-model neighbor outcomes
-    (``{model: [(distance, passed), ...]}`` + ``{model: cost_per_1M}``),
-    returning ``(model, score)`` tuples by descending score.
-    """
+    """Order neighbour-seen models by ``bucket - 0.5*(price/max_price)`` desc, where
+    ``bucket = floor(weighted_rate / success_tolerance)`` — the integer band
+    dominates (genuine quality wins) and price only breaks within-band ties."""
     max_price = max(pricing.values()) if pricing else 1.0
+    tol = success_tolerance if success_tolerance > 0 else _DEFAULT_SUCCESS_TOLERANCE
 
     scored: list[tuple[str, float]] = []
     for model, outcomes in neighbor_results.items():
@@ -62,7 +77,11 @@ def compute_cascade_order(
             continue
 
         price = pricing.get(model, 0.0)
-        score = weighted_rate - 0.01 * (price / max_price)
+        # +1e-9 pulls exact tol multiples (e.g. 0.70/0.10 == 6.999… in float) back
+        # onto the intended bucket boundary before flooring.
+        bucket = math.floor(weighted_rate / tol + 1e-9)
+        norm_price = price / max_price if max_price > 0 else 0.0
+        score = bucket - _PRICE_PENALTY_WEIGHT * norm_price
         scored.append((model, score))
 
     scored.sort(key=lambda x: -x[1])
@@ -100,6 +119,10 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
         self.cascade_total_cost: float = 0.0
         self.cascade_tried_models: list[str] = []
         self.cascade_order: list[tuple[str, float]] = []
+        # False when the cascade path (any tried model, or the frontier fallback)
+        # lands on an unmeasured matrix cell — the true cost/outcome is unknown, so
+        # this decision is a coverage gap, not a real fail@$0.
+        self.cascade_scorable: bool = True
 
     @property
     def name(self) -> str:
@@ -110,12 +133,14 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
             self.cascade_tried_models = []
             self.cascade_total_cost = 0.0
             self.cascade_order = []
+            self.cascade_scorable = False
             return _fallback_model(matrix)
         if not self._ready:
             self._build(matrix)
 
         self.cascade_tried_models = []
         self.cascade_total_cost = 0.0
+        self.cascade_scorable = True
 
         order = self._get_cascade_order(task_id, task_meta, matrix)
         self.cascade_order = order
@@ -125,6 +150,8 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
         for model, _score in order:
             self.cascade_tried_models.append(model)
             outcome = task_results.get(model, {})
+            if not outcome:
+                self.cascade_scorable = False
             self.cascade_total_cost += outcome.get("cost", 0.0)
             if outcome.get("pass", False):
                 return model
@@ -135,6 +162,8 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
         frontier = max(pricing, key=lambda m: pricing[m])
         self.cascade_tried_models.append(frontier)
         frontier_outcome = task_results.get(frontier, {})
+        if not frontier_outcome:
+            self.cascade_scorable = False
         self.cascade_total_cost += frontier_outcome.get("cost", 0.0)
         return frontier
 

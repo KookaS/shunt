@@ -68,7 +68,11 @@ jobs:
           pip install uv
           uv sync --extra dev --extra benchmark
       - name: Integrity + derived-artifact drift
-        run: uv run python benchmark/runner/check_integrity.py --check-derived
+        # Run as a module (cwd = repo root) so `from benchmark import config`
+        # resolves via sys.path[0]. benchmark is dev/CI-only, not an installed
+        # package (see pyproject.toml packages.find), so a by-path invocation
+        # would fail with ModuleNotFoundError.
+        run: uv run python -m benchmark.runner.check_integrity --check-derived
 
   # Advisory whole-program hygiene — runs separately so its slower/noisier
   # tools never block the fast pre-commit path. Reports, does not fail the build.

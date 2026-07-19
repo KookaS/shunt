@@ -1,0 +1,59 @@
+site_name: Shunt
+site_description: >-
+  Pre-alpha, cache-safe LLM proxy that today forwards to a cheap default; kNN
+  outcome-based routing is designed and offline-validated but not yet live.
+site_url: https://kookas.github.io/shunt/
+repo_url: https://github.com/KookaS/shunt
+repo_name: KookaS/shunt
+edit_uri: edit/master/docs/
+copyright: Apache-2.0
+
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Configuration: configuration.md
+  - Benchmark: benchmark.md
+  - Benchmark design: benchmark-design.md
+  - Decision records: decisions/index.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+plugins:
+  - search

@@ -43,10 +43,14 @@ your own, start from a copy of the packaged file.
 
 ### Without a benchmark run
 
-Three fields make a model routable — `model_id`, `tier`, and `provider`. A new
-model works the moment its row exists, and shunt uses its `tier` as a prior until
-real outcomes accumulate. The two `supports_*` fields below are optional; they
-default to streaming on, cache control off.
+Three fields make a model registerable — `model_id`, `tier`, and `provider`. A
+model row is picked up the moment it exists; `tier` is the prior the routing is
+designed to start from before real outcomes accumulate. (Pre-alpha note: the live
+proxy forwards to a single cheap default today and does not yet choose between
+registered models — see [architecture.md](architecture.md). Registering models
+now sets up the pool the router will use once routing is wired in, and makes them
+scoreable in the offline benchmark.) The two `supports_*` fields below are
+optional; they default to streaming on, cache control off.
 
 ```yaml
 providers:
@@ -70,11 +74,13 @@ claiming less than the truth just costs you the discount. Guess low.
 
 The `examples/providers/` directory has one of these per provider, ready to copy.
 
-**Order matters.** Models are read in file order. When the router escalates, it
-tries the first model it hasn't tested yet, starting from the cheapest tier — so
-order decides what gets explored first. If everything has been tried, it falls
-back to the *last* model of the highest tier. Reordering rows changes both, so
-add new rows deliberately rather than sorting the file.
+**Order matters.** Models are read in file order, and that order is load-bearing
+for the routing being built: when the router escalates, it is designed to try the
+first model it hasn't tested yet, starting from the cheapest tier, and to fall
+back to the *last* model of the highest tier once everything has been tried.
+(Escalation is not on the live path yet — it exists as an offline benchmark
+strategy.) Reordering rows changes that intended behavior, so add new rows
+deliberately rather than sorting the file.
 
 ### With a benchmark run
 

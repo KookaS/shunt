@@ -69,7 +69,7 @@ The evaluator iterates tasks, calls `select()` per strategy, looks up the outcom
 
 γ defaults to 0.1, matching the `agent-as-a-router` cost-weight baseline.
 
-Cost is recorded from actual model API responses: litellm's computed cost for direct routes (deepseek), and provider-returned `usage.cost` for Requesty-routed models (including cache-aware rates). For offline eval, costs come from the cached `results.csv` (recorded during live runs). In production the router records actual API costs in real time.
+Cost is recorded from actual model API responses: litellm's computed cost for direct routes (deepseek), and provider-returned `usage.cost` for Requesty-routed models (including cache-aware rates). For offline eval, costs come from the cached `results.csv` (recorded during live benchmark matrix runs). Recording per-request API cost on the live proxy path is roadmap, not a current feature.
 
 ## Baselines
 
@@ -84,4 +84,4 @@ Additional strategies: kNN and kNN-cascade, both implemented in `strategies/`.
 
 ## Relationship to src/shunt/
 
-The strategies in `benchmark/routing/strategies/` are evaluation copies — they consume a known matrix and compute metrics offline. They do not replace `src/shunt/router/` (the live inference server). The offline kNN strategy is designed to mirror the live router's algorithm identically.
+The strategies in `benchmark/routing/strategies/` are evaluation copies — they consume a known matrix and compute metrics offline. They are separate from `src/shunt/router/`, the decision module that is built and unit-tested but not yet wired into the live proxy (which currently forwards to a cheap default). The offline kNN strategy is designed to mirror that module's algorithm, so that if the module clears the kill gate and is wired in, live behavior matches what the benchmark scored.
