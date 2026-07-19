@@ -15,7 +15,9 @@ than a pitch.
 ![Telemetry](https://img.shields.io/badge/telemetry-none-brightgreen)
 ![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)
 
-📖 **Full documentation: [kookas.github.io/shunt](https://kookas.github.io/shunt/)**
+<p align="center">
+  <img src="docs/assets/hero.svg" alt="Coding agents (Claude Code, Cursor, n8n, and more) route through Shunt to model providers (DeepSeek, OpenAI, Claude, and more)" width="860">
+</p>
 
 ## The bet
 
