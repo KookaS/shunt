@@ -20,8 +20,26 @@ ARM_SALT_PREFIX = "arm-v1"
 # churn-free hash primitive.
 
 ORDER_SALT = "order-v1"
+
+# Salt namespace for the frontier-audit draw (collect mode). Distinct from ORDER_SALT,
+# ARM_SALT_PREFIX and calibration.DEFAULT_SALT so the four hash draws never alias — a
+# shared salt would make the audit membership correlate with run order / arm selection,
+# breaking the "known uniform sampling probability pi = fraction" the AIPW estimator needs.
+AUDIT_SALT = "frontier-audit-v1"
+
 # Cheapest→hardest so a repo's early picks lead with its easy tasks.
 _STRATUM_ORDER = ("easy", "medium", "hard")
+
+
+def in_frontier_audit(task_id: str, fraction: float, salt: str = AUDIT_SALT) -> bool:
+    """True iff a non-discriminating task is drawn into the frontier audit stratum.
+
+    Uniform hash-threshold, so the inclusion probability pi = fraction is known exactly
+    (the AIPW/PPI++ validity precondition); nested and churn-free like the holdout draw.
+    """
+    if not 0.0 <= fraction <= 1.0:
+        raise ValueError(f"fraction must be in [0, 1], got {fraction}")
+    return holdout_score(task_id, salt) < fraction
 
 
 def _stratum_rank(stratum: str) -> int:

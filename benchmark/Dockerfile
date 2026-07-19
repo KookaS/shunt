@@ -22,6 +22,8 @@ COPY benchmark/ ./benchmark/
 COPY pyproject.toml ./
 
 # Simulated by default: reports missing/stale cells + regenerates plots, never
-# fabricates outcomes. Pass --live (with keys + Docker) for real execution.
+# fabricates outcomes. `--strategy full` = the exhaustive matrix loop (the runner's
+# default is cost_optimal, which does not regenerate plots). Pass --live (with keys +
+# Docker) for real execution.
 ENTRYPOINT ["python", "-m", "benchmark.runner.run_matrix"]
-CMD ["--no-summary"]
+CMD ["--strategy", "full", "--no-summary"]

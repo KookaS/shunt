@@ -15,8 +15,10 @@ import numpy as np
 
 from benchmark import config
 from benchmark.routing.strategies import Strategy
+from benchmark.routing.strategies.external_prior import ExternalPriorCascade
 from benchmark.routing.strategies.fixed import AlwaysCheap, AlwaysFrontier, Random
 from benchmark.routing.strategies.knn import kNNStrategy
+from benchmark.routing.strategies.knn_blended import kNNBlended
 from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
 from benchmark.routing.strategies.oracle import Oracle, OracleRewardAware
 
@@ -85,6 +87,8 @@ def get_strategies() -> list[tuple[str, Strategy]]:
     knn_p = dict(strat_cfg.get("knn", {}))
     cascade_p = dict(strat_cfg.get("knn", {}))
     cascade_p.update(strat_cfg.get("knn_cascade", {}))
+    ext_p = dict(strat_cfg.get("external_prior", {}))
+    blend_p = dict(strat_cfg.get("knn_blended", {}))
 
     registry: dict[str, Callable[[], Strategy]] = {
         "oracle": lambda: Oracle(),
@@ -94,6 +98,8 @@ def get_strategies() -> list[tuple[str, Strategy]]:
         "random": lambda: Random(seed=42),
         "knn": lambda: kNNStrategy(**knn_p),
         "knn_cascade": lambda: kNNCascadeStrategy(**cascade_p),
+        "external_prior": lambda: ExternalPriorCascade(**ext_p),
+        "knn_blended": lambda: kNNBlended(**blend_p),
     }
 
     return [(name, registry[name]()) for name in enabled if name in registry]

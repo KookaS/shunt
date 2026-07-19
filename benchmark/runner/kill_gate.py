@@ -477,7 +477,7 @@ def _format_report(  # noqa: PLR0913
     lines.append("")
     lines.append("\u2500" * 72)
     lines.append("  DATA CAVEAT: model availability determined by config.yaml.")
-    lines.append("  Models with enabled: false are excluded from enabled_models().")
+    lines.append("  Models absent from config.yaml's `models` list are excluded.")
     lines.append("\u2500" * 72)
     verdict_code, verdict_label = decide_verdict(cost_delta, pr_delta, verifier_threshold, n)
     lines.append(f"  Verdict : {verdict_label}")

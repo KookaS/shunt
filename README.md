@@ -63,6 +63,18 @@ code-gen savings at 15–30%; the one study on *agentic* Claude Code found no
 benefit, so we measure our own workflow before quoting you a number. Zero
 telemetry, and we publish the real result — honesty is the feature.
 
+Running the frontier model on every task to set that bar is expensive, so by default
+Shunt collects its outcomes adaptively: cheap and mid models on every task, the frontier
+model only where cheaper tiers disagree plus a uniformly random audit. The baseline is
+then estimated with a doubly-robust (PPI++/AIPW) estimator whose validity comes from
+the random audit, not from the prediction — and the gate rests on the paired
+routing-vs-frontier contrast, not the wide absolute pass-rate. The savings over an
+exhaustive matrix are scale-dependent (the measured cheap↔frontier correlation is low),
+so the adaptive default earns its keep mostly at larger task counts; the exhaustive run
+stays one flag away (`--strategy full`). Shunt even *measures* the rate at which the
+frontier model fails tasks cheaper ones pass, the assumption most routers leave
+undisclosed. See [`docs/benchmark.md`](docs/benchmark.md) for the method.
+
 ## Works with the tools you already use
 
 One line, and your agent talks to Shunt instead of the model API. Shunt speaks both

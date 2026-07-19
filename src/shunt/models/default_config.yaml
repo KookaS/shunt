@@ -29,12 +29,16 @@ providers:
 # Required core (model_id, tier, provider, supports_streaming,
 # supports_cache_control) makes a model routable. The optional `pricing` block
 # makes it benchmarkable — absent pricing means the benchmark cannot see it and
-# so can never score it against a fabricated price.
+# so can never score it against a fabricated price. `version` is a MODEL-IDENTITY
+# attribute (a sibling of tier/provider, NOT a pricing field): a genuine provider
+# model change is a NEW registry id, and `version` is the opt-in "force re-run
+# under the same id" staleness key — required once a model is priced.
 models:
   qwen3.7-plus:
     model_id: alibaba/qwen3.7-plus
     tier: cheap
     provider: requesty
+    version: qwen3.7-plus
     supports_streaming: true
     supports_cache_control: false
     pricing:
@@ -42,7 +46,6 @@ models:
       output_cost_per_1m: 1.28
       cache_read_cost_per_1m: 0.032
       cache_write_cost_per_1m: 0.4
-      version: qwen3.7-plus
       price_provider: requesty
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"
@@ -63,13 +66,13 @@ models:
     model_id: deepseek-v4-flash
     tier: cheap
     provider: deepseek
+    version: deepseek-v4-flash
     supports_streaming: true
     supports_cache_control: false
     pricing:
       input_cost_per_1m: 0.14
       output_cost_per_1m: 0.28
       cache_read_cost_per_1m: 0.0028
-      version: deepseek-v4-flash
       price_provider: requesty
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"
@@ -92,13 +95,13 @@ models:
     model_id: openai/gpt-5-mini
     tier: mid
     provider: requesty
+    version: gpt-5-mini
     supports_streaming: true
     supports_cache_control: false
     pricing:
       input_cost_per_1m: 0.25
       output_cost_per_1m: 2.0
       cache_read_cost_per_1m: 0.025
-      version: gpt-5-mini
       price_provider: requesty
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-16"
@@ -124,15 +127,15 @@ models:
           api: {reasoning_effort: high}
   zai-glm-5.2:
     model_id: fireworks/glm-5.2      # requesty's serving path, not the origin vendor
-    tier: frontier                   # was `high` in an earlier tier vocabulary
+    tier: high                       # high tier: strong but below the frontier baseline (kimi-k3)
     provider: requesty
+    version: glm-5.2
     supports_streaming: true
     supports_cache_control: true
     pricing:
       input_cost_per_1m: 1.4
       output_cost_per_1m: 4.4
       cache_read_cost_per_1m: 0.14
-      version: glm-5.2
       price_provider: requesty
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-16"
@@ -151,13 +154,13 @@ models:
     model_id: moonshot/kimi-k2.5
     tier: mid
     provider: requesty
+    version: kimi-k2.5
     supports_streaming: true
     supports_cache_control: false
     pricing:
       input_cost_per_1m: 0.6
       output_cost_per_1m: 3.0
       cache_read_cost_per_1m: 0.1
-      version: kimi-k2.5
       price_provider: requesty
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"
@@ -176,6 +179,7 @@ models:
     model_id: moonshot/kimi-k3
     tier: frontier
     provider: requesty
+    version: kimi-k3
     supports_streaming: true
     # Conservative: mirrors kimi-k2.5 (same provider/family). Not verified against
     # a live response — sending unsupported cache_control breakpoints risks a 400.
@@ -184,7 +188,6 @@ models:
       input_cost_per_1m: 3.0
       output_cost_per_1m: 15.0
       cache_read_cost_per_1m: 0.3
-      version: kimi-k3
       price_provider: requesty
       price_source: https://www.requesty.ai/models/moonshot/kimi-k3
       price_as_of: "2026-07-17"
@@ -204,6 +207,7 @@ models:
     model_id: anthropic/claude-opus-4-6
     tier: frontier
     provider: requesty
+    version: claude-opus-4-6
     supports_streaming: true
     supports_cache_control: true
     pricing:
@@ -211,7 +215,6 @@ models:
       output_cost_per_1m: 25.0
       cache_read_cost_per_1m: 0.5
       cache_write_cost_per_1m: 6.25
-      version: claude-opus-4-6
       price_provider: requesty
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"

@@ -4,6 +4,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from shunt.models import TIER_ORDER
+
 
 class ModelInfo(Protocol):
     """Minimal view of a model config the router reads — just its name."""
@@ -23,7 +25,6 @@ class ModelPoolProtocol(Protocol):
     def is_healthy(self, name: str) -> bool: ...
 
 
-_TIER_ORDER = ("cheap", "mid", "frontier")
 _DEFAULT_COLD_START_MODEL = "qwen3.7-plus"
 _DEFAULT_MIN_SUCCESS_RATE = 0.7
 _DEFAULT_MIN_SAMPLES = 3
@@ -125,12 +126,12 @@ class SelectionRule:
         tested_models: set[str],
         model_pool: ModelPoolProtocol,
     ) -> tuple[str, str]:
-        for tier in _TIER_ORDER:
+        for tier in TIER_ORDER:
             for m in model_pool.get_tier_models(tier):
                 if m.name not in tested_models:
                     return (m.name, "exploration_untested")
 
-        for tier in reversed(_TIER_ORDER):
+        for tier in reversed(TIER_ORDER):
             models = model_pool.get_tier_models(tier)
             if models:
                 return (models[-1].name, "safe_fallback")

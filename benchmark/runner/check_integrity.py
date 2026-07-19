@@ -4,12 +4,22 @@
 from __future__ import annotations
 
 import argparse
+import csv
+from pathlib import Path
 
 from benchmark import config
-from benchmark.routing import integrity, summary
+from benchmark.routing import authenticity, integrity, summary
 from benchmark.routing.strategies.fixed import AlwaysCheap, AlwaysFrontier
 from benchmark.routing.strategies.oracle import Oracle
 from benchmark.runner import image_version, swebench_specs
+
+
+def _raw_rows(path: Path) -> list[dict[str, str]]:
+    """Read results.csv verbatim (each row a str→str dict) for authenticity checks."""
+    if not path.exists():
+        return []
+    with path.open(newline="") as f:
+        return list(csv.DictReader(f))
 
 
 def _stored_hashes(cache: dict) -> dict[str, str]:
@@ -30,18 +40,6 @@ def check_hashes(cache: dict, hashes: dict[str, str]) -> tuple[list[str], list[s
         cid for cid in stored if cid in hashes and stored[cid] and stored[cid] != hashes[cid]
     ]
     return sorted(removed), sorted(changed)
-
-
-def check_model_versions(cache: dict, versions: dict[str, str]) -> list[tuple[str, str, str]]:
-    """Return (model, stored_version, current_version) for every stale model row."""
-    stale: set[tuple[str, str, str]] = set()
-    for models in cache.values():
-        for model, cell in models.items():
-            stored = str(cell.get("model_version", ""))
-            current = versions.get(model, integrity.UNKNOWN_VERSION)
-            if stored and current and stored != current:
-                stale.add((model, stored, current))
-    return sorted(stale)
 
 
 def check_image_digests(
@@ -103,11 +101,16 @@ def _diff_row(first: dict, second: dict) -> list[str]:
 def _report(
     removed: list[str],
     changed: list[str],
-    stale: list,
     derived: list[str],
     image_drift: list[tuple[str, str, str, str]] | None = None,
+    auth_errors: list[authenticity.Finding] | None = None,
 ) -> bool:
     ok = True
+    if auth_errors:
+        ok = False
+        print(f"AUTHENTICITY violations ({len(auth_errors)}): results.csv rows fail Layer-1 checks")
+        for finding in auth_errors[:10]:
+            print(f"  - [{finding.rule}] {finding.key} — {finding.detail}")
     if changed:
         ok = False
         print(f"CHANGED challenges ({len(changed)}): content hash differs from stored version_hash")
@@ -118,11 +121,6 @@ def _report(
         print(f"REMOVED challenges ({len(removed)}): rows exist but challenge file is gone")
         for cid in removed[:10]:
             print(f"  - {cid}")
-    if stale:
-        ok = False
-        print(f"STALE model versions ({len(stale)}):")
-        for model, stored, current in stale:
-            print(f"  - {model}: stored={stored} current={current}")
     if image_drift:
         ok = False
         print(f"IMAGE-DIGEST drift ({len(image_drift)}): resolved manifest differs from stored")
@@ -134,7 +132,7 @@ def _report(
         for msg in derived[:10]:
             print(f"  - {msg}")
     if ok:
-        print("Integrity OK: hashes match, no removed challenges, model versions current.")
+        print("Integrity OK: hashes match, no removed challenges, authenticity anchors current.")
     return ok
 
 
@@ -158,10 +156,16 @@ def main(config_path: str = "benchmark/config.yaml") -> int:
     # SWE-bench Verified is the sole challenge source: a cell's version_hash is the
     # content hash of its instance spec (base_commit + F2P/P2P + provenance).
     hashes = integrity.swebench_spec_hashes()
-    versions = integrity.model_versions()
 
     removed, changed = check_hashes(cache, hashes)
-    stale = check_model_versions(cache, versions)
+
+    # Layer-1 authenticity: recompute every derivable field on the RAW rows so
+    # accidental corruption and naive fabrication fail the gate — including the
+    # model_version anchor (a stale model version fails here, not in a separate pass).
+    auth_findings = authenticity.verify_rows(_raw_rows(config.results_csv_path()))
+    auth_errors = authenticity.errors(auth_findings)
+    for warn in authenticity.warnings(auth_findings):
+        print(f"  authenticity WARN [{warn.rule}] {warn.key} — {warn.detail}")
 
     image_drift: list[tuple[str, str, str, str]] = []
     if args.check_images:
@@ -177,7 +181,7 @@ def main(config_path: str = "benchmark/config.yaml") -> int:
         tasks = config.sample_tasks(sorted(hashes.keys()), seed=seed)
         derived = check_derived(matrix, tasks)
 
-    return 0 if _report(removed, changed, stale, derived, image_drift) else 1
+    return 0 if _report(removed, changed, derived, image_drift, auth_errors) else 1
 
 
 if __name__ == "__main__":

@@ -273,7 +273,9 @@ class TestInfraFailure:
 
     def test_run_live_cell_raises_when_report_missing(self, tmp_path, monkeypatch):
         # Docker/image unavailable ⇒ run_harness returns report_path=None.
-        monkeypatch.setattr(infer, "generate_patch_live", lambda spec, model: self._patch())
+        monkeypatch.setattr(
+            infer, "generate_patch_live", lambda spec, model, arm="default": self._patch()
+        )
         monkeypatch.setattr(
             infer.swebench_harness,
             "run_harness",
@@ -285,7 +287,9 @@ class TestInfraFailure:
     def test_run_live_cell_raises_on_nonzero_returncode(self, tmp_path, monkeypatch):
         # Harness exited non-zero (timeout/error) ⇒ not a real pass=False result.
         report = tmp_path / "r.json"
-        monkeypatch.setattr(infer, "generate_patch_live", lambda spec, model: self._patch())
+        monkeypatch.setattr(
+            infer, "generate_patch_live", lambda spec, model, arm="default": self._patch()
+        )
         monkeypatch.setattr(
             infer.swebench_harness,
             "run_harness",

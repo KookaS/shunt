@@ -17,7 +17,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 
 from benchmark import config
-from benchmark.routing import integrity, plot_style, summary
+from benchmark.routing import plot_style, summary
 from benchmark.routing.metrics import _reward
 from benchmark.routing.plot_style import RawResults
 from benchmark.routing.strategies import Strategy
@@ -1229,9 +1229,12 @@ def plot_embedding_routing_map(
     return path
 
 
-def derive_tasks(seed: int) -> list[str]:
-    """All challenge specs sampled by ``sample_size``, matching run_matrix and check_integrity."""
-    return config.sample_tasks(sorted(integrity.all_hashes().keys()), seed=seed)
+def derive_tasks(matrix: dict, seed: int) -> list[str]:
+    """Covered tasks (present in results.csv) sampled by ``sample_size`` — matches run_eval."""
+    # Evaluate over the MEASURED denominator, not the full suite: an uncovered task is
+    # unmeasured, NOT a failure — scoring the 151 unrun-of-200 as fail@$0 diluted every
+    # plotted pass-rate ~4x and made report.py disagree with run_eval/plot_strategies.
+    return config.sample_tasks(sorted(matrix.get("results", {}).keys()), seed=seed)
 
 
 def derive_rows(matrix: dict, tasks: list[str]) -> list[dict]:
@@ -1348,7 +1351,7 @@ def main(config_path: str = "benchmark/config.yaml") -> None:
                 "Run the live matrix first: python -m benchmark.runner.run_matrix --live"
             )
             return
-        tasks = derive_tasks(config.benchmark_params().get("seed", 42))
+        tasks = derive_tasks(matrix, config.benchmark_params().get("seed", 42))
         results = derive_rows(matrix, tasks)
         # Write a human-readable copy to reports/ (gitignored) — never committed.
         summary.write_summary_csv(results, out_dir / "strategy_summary.csv")

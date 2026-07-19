@@ -93,8 +93,61 @@ class TestOptionalPricingIsTheNoBenchmarkPath:
         path.write_text(yaml.safe_dump(_UNPRICED_REGISTRY, sort_keys=False))
         monkeypatch.setattr(config, "_pricing", None)
         monkeypatch.setattr(config, "_pricing_path", lambda: path)
+        monkeypatch.setattr(config, "_config", {"models": []})
         assert config.load_pricing() == {}
         assert config.enabled_models() == []
+
+
+class TestVersionIsModelLevel:
+    """`version` is a MODEL-IDENTITY attribute, not a pricing field — it lives on
+    the model row, and a genuine model change means a new registry id, not a bump."""
+
+    def _priced_model(self, **over) -> dict:
+        row = {
+            "model_id": "p/m",
+            "tier": "cheap",
+            "provider": "p",
+            "version": "m",
+            "pricing": {
+                "input_cost_per_1m": 0.1,
+                "output_cost_per_1m": 0.2,
+                "cache_read_cost_per_1m": 0.01,
+                "price_provider": "p",
+                "price_source": "https://p.ai",
+                "price_as_of": "2026-07-18",
+            },
+        }
+        row.update(over)
+        return {"providers": {"p": _provider_row()}, "models": {"m": row}}
+
+    def test_model_level_version_parses_and_surfaces(self, tmp_path, monkeypatch):
+        path = tmp_path / "models.yaml"
+        path.write_text(yaml.safe_dump(self._priced_model(), sort_keys=False))
+        registry = parse_registry(yaml.safe_load(path.read_text()))
+        assert registry.models["m"].version == "m"
+        monkeypatch.setattr(config, "_pricing", None)
+        monkeypatch.setattr(config, "_pricing_path", lambda: path)
+        assert config.load_pricing()["m"]["version"] == "m"
+        assert integrity.model_versions()["m"] == "m"
+
+    def test_version_under_pricing_is_rejected(self):
+        # `version` no longer belongs to the pricing block — Pricing forbids extras.
+        bad = self._priced_model()
+        del bad["models"]["m"]["version"]
+        bad["models"]["m"]["pricing"]["version"] = "m"
+        with pytest.raises(ValidationError, match="version"):
+            parse_registry(bad)
+
+    def test_priced_model_without_version_is_rejected(self):
+        # A benchmarkable (priced) model must carry its identity/version.
+        bad = self._priced_model()
+        del bad["models"]["m"]["version"]
+        with pytest.raises(ValidationError, match="version"):
+            parse_registry(bad)
+
+    def test_unpriced_model_needs_no_version(self):
+        # Routable-but-unscored models (the example fragments) stay versionless.
+        parse_registry(_UNPRICED_REGISTRY)  # must not raise
 
 
 class TestRegistrySchemaIsEnforced:
@@ -117,10 +170,18 @@ class TestRegistrySchemaIsEnforced:
         with pytest.raises(ValueError, match="unknown provider"):
             parse_registry(data)
 
-    def test_high_tier_is_no_longer_a_valid_vocabulary(self):
+    def test_high_tier_is_valid_vocabulary(self):
+        # `high` is a registered tier (cheap|mid|high|frontier) — zai-glm-5.2 carries it.
         data = {
             "providers": {"p": _provider_row()},
             "models": {"m": {"model_id": "m", "tier": "high", "provider": "p"}},
+        }
+        parse_registry(data)  # must not raise
+
+    def test_unregistered_tier_is_rejected(self):
+        data = {
+            "providers": {"p": _provider_row()},
+            "models": {"m": {"model_id": "m", "tier": "ultra", "provider": "p"}},
         }
         with pytest.raises(ValidationError):
             parse_registry(data)
@@ -199,9 +260,50 @@ class TestValidatorChecksConfigReferences:
 
     def test_validate_flags_a_config_model_absent_from_the_registry(self, tmp_path):
         cfg = tmp_path / "config.yaml"
-        cfg.write_text("models:\n  ghost-model:\n    enabled: true\n")
+        cfg.write_text("models:\n  - ghost-model\n")
         errors = config.validate(cfg)
         assert any("ghost-model" in e for e in errors)
+
+    def test_validate_rejects_the_legacy_enabled_dict_form(self, tmp_path):
+        # The old {model: {enabled: bool}} shape is no longer accepted — a listed
+        # model must be a bare name in a list.
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text("models:\n  deepseek-v4-flash:\n    enabled: true\n")
+        errors = config.validate(cfg)
+        assert any("list" in e.lower() for e in errors), errors
+
+
+class TestEnabledModelsList:
+    """`models:` in config.yaml is a LIST of enabled names; in-list = enabled,
+    registry-only = disabled, listed-but-unregistered = hard error."""
+
+    def _load(self, monkeypatch, models: list[str]) -> None:
+        monkeypatch.setattr(config, "_config", {"models": models})
+
+    def test_listed_models_are_enabled(self, monkeypatch):
+        self._load(monkeypatch, ["deepseek-v4-flash", "gpt-5-mini"])
+        assert set(config.enabled_models()) == {"deepseek-v4-flash", "gpt-5-mini"}
+
+    def test_registry_model_absent_from_the_list_is_disabled(self, monkeypatch):
+        self._load(monkeypatch, ["deepseek-v4-flash"])
+        enabled = config.enabled_models()
+        assert "gpt-5-mini" not in enabled
+        assert "deepseek-v4-flash" in enabled
+
+    def test_listed_model_absent_from_the_registry_raises(self, monkeypatch):
+        self._load(monkeypatch, ["deepseek-v4-flash", "ghost-model"])
+        with pytest.raises(ValueError, match="ghost-model"):
+            config.enabled_models()
+
+    def test_tier_sort_is_preserved(self, monkeypatch):
+        # cheap → mid → high → frontier, cheapest-first within tier.
+        self._load(monkeypatch, ["kimi-k3", "deepseek-v4-flash", "gpt-5-mini", "zai-glm-5.2"])
+        ordered = config.enabled_models()
+        tiers = [config.load_pricing()[m]["tier"] for m in ordered]
+        rank = {t: i for i, t in enumerate(("cheap", "mid", "high", "frontier"))}
+        assert tiers == sorted(tiers, key=lambda t: rank[t])
+        assert ordered[0] == "deepseek-v4-flash"
+        assert ordered[-1] == "kimi-k3"
 
 
 class TestRegistryShipsWithThePackage:

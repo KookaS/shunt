@@ -58,7 +58,7 @@ providers:
 models:
   gpt-oss-120b-groq:
     model_id: openai/gpt-oss-120b   # the id the provider knows it by
-    tier: cheap                     # cheap | mid | frontier
+    tier: cheap                     # cheap | mid | high | frontier
     provider: groq                  # must name a row in `providers:`
     supports_streaming: true
     supports_cache_control: false   # true only if you've confirmed it
@@ -87,13 +87,13 @@ models:
     model_id: openai/gpt-oss-120b
     tier: cheap
     provider: groq
+    version: gpt-oss-120b            # model identity — see "A model id is immutable"
     supports_streaming: true
     supports_cache_control: false
     pricing:
       input_cost_per_1m: 0.15
       output_cost_per_1m: 0.6
       cache_read_cost_per_1m: 0.075   # omit if the provider has no cache discount
-      version: gpt-oss-120b
       price_provider: groq
       price_source: https://groq.com/pricing
       price_as_of: "2026-07-17"
@@ -108,6 +108,35 @@ without a date is a number you can't audit.
 
 Watch for models with no cache-read discount. They resend the full context at
 full price every turn, which shows up as a benchmark bill rather than an error.
+
+Once a model is registered, score it with `python -m benchmark.runner.run_matrix`. The
+default `--strategy cost_optimal` runs the cheap adaptive collection (frontier only where
+tiers disagree, plus a random audit); `--strategy full` runs the exhaustive matrix. Both
+are simulated unless you pass `--live`. See [benchmark.md](benchmark.md) for the details.
+
+### A model id is immutable — new version, new id
+
+`version` sits on the model row, next to `tier` and `provider` — not inside
+`pricing:`. It records model *identity*, and that distinction is a rule worth
+following:
+
+- **A model id is a fixed behavior identity.** Every benchmark result is a fact
+  about one `(task, model-at-that-version)` pair. When a provider ships genuinely
+  new weights, give it a **new registry id** — `kimi-k3` becomes `kimi-k3-2026-09`,
+  a new row — rather than editing the old one in place. Old results stay valid:
+  they describe the old model, which still existed.
+- **`version` is provenance plus an opt-in re-run switch.** The benchmark treats it
+  as a staleness key: bump it only when you knowingly want to recompute every cell
+  for that id under the same name. It is the deliberate escape hatch, not the
+  default path — the default path for a real model change is a new id.
+- **Price changes never invalidate data.** A stored result records the cost you were
+  actually billed. Editing `input_cost_per_1m`, a cache price, or `price_as_of`
+  re-scores current routing against the current price but leaves every stored
+  result untouched — which is exactly why `version` is a model attribute and not a
+  pricing one. Correcting a price is not a model change.
+
+A priced model must declare a `version`; an unpriced one (the `examples/providers/`
+fragments) may omit it, since nothing benchmarks it.
 
 ### Reasoning effort (optional)
 
@@ -144,6 +173,34 @@ as before — the field is optional and backward-compatible. The benchmark score
 reasoning)`; `default_arm` is the arm a new model routes to until real outcomes
 accumulate. Effort is chosen once per task and held for the session — never switched
 mid-conversation, which would break the provider's prompt cache.
+
+## Choose which models the benchmark runs
+
+The registry above defines every model shunt knows. The benchmark harness runs a
+subset of them, chosen by the `models` list in `benchmark/config.yaml`:
+
+```yaml
+models:                 # enabled models; each name must exist in the registry
+  - deepseek-v4-flash
+  - qwen3.7-plus
+  - gpt-5-mini
+  - kimi-k2.5
+  - zai-glm-5.2
+  - kimi-k3
+```
+
+The list decides enablement three ways:
+
+- **In the list** — the model is enabled and runs.
+- **In the registry but not the list** — disabled. It stays available (drop its
+  name back in to turn it on), it just sits out the current runs. That is how
+  `claude-opus-4-6` is priced for provenance yet excluded from the sweep.
+- **In the list but not the registry** — a hard error at config load, naming the
+  offender. A model you run must exist, so a typo fails loudly instead of silently
+  routing to nothing.
+
+Enabled models are always scored cheapest-tier-first (cheap → mid → high →
+frontier), so list order is for readability only — it does not affect results.
 
 ```bash
 shunt start

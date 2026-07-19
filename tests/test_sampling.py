@@ -196,3 +196,38 @@ class TestSelectArms:
             arms = sampling.select_arms("astropy__astropy-13453", model, bracket, weights)
             assert bracket.default_arm in arms
             assert set(arms) <= {a.id for a in bracket.arms}
+
+
+class TestFrontierAudit:
+    def test_deterministic_and_idempotent(self):
+        a = sampling.in_frontier_audit("astropy__astropy-7166", 0.2)
+        b = sampling.in_frontier_audit("astropy__astropy-7166", 0.2)
+        assert a == b
+
+    def test_raising_fraction_only_adds_members(self):
+        ids = [f"repo__task-{i}" for i in range(500)]
+        small = {i for i in ids if sampling.in_frontier_audit(i, 0.2)}
+        large = {i for i in ids if sampling.in_frontier_audit(i, 0.3)}
+        assert small <= large
+
+    def test_known_fraction_holds_empirically(self):
+        ids = [f"repo__task-{i}" for i in range(5000)]
+        picked = sum(1 for i in ids if sampling.in_frontier_audit(i, 0.2))
+        # Binomial(5000, 0.2): expect ~1000; generous band for hash noise.
+        assert 900 <= picked <= 1100
+
+    def test_distinct_salt_from_calibration_holdout(self):
+        from benchmark.runner import calibration as cal
+
+        # The audit salt must not alias the calibration holdout: the two memberships
+        # should not be identical across a batch of ids (independent draws).
+        ids = [f"repo__task-{i}" for i in range(500)]
+        audit = {i for i in ids if sampling.in_frontier_audit(i, 0.3)}
+        holdout = {i for i in ids if cal.in_calibration_holdout(i, 0.3)}
+        assert audit != holdout
+
+    def test_invalid_fraction_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError):
+            sampling.in_frontier_audit("x", 1.5)

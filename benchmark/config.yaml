@@ -4,21 +4,14 @@
 # (src/shunt/models/default_config.yaml).
 # This file only controls which models are active and how routing behaves.
 
-models:
-  deepseek-v4-flash:
-    enabled: true
-  zai-glm-5.2:
-    enabled: true
-  kimi-k2.5:
-    enabled: true
-  qwen3.7-plus:
-    enabled: true
-  gpt-5-mini:
-    enabled: true
-  kimi-k3:
-    enabled: true
-  claude-opus-4-6:
-    enabled: false
+models:                 # enabled models; a name must exist in the registry.
+                        # Omit a registry model here to disable it (opus is off).
+  - deepseek-v4-flash
+  - qwen3.7-plus
+  - gpt-5-mini
+  - kimi-k2.5
+  - zai-glm-5.2
+  - kimi-k3
 
 strategies:
   enabled:
@@ -50,7 +43,7 @@ strategies:
 
 routing:
   default_strategy: cascade
-  control_model: kimi-k3    # cheapest-frontier baseline for the kill gate (opus excluded)
+  control_model: kimi-k3    # strongest ENABLED frontier = kill-gate baseline (opus-4-6 priced but disabled)
   gamma: 0.1
 
 # p(arm|model) exploration sampling. A model's default_arm always
@@ -58,13 +51,47 @@ routing:
 # challenges below weights[r] (deterministic, cost-skewed toward cheaper arms).
 # Ranks beyond the list reuse the last weight. Keeps exploration within ~1.3-1.6x
 # of today's cost instead of running the full bracket on every cell.
-# `enabled` gates the sweep itself (default false): the live executor sends one
-# fixed request per (challenge, model) regardless of arm, so sweeping arms now
-# would bill duplicate identical requests cached under fake arm labels. Flip to
-# true only once per-arm requests are wired into the live executor.
+# `enabled` gates the sweep: the live executor now overlays each arm's registry API
+# params onto the request (infer._scaffold_model_kwargs), so distinct arms bill
+# distinct requests — the wiring this gate previously waited on. Set false to
+# reproduce default-arm-only runs.
 arm_sampling:
-  enabled: false
+  enabled: true
   weights: [0.5, 0.35, 0.25]
+  # Models pinned to their DEFAULT arm even while the sweep is on — the expensive
+  # tiers (high/frontier), where extra reasoning arms aren't worth the per-cell cost.
+  # Their default arm is already the high-reasoning one; other models still explore.
+  default_only_models: [zai-glm-5.2, kimi-k3]
+
+# Adaptive frontier collection (see docs/benchmark.md).
+# This is the DEFAULT runner strategy: `python -m benchmark.runner.run_matrix`
+# (--strategy cost_optimal) runs the two-phase protocol — observe cheap+mid on all
+# sampled tasks, derive the discriminating set, then run the frontier (control_model)
+# on discriminating + a uniform random audit stratum. `--strategy full` runs the
+# exhaustive matrix instead. The knobs below tune the cost_optimal strategy.
+#
+# audit_fraction + noninferiority_margin were PINNED 2026-07-19 from results.csv
+# (measured cheap<->frontier ρ²≈0.04, discriminating count) via the CI-sizing rule in
+# docs/benchmark.md; constants_pinned: true. Re-pin if the suite scale changes materially
+# (audit_fraction must still yield >=~10 absolute audit tasks at your run scale).
+collect:
+  enabled: false            # gates run_eval's partial-coverage frontier-gate estimation.
+                            #   The cost_optimal strategy itself always runs when invoked
+                            #   (run_matrix --strategy cost_optimal); this flag does NOT gate it.
+  constants_pinned: true    # SAFETY: a --live run refuses while false. Pinned 2026-07-19 from
+                            #   results.csv (see below); re-check audit_fraction yields >=~10
+                            #   absolute audit tasks at your run scale before a large paid run.
+  phase_a_mode: single      # single = one representative model per tier | full = every cheap+mid model
+  audit_fraction: 0.12      # π for the uniform audit. Sized to draw ~15-18 audit tasks at the
+                            #   200-challenge scale. NOTE: measured corr(cheap+mid,frontier)=0.21
+                            #   (ρ²=0.04) — the AIPW covariate barely helps, so the gate rests on
+                            #   the paired McNemar + audit, and savings vs `full` are modest at small N.
+  audit_salt: frontier-audit-v1
+  include_high: false       # add the 'high' tier to the frontier phase (extra oracle point)
+  sequential_stop: false    # advisory in v1 (e-process logged, --max-cost is the hard stop)
+  noninferiority_margin: 0.05   # δ: the pre-registered 5pp equal-quality bar for paired McNemar
+  budget_phase_a: null      # per-phase --max-cost override (null = shared ceiling)
+  budget_phase_c: null
 
 paths:
   challenges: routing/data/challenges.json        # curated input, relative to config.py dir
@@ -75,4 +102,4 @@ benchmark:
   seed: 42
   bootstrap_iterations: 10000
   n_default: 20
-  sample_size: 20             # 0 = all tasks, N = first N tasks in the nested order (cost-safe partial run)
+  sample_size: 200            # 0 = all tasks, N = first N tasks in the nested order (cost-safe partial run)

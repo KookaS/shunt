@@ -19,12 +19,14 @@ import numpy as np  # noqa: E402
 from benchmark import config  # noqa: E402
 from benchmark.routing.metrics import compute_metrics, compute_pareto  # noqa: E402
 from benchmark.routing.strategies import Strategy  # noqa: E402
+from benchmark.routing.strategies.external_prior import ExternalPriorCascade  # noqa: E402
 from benchmark.routing.strategies.fixed import (  # noqa: E402
     AlwaysCheap,
     AlwaysFrontier,
     Random,
 )
 from benchmark.routing.strategies.knn import kNNStrategy  # noqa: E402
+from benchmark.routing.strategies.knn_blended import kNNBlended  # noqa: E402
 from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy  # noqa: E402
 from benchmark.routing.strategies.oracle import Oracle, OracleRewardAware  # noqa: E402
 
@@ -67,6 +69,8 @@ def get_strategies() -> list[tuple[str, Strategy]]:
     knn_p = dict(strat_cfg.get("knn", {}))
     cascade_p = dict(strat_cfg.get("knn", {}))
     cascade_p.update(strat_cfg.get("knn_cascade", {}))
+    ext_p = dict(strat_cfg.get("external_prior", {}))
+    blend_p = dict(strat_cfg.get("knn_blended", {}))
 
     registry: dict[str, Callable[[], Strategy]] = {
         "oracle": lambda: Oracle(),
@@ -76,6 +80,8 @@ def get_strategies() -> list[tuple[str, Strategy]]:
         "random": lambda: Random(seed=42),
         "knn": lambda: kNNStrategy(**knn_p),
         "knn_cascade": lambda: kNNCascadeStrategy(**cascade_p),
+        "external_prior": lambda: ExternalPriorCascade(**ext_p),
+        "knn_blended": lambda: kNNBlended(**blend_p),
     }
 
     return [(name, registry[name]()) for name in enabled if name in registry]
@@ -98,6 +104,8 @@ def plot_pareto(
             "Random": "random",
             "kNN": "knn",
             "kNN-cascade": "knn_cascade",
+            "External-Prior": "external_prior",
+            "kNN-blended": "knn_blended",
         }
     if colors is None:
         colors = {
@@ -108,6 +116,8 @@ def plot_pareto(
             "random": "#CC79A7",
             "knn": "#E69F00",
             "knn_cascade": "#F0E442",
+            "external_prior": "#882255",
+            "knn_blended": "#44AA99",
         }
     if markers is None:
         markers = {
@@ -118,6 +128,8 @@ def plot_pareto(
             "random": "o",
             "knn": "P",
             "knn_cascade": "X",
+            "external_prior": "*",
+            "knn_blended": "h",
         }
     names = [r["strategy"] for r in results]
     costs = np.array([float(r["TotalCost"]) for r in results], dtype=float)
@@ -223,7 +235,7 @@ def plot_pareto(
         # its model never ran on, dragging its pass rate to a phantom value.
         ax.annotate(
             warning,
-            xy=(0.5, 0.02),
+            xy=(0.5, 1.09),  # clear of the bold title (~1.06) and the lower-right legend
             xycoords="axes fraction",
             fontsize=9,
             fontweight="bold",

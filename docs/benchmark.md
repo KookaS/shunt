@@ -32,7 +32,7 @@ dataset revision `c104f840`.
 
 Prices below are the **Requesty router listing** rates (as of mid-July 2026), in
 USD per 1M tokens; each entry carries its own `price_as_of`, `price_note`, and
-cache-read/write rate in the model registry (`src/shunt/models/default_config.yaml`). Three tiers — cheap → mid → frontier.
+cache-read/write rate in the model registry (`src/shunt/models/default_config.yaml`). Four tiers — cheap → mid → high → frontier.
 
 | Model | Tier | Input $/1M | Output $/1M |
 |-------|------|-----------:|------------:|
@@ -40,35 +40,69 @@ cache-read/write rate in the model registry (`src/shunt/models/default_config.ya
 | qwen3.7-plus | cheap | 0.32 | 1.28 |
 | gpt-5-mini | mid | 0.25 | 2.00 |
 | kimi-k2.5 | mid | 0.60 | 3.00 |
-| zai-glm-5.2 | frontier | 1.40 | 4.40 |
+| zai-glm-5.2 | high | 1.40 | 4.40 |
 | kimi-k3 | frontier | 3.00 | 15.00 |
 
 Spread: ~21x input, ~54x output between the cheapest and the frontier model.
 The model registry (`src/shunt/models/default_config.yaml`) is the single source of truth — the table above is a
-snapshot of it. (claude-opus-4-6 is priced in the registry for provenance but is `enabled: false`
-— excluded from runs; kimi-k3 is the frontier baseline.)
+snapshot of it. (claude-opus-4-6 is priced in the registry for provenance but is left out of
+`benchmark/config.yaml`'s `models` list — excluded from runs; the strongest enabled frontier model is the baseline.)
 
 ## Benchmark execution
 
 The live harness runs each `(challenge, model, reasoning-arm)` cell as an isolated,
-reproducible Docker job (by default one arm per model — the model's declared default
-reasoning arm):
+reproducible Docker job:
 
 1. Resolve the challenge spec at its pinned `base_commit` and dataset revision.
 2. Pull the challenge's prebuilt SWE-bench image (per-challenge, by manifest
    digest) — source mounted read-only, with a writable sandbox.
-3. Run the coding agent with the target model against the task.
+3. Run the coding agent with the target model against the task. The cell's
+   reasoning arm is overlaid on the request (e.g. `reasoning_effort`,
+   `thinking` on/off), so each arm bills a distinct call.
 4. Run the deterministic judge (the spec's `FAIL_TO_PASS` / `PASS_TO_PASS` tests).
 5. Record the verified pass/fail, real cost (from the API response), estimated
    cost (from the registry's prices × token counts), and token usage.
 
-Per-challenge images give reproducibility, isolation, and parallelization. Only
-model API costs enter routing metrics; judging costs are excluded.
+Which arms run is `p(arm|model)` exploration sampling: a model's default arm
+always runs, and each extra arm runs on a deterministic, cost-skewed fraction of
+challenges (hash-thresholded on the challenge id, so a re-run selects the identical
+arms). Set `arm_sampling.enabled: false` in `benchmark/config.yaml` to run
+default-arm-only, or list models under `arm_sampling.default_only_models` to pin
+just those (e.g. the expensive high/frontier tiers) to their default arm while the
+rest keep exploring.
+
+Per-challenge images give reproducibility, isolation, and parallelization. Cells
+run concurrently with `--workers N` (each worker runs one SWE-bench container, so
+raise it with an eye on host memory). Cells complete challenge-at-a-time — every
+model (and sampled reasoning arm) for one challenge finishes before the next
+challenge starts. `--max-cost USD` stops the run once cumulative real cost crosses
+a ceiling, checked at challenge boundaries, so the run keeps a prefix of
+**fully-covered** (comparable) challenges rather than many partially-covered ones.
+Only model API costs enter routing metrics; judging costs are excluded.
 
 Outcomes are appended to `benchmark/routing/results.csv`. **This file
-is populated by live matrix runs** (`run_matrix.py --live`), which need Docker and API keys.
+is populated by live runs** (`python -m benchmark.runner.run_matrix --live`), which need
+Docker and API keys.
+Each cell is written to `results.csv` the moment it completes (an atomic
+temp-file-then-`os.replace`), so a kill or crash only loses the handful of cells
+still in flight — never the whole batch; a `--max-cost` stop cuts at a challenge
+boundary, leaving no challenge partial.
 The evaluator can backtest strategies against cached outcomes; if the cache is empty, it reports
 coverage gaps rather than fabricating numbers.
+
+### Result integrity
+
+CI validates every `results.csv` row (`check_integrity.py`): identity anchors (spec
+content hash, model version, reasoning-arm hash, image digest) must match the current
+source, and
+every derivable field is recomputed and cross-checked — the `cost` column against its
+derivation rule, `real_cost` against a token-based plausibility floor (a real cost far
+below the estimate — an expensive run billed as ~free — fails the build; unusually high
+ratios warn), the challenge/model/arm against the registry, and basic plausibility (a
+resolved cell must have emitted output and not be a timeout). A
+corrupted or hand-edited row fails the build. This is an *internal-consistency* check:
+it catches corruption and casual fabrication, not a determined forger reproducing every
+invariant — stronger provenance (signed runs) and sampled re-execution are planned.
 
 ## Routing evaluation
 
@@ -109,6 +143,61 @@ Metrics per strategy:
 | Random | Uniform random per task (mean over seeds) |
 | kNN | Embed task → retrieve similar → cheapest capable model |
 | kNN-cascade | kNN-informed try-verify-escalate |
+
+## Deciding the kill-gate on partial frontier coverage
+
+Running the most expensive ("frontier") model on every task is costly, so Shunt can
+collect frontier outcomes adaptively instead and estimate the fixed-frontier baseline
+statistically. When that mode is on, the gate — *does routing match fixed-frontier
+quality at lower cost?* — rests on four stated assumptions:
+
+1. **Missing-at-random audit.** Cheap and mid-tier models run on every sampled task.
+   The frontier model runs on every task where cheaper tiers *disagree* (the tasks that
+   decide quality) plus a *uniformly random audit* of the rest. The audit is drawn by a
+   deterministic salted hash of each task id, so its sampling probability is known and
+   uniform — the precondition that makes the baseline estimate unbiased.
+2. **Doubly-robust estimator.** The baseline pass-rate and cost are estimated with a
+   prediction-powered (PPI++/AIPW) estimator that uses cheap+mid outcomes as covariates.
+   The estimate is unbiased *regardless of how well cheap outcomes predict frontier
+   outcomes* — a poor predictor only widens the interval. Validity comes from the random
+   audit, not from the prediction being good.
+3. **Measured non-monotonicity.** Stronger models sometimes fail tasks weaker models
+   pass. Shunt measures that violation rate (with a confidence interval) on the audit
+   stratum and reports it, rather than assuming it away.
+4. **The gate is a paired contrast, not an absolute score.** At this task count the
+   interval on the *absolute* frontier pass-rate is wide, so the decision rests on the
+   *paired* comparison of routing versus fixed-frontier on the same tasks (a McNemar
+   non-inferiority test with an anytime-valid stopping rule) — not on the absolute
+   pass-rate. Per-instance oracle-relative regret, which needs every model on every
+   task, is reported only where full coverage exists and is never the gate.
+
+This decides quality non-inferiority and estimates baseline cost with honest intervals
+from partial coverage. It cannot pin the absolute frontier pass-rate to a tight interval
+at this task count, and it cannot decide the gate when routing's true edge over
+fixed-frontier is near zero — a near-zero edge is itself the signal to stop.
+
+**Running it.** The runner has two strategies, selected with `--strategy`:
+
+- `cost_optimal` (**default**) — the adaptive collection above. A plain
+  `python -m benchmark.runner.run_matrix` runs it: cheap+mid on every task, frontier
+  only on disputed tasks plus a random audit. Savings over `full` are
+  **scale-dependent** — the measured cheap↔frontier correlation is low (ρ²≈0.04), so the
+  gain is modest at small task counts and the gate rests on the paired McNemar contrast
+  plus the audit, not the covariate.
+- `full` — the exhaustive every-enabled-model × every-sampled-challenge matrix
+  (`python -m benchmark.runner.run_matrix --strategy full`). `full --live` with **no**
+  `--max-cost` prompts for interactive confirmation before spending (uncapped live spend
+  is dangerous); a non-interactive stdin aborts. `cost_optimal` keeps its own
+  `constants_pinned` safety guard and needs no such prompt.
+
+`python -m benchmark.runner.collect` is a **deprecated alias** for `--strategy
+cost_optimal`. Key `cost_optimal` knobs live under `collect:` in `benchmark/config.yaml`:
+`phase_a_mode` (`single` = one representative model per tier, or `full` = every cheap+mid
+model), `include_high` (add the high tier to the frontier phase), and the two sizing
+constants `audit_fraction` (audit sampling probability π) and `noninferiority_margin`
+(δ). Pin those two from the live `results.csv` (its cheap↔frontier correlation and
+discriminating-task count) and set `constants_pinned: true` before any paid run, or the
+interval is mis-sized.
 
 ## Honest limits
 

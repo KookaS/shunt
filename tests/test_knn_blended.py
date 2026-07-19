@@ -63,30 +63,32 @@ class TestBlendScores:
 
 
 class TestSelectModel:
-    BY_COST = ["cheap", "mid", "frontier"]
+    # Arbitrary cost-ordered MODEL identifiers (not registry tiers) — select_model
+    # takes any cheapest-first model list; these just exercise the ordering logic.
+    BY_COST = ["m_lo", "m_mid", "m_hi"]
 
     def test_picks_cheapest_clearing_threshold(self):
-        scores = {"cheap": (0.9, 5), "mid": (0.95, 5), "frontier": (1.0, 5)}
-        assert kb.select_model(scores, self.BY_COST, 0.5, 1) == "cheap"
+        scores = {"m_lo": (0.9, 5), "m_mid": (0.95, 5), "m_hi": (1.0, 5)}
+        assert kb.select_model(scores, self.BY_COST, 0.5, 1) == "m_lo"
 
     def test_escalates_when_cheap_below_threshold(self):
-        scores = {"cheap": (0.2, 5), "mid": (0.8, 5), "frontier": (1.0, 5)}
-        assert kb.select_model(scores, self.BY_COST, 0.5, 1) == "mid"
+        scores = {"m_lo": (0.2, 5), "m_mid": (0.8, 5), "m_hi": (1.0, 5)}
+        assert kb.select_model(scores, self.BY_COST, 0.5, 1) == "m_mid"
 
     def test_min_samples_gate_then_relax(self):
-        # cheap clears rate but not min_samples; mid clears both -> mid wins the
+        # m_lo clears rate but not min_samples; m_mid clears both -> m_mid wins the
         # strict pass. (relax only triggers if NOTHING clears min_samples.)
-        scores = {"cheap": (0.9, 1), "mid": (0.9, 5), "frontier": (1.0, 5)}
-        assert kb.select_model(scores, self.BY_COST, 0.5, 3) == "mid"
+        scores = {"m_lo": (0.9, 1), "m_mid": (0.9, 5), "m_hi": (1.0, 5)}
+        assert kb.select_model(scores, self.BY_COST, 0.5, 3) == "m_mid"
 
     def test_relax_when_none_meet_min_samples(self):
-        scores = {"cheap": (0.9, 1), "mid": (0.9, 1)}
+        scores = {"m_lo": (0.9, 1), "m_mid": (0.9, 1)}
         # nobody has >=3 samples -> relaxed pass picks cheapest above threshold
-        assert kb.select_model(scores, self.BY_COST, 0.5, 3) == "cheap"
+        assert kb.select_model(scores, self.BY_COST, 0.5, 3) == "m_lo"
 
     def test_fallback_cheapest_when_nothing_clears(self):
-        scores = {"cheap": (0.1, 5), "mid": (0.2, 5), "frontier": (0.3, 5)}
-        assert kb.select_model(scores, self.BY_COST, 0.5, 1) == "cheap"
+        scores = {"m_lo": (0.1, 5), "m_mid": (0.2, 5), "m_hi": (0.3, 5)}
+        assert kb.select_model(scores, self.BY_COST, 0.5, 1) == "m_lo"
 
 
 class TestIntegrationOffline:

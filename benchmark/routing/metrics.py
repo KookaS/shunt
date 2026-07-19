@@ -9,6 +9,95 @@ def _reward(passed: bool, cost: float, gamma: float = 0.1) -> float:
     return 1.0 - gamma * cost if passed else 0.0 - gamma * cost
 
 
+def _default_arm_passes(
+    per_model: dict[str, dict[str, dict]],
+    models: list[str],
+    default_arms: dict[str, str],
+) -> list[bool] | None:
+    """Default-arm pass outcome per model, or None if any model's cell is absent."""
+    passes: list[bool] = []
+    for model in models:
+        cell = per_model.get(model, {}).get(default_arms.get(model, ""))
+        if cell is None:
+            return None
+        passes.append(bool(cell.get("pass", False)))
+    return passes
+
+
+def task_signal(
+    per_model: dict[str, dict[str, dict]],
+    models: list[str],
+    default_arms: dict[str, str],
+) -> str:
+    """One task's routing-signal class from default-arm outcomes.
+
+    ``uncovered`` if any model's default-arm cell is absent; else ``all_pass`` /
+    ``all_fail`` / ``discriminating`` (default-arm passes mixed).
+    """
+    passes = _default_arm_passes(per_model, models, default_arms) if models else None
+    if passes is None:
+        return "uncovered"
+    if all(passes):
+        return "all_pass"
+    if not any(passes):
+        return "all_fail"
+    return "discriminating"
+
+
+def discriminating_set(
+    results: dict[str, dict[str, dict[str, dict]]],
+    tasks: list[str],
+    models: list[str],
+    default_arms: dict[str, str],
+) -> tuple[set[str], set[str]]:
+    """(D, U) membership: D = tiers disagree; U = fully-covered but all-pass|all-fail.
+
+    Pure function of the cache — the shared predicate ``discriminating_stats`` counts
+    and the ``collect`` mode strata-splits over, so counts and membership never diverge.
+    """
+    discriminating: set[str] = set()
+    uncontested: set[str] = set()
+    for tid in tasks:
+        signal = task_signal(results.get(tid, {}), models, default_arms)
+        if signal == "discriminating":
+            discriminating.add(tid)
+        elif signal in ("all_pass", "all_fail"):
+            uncontested.add(tid)
+    return discriminating, uncontested
+
+
+def discriminating_stats(
+    results: dict[str, dict[str, dict[str, dict]]],
+    tasks: list[str],
+    models: list[str],
+    default_arms: dict[str, str],
+) -> dict[str, int]:
+    """Routing-signal breakdown of a task set: how many tasks actually discriminate.
+
+    Fully-covered = every model has a default-arm outcome; among those, discriminating
+    = default-arm passes are mixed (all-pass / all-fail carry no routing signal).
+    """
+    counts = {"all_pass": 0, "all_fail": 0, "discriminating": 0}
+    n_tasks = 0
+    n_fully_covered = 0
+    for tid in tasks:
+        per_model = results.get(tid, {})
+        if any(model in per_model for model in models):
+            n_tasks += 1
+        signal = task_signal(per_model, models, default_arms)
+        if signal == "uncovered":
+            continue
+        n_fully_covered += 1
+        counts[signal] += 1
+    return {
+        "n_tasks": n_tasks,
+        "n_fully_covered": n_fully_covered,
+        "n_all_pass": counts["all_pass"],
+        "n_all_fail": counts["all_fail"],
+        "n_discriminating": counts["discriminating"],
+    }
+
+
 def compute_metrics(decisions: list[tuple[str, str, bool, float]], gamma: float = 0.1) -> dict:
     if not decisions:
         return {}

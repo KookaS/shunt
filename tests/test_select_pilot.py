@@ -1,6 +1,6 @@
-"""Tier bucketing in select_pilot — pins the frontier bucket after the high→frontier migration."""
+"""Tier bucketing in select_pilot — pins the escalation band after zai-glm → high."""
 
-from benchmark.runner.select_pilot import _models_by_tier, classify_pattern
+from benchmark.runner.select_pilot import _escalation_models, _models_by_tier, classify_pattern
 
 
 def _r(**passes: bool) -> dict:
@@ -8,19 +8,27 @@ def _r(**passes: bool) -> dict:
 
 
 class TestTierBuckets:
-    def test_frontier_bucket_includes_glm(self) -> None:
-        # zai-glm-5.2 used to carry tier "high", which matched NO bucket here, so
-        # its results were silently dropped from every pattern. An earlier tier
-        # vocabulary migration folded high into frontier; this pins that it now counts.
-        assert _models_by_tier("frontier") == {"kimi-k3", "zai-glm-5.2"}
+    def test_glm_is_high_and_kimi_k3_is_frontier(self) -> None:
+        # zai-glm-5.2 sits in the `high` tier (strong, below the frontier baseline);
+        # kimi-k3 is the sole enabled frontier model.
+        assert _models_by_tier("high") == {"zai-glm-5.2"}
+        assert _models_by_tier("frontier") == {"kimi-k3"}
+
+    def test_escalation_band_spans_high_and_frontier(self) -> None:
+        # The pilot's discrimination signal is "any tier above mid" — glm must still
+        # count as an escalation pass even though it's no longer labelled frontier.
+        assert _escalation_models() == {"zai-glm-5.2", "kimi-k3"}
 
     def test_buckets_are_disjoint_and_cover_the_enabled_pool(self) -> None:
-        cheap, mid, frontier = (_models_by_tier(t) for t in ("cheap", "mid", "frontier"))
-        assert cheap & mid == set()
-        assert cheap & frontier == set()
-        assert mid & frontier == set()
+        cheap, mid, high, frontier = (
+            _models_by_tier(t) for t in ("cheap", "mid", "high", "frontier")
+        )
+        buckets = [cheap, mid, high, frontier]
+        for i, a in enumerate(buckets):
+            for b in buckets[i + 1 :]:
+                assert a & b == set()
         # No enabled model lands in an unmatched tier the way glm silently did.
-        assert cheap | mid | frontier == {
+        assert cheap | mid | high | frontier == {
             "qwen3.7-plus",
             "deepseek-v4-flash",
             "gpt-5-mini",

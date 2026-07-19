@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import yaml
 
 from shunt.models.config import (
+    TIER_ORDER,
     ModelConfig,
     Pricing,
     ReasoningConfig,
     default_registry_path,
     load_registry,
     resolve_models,
+)
+from shunt.models.config import (
+    arm_api_params as _resolve_arm_api_params,
 )
 
 _config: dict | None = None
@@ -58,6 +62,9 @@ def _flatten(model: ModelConfig, pricing: Pricing) -> dict:
         "route": model.route,
         "base_url": model.base_url,
         "api_key_env_var": model.api_key_env_var,
+        # `version` is a model-identity attribute (a sibling of tier/provider), no
+        # longer a pricing field; a priced model always carries one (schema-enforced).
+        "version": model.version,
         **pricing.model_dump(exclude_none=True),
     }
 
@@ -115,19 +122,50 @@ def arm_sampling_weights() -> list[float]:
     return [float(w) for w in weights] if weights else list(DEFAULT_ARM_SAMPLING_WEIGHTS)
 
 
+def arm_sampling_default_only_models() -> set[str]:
+    """Models pinned to their default arm even when the sweep is on (cost control)."""
+    cfg = get()
+    models = cfg.get("arm_sampling", {}).get("default_only_models") or []
+    return {str(m) for m in models}
+
+
+def arm_api_params(model: str, arm_id: str) -> dict[str, Any]:
+    """Verbatim request params for a model's reasoning arm ({} if model unregistered).
+
+    The live executor overlays these so a sampled arm bills a DISTINCT request.
+    """
+    mc = resolved_models().get(model)
+    return _resolve_arm_api_params(mc, arm_id) if mc is not None else {}
+
+
 def arm_sampling_enabled() -> bool:
-    """Gate for the multi-arm sweep — default False."""
-    # The live executor sends one fixed request per (challenge, model)
-    # regardless of arm (a known gap — see run_matrix.run_live_cell's
-    # docstring), so sweeping arms before that lands would bill duplicate
-    # identical requests cached under fake arm labels. False reproduces the
-    # default-arm-only behavior from before arm sampling existed.
+    """Gate for the multi-arm sweep — default False if unset."""
+    # The live executor overlays each arm's registry API params onto the request
+    # (infer._scaffold_model_kwargs), so distinct arms bill distinct requests.
+    # False reproduces the default-arm-only behavior from before arm sampling existed.
     cfg = get()
     return bool(cfg.get("arm_sampling", {}).get("enabled", False))
 
 
+def collect_config() -> dict:
+    """The adaptive `collect` run-mode block (defaults reproduce today's full matrix)."""
+    cfg = get()
+    return dict(cfg.get("collect", {}))
+
+
+def collect_enabled() -> bool:
+    """Gate for the adaptive frontier-collection mode — default False (full matrix)."""
+    return bool(collect_config().get("enabled", False))
+
+
 def _tier_order(tier: str) -> int:
-    return {"cheap": 0, "mid": 1, "frontier": 2}.get(tier, 99)
+    """Canonical tier rank, derived from the registry's ``TIER_ORDER`` (single source
+    of truth). Raises on an unregistered tier so a drift can't silently sort last.
+    """
+    ranks = {t: i for i, t in enumerate(TIER_ORDER)}
+    if tier not in ranks:
+        raise ValueError(f"unknown tier {tier!r}; registered tiers: {list(TIER_ORDER)}")
+    return ranks[tier]
 
 
 def _pricing_dict() -> dict:
@@ -147,17 +185,23 @@ def _pricing_dict() -> dict:
 def enabled_models() -> list[str]:
     """Return enabled model names sorted by tier (cheap → mid → frontier),
     then by cost ascending within each tier."""
+    # `models:` is a LIST of enabled names. In-list = enabled; a registry model
+    # absent from the list is disabled; a listed name absent from the registry is
+    # an unrecoverable config error (a listed model must exist to be routable).
     cfg = get()
-    models_cfg = cfg.get("models", {})
+    listed = cfg.get("models", [])
     pricing = load_pricing()
 
-    enabled = []
-    for model_name in pricing:
-        if not isinstance(pricing[model_name], dict) or model_name.startswith("_"):
-            continue
-        info = models_cfg.get(model_name, {})
-        if info.get("enabled", True):
-            enabled.append(model_name)
+    unregistered = [m for m in listed if m not in pricing]
+    if unregistered:
+        raise ValueError(
+            "benchmark/config.yaml lists model(s) the benchmark cannot see "
+            f"(absent from the registry, or registered without a pricing block): {unregistered}. "
+            "A listed model must exist in src/shunt/models/default_config.yaml with pricing."
+        )
+    # dict.fromkeys dedupes a repeated list entry while preserving order, so a typo'd
+    # duplicate can't make classify_cells enumerate (and pay for) the same cell twice.
+    enabled = list(dict.fromkeys(m for m in listed if not m.startswith("_")))
 
     pricing_dict = _pricing_dict()
 
@@ -396,14 +440,10 @@ def models_matrix(results: dict | None = None) -> dict:
     evaluated: set[str] = set()
     for task_results in results.values():
         evaluated.update(task_results.keys())
-    # Respect `enabled: false`: a disabled model is excluded even if it has a
+    # Respect the enabled list: a model not in it is excluded even if it has a
     # historical results row (defense-by-construction against silent leakage).
-    models_cfg = get().get("models", {})
-    return {
-        m: priced[m]
-        for m in priced
-        if m in evaluated and models_cfg.get(m, {}).get("enabled", True)
-    }
+    enabled = set(enabled_models())
+    return {m: priced[m] for m in priced if m in evaluated and m in enabled}
 
 
 def load_challenges() -> dict:
@@ -468,11 +508,17 @@ def validate(config_path: str | Path | None = None) -> list[str]:
     cfg = load(config_path)
     pricing = load_pricing()
 
-    # Check models in config are priced registry models
-    models_cfg = cfg.get("models", {})
-    for name in models_cfg:
-        if name not in pricing:
-            errors.append(f"Model '{name}' in config.yaml not found in the model registry")
+    # `models:` must be a LIST of enabled names, each a priced registry model.
+    models_cfg = cfg.get("models", [])
+    if not isinstance(models_cfg, list):
+        errors.append(
+            "config.yaml 'models' must be a list of model names "
+            "(the legacy '{model: {enabled: bool}}' dict form is no longer supported)"
+        )
+    else:
+        for name in models_cfg:
+            if name not in pricing:
+                errors.append(f"Model '{name}' in config.yaml not found in the model registry")
 
     # Check strategies
     strat_cfg = cfg.get("strategies", {})

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from shunt.models import ModelPool
+from shunt.models import TIER_ORDER, ModelPool
 from shunt.router.selection import NeighborResult, SelectionRule
 
 from .conftest import FakeModel, FakeModelPool
@@ -207,7 +207,7 @@ class TestEscalation:
         # the single-model-per-tier fakes above cannot catch that. This pins it.
         rule = SelectionRule()
         pool = ModelPool()
-        names = [m.name for t in ("cheap", "mid", "frontier") for m in pool.get_tier_models(t)]
+        names = [m.name for t in TIER_ORDER for m in pool.get_tier_models(t)]
         neighbors = [
             _neighbor(n, outcome=False, cost=1.0, confidence=0.9) for n in names for _ in range(5)
         ]

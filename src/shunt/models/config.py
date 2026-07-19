@@ -41,9 +41,9 @@ def strict_yaml_load(text: str) -> dict[str, Any]:
     return data
 
 
-Tier = Literal["cheap", "mid", "frontier"]
+Tier = Literal["cheap", "mid", "high", "frontier"]
 
-TIER_ORDER: Final[list[Tier]] = ["cheap", "mid", "frontier"]
+TIER_ORDER: Final[list[Tier]] = ["cheap", "mid", "high", "frontier"]
 
 DEFAULT_PROBE_ENDPOINT: Final[str] = "/v1/chat/completions"
 # The authenticated (200) check GETs this — a model listing, billed to no one.
@@ -95,7 +95,6 @@ class Pricing(BaseModel):
     output_cost_per_1m: float
     cache_read_cost_per_1m: float | None = None
     cache_write_cost_per_1m: float | None = None
-    version: str
     price_provider: str
     price_source: str
     price_as_of: str
@@ -144,10 +143,24 @@ class ModelEntry(BaseModel):
     model_id: str
     tier: Tier
     provider: str
+    # Model identity: a genuine provider model change (new weights) is a NEW
+    # registry id, not a version bump. Optional so unpriced example fragments stay
+    # versionless, but required once `pricing` makes the model benchmarkable —
+    # `version` is the opt-in staleness key the benchmark keys cached cells on.
+    version: str | None = None
     supports_streaming: bool = True
     supports_cache_control: bool = False
     pricing: Pricing | None = None
     reasoning: ReasoningConfig | None = None
+
+    @model_validator(mode="after")
+    def _priced_model_declares_version(self) -> ModelEntry:
+        if self.pricing is not None and self.version is None:
+            raise ValueError(
+                "a priced model must declare a top-level `version` "
+                "(model identity — no longer a pricing field)"
+            )
+        return self
 
 
 class Registry(BaseModel):
@@ -168,6 +181,7 @@ class ModelConfig(BaseModel):
     model_id: str | None = None
     tier: Tier
     provider: str
+    version: str | None = None
     base_url: str
     api_key_env_var: str
     litellm_prefix: str = "openai"
@@ -204,6 +218,7 @@ def resolve_models(registry: Registry) -> dict[str, ModelConfig]:
             model_id=entry.model_id,
             tier=entry.tier,
             provider=entry.provider,
+            version=entry.version,
             base_url=provider.base_url,
             api_key_env_var=provider.api_key_env_var,
             litellm_prefix=provider.litellm_prefix,

@@ -53,14 +53,14 @@ be scored against a fabricated price.
 
 | Field | Meaning |
 |-------|---------|
-| `model_id` / `tier` / `provider` | Model identity, routing tier (cheap/mid/frontier), and the `providers` row used to reach it |
+| `model_id` / `tier` / `provider` | Model identity, routing tier (cheap/mid/high/frontier), and the `providers` row used to reach it |
 | `pricing.input_cost_per_1m` / `.output_cost_per_1m` | Price, USD per 1M tokens (Requesty router listing) |
 | `pricing.cache_read_cost_per_1m` / `.cache_write_cost_per_1m` | Optional — cache-read/write rate where the provider lists one |
 | `pricing.price_provider` | Where the price is quoted from (`requesty` — the router listing) |
 | `pricing.price_source` | The pricing-listing URL the number came from |
 | `pricing.price_as_of` | Date the price was recorded |
 | `pricing.price_note` | Provenance note — the listing the rate came from + cache rates |
-| `pricing.version` | Stable model-version string (feeds `results.csv` `model_version` staleness) |
+| `version` | Stable model-version string (feeds `results.csv` `model_version` staleness); a model-level field, not a pricing field |
 
 The **litellm route is derived**, not stored: `<litellm_prefix>/<model_id>`, e.g.
 `deepseek/deepseek-v4-flash`, `openai/alibaba/qwen3.7-plus`. `base_url` and
@@ -98,7 +98,7 @@ one row per key; superseded rows move to the history log, below):
 | `arm_hash` | Hash of the arm's request params — a staleness anchor; a re-mapped arm recomputes |
 | `pass` / `cost` / `in_tok` / `out_tok` / `calls` | Verified outcome + token usage |
 | `version_hash` | SHA256 of the instance spec's canonical content **at compute time** (staleness anchor) |
-| `model_version` | The model's `pricing.version` (from the registry) **at compute time** (staleness anchor) |
+| `model_version` | The model's `version` field (from the registry) **at compute time** (staleness anchor) |
 | `real_cost` | Actual measured cost (USD); equals `cost` for cached rows |
 | `estimated_cost` | Cost derived from the registry's prices × token counts |
 | `timeout_flag` | True if the run hit the per-cell timeout |
@@ -125,7 +125,7 @@ row:
   `difficulty_stratum`): a label the model never sees is not execution identity, so
   correcting it must not stale a paid result cell. `challenge_hash(id)` /
   `all_hashes()` expose it.
-- **`model_version`** — the model's `pricing.version` from the registry.
+- **`model_version`** — the model's `version` field from the registry.
 - **`image_digest`** — the **manifest** digest (never the config digest) of the
   instance's SWE-bench image, resolved via `docker buildx imagetools inspect`
   (registry query, **no pull**) and canonicalized to a bare `sha256:…`. The
@@ -186,9 +186,10 @@ uncached cell is flagged (can't be backtested) rather than silently skipped.
 Respects `config.yaml`'s `sample_size` for local subset debugging.
 
 ```sh
-python3 ../runner/run_matrix.py                 # simulated: report gaps, refresh summary + plots
-python3 ../runner/run_matrix.py --no-summary    # cache report + plots only (container default)
-python3 ../runner/run_matrix.py --live          # real execution (needs Docker + API keys)
+# --strategy full = exhaustive matrix (the caching loop below). Default is cost_optimal (adaptive).
+python3 -m benchmark.runner.run_matrix --strategy full              # simulated: report gaps, refresh summary + plots
+python3 -m benchmark.runner.run_matrix --strategy full --no-summary # cache report + plots only (container default)
+python3 -m benchmark.runner.run_matrix --strategy full --live       # real execution (needs Docker + API keys)
 ```
 
 ## Integrity check (`../runner/check_integrity.py`)

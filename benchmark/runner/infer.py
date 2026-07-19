@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from benchmark import config
+from benchmark.routing import integrity
 from benchmark.runner import image_version, swebench_harness, swebench_specs
 
 # Wall-clock backstop for one live agent run (mini-swe-agent's own step_limit is the
@@ -115,8 +116,9 @@ def generate_patch_live(
     model: str,
     scaffold: str = LIVE_SCAFFOLD,
     env: dict[str, str] | None = None,
+    arm: str = integrity.DEFAULT_REASONING,
 ) -> AgentPatch:
-    """Run the fixed agent scaffold on one instance/model to produce a patch.
+    """Run the fixed agent scaffold on one instance/model/arm to produce a patch.
 
     Gated: raises ``MissingApiKeysError`` without keys (keyless never fabricates);
     scaffold import is lazy so the wiring is unit-testable without it installed.
@@ -125,7 +127,7 @@ def generate_patch_live(
         raise MissingApiKeysError(
             f"live inference for {spec.instance_id}/{model} needs one of {_KEY_ENV}"
         )
-    return _invoke_scaffold(spec, model, scaffold)
+    return _invoke_scaffold(spec, model, scaffold, arm)
 
 
 def litellm_model_target(model: str) -> tuple[str, dict[str, Any]]:
@@ -191,12 +193,31 @@ def _sum_usage(messages: list[dict[str, Any]]) -> tuple[int, int, int, float]:
     return in_tok, out_tok, calls, cost
 
 
+def _scaffold_model_kwargs(
+    model: str, arm: str, base: dict[str, Any], target: dict[str, Any]
+) -> dict[str, Any]:
+    """Model kwargs for one live call: base ← litellm target ← reasoning-arm params.
+
+    Arm overlay is last, so distinct arms bill distinct requests (the arm_sampling premise).
+    """
+    arm_params = config.arm_api_params(model, arm)
+    # Registry arm `api` blobs are free dicts; refuse one that would clobber the routing
+    # target's auth/identity keys (silent auth breakage on a paid call). Boundary check.
+    clash = arm_params.keys() & {"api_base", "api_key", "model_name"}
+    if clash:
+        raise ValueError(
+            f"reasoning arm {arm!r} of {model!r} sets reserved request key(s) {sorted(clash)}"
+        )
+    return {**base, **target, **arm_params}
+
+
 def _invoke_scaffold(
     spec: swebench_specs.SwebenchSpec,
     model: str,
     scaffold: str,  # noqa: ARG001 (kept for signature stability; only mini-swe-agent is wired)
+    arm: str = integrity.DEFAULT_REASONING,
 ) -> AgentPatch:
-    """Invoke mini-swe-agent (v2) for one instance/model (only reached when keys exist)."""
+    """Invoke mini-swe-agent (v2) for one instance/model/arm (only reached when keys exist)."""
     from minisweagent.agents import get_agent  # noqa: PLC0415
     from minisweagent.config import builtin_config_dir, get_config_from_spec  # noqa: PLC0415
     from minisweagent.models import get_model  # noqa: PLC0415
@@ -213,7 +234,7 @@ def _invoke_scaffold(
             "agent": {"wall_time_limit_seconds": _AGENT_WALL_LIMIT_S},
             "model": {
                 "model_name": model_string,
-                "model_kwargs": {**base_kwargs, **model_kwargs},
+                "model_kwargs": _scaffold_model_kwargs(model, arm, base_kwargs, model_kwargs),
                 "cost_tracking": "ignore_errors",
             },
             "environment": {"environment_class": "docker"},
@@ -245,6 +266,7 @@ def run_live_cell(
     run_id: str,
     namespace: str = swebench_harness.DEFAULT_NAMESPACE,
     timeout: int = 1800,
+    arm: str = integrity.DEFAULT_REASONING,
 ) -> dict[str, object]:
     """Full live cell: agent → patch → harness → outcome dict for results.csv.
 
@@ -254,7 +276,7 @@ def run_live_cell(
     spec = swebench_specs.load_spec(instance_id)
     if spec is None:
         raise KeyError(f"no SWE-bench spec for {instance_id!r}; materialise it first")
-    patch = generate_patch_live(spec, model)
+    patch = generate_patch_live(spec, model, arm=arm)
     preds_path = write_predictions(
         [prediction_line(instance_id, model, patch.patch)],
         work_dir / f"predictions_{run_id}.jsonl",

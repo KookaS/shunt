@@ -6,33 +6,42 @@ import sys
 from pathlib import Path
 
 from benchmark import config
+from shunt.models import TIER_ORDER
 
 
 def _models_by_tier(tier: str) -> set[str]:
     pricing = config.load_pricing()
-    enabled_cfg = config.get().get("models", {})
+    enabled = set(config.enabled_models())
     return {
         name
         for name, info in pricing.items()
-        if isinstance(info, dict)
-        and info.get("tier") == tier
-        and enabled_cfg.get(name, {}).get("enabled", True)
+        if isinstance(info, dict) and info.get("tier") == tier and name in enabled
     }
+
+
+def _escalation_models() -> set[str]:
+    """Enabled models in any tier above ``mid`` — the escalation band (high, frontier, …).
+
+    Derived from ``TIER_ORDER``; the ``frontier-only`` pattern means "a top-tier model
+    passed", not literally the ``frontier`` label.
+    """
+    above = TIER_ORDER[TIER_ORDER.index("mid") + 1 :]
+    return set().union(*(_models_by_tier(t) for t in above)) if above else set()
 
 
 def classify_pattern(task_id: str, results: dict) -> str:
     cheap = _models_by_tier("cheap")
     mid = _models_by_tier("mid")
-    frontier = _models_by_tier("frontier")
+    escalation = _escalation_models()
     cheap_pass = all(results.get(m, {}).get("pass", False) for m in cheap if m in results)
     mid_pass = all(results.get(m, {}).get("pass", False) for m in mid if m in results)
-    frontier_pass = any(results.get(m, {}).get("pass", False) for m in frontier if m in results)
+    escalation_pass = any(results.get(m, {}).get("pass", False) for m in escalation if m in results)
 
     if cheap_pass and mid_pass:
         return "all-pass"
     if not cheap_pass and mid_pass:
         return "cheap-fail-mid-pass"
-    if not cheap_pass and not mid_pass and frontier_pass:
+    if not cheap_pass and not mid_pass and escalation_pass:
         return "frontier-only"
     return "other"
 
@@ -128,7 +137,7 @@ def main(config_path: str = "benchmark/config.yaml") -> None:
                     need -= 1
 
     cheap = _models_by_tier("cheap")
-    frontier = _models_by_tier("frontier")
+    frontier = _escalation_models()
 
     print("=" * 72)
     print("Pilot Task Selection — 10 Discriminating Tasks")
@@ -138,21 +147,21 @@ def main(config_path: str = "benchmark/config.yaml") -> None:
         desc = meta.get("description", "")
         tag_str = ", ".join(tags)
         rationale_map = {
-            "cheap-fail-mid-pass": "Cheap fail; mid/frontier pass — tests escape-to-frontier.",
-            "frontier-only": "Only frontier passes — tests max-cost escalation.",
+            "cheap-fail-mid-pass": "Cheap fail; mid/top pass — tests escape-to-escalation.",
+            "frontier-only": "Only a top-tier model passes — tests max-cost escalation.",
             "all-pass": "All models pass — tests avoid-over-escalation.",
             "other": "Mixed pattern.",
         }
         rationale = rationale_map.get(pattern, "")
         cost_map = results.get(tid, {})
         cheap_p = any(cost_map.get(m, {}).get("pass") for m in cheap if m in cost_map)
-        frontier_p = any(cost_map.get(m, {}).get("pass") for m in frontier if m in cost_map)
+        top_tier_p = any(cost_map.get(m, {}).get("pass") for m in frontier if m in cost_map)
 
         print(f"\n  {i}. {tid} ({lang} — {pattern})")
         print(f"     Task: {desc}")
         print(f"     Tags: {tag_str}")
         print(f"     Rationale: {rationale}")
-        print(f"     Cheap-pass={cheap_p}, Frontier-pass={frontier_p}")
+        print(f"     Cheap-pass={cheap_p}, Top-tier-pass={top_tier_p}")
 
     print(f"\n  Language coverage: {sorted(set(s[2] for s in selected))}")
     print(f"  Pattern coverage: {sorted(set(s[3] for s in selected))}")

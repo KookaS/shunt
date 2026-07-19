@@ -1,8 +1,8 @@
-"""Tests for the arm-sampling gate — multi-arm sweep stays OFF by default."""
+"""Arm-sampling gate — the multi-arm sweep toggle.
 
-# The live executor does not yet send a distinct request per arm (see
-# run_matrix's run_live_cells docstring) — sweeping arms before that lands
-# would bill duplicate identical requests under fake arm labels.
+Per-arm requests are wired (infer._scaffold_model_kwargs), so the shipped config
+enables the sweep; both toggle positions stay covered via monkeypatch.
+"""
 
 from __future__ import annotations
 
@@ -16,8 +16,16 @@ _TASKS: Final[tuple[str, ...]] = ("repo__task-1", "repo__task-2", "repo__task-3"
 
 
 class TestArmSamplingGateDefault:
-    def test_config_default_is_false(self):
+    def test_shipped_config_enables_sweep(self):
+        # Per-arm requests are wired (infer._scaffold_model_kwargs), so the shipped
+        # config runs the p(arm|model) sweep.
         config.load("benchmark/config.yaml")
+        assert config.arm_sampling_enabled() is True
+
+    def test_gate_defaults_false_when_key_absent(self, monkeypatch):
+        # Absent the arm_sampling block entirely, the gate is conservatively off.
+        config.load("benchmark/config.yaml")
+        monkeypatch.delitem(config.get(), "arm_sampling", raising=False)
         assert config.arm_sampling_enabled() is False
 
 
@@ -56,6 +64,25 @@ class TestArmContextGate:
 
         # At least one (cid, model) cell selected more than just its default arm.
         assert len(status.missing) > len(_TASKS) * len(models)
+
+    def test_default_only_models_pinned_to_default_arm(self, monkeypatch):
+        # A model in default_only_models runs ONLY its default arm even with the sweep on;
+        # a peer multi-arm model still explores extra arms.
+        config.load("benchmark/config.yaml")
+        models = self._models()
+        assert len(models) >= 2
+        pinned, free = models[0], models[1]
+        monkeypatch.setitem(
+            config.get(),
+            "arm_sampling",
+            {"enabled": True, "weights": [0.5, 0.35, 0.25], "default_only_models": [pinned]},
+        )
+        selected, _ = run_matrix._arm_context(_TASKS, models)
+        defaults = config.default_arm_ids(models)
+        for cid in _TASKS:
+            assert selected[(cid, pinned)] == [defaults[pinned]]
+        # the un-pinned model still gets >1 arm on at least one challenge
+        assert any(len(selected[(cid, free)]) > 1 for cid in _TASKS)
 
     def test_gate_false_matches_default_selected_arms_helper(self, monkeypatch):
         config.load("benchmark/config.yaml")

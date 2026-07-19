@@ -2,8 +2,10 @@
 
 import json
 
+import yaml
+
 from benchmark import config
-from benchmark.routing import coverage, integrity
+from benchmark.routing import authenticity, coverage, integrity
 from benchmark.routing.strategies.oracle import Oracle
 from benchmark.runner import check_integrity, image_version, run_matrix
 
@@ -285,6 +287,71 @@ class TestCacheKeyIsolation:
         after = integrity.model_versions()
         assert before == after == {"m1": "v1"}
 
+    def _write_registry(self, path, *, input_cost, cache_read):
+        registry = {
+            "providers": {
+                "p": {
+                    "base_url": "https://p.ai/v1",
+                    "api_key_env_var": "P_KEY",
+                    "litellm_prefix": "openai",
+                }
+            },
+            "models": {
+                "m1": {
+                    "model_id": "p/m1",
+                    "tier": "cheap",
+                    "provider": "p",
+                    "version": "m1",
+                    "pricing": {
+                        "input_cost_per_1m": input_cost,
+                        "output_cost_per_1m": 0.28,
+                        "cache_read_cost_per_1m": cache_read,
+                        "price_provider": "p",
+                        "price_source": "https://p.ai",
+                        "price_as_of": "2026-07-18",
+                    },
+                }
+            },
+        }
+        path.write_text(yaml.safe_dump(registry, sort_keys=False))
+
+    def test_price_edit_through_schema_changes_neither_version_nor_staleness(
+        self, tmp_path, monkeypatch
+    ):
+        # End-to-end through the real registry parse: a price/cache-price edit must
+        # leave model_versions() identical and never stale a stored cell — the stored
+        # real_cost is the billed fact; `version` is model identity, not a price.
+        cheap = tmp_path / "cheap.yaml"
+        pricey = tmp_path / "pricey.yaml"
+        self._write_registry(cheap, input_cost=0.14, cache_read=0.0028)
+        self._write_registry(pricey, input_cost=9.99, cache_read=0.99)
+
+        monkeypatch.setattr(config, "_pricing", None)
+        monkeypatch.setattr(config, "_pricing_path", lambda: cheap)
+        before = integrity.model_versions()
+
+        monkeypatch.setattr(config, "_pricing", None)
+        monkeypatch.setattr(config, "_pricing_path", lambda: pricey)
+        after = integrity.model_versions()
+
+        assert before == after == {"m1": "m1"}
+        # A cell stored under the old version stays present after the price edit.
+        status = run_matrix.classify_cells(
+            ["c1"],
+            ["m1"],
+            {
+                "c1": {
+                    "m1": {
+                        "default": {"version_hash": "h1", "model_version": "m1", "image_digest": ""}
+                    }
+                }
+            },
+            {"c1": "h1"},
+            after,
+            {"c1": ""},
+        )
+        assert status.present == 1 and status.stale == []
+
     def test_price_bump_keeps_cell_present(self):
         # Same version despite a price change ⇒ the stored cell stays present (no recompute).
         status = run_matrix.classify_cells(
@@ -474,11 +541,16 @@ class TestCheckIntegrity:
         removed, changed = check_integrity.check_hashes(cache, {})
         assert removed == ["gone"]
 
-    def test_detects_stale_model_version(self):
-        cache = {"c1": {"m1": {"version_hash": "h1", "model_version": "old"}}}
-        stale = check_integrity.check_model_versions(cache, {"m1": "new"})
-        assert stale == [("m1", "old", "new")]
-
-    def test_current_model_version_not_stale(self):
-        cache = {"c1": {"m1": {"version_hash": "h1", "model_version": "v1"}}}
-        assert check_integrity.check_model_versions(cache, {"m1": "v1"}) == []
+    def test_stale_model_version_fails_via_authenticity_only(self, capsys):
+        # model_version enforcement lives in the portable authenticity layer now; the
+        # gate fails through a single AUTHENTICITY message with no separate STALE path
+        # (no double-report). Its recompute counterpart is run_matrix._is_stale, tested
+        # under TestClassifyCells.test_stale_on_model_version_mismatch.
+        finding = authenticity.Finding(
+            authenticity.ERROR, "anchor.model_version_mismatch", "c1:m1:default", "old≠new"
+        )
+        ok = check_integrity._report([], [], [], auth_errors=[finding])
+        out = capsys.readouterr().out
+        assert ok is False
+        assert "AUTHENTICITY" in out
+        assert "STALE model versions" not in out

@@ -9,7 +9,7 @@ Treat the current numbers as a **pilot, not a verdict.** They come from a small,
 - **Small measured N.** The challenge suite is the full 500-task Verified set, but **live `results.csv` coverage is a nested partial subset** (set by `benchmark.sample_size`) — start it small (10 → 20 → 200 → 500) so cost grows deliberately. At the current pilot coverage (~tens of tasks) pass-rate confidence intervals are ±10–14 points — wide enough that most strategy differences are not statistically distinguishable.
 - **Single sample per cell (pass@1).** Each task×model outcome is one stochastic agentic run; a lone pass or fail can flip on a rerun. Decisions that hinge on one cell are noisy.
 - **The routable tail is small.** On SWE-bench Verified the field already solves ~80% of tasks with cheap models, so only ~15–20% of tasks carry any routing headroom. Aggregate metrics are dominated by easy tasks where every model succeeds and routing is irrelevant.
-- **Frontier coverage is censored under cascade collection.** A tiered/cascade collector would only run a model at the tier a task needs, so easy tasks never get a frontier data point — the fixed-frontier baseline (the kill-gate reference) would be unmeasurable without a small **full-matrix calibration holdout**. That holdout is **specified but not yet wired**: `runner/calibration.py` is a tested standalone primitive with no consumer in the run/eval path today, so current runs are full-matrix (not cascade) and the holdout is not yet collected.
+- **Frontier coverage is censored under cascade collection.** A tiered/cascade collector would only run a model at the tier a task needs, so easy tasks never get a frontier data point — the fixed-frontier baseline (the kill-gate reference) would be unmeasurable without a full-matrix run or an adaptive collection strategy. An **adaptive frontier-collection mode** is available via `python -m benchmark.runner.run_matrix --strategy cost_optimal` (or the deprecated alias `python -m benchmark.runner.collect`): it runs cheap+mid models on every task, then routes frontier runs to disputed tasks plus a uniform random audit, and estimates the baseline with a doubly-robust (PPI++/AIPW) estimator. See `docs/benchmark.md` for the method and assumptions.
 
 **Why more samples:** to make a defensible claim (tight CIs, a routable subset large enough to measure, robustness to pass@1 noise), run the full 500-task suite (already materialised) with ≥2 samples at escalation-boundary decisions. For a **fixed manifest**, the nested run order (`runner/sampling.py`) makes each step up in `sample_size` *add* tasks rather than reshuffle, so earlier `results.csv` cells are reused, not re-spent (see the caveat below — regenerating the manifest can move the order).
 
@@ -62,8 +62,16 @@ directory — there is a **single committed source of truth**.
 # Evaluate strategies against the cached matrix (writes parameterized CSV to artifacts/)
 python3 routing/run_eval.py
 
-# Caching loop: report missing/stale cells, refresh the summary + plots (simulated)
-python3 runner/run_matrix.py
+# Runner (simulated by default). --strategy cost_optimal is the DEFAULT: adaptive
+# cheap+mid on all tasks, frontier only on disputed tasks + a random audit (minimises
+# frontier spend; savings are scale-dependent — measured ρ²≈0.04 is low, so the gain
+# over `full` is modest at small task counts).
+python3 -m benchmark.runner.run_matrix
+
+# --strategy full = exhaustive every-enabled-model × every-sampled-challenge matrix.
+python3 -m benchmark.runner.run_matrix --strategy full
+
+# `python -m benchmark.runner.collect` is a DEPRECATED alias for --strategy cost_optimal.
 
 # Integrity gate: hashes match, no removed challenges, versions current, no drift
 python3 runner/check_integrity.py --check-derived
@@ -173,8 +181,12 @@ the model registry), driven by the caching loop:
 ```sh
 export DEEPSEEK_API_KEY=…      # models on the `deepseek` provider (read from env by the SDK)
 export REQUESTY_API_KEY=…      # models on the `requesty` provider (routed via router.requesty.ai)
-python benchmark/runner/run_matrix.py --live    # real execution; no keys ⇒ stays simulated
+python -m benchmark.runner.run_matrix --live    # cost_optimal (default), real execution; no keys ⇒ simulated
+python -m benchmark.runner.run_matrix --strategy full --live --max-cost 20   # capped exhaustive run
 ```
+
+`--strategy full --live` with **no** `--max-cost` prompts for interactive confirmation
+before spending (uncapped live spend is dangerous); a non-interactive stdin aborts.
 
 Keys are read from **environment variables only** (the OpenAI SDK convention) — set
 them however you like (shell export, direnv, a secrets manager). Each model in

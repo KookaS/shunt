@@ -53,7 +53,10 @@ UNKNOWN_VERSION: Final[str] = "unknown"
 # hash so correcting a label (e.g. difficulty_stratum) never stales a PAID result cell.
 # The task a model actually runs (repo/base_commit/version/F2P/P2P/image_ref/
 # dataset_revision) is unchanged by a relabel, so its cached outcome stays valid.
-_HASH_EXCLUDED_KEYS: Final[frozenset[str]] = frozenset({"difficulty_stratum"})
+# Selection-only metadata, never part of a challenge's identity: excluded from the
+# spec hash so re-stratifying difficulty can't stale cached cells. Both spellings —
+# the sampling manifest reader (order_from_manifest) accepts either.
+_HASH_EXCLUDED_KEYS: Final[frozenset[str]] = frozenset({"difficulty_stratum", "difficulty"})
 
 
 def canonical_content(challenge: dict[str, object]) -> str:
