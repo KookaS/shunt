@@ -1,4 +1,30 @@
-# Shunt
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/lockup-brand-dark.svg">
+    <img alt="🔀 SHUNT: the routing decision" src="docs/assets/lockup-ink-light.svg" width="380">
+  </picture>
+</p>
+<!-- Theme-aware wordmark; the emoji + text alt is the placeholder if the SVG fails to load. -->
+
+<p align="center">
+  <b>Open-source AI router to 100+ LLMs. Self-hosted. Call any LLM in OpenAI format.</b>
+</p>
+
+<p align="center">
+  <a href="https://kookas.github.io/shunt/"><img src="https://img.shields.io/badge/docs-kookas.github.io%2Fshunt-blue" alt="Docs"></a>
+  <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License">
+  <img src="https://img.shields.io/badge/status-pre--alpha-orange" alt="Status">
+  <img src="https://img.shields.io/badge/telemetry-none-brightgreen" alt="Telemetry">
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs">
+</p>
+
+<p align="center">
+  <picture>
+    <source srcset="docs/assets/routing.webp" type="image/webp">
+    <img src="docs/assets/hero.svg" alt="Agentic platforms (Claude Code, Cursor, n8n, and more) route through Shunt to model providers (DeepSeek, OpenAI, Claude, and more)" width="860">
+  </picture>
+</p>
+<!-- Animated WebP where supported (GitHub renders it); the static hero.svg is the fallback/placeholder. -->
 
 **One cheap model for the routine 80%. A frontier model for the hard tail. The
 line learned from your own passing tests — not a guess.**
@@ -8,20 +34,6 @@ model API. Point your agent at it with one environment variable, and Shunt aims
 to send each request to the cheapest model that can actually do the job —
 cutting the bill without cutting quality, and proving it with a benchmark rather
 than a pitch.
-
-[![Docs](https://img.shields.io/badge/docs-kookas.github.io%2Fshunt-blue)](https://kookas.github.io/shunt/)
-![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-![Status](https://img.shields.io/badge/status-pre--alpha-orange)
-![Telemetry](https://img.shields.io/badge/telemetry-none-brightgreen)
-![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)
-
-<p align="center">
-  <picture>
-    <source srcset="docs/assets/routing.webp" type="image/webp">
-    <img src="docs/assets/hero.svg" alt="Agentic platforms (Claude Code, Cursor, n8n, and more) route through Shunt to model providers (DeepSeek, OpenAI, Claude, and more)" width="860">
-  </picture>
-</p>
-<!-- Animated WebP where supported (GitHub renders it); the static hero.svg is the fallback/placeholder. -->
 
 
 
