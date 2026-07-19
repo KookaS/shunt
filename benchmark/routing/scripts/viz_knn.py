@@ -13,6 +13,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
 from sklearn.decomposition import PCA  # noqa: E402
 
 from benchmark import config  # noqa: E402
@@ -175,7 +176,7 @@ def main(config_path: str = "benchmark/config.yaml"):
     legend_handles = []
     for m in models_order:
         legend_handles.append(
-            plt.Line2D(  # type: ignore[attr-defined]
+            Line2D(
                 [0],
                 [0],
                 marker="o",

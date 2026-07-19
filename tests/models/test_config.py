@@ -34,6 +34,11 @@ DEFAULT_MODEL_NAMES: Final = [
     "zai-glm-5.2",
     "kimi-k2.5",
     "kimi-k3",
+    # Frontier escalation tail added 2026-07-19 (router-only; benchmark-disabled).
+    "gemini-3.1-pro",
+    "gpt-5.6-sol",
+    "claude-fable-5",
+    "claude-opus-4-8",
     "claude-opus-4-6",
 ]
 
@@ -331,7 +336,8 @@ class TestReasoningConfigSchema:
 
 class TestDefaultRegistryHasReasoning:
     def test_every_default_model_declares_a_reasoning_block(self) -> None:
-        # D2: all 7 registry models (6 benchmark-enabled + opus) get a bracket.
+        # D2: all 11 registry models (6 benchmark-enabled + opus-4-6 + the 4
+        # benchmark-disabled frontier escalation targets) get a bracket.
         pool = ModelPool()
         for name in DEFAULT_MODEL_NAMES:
             model = pool.get_model(name)
