@@ -23,16 +23,18 @@ curl http://127.0.0.1:3000/api/v1/prediction/<your-flow-id> \
   -d '{"question":"hi"}'
 ```
 
-## Run the handshake (local or CI) — best-effort scaffold
+## Run the handshake (local or CI)
 
 ```bash
 docker compose -f compose.yaml up --build --abort-on-container-exit --exit-code-from client
 ```
 
-This is a **best-effort scaffold**, not a cold-start pass. A Flowise chatflow must
-be **seeded first** — the `client` leg POSTs to
-`/api/v1/prediction/<flow-id>`, and with no imported flow there is nothing to
-answer (replace `SEEDED_FLOW_ID` in `compose.yaml` with a real flow id once you
-have one). The CI matrix therefore runs this leg `continue-on-error`; a red exit
-reflects the missing seeded flow, not a Shunt failure. The supported integration
-is the UI path above. See [`../README.md`](../README.md) for the shared harness.
+The handshake **self-seeds** — the `client` leg fetches Flowise's own shipped
+"Conversation Chain" template, points its ChatOpenAI node at `http://shunt:8080/v1`,
+creates the chatflow via the API, then predicts and asserts the routed answer comes
+back. It pins `flowiseai/flowise:2.2.8` (the last v2; v3 forces interactive account
+registration, hostile to hermetic CI) and reaches the management API with the
+`x-request-from: internal` header (no credentials set). The CI matrix still runs this
+leg `continue-on-error` (`best_effort: true`) because it drives a heavy pinned server,
+but a green exit is a genuine end-to-end proof. See [`../README.md`](../README.md) for
+the shared harness.

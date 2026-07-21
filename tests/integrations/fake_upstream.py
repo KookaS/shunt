@@ -33,6 +33,23 @@ def _completion_body(model: str) -> str:
     )
 
 
+def _completion_chunks(model: str) -> list[str]:
+    """SSE frames for a streamed ChatCompletion: leading role delta (required — the
+    ai-sdk `openai-compatible` provider drops all text without it), content, stop, DONE."""
+    base = {"id": "fake-cmpl-1", "object": "chat.completion.chunk", "created": 0, "model": model}
+
+    def frame(delta: dict[str, object], finish: str | None) -> str:
+        chunk = {**base, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+        return f"data: {json.dumps(chunk)}\n\n"
+
+    return [
+        frame({"role": "assistant"}, None),
+        frame({"content": "ok"}, None),
+        frame({}, "stop"),
+        "data: [DONE]\n\n",
+    ]
+
+
 def _models_body() -> str:
     return json.dumps({"object": "list", "data": [{"id": "fake/cheap", "object": "model"}]})
 
@@ -53,9 +70,13 @@ def _handler_for(received: list[str]) -> type[BaseHTTPRequestHandler]:
             raw = self.rfile.read(length) if length else b"{}"
             received.append(f"POST {self.path}")
             if self.path.endswith("/chat/completions"):
-                model = "fake/cheap"
+                payload: dict[str, object] = {}
                 with contextlib.suppress(json.JSONDecodeError):
-                    model = json.loads(raw).get("model", model)
+                    payload = json.loads(raw)
+                model = str(payload.get("model", "fake/cheap"))
+                if payload.get("stream"):
+                    self._send_sse(_completion_chunks(model))
+                    return
                 self._send(200, _completion_body(model))
                 return
             self._send(404, json.dumps({"error": {"message": f"Path not found: {self.path}"}}))
@@ -67,6 +88,16 @@ def _handler_for(received: list[str]) -> type[BaseHTTPRequestHandler]:
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+
+        def _send_sse(self, frames: list[str]) -> None:
+            """Stream SSE frames; connection-close (HTTP/1.0) delimits the stream."""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            for frame in frames:
+                self.wfile.write(frame.encode())
+                self.wfile.flush()
 
         def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib's name
             """Silence per-request stderr logging."""

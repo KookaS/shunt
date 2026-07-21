@@ -30,6 +30,7 @@ services:
         condition: service_healthy
     environment:
       HOME: /tmp/cn
+      CI: "true"   # force `cn`'s non-interactive path (no onboarding prompt in a non-TTY)
     working_dir: /work
     configs:
       - source: continue_config
@@ -40,8 +41,10 @@ services:
     command:
       - |
         set -eu
-        npm install -g @continuedev/cli >/dev/null 2>&1
+        npm install -g @continuedev/cli@1.5.47 >/dev/null 2>&1
         mkdir -p /tmp/cn
+        # `cn` always sends stream:true — needs the fake upstream's real SSE (leading
+        # role delta) or the stream yields no text and `cn` exits nonzero with empty stdout.
         out=$$(cn -p "say hi" --config /work/config.yaml)
         printf '%s\n' "$$out"
         printf '%s' "$$out" | grep -qi ok
