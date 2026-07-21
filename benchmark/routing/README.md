@@ -19,16 +19,24 @@ routing/
     external_prior.py         # Escalate on external p_solve difficulty (in-sample lookup)
     knn_blended.py            # kNN over our verified runs ∪ external Verified priors (down-weighted)
   heldout_eval.py             # Out-of-sample generalization over held-out instances (no live result yet)
+  exploration_replay.py       # Direct-Method replay of the SHIPPED exploration policy on the dense slice
   run_eval.py                 # Evaluate all strategies
   metrics.py                  # Metric definitions
   report.py                   # Comparison tables and plots (derived from results.csv)
-  scripts/plot_external.py    # External-signal plots (difficulty, ours-vs-external, held-out)
+  scripts/                    # Analysis + figure producers (all read results.csv, write reports/)
+    compute_costs.py          # Per-model cost/pass rollup from the outcome cache
+    embedding_compare.py      # TF-IDF vs embedding neighbourhoods (retrieval quality)
+    plot_exploration.py       # Exploit-only vs exploit+exploration cost/quality + explore share
+    plot_external.py          # External-signal plots (difficulty, ours-vs-external, held-out)
+    plot_strategies.py        # Strategy Pareto scatter (same rows as report.py)
+    threshold_sweep.py        # kNN (k, success_rate, min_samples) sweep + reward heatmap
+    viz_knn.py                # kNN neighbourhood / routing-map visualisations
   artifacts/                  # gitignored — parameterized run_eval outputs + embedding cache
   reports/                    # gitignored — regenerable plots (PNG) + derived strategy_summary.csv
 ../runner/build_external_prior.py  # Regenerates data/external_swebench.csv from the experiments clone
 benchmark/
   challenges/
-    swebench_verified/        # The 10 instance specs (the sole challenge source)
+    swebench_verified/        # The 500 instance specs (the sole challenge source)
 ```
 
 There is a **single committed data source of truth**:
@@ -39,7 +47,7 @@ regenerable, never committed**: the **per-strategy** summary
 `report.py`, `run_matrix.py`, `run_eval.py`) and written to the gitignored
 `reports/` dir; plots and parameter sweeps likewise regenerate from `results.csv`.
 
-## Model registry (`src/shunt/models/default_config.yaml`) — the cost + routing source of truth
+## Model registry (`src/shunt/config/models.yaml`) — the cost + routing source of truth
 
 The model registry is shared with the shipped router: one `providers` table (access
 channels) and one `models` table. It is the cost source of truth. Prices are the
@@ -108,13 +116,13 @@ one row per key; superseded rows move to the history log, below):
 Sample row (after a live run):
 
 ```
-astropy__astropy-7166,deepseek-v4-flash,default,True,0.0239,65928,1078,6,fd811481…,deepseek-v4-flash,0.0239,0.0239,False,sha256:9b0b13…,2026-07-15T12:00:00+00:00
+astropy__astropy-7166,deepseek-v4-flash,high,True,0.0239,65928,1078,6,fd811481…,deepseek-v4-flash,3c9a7e02…,0.0239,0.0239,False,sha256:9b0b13…,2026-07-15T12:00:00+00:00
 ```
 
 ### Anchors, staleness & the run-twice-zero guarantee
 
 Staleness is decided by **string-equality on immutable anchors** — no git or
-registry lookup happens when *reading* the cache. Three anchors are stored per
+registry lookup happens when *reading* the cache. Four anchors are stored per
 row:
 
 - **`version_hash`** — deterministic **SHA256** of the instance spec's
@@ -126,6 +134,12 @@ row:
   correcting it must not stale a paid result cell. `challenge_hash(id)` /
   `all_hashes()` expose it.
 - **`model_version`** — the model's `version` field from the registry.
+- **`arm_hash`** — SHA256 of the reasoning arm's resolved API params
+  (`integrity.arm_hash_value`). Re-mapping an arm's native request params (a
+  changed thinking budget, say) changes the hash, so only that arm's cells
+  recompute. A model with no `reasoning:` block has no arm anchor, and a legacy
+  row with an empty `arm_hash` degrades to a no-op rather than restaging a paid
+  cell.
 - **`image_digest`** — the **manifest** digest (never the config digest) of the
   instance's SWE-bench image, resolved via `docker buildx imagetools inspect`
   (registry query, **no pull**) and canonicalized to a bare `sha256:…`. The
@@ -135,11 +149,13 @@ row:
   therefore equals produced.
 
 A cell is **STALE** iff current spec `version_hash` ≠ stored **OR** current
-`image_digest` ≠ stored **OR** current `model_version` ≠ stored; **MISSING** iff
-no current row. Missing means *compute new*; stale means *recompute and archive
-the old row*. Invalidation is per-cell: an **image rebuild** invalidates every
-`(model, reasoning)` cell for that challenge; a **model bump** invalidates only
-that model's cells.
+`image_digest` ≠ stored **OR** current `model_version` ≠ stored **OR** the
+current `arm_hash` for that `(model, reasoning)` ≠ a non-empty stored one;
+**MISSING** iff no current row. Missing means *compute new*; stale means
+*recompute and archive the old row*. Invalidation is per-cell: an **image
+rebuild** invalidates every `(model, reasoning)` cell for that challenge; a
+**model bump** invalidates only that model's cells; an **arm re-map**
+invalidates only that arm's.
 
 **Never invalidate on resolution failure.** If a digest can't be resolved
 (offline / unreachable / yanked tag), the image axis is *skipped* with a warning —
@@ -183,7 +199,7 @@ arm). `run_matrix.py` keeps the cache current:
 
 Per-strategy **coverage** is reported: a strategy whose decision needs an
 uncached cell is flagged (can't be backtested) rather than silently skipped.
-Respects `config.yaml`'s `sample_size` for local subset debugging.
+Respects `benchmark.yaml`'s `sample_size` for local subset debugging.
 
 ```sh
 # --strategy full = exhaustive matrix (the caching loop below). Default is cost_optimal (adaptive).
@@ -202,7 +218,7 @@ summary from `results.csv` **twice** and fails if the derivation is non-determin
 (`benchmark-integrity` job) — light, no model calls.
 
 ```sh
-python3 ../runner/check_integrity.py --check-derived
+python3 -m benchmark.runner.check_integrity --check-derived
 ```
 
 ## Container
@@ -213,7 +229,7 @@ writable. Build from the repo root (BuildKit reads `benchmark/Dockerfile.dockeri
 
 ```sh
 docker build -f benchmark/Dockerfile -t shunt-benchmark .
-docker compose --profile benchmark run --rm benchmark        # simulated loop + plots
+docker compose -f benchmark/compose.yaml run --rm benchmark  # simulated loop + plots
 ```
 
 
@@ -264,7 +280,7 @@ The canonical index is `benchmark/routing/data/challenges.json`:
 
 Model pricing and per-model outcomes are kept **out** of challenges.json to
 avoid duplication:
-- **Model pricing** is sourced from the model registry (`src/shunt/models/default_config.yaml` —
+- **Model pricing** is sourced from the model registry (`src/shunt/config/models.yaml` —
   the single source of truth). `config.load_matrix()` reads it and exposes it as `matrix["models"]`
   (`{model: {input_price, output_price}}`) for backward compatibility.
 - **Per-model outcomes** live in `results.csv` (long/tidy).

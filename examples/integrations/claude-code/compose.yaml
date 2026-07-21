@@ -16,14 +16,22 @@ services:
       ANTHROPIC_BASE_URL: http://shunt:8080
       ANTHROPIC_AUTH_TOKEN: shunt-local
       HOME: /tmp/cc
+      # The container runs as root; Claude Code refuses --dangerously-skip-permissions
+      # under root unless IS_SANDBOX=1 (the accepted hermetic-container escape hatch).
+      IS_SANDBOX: "1"
+      # Keep the leg hermetic: no autoupdater / telemetry / error-reporting / non-
+      # essential model calls to the real Anthropic (one umbrella switch).
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
     entrypoint:
       - /bin/sh
       - -c
     command:
       - |
         set -eu
-        npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
+        npm install -g @anthropic-ai/claude-code@2.1.216 >/dev/null 2>&1
         mkdir -p /tmp/cc
+        # Pre-seed onboarding so `-p` never blocks on the theme/welcome prompt in a non-TTY.
+        printf '{"hasCompletedOnboarding":true}' > /tmp/cc/.claude.json
         out=$$(claude -p "say hi" --output-format text --dangerously-skip-permissions)
         printf '%s\n' "$$out"
         printf '%s' "$$out" | grep -qi ok

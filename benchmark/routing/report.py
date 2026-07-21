@@ -62,8 +62,34 @@ def load_matrix(path: Path) -> dict | None:
 
 
 def _is_pareto(row: dict) -> bool:
-    """Pareto flag, tolerant of bool (in-memory rows) or str (CSV override)."""
+    """Pareto flag, tolerant of bool (in-memory rows) or str (CSV override).
+
+    A strategy with no scorable task is never Pareto-optimal: ($0, 0%) is
+    un-dominated by construction, which is absence of evidence, not efficiency.
+    """
+    if int(float(row.get("n_tasks", 0) or 0)) <= 0:
+        return False
     return row.get("Pareto") in (True, "True")
+
+
+def _validate_rows(results: list[dict]) -> str | None:
+    """Reason the row set cannot be plotted, or ``None`` if it is usable.
+
+    Plotting reads TotalCost/AvgPerf% unguarded; a thin or malformed matrix must
+    fail here with a diagnosis rather than half-write artifacts and KeyError later.
+    """
+    for row in results:
+        for field in ("TotalCost", "AvgPerf%"):
+            try:
+                float(row[field])
+            except (KeyError, TypeError, ValueError):
+                return f"strategy {row.get('strategy', '?')!r} has no usable {field}"
+    if not any(int(float(r.get("n_tasks", 0) or 0)) > 0 for r in results):
+        return (
+            "no strategy has a single scorable task — every chosen cell is a "
+            "coverage gap. Run the matrix before reporting."
+        )
+    return None
 
 
 def print_summary(results: list[dict[str, str]]) -> None:
@@ -1176,8 +1202,8 @@ def plot_embedding_routing_map(
     matrix: dict, out_dir: Path, model_colors: dict[str, str], k: int = 10
 ) -> Path | None:
     """N6 — 2-D PCA projection of the per-task feature vectors (reusing
-    viz_knn's engineered vectors; degrades to None if sklearn is unavailable),
-    colored by the kNN-selected (model, default-arm).
+    viz_knn's engineered model-outcome vectors; None if sklearn is unavailable),
+    colored by the outcome-vector NN PROXY's (model, default-arm) — not kNNStrategy.
     """
     try:
         from sklearn.decomposition import PCA
@@ -1217,7 +1243,8 @@ def plot_embedding_routing_map(
     ax.set_xlabel(f"PC1 ({explained[0] * 100:.1f}% variance)")
     ax.set_ylabel(f"PC2 ({explained[1] * 100:.1f}% variance)")
     ax.set_title(
-        "Embedding routing map — kNN-selected model per task (PCA of TF-IDF task vectors)\n"
+        "Routing map — outcome-vector NN proxy selection per task "
+        "(PCA of model-outcome vectors, NOT the routed kNN strategy)\n"
         "arm is always the default arm until the live executor wires per-arm routing",
         fontsize=9,
     )
@@ -1307,7 +1334,7 @@ def _run_arm_plots(
     _ = matrix_path  # kept for signature symmetry with the other plot entry points
 
 
-def main(config_path: str = "benchmark/config.yaml") -> None:
+def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     config.load(config_path)
 
     ap = argparse.ArgumentParser(
@@ -1353,12 +1380,23 @@ def main(config_path: str = "benchmark/config.yaml") -> None:
             return
         tasks = derive_tasks(matrix, config.benchmark_params().get("seed", 42))
         results = derive_rows(matrix, tasks)
+        # Validate BEFORE writing: a degenerate matrix must not leave a misleading
+        # summary CSV behind on its way to a crash in the first plot.
+        problem = _validate_rows(results) if results else None
+        if problem:
+            print(f"Refusing to report: {problem}", file=sys.stderr)
+            return
         # Write a human-readable copy to reports/ (gitignored) — never committed.
         summary.write_summary_csv(results, out_dir / "strategy_summary.csv")
         source = "results.csv (derived in-memory)"
 
     if not results:
         print("No strategy rows to plot.", file=sys.stderr)
+        return
+
+    problem = _validate_rows(results)
+    if problem:
+        print(f"Refusing to report: {problem}", file=sys.stderr)
         return
 
     print(f"Loaded {len(results)} strategies from {source}")

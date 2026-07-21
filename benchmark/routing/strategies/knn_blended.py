@@ -138,7 +138,7 @@ def _clears(
 # Default external provider: CSV + HF problem statements + cached embeddings
 # ---------------------------------------------------------------------------
 def _default_external_provider(exclude: set[str]) -> ExternalData:
-    """Load the ~490 external instances (minus ``exclude``), embed offline, cache."""
+    """Load the external instances (minus ``exclude``), embed offline, cache."""
     from benchmark.routing.strategies.knn import _embed_texts
 
     priors = load_external_priors()

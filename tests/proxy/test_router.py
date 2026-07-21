@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,6 +19,7 @@ from shunt.proxy.router import (
     _is_retryable,
     _openai_chunk_to_anthropic_sse,
     _openai_response_to_anthropic,
+    final_sse_events,
 )
 from shunt.proxy.server import app
 from shunt.session import Session, SessionManager
@@ -301,13 +304,18 @@ class TestOpenAIChunkToAnthropicSSE:
         choice.delta = delta
         mock_chunk.choices = [choice]
 
-        events = _openai_chunk_to_anthropic_sse(mock_chunk)
-        event_text = "\n".join(events)
+        # message_delta/message_stop are deferred to final_sse_events so the
+        # trailing usage-only chunk (choices: []) can be folded in first.
+        state: dict[str, Any] = {}
+        events = _openai_chunk_to_anthropic_sse(mock_chunk, state=state)
+        assert "content_block_stop" in "\n".join(events)
 
-        assert "content_block_stop" in event_text
+        event_text = "\n".join(events + final_sse_events(state))
         assert "message_delta" in event_text
         assert "message_stop" in event_text
         assert "end_turn" in event_text
+        # The usage on the finish chunk is still carried through.
+        assert '"input_tokens": 10' in event_text
 
 
 # ── Test: Session model locking ─────────────────────────────────────────────
@@ -325,6 +333,32 @@ def test_get_or_lock_model_reuses(router: ProxyRouter, session: Session) -> None
     session.model_chosen = "custom-model"
     model = router._get_or_lock_model(session)
     assert model == "custom-model"
+
+
+def test_get_or_lock_model_logs_decision_once(
+    router: ProxyRouter, session: Session, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.INFO):
+        model = router._get_or_lock_model(session)
+
+    routed_records = [r for r in caplog.records if "routed to" in r.getMessage()]
+    assert len(routed_records) == 1
+    message = routed_records[0].getMessage()
+    assert session.session_id in message
+    assert model in message
+    assert "cold-start-always-cheap" in message
+
+
+def test_get_or_lock_model_no_log_on_reuse(
+    router: ProxyRouter, session: Session, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.INFO):
+        router._get_or_lock_model(session)
+        caplog.clear()
+        router._get_or_lock_model(session)
+
+    routed_records = [r for r in caplog.records if "routed to" in r.getMessage()]
+    assert len(routed_records) == 0
 
 
 # ── Test: Routing with mocked upstream ──────────────────────────────────────

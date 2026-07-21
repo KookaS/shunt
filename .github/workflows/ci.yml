@@ -22,8 +22,8 @@ jobs:
           pip install uv
           uv sync --extra dev --extra benchmark
       # Single source of truth: the same .pre-commit-config.yaml devs run locally
-      # (ruff, ruff-format, mypy strict, the custom SH001/SH002/SH004 blocking
-      # checks + SH003 advisory, benchmark config validation, whitespace,
+      # (ruff, ruff-format, mypy strict, the custom SH001/SH002/SH004/SH005
+      # blocking checks + SH003 advisory, benchmark config validation, whitespace,
       # gitleaks). Running the config here is what guarantees pre-commit ↔ CI
       # parity — CI enforces the exact custom checks, not a drifted subset.
       - name: pre-commit (lint, format, types, custom SH0xx checks, config validation)

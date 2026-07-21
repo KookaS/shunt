@@ -188,7 +188,7 @@ class TestSelectArms:
     def test_real_registry_brackets_resolve(self):
         # Sanity check against the real registry: every enabled model's declared
         # bracket selects at least its default arm on a fixed challenge id.
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         cfgs = config.reasoning_configs()
         weights = config.arm_sampling_weights()
         for model in config.enabled_models():

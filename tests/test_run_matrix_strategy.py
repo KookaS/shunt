@@ -12,7 +12,7 @@ from typing import Final
 
 from benchmark.runner import collect, run_matrix
 
-_CONFIG: Final = "benchmark/config.yaml"
+_CONFIG: Final = "benchmark/benchmark.yaml"
 
 
 def _args(**over: object) -> Namespace:

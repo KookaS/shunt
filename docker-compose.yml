@@ -1,31 +1,47 @@
+# Deploy Shunt from the published image.
+#
+#   cp .env.example .env     # add the provider keys you use
+#   docker compose up -d
+#
+# To run a build of your own checkout instead of the published image, add
+# `build: .` to the service — but note that also RETAGS your local
+# ghcr.io/kookas/shunt-router:latest as that build.
 services:
   shunt:
-    build: .
     image: ghcr.io/kookas/shunt-router:latest
+    # Loopback ONLY. Shunt holds your provider API keys in the request path and does
+    # not authenticate its own clients, so a reachable port is spendable credit for
+    # anyone who can reach it. Publish wider only behind something that authenticates:
+    #   ports: ["8080:8080"]        # every interface — do this deliberately, not by default
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
+    # Providers read their keys from the environment; .env is gitignored. Without this
+    # the router starts happily and then fails auth on every request.
+    env_file:
+      - .env
     environment:
+      # 0.0.0.0 inside the container — the port binding above is what limits reach.
       - SHUNT_HOST=0.0.0.0
       - SHUNT_PORT=8080
-      - SHUNT_DB_PATH=/data/shunt.db
+      # The variable the outcome store actually reads. Point it at the volume or the
+      # DB lands in the container's home directory and dies with the container,
+      # taking every recorded outcome — and so all learned routing — with it.
+      - SHUNT_DATA_DIR=/data
     volumes:
       - shunt_data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8080/health')
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
     restart: unless-stopped
 
-  # Reproducible benchmark runner. Code mounted READ-ONLY; only the outcome
-  # cache + plot output are writable. Simulated by default (reports gaps,
-  # fabricates nothing); pass `--live` for real Docker execution with keys.
-  benchmark:
-    build:
-      context: .
-      dockerfile: benchmark/Dockerfile
-    image: shunt-benchmark:latest
-    volumes:
-      - ./:/app:ro
-      - ./benchmark/routing/results.csv:/app/benchmark/routing/results.csv:rw
-      - ./benchmark/routing/reports:/app/benchmark/routing/reports:rw
-    command: ["--no-summary"]
-    profiles: ["benchmark"]
-
 volumes:
+  # Named volume: the outcome DB is state the router accumulates. `docker compose down`
+  # keeps it; `down -v` deletes it.
   shunt_data:

@@ -113,3 +113,43 @@ def test_dimension_inferred_on_build() -> None:
     assert idx.count == 1
     r = idx.query(_normalize(_random_emb(128)), k=1)
     assert len(r) == 1
+
+
+def test_re_adding_a_session_overwrites_rather_than_duplicating() -> None:
+    # A session is persisted once per TURN, so without dedup an N-turn session added N
+    # identical vectors: every neighbourhood was inflated and one session could satisfy the
+    # selection rule's min_samples by itself. Re-adding must overwrite in place.
+    idx = HNSWIndex(dim=64)
+    emb = _normalize(_random_emb())
+    for _ in range(5):
+        idx.add("s1", emb)
+
+    assert idx.count == 1
+    assert [idx.get_session_id(i) for i, _ in idx.query(emb, k=5)] == ["s1"]
+
+
+def test_re_added_session_keeps_the_latest_embedding() -> None:
+    idx = HNSWIndex(dim=64)
+    first, second = _normalize(_random_emb()), _normalize(_random_emb())
+    idx.add("s1", first)
+    idx.add("other", _normalize(_random_emb()))
+    idx.add("s1", second)
+
+    assert idx.count == 2
+    nearest_idx, nearest_dist = idx.query(second, k=1)[0]
+    assert idx.get_session_id(nearest_idx) == "s1"
+    assert nearest_dist < 0.01
+
+
+def test_dedup_survives_a_save_load_round_trip(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    idx = HNSWIndex(dim=64)
+    emb = _normalize(_random_emb())
+    idx.add("s1", emb)
+    path = str(tmp_path / "idx" / "index.bin")
+    idx.save(path)
+
+    reloaded = HNSWIndex(dim=64)
+    reloaded.load(path)
+    reloaded.add("s1", emb)
+
+    assert reloaded.count == 1

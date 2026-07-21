@@ -7,13 +7,14 @@ you get it right the first time.
 ## Layout
 
 - `src/shunt/` — the shipped router (product). Strictest rules apply here.
-- `benchmark/` — the eval harness (installed package `benchmark`). Absolute
+- `benchmark/` — the eval harness (not installed; tests reach it via pytest
+  `pythonpath = ["."]`). Absolute
   imports only: `from benchmark import config`, never `sys.path` hacks.
 - `tools/lint/` — the custom `SH0xx` AST checks.
 - `tests/` — pytest suite.
 - `examples/providers/` — one copy-paste registry fragment per provider. Adding a
   provider or model? Read `examples/providers/README.md` and `docs/configuration.md`
-  first; the registry is `src/shunt/models/default_config.yaml` and its row order
+  first; the registry is `src/shunt/config/models.yaml` and its row order
   is semantic.
 - `examples/integrations/` — one directory per external tool (Claude Code, opencode,
   aider, LangChain, n8n, …): a README with the copy-paste config, plus a `compose.yaml`

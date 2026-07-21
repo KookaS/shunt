@@ -8,4 +8,9 @@
 ARG SHUNT_BASE_IMAGE=shunt-router:handshake
 FROM ${SHUNT_BASE_IMAGE}
 COPY fake_registry.yaml /shunt-harness/fake_registry.yaml
+# The packaged router.yaml lists the shipped registry's live models; against the
+# 3-model fake registry `restrict_to_live` would refuse to boot. Bake a router.yaml
+# with `models: []` (route over the whole registry) and point SHUNT_CONFIG_DIR at it.
+COPY fake_router.yaml /shunt-harness/router.yaml
 ENV SHUNT_MODEL_CONFIG_PATH=/shunt-harness/fake_registry.yaml
+ENV SHUNT_CONFIG_DIR=/shunt-harness

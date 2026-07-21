@@ -8,21 +8,70 @@ import asyncio
 import functools
 import json
 import logging
+import math
 import os
+import threading
 import time
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import TYPE_CHECKING, Any, Final
 
 import openai
 from openai import AsyncOpenAI
+from starlette.concurrency import run_in_threadpool
 
 from shunt.models import ModelConfig, ModelPool
 from shunt.session import Session, SessionManager
+
+if TYPE_CHECKING:
+    from shunt.router.engine import RouterEngine
 
 logger = logging.getLogger(__name__)
 
 # Default cheap model — cold-start placeholder (kNN replaces this later)
 _DEFAULT_MODEL = "qwen3.7-plus"
+
+# Request fields forwarded upstream. `tools`/`tool_choice` are the load-bearing entries:
+# Shunt sits in front of CODING AGENTS, which are tool-calling clients, and omitting them
+# meant every agent request reached the model with its tools stripped. The model then
+# improvised tool calls as plain text (observed live: opencode emitted a raw
+# "<tool_calls>{...}" string instead of calling Read), so the agent could not act at all.
+#
+# An allow-list keeps client-specific junk and shunt-internal keys off the upstream call,
+# but a SILENT allow-list is what hid this for so long — hence _log_dropped_keys.
+_FORWARDED_OPENAI_KEYS: tuple[str, ...] = (
+    "max_tokens",
+    "max_completion_tokens",
+    "temperature",
+    "top_p",
+    "stop",
+    "frequency_penalty",
+    "presence_penalty",
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+    "response_format",
+    "seed",
+    "n",
+    "logprobs",
+    "top_logprobs",
+    "logit_bias",
+    "user",
+    "reasoning_effort",
+)
+
+# Keys the proxy consumes itself, so they are dropped on purpose and never warned about.
+_CONSUMED_KEYS: frozenset[str] = frozenset({"model", "messages", "stream", "stream_options"})
+
+
+def _log_dropped_keys(body: dict[str, Any], forwarded: dict[str, Any]) -> None:
+    """Warn once per request about client fields the proxy did not pass upstream."""
+    dropped = sorted(set(body) - set(forwarded) - _CONSUMED_KEYS)
+    if dropped:
+        logger.warning(
+            "Dropping unforwarded request fields: %s. If a client needs one, add it to "
+            "_FORWARDED_OPENAI_KEYS — a silently dropped field looks like a model defect.",
+            ", ".join(dropped),
+        )
 
 
 class UpstreamError(Exception):
@@ -86,7 +135,125 @@ def _is_retryable(exc: Exception) -> bool:
     return any(pattern in err_str for pattern in patterns)
 
 
+def _block_text(block: Any) -> str:
+    """Extract text from one content block (str passthrough, dict → its ``text``)."""
+    if isinstance(block, str):
+        return block
+    if isinstance(block, dict):
+        return str(block.get("text", ""))
+    return ""
+
+
+def _prompt_text_from_messages(messages: list[dict[str, Any]]) -> str:
+    """Flatten OpenAI-format messages into a single string, in wire order."""
+    parts: list[str] = []
+    for msg in messages:
+        content = msg.get("content", "") if isinstance(msg, dict) else ""
+        if isinstance(content, list):
+            parts.extend(_block_text(block) for block in content)
+        else:
+            parts.append(_block_text(content))
+    return "\n".join(p for p in parts if p)
+
+
+# Roles that carry the user's actual task. `system` is excluded on purpose: a coding
+# agent's system prompt alone runs ~29k chars, which is 7x the embedder's clip window.
+_TASK_ROLES: Final[frozenset[str]] = frozenset({"user", "tool"})
+
+
+def _routing_text_from_messages(messages: list[dict[str, Any]]) -> str:
+    """Task-bearing text for the routing embedding, most-recent turn first."""
+    # The embedder clips to its HEAD, so wire order is the wrong order here: with a
+    # system prompt in slot 0 the clip window closed before the task began, and every
+    # session embedded to the same vector. Recency-first keeps the task inside it.
+    parts: list[str] = []
+    for msg in reversed(messages):
+        if not isinstance(msg, dict) or msg.get("role") not in _TASK_ROLES:
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            parts.extend(_block_text(block) for block in content)
+        else:
+            parts.append(_block_text(content))
+    text = "\n".join(p for p in parts if p)
+    # A body with no task-bearing role at all is better routed on something than on
+    # nothing, so fall back to the flat wire-order text rather than embedding "".
+    return text or _prompt_text_from_messages(messages)
+
+
 # ── Format conversion helpers ──────────────────────────────────────────────
+
+
+def _tool_result_to_text(content: Any) -> str:
+    """Flatten an Anthropic tool_result payload into OpenAI's plain string content."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        ]
+        return "".join(parts) or json.dumps(content)
+    return "" if content is None else json.dumps(content)
+
+
+def _anthropic_message_to_openai(role: str, content: Any) -> list[dict[str, Any]]:
+    """One Anthropic message -> the OpenAI message(s) it corresponds to.
+
+    A tool turn expands: Anthropic carries tool results as blocks inside a *user*
+    message, while OpenAI needs a separate `tool` message per result.
+    """
+    if not isinstance(content, list):
+        return [{"role": role, "content": content}]
+
+    passthrough: list[dict[str, Any]] = []
+    tool_calls: list[dict[str, Any]] = []
+    tool_messages: list[dict[str, Any]] = []
+
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") == "image":
+            continue
+        if block.get("type") == "tool_use":
+            tool_calls.append(
+                {
+                    "id": block.get("id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": block.get("name", ""),
+                        # OpenAI wants arguments as a JSON *string*.
+                        "arguments": json.dumps(block.get("input") or {}),
+                    },
+                }
+            )
+        elif block.get("type") == "tool_result":
+            tool_messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": block.get("tool_use_id", ""),
+                    "content": _tool_result_to_text(block.get("content")),
+                }
+            )
+        else:
+            # Text and everything else passes through untouched, so cache_control
+            # markers on those blocks survive.
+            passthrough.append(block)
+
+    messages: list[dict[str, Any]] = []
+    # Results first: OpenAI requires each `tool` message to follow the assistant turn
+    # that requested it, before any new user text.
+    messages.extend(tool_messages)
+    if tool_calls:
+        messages.append(
+            {
+                "role": role,
+                "content": passthrough or None,
+                "tool_calls": tool_calls,
+            }
+        )
+    elif passthrough:
+        messages.append({"role": role, "content": passthrough})
+    return messages
 
 
 def _anthropic_request_to_openai(body: dict[str, Any]) -> dict[str, Any]:
@@ -98,21 +265,14 @@ def _anthropic_request_to_openai(body: dict[str, Any]) -> dict[str, Any]:
     system = body.get("system")
 
     for msg in body.get("messages", []):
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        if isinstance(content, list):
-            content = [
-                block
-                for block in content
-                if isinstance(block, dict) and block.get("type") != "image"
-            ]
-        messages.append({"role": role, "content": content})
+        messages.extend(
+            _anthropic_message_to_openai(msg.get("role", "user"), msg.get("content", ""))
+        )
 
     if system:
-        if isinstance(system, list):
-            messages.insert(0, {"role": "system", "content": system})
-        else:
-            messages.insert(0, {"role": "system", "content": system})
+        # Anthropic allows `system` as a string or a block list; the OpenAI shape
+        # accepts either as message content, so both forms pass through identically.
+        messages.insert(0, {"role": "system", "content": system})
 
     kwargs: dict[str, Any] = {
         "messages": messages,
@@ -122,16 +282,93 @@ def _anthropic_request_to_openai(body: dict[str, Any]) -> dict[str, Any]:
         # Ask the OpenAI SDK to emit a trailing usage chunk (else streaming
         # cache-tax/usage is silently 0 — see _track_cache_tax).
         kwargs["stream_options"] = {"include_usage": True}
-    if "max_tokens" in body:
-        kwargs["max_tokens"] = body["max_tokens"]
-    if "temperature" in body:
-        kwargs["temperature"] = body["temperature"]
-    if "top_p" in body:
-        kwargs["top_p"] = body["top_p"]
-    if "stop_sequences" in body:
-        kwargs["stop"] = body["stop_sequences"]
+    for source, target in (
+        ("max_tokens", "max_tokens"),
+        ("temperature", "temperature"),
+        ("top_p", "top_p"),
+        ("stop_sequences", "stop"),
+    ):
+        if source in body:
+            kwargs[target] = body[source]
+    if tools := _anthropic_tools_to_openai(body.get("tools")):
+        kwargs["tools"] = tools
+    if (choice := _anthropic_tool_choice_to_openai(body.get("tool_choice"))) is not None:
+        kwargs["tool_choice"] = choice
 
     return kwargs
+
+
+def _anthropic_tools_to_openai(tools: Any) -> list[dict[str, Any]]:
+    """Map Anthropic tool declarations onto the OpenAI function-tool shape."""
+    # Anthropic: {name, description, input_schema}. OpenAI nests the same information
+    # under {type: function, function: {name, description, parameters}}. Without this a
+    # Claude Code request reached the upstream model with no tools at all.
+    if not isinstance(tools, list):
+        return []
+    converted: list[dict[str, Any]] = []
+    for tool in tools:
+        if not isinstance(tool, dict) or "name" not in tool:
+            continue
+        function: dict[str, Any] = {"name": tool["name"]}
+        if "description" in tool:
+            function["description"] = tool["description"]
+        function["parameters"] = tool.get("input_schema", {"type": "object", "properties": {}})
+        converted.append({"type": "function", "function": function})
+    return converted
+
+
+def _anthropic_tool_choice_to_openai(choice: Any) -> Any:
+    """Map Anthropic's tool_choice object onto OpenAI's string/object form."""
+    if not isinstance(choice, dict):
+        return None
+    kind = choice.get("type")
+    if kind == "auto":
+        return "auto"
+    if kind == "any":
+        return "required"
+    if kind == "tool" and "name" in choice:
+        return {"type": "function", "function": {"name": choice["name"]}}
+    return None
+
+
+def _tool_call_delta_events(
+    call: dict[str, Any],
+    tool_blocks: dict[int, int],
+    state: dict[str, Any] | None,
+) -> list[str]:
+    """SSE events for one streamed tool-call fragment (opening its block if new)."""
+    events: list[str] = []
+    call_index = call.get("index", 0)
+    function = call.get("function") or {}
+
+    if call_index not in tool_blocks:
+        # Index 0 is the text block, opened eagerly with message_start, so tool blocks
+        # start at 1. `next_index` lives in state so several calls do not collide.
+        block_index = state.setdefault("next_index", 1) if state is not None else 1
+        if state is not None:
+            state["next_index"] = block_index + 1
+        tool_blocks[call_index] = block_index
+        start: dict[str, Any] = {
+            "type": "content_block_start",
+            "index": block_index,
+            "content_block": {
+                "type": "tool_use",
+                "id": call.get("id") or f"toolu_{block_index}",
+                "name": function.get("name") or "",
+                "input": {},
+            },
+        }
+        events.append(f"event: content_block_start\ndata: {json.dumps(start)}\n")
+
+    if arguments := function.get("arguments"):
+        # Anthropic streams tool arguments as raw JSON text fragments, not decoded.
+        delta = {
+            "type": "content_block_delta",
+            "index": tool_blocks[call_index],
+            "delta": {"type": "input_json_delta", "partial_json": arguments},
+        }
+        events.append(f"event: content_block_delta\ndata: {json.dumps(delta)}\n")
+    return events
 
 
 def _openai_chunk_to_anthropic_sse(
@@ -139,6 +376,7 @@ def _openai_chunk_to_anthropic_sse(
     *,
     message_id: str | None = None,
     model_name: str | None = None,
+    state: dict[str, Any] | None = None,
 ) -> list[str]:
     """Convert an OpenAI-format streaming chunk to Anthropic SSE event text(s).
 
@@ -147,7 +385,16 @@ def _openai_chunk_to_anthropic_sse(
     """
     events: list[str] = []
 
+    if state is None:
+        state = {}
+
+    # With stream_options.include_usage the token counts arrive in a TRAILING
+    # chunk that has an empty `choices` list, AFTER the finish_reason chunk
+    # (whose own `usage` is null). Returning early here dropped it, so every
+    # streamed Anthropic response reported `usage: {}` to the client. Stash it;
+    # `final_sse_events` emits message_delta once the stream is exhausted.
     if not hasattr(chunk, "choices") or not chunk.choices:
+        _capture_usage(chunk, state)
         return events
 
     choice = chunk.choices[0]
@@ -191,29 +438,101 @@ def _openai_chunk_to_anthropic_sse(
         }
         events.append(f"event: content_block_delta\ndata: {json.dumps(cb_delta)}\n")
 
+    # Tool calls arrive spread across chunks: the first carries id+name, later ones carry
+    # argument fragments. Anthropic models that as one content block per call, so the
+    # open-block bookkeeping has to outlive a single chunk — hence `state`.
+    tool_blocks: dict[int, int] = state.setdefault("tool_blocks", {}) if state is not None else {}
+    for call in delta_dict.get("tool_calls") or []:
+        if not isinstance(call, dict):
+            continue
+        events.extend(_tool_call_delta_events(call, tool_blocks, state))
+
     if finish:
-        finish_map = {
-            "stop": "end_turn",
-            "length": "max_tokens",
-            "content_filter": "content_filter",
-        }
-        anthropic_finish = finish_map.get(finish, finish)
+        anthropic_finish = _ANTHROPIC_STOP_REASON.get(finish, finish)
         events.append('event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n')
-        usage = {}
-        if hasattr(chunk, "usage") and chunk.usage:
-            usage = {
-                "input_tokens": chunk.usage.prompt_tokens or 0,
-                "output_tokens": chunk.usage.completion_tokens or 0,
-            }
-        msg_delta = {
-            "type": "message_delta",
-            "delta": {"stop_reason": anthropic_finish, "stop_sequence": None},
-            "usage": usage,
-        }
-        events.append(f"event: message_delta\ndata: {json.dumps(msg_delta)}\n")
-        events.append('event: message_stop\ndata: {"type":"message_stop"}\n')
+        for block_index in sorted(tool_blocks.values()):
+            events.append(
+                f'event: content_block_stop\ndata: {{"type":"content_block_stop",'
+                f'"index":{block_index}}}\n'
+            )
+        # message_delta / message_stop are deferred to final_sse_events so the
+        # trailing usage-only chunk can be folded in first.
+        _capture_usage(chunk, state)
+        state["stop_reason"] = anthropic_finish
 
     return events
+
+
+def _capture_usage(chunk: Any, state: dict[str, Any]) -> None:
+    """Record token counts from whichever chunk actually carries them."""
+    usage = getattr(chunk, "usage", None)
+    if not usage:
+        return
+    state["usage"] = {
+        "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+        "output_tokens": getattr(usage, "completion_tokens", 0) or 0,
+    }
+
+
+def final_sse_events(state: dict[str, Any]) -> list[str]:
+    """Emit the terminal message_delta/message_stop once the stream is exhausted."""
+    if "stop_reason" not in state:
+        return []
+    msg_delta = {
+        "type": "message_delta",
+        "delta": {"stop_reason": state["stop_reason"], "stop_sequence": None},
+        "usage": state.get("usage", {}),
+    }
+    return [
+        f"event: message_delta\ndata: {json.dumps(msg_delta)}\n",
+        'event: message_stop\ndata: {"type":"message_stop"}\n',
+    ]
+
+
+# OpenAI finish_reason -> Anthropic stop_reason. `tool_calls -> tool_use` is the one
+# clients branch on to decide whether to run a tool; passing it through untranslated
+# left Claude Code with a stop_reason it does not recognise.
+_ANTHROPIC_STOP_REASON: Final[dict[str, str]] = {
+    "stop": "end_turn",
+    "length": "max_tokens",
+    "content_filter": "content_filter",
+    "tool_calls": "tool_use",
+}
+
+
+def _tool_arguments_to_input(raw: Any) -> dict[str, Any]:
+    """Anthropic wants a decoded object; OpenAI sends a JSON *string*."""
+    if isinstance(raw, dict):
+        return raw
+    try:
+        decoded = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        # A truncated/invalid argument string must not 500 the whole response — the
+        # client sees an empty input and can retry, which beats losing the turn.
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _openai_message_to_anthropic_content(message: Any) -> list[dict[str, Any]]:
+    """Anthropic content blocks for one OpenAI assistant message: text plus tool calls."""
+    blocks: list[dict[str, Any]] = []
+    text = (getattr(message, "content", None) or "") if message is not None else ""
+    if text:
+        blocks.append({"type": "text", "text": text})
+
+    for index, call in enumerate(getattr(message, "tool_calls", None) or []):
+        function = getattr(call, "function", None)
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": getattr(call, "id", None) or f"toolu_{index}",
+                "name": getattr(function, "name", None) or "",
+                "input": _tool_arguments_to_input(getattr(function, "arguments", None)),
+            }
+        )
+
+    # Anthropic requires a non-empty content list.
+    return blocks or [{"type": "text", "text": ""}]
 
 
 def _openai_response_to_anthropic(response: Any) -> dict[str, Any]:
@@ -221,7 +540,6 @@ def _openai_response_to_anthropic(response: Any) -> dict[str, Any]:
     choice = response.choices[0] if response.choices and len(response.choices) > 0 else None
     message = choice.message if choice else None
 
-    content_text = (message.content or "") if message else ""
     usage_in = 0
     usage_out = 0
     if hasattr(response, "usage") and response.usage:
@@ -230,14 +548,13 @@ def _openai_response_to_anthropic(response: Any) -> dict[str, Any]:
 
     finish_reason = None
     if choice and hasattr(choice, "finish_reason") and choice.finish_reason:
-        fr_map = {"stop": "end_turn", "length": "max_tokens", "content_filter": "content_filter"}
-        finish_reason = fr_map.get(choice.finish_reason, choice.finish_reason)
+        finish_reason = _ANTHROPIC_STOP_REASON.get(choice.finish_reason, choice.finish_reason)
 
     return {
         "id": getattr(response, "id", None) or f"msg_{int(time.time() * 1000)}",
         "type": "message",
         "role": "assistant",
-        "content": [{"type": "text", "text": content_text or ""}],
+        "content": _openai_message_to_anthropic_content(message),
         "model": getattr(response, "model", None) or "",
         "stop_reason": finish_reason,
         "stop_sequence": None,
@@ -257,10 +574,26 @@ class ProxyRouter:
         model_pool: ModelPool,
         session_manager: SessionManager,
         retry_count: int = 3,
+        engine: RouterEngine | None = None,
     ) -> None:
         self._pool = model_pool
         self._sessions = session_manager
         self.retry_count = retry_count
+        self._engine = engine
+        # Serializes the first-turn decision so concurrent first turns of one session
+        # cannot both route (which would break the one-decision-per-session guarantee).
+        self._decision_lock = threading.Lock()
+        # Opt-in label on the `model` field of responses. Clients echo that field in
+        # their UI, so without it a routed session is indistinguishable from talking to
+        # the provider directly — you cannot tell the router is in the path at all.
+        # Off by default: it changes a wire-visible field, so a deployment opts in.
+        self._model_label = os.environ.get("SHUNT_RESPONSE_MODEL_LABEL", "")
+
+    def _label(self, model_name: str) -> str:
+        """Prefix a response's model id with the configured label, if any."""
+        if not self._model_label or not model_name:
+            return model_name
+        return f"{self._model_label}{model_name}"
 
     # ── Public API ──────────────────────────────────────────────────────────
 
@@ -273,7 +606,7 @@ class ProxyRouter:
         model_name, decision_reason)* — a byte-generator when streaming, else a
         JSON-serialisable dict.
         """
-        return await self._route(body, session, output_format="openai")
+        return await self._route(body, session)
 
     async def route_messages(
         self,
@@ -299,6 +632,9 @@ class ProxyRouter:
         self._update_cache_tax(session, response)
         self._log_cache_metrics(session)
         anthropic_body = _openai_response_to_anthropic(response)
+        # The label was applied on the OpenAI path only, so Claude Code — the one client
+        # that can actually surface it — never saw which model served the turn.
+        anthropic_body["model"] = self._label(str(anthropic_body.get("model") or ""))
         return anthropic_body, model_name, model_name
 
     # ── Internal routing ────────────────────────────────────────────────────
@@ -307,7 +643,6 @@ class ProxyRouter:
         self,
         body: dict[str, Any],
         session: Session,
-        output_format: str = "openai",
     ) -> tuple[dict[str, Any] | AsyncGenerator[bytes, None], str, str]:
         """Common routing path shared by both endpoint formats."""
         stream = body.get("stream", False)
@@ -321,17 +656,10 @@ class ProxyRouter:
             # The OpenAI SDK omits usage from streamed chunks unless asked; without
             # this, cache-tax/prompt-length read 0 for all streaming traffic.
             openai_kwargs["stream_options"] = {"include_usage": True}
-        option_keys = (
-            "max_tokens",
-            "temperature",
-            "top_p",
-            "stop",
-            "frequency_penalty",
-            "presence_penalty",
-        )
-        for key in option_keys:
+        for key in _FORWARDED_OPENAI_KEYS:
             if key in body:
                 openai_kwargs[key] = body[key]
+        _log_dropped_keys(body, openai_kwargs)
 
         response, model_name = await self._route_with_fallback(openai_kwargs, session)
 
@@ -342,9 +670,10 @@ class ProxyRouter:
 
         self._update_cache_tax(session, response)
         self._log_cache_metrics(session)
-        if hasattr(response, "model_dump"):
-            return response.model_dump(), model_name, model_name
-        return response, model_name, model_name
+        payload = response.model_dump() if hasattr(response, "model_dump") else response
+        if isinstance(payload, dict) and payload.get("model"):
+            payload["model"] = self._label(str(payload["model"]))
+        return payload, model_name, model_name
 
     async def _route_with_fallback(
         self,
@@ -355,7 +684,12 @@ class ProxyRouter:
 
         Returns *(openai_response | async_generator, selected_model_name)*.
         """
-        model_name = self._get_or_lock_model(session)
+        prompt_text = _routing_text_from_messages(openai_kwargs.get("messages", []))
+        # Off the event loop: the decision runs ONNX inference and takes a blocking
+        # lock, so doing it inline serialized concurrent first turns and stalled every
+        # in-flight SSE stream for the duration (measured 1.50s for 3 concurrent turns
+        # of a 0.5s embed).
+        model_name = await run_in_threadpool(self._get_or_lock_model, session, prompt_text)
         chain = self._pool.fallback_chain(model_name)
         last_error: Exception | None = None
 
@@ -391,6 +725,16 @@ class ProxyRouter:
         if config is None:
             raise UpstreamError(f"Unknown model: {model_name}", status_code=400)
 
+        logger.debug(
+            "upstream: model=%s provider_route=%s stream=%s messages=%d forwarded_keys=%s",
+            model_name,
+            # The route, never the key — this identifies WHICH provider actually served
+            # the call, which the response body alone does not tell you.
+            getattr(config, "route", "?"),
+            openai_kwargs.get("stream", False),
+            len(openai_kwargs.get("messages", []) or []),
+            sorted(k for k in openai_kwargs if k not in ("messages", "model")),
+        )
         for attempt in range(self.retry_count):
             try:
                 return await _acompletion(config, **openai_kwargs)
@@ -415,17 +759,89 @@ class ProxyRouter:
 
     # ── Session model locking ───────────────────────────────────────────────
 
-    def _get_or_lock_model(self, session: Session) -> str:
-        """Return the model chosen for *session*, locking it on first access."""
+    def _get_or_lock_model(self, session: Session, prompt_text: str = "") -> str:
+        """Return the model chosen for *session*, locking it on first access.
+
+        Cache-safe: the decision is made exactly once (when ``model_chosen`` is unset)
+        and reused for every later turn — never re-routed mid-session.
+        """
         if session.model_chosen:
             return session.model_chosen
+        with self._decision_lock:
+            if session.model_chosen:
+                return session.model_chosen
+            model = self._decide_once(session, prompt_text)
+            logger.info(
+                "Session %s routed to model=%s reason=%s",
+                session.session_id,
+                model,
+                session.metadata.get("model_source", "unknown"),
+            )
+            return model
+
+    def _decide_once(self, session: Session, prompt_text: str) -> str:
+        """Make the session's single routing decision — caller holds the decision lock."""
+        if self._engine is not None:
+            return self._decide_via_engine(session, prompt_text)
         model_name = _DEFAULT_MODEL
         session.model_chosen = model_name
         session.metadata["model"] = model_name
         session.metadata["model_source"] = "cold-start-always-cheap"
+        session.metadata["last_prompt"] = prompt_text
+        return model_name
+
+    def cached_embedding(self, session_id: str) -> Any:
+        """Embedding the engine computed for *session_id* (None when no engine embedded it)."""
+        if self._engine is None:
+            return None
+        return self._engine.cached_embedding(session_id)
+
+    def _decide_via_engine(self, session: Session, prompt_text: str) -> str:
+        """Route the first turn through the injected engine and lock the result."""
+        assert self._engine is not None
+        model_name, reason, provenance = self._engine.decide(session.session_id, prompt_text)
+        session.model_chosen = model_name
+        session.metadata["model"] = model_name
+        session.metadata["model_source"] = reason
+        session.metadata["last_prompt"] = prompt_text
+        session.decision_provenance = provenance
         return model_name
 
     # ── Cache-tax measurement ──────────────────────────────────────────────
+
+    @staticmethod
+    def _reported_cost(usage: Any) -> float | None:
+        """The provider-reported billed amount for one call, or None when absent."""
+        # OpenAI-compatible gateways return the real, cache-aware charge on ``usage.cost``.
+        # Nothing here derives a price locally: an unreported charge stays unknown rather
+        # than being guessed from a list price.
+        if usage is None:
+            return None
+        raw = getattr(usage, "cost", None)
+        if raw is None and isinstance(usage, dict):
+            raw = usage.get("cost")
+        if raw is None or isinstance(raw, bool):
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) and value >= 0.0 else None
+
+    def _accumulate_cost(self, session: Session, usage: Any) -> None:
+        """Add the provider-reported charge to the session total; log once if unreported."""
+        reported = self._reported_cost(usage)
+        if reported is not None:
+            session.total_cost += reported
+            return
+        if not session.metadata.get("cost_unreported"):
+            session.metadata["cost_unreported"] = True
+            logger.info(
+                "Upstream reported no usage.cost for session %s (model %s); "
+                "session cost stays unaccumulated rather than estimated",
+                session.session_id,
+                session.model_chosen,
+            )
 
     @staticmethod
     def _extract_cache_tax(response: Any) -> float:
@@ -448,13 +864,13 @@ class ProxyRouter:
                 last_usage = chunk.usage
             yield chunk
         if last_usage is not None:
+            self._accumulate_cost(session, last_usage)
             details = getattr(last_usage, "prompt_tokens_details", None)
-            cache_tax = float(getattr(details, "cached_tokens", 0) or 0)
-            if cache_tax > 0:
-                session.cache_tax = getattr(session, "cache_tax", 0.0) + cache_tax
-            prompt_tokens = getattr(last_usage, "prompt_tokens", 0) or 0
-            if prompt_tokens > 0:
-                session.prompt_length_tokens = prompt_tokens
+            self._record_cache_turn(
+                session,
+                float(getattr(details, "cached_tokens", 0) or 0),
+                getattr(last_usage, "prompt_tokens", 0) or 0,
+            )
             self._log_cache_metrics(session)
 
     @staticmethod
@@ -466,27 +882,49 @@ class ProxyRouter:
         return getattr(usage, "prompt_tokens", 0) or 0
 
     def _update_cache_tax(self, session: Session, response: Any) -> None:
-        """Extract cache metrics from a completed response and update session."""
-        cache_tax = self._extract_cache_tax(response)
-        prompt_tokens = self._extract_prompt_tokens(response)
-        if cache_tax > 0:
-            session.cache_tax = getattr(session, "cache_tax", 0.0) + cache_tax
+        """Extract cache metrics and the billed cost from a response; update the session."""
+        self._accumulate_cost(session, getattr(response, "usage", None))
+        self._record_cache_turn(
+            session, self._extract_cache_tax(response), self._extract_prompt_tokens(response)
+        )
+
+    @staticmethod
+    def _record_cache_turn(session: Session, cached_tokens: float, prompt_tokens: int) -> None:
+        """Fold one turn's cache numbers into the session's running totals."""
+        # Both sides accumulate. Only `cache_tax` used to, so the ratio divided a
+        # session total by one turn's prompt and saturated at the clamp.
+        if cached_tokens > 0:
+            session.cache_tax = getattr(session, "cache_tax", 0.0) + cached_tokens
         if prompt_tokens > 0:
             session.prompt_length_tokens = prompt_tokens
+            session.prompt_tokens_total = getattr(session, "prompt_tokens_total", 0) + prompt_tokens
+        session.metadata["last_turn_cached_tokens"] = cached_tokens
+        session.metadata["last_turn_prompt_tokens"] = prompt_tokens
+
+    @staticmethod
+    def _session_hit_ratio(session: Session) -> float:
+        """Cached share of every prompt token this session has sent."""
+        total = getattr(session, "prompt_tokens_total", 0)
+        return getattr(session, "cache_tax", 0.0) / total if total > 0 else 0.0
 
     def _log_cache_metrics(self, session: Session) -> None:
-        """Log cache hit ratio and cache tax for a session request."""
-        cache_tax = getattr(session, "cache_tax", 0.0)
-        prompt_tokens = getattr(session, "prompt_length_tokens", 0)
-        hit_ratio = min(1.0, cache_tax / prompt_tokens) if prompt_tokens > 0 else 0.0
-        if cache_tax > 0 or prompt_tokens > 0:
-            logger.info(
-                "Session %s cache_tax=%.0f prompt_tokens=%d cache_hit_ratio=%.4f",
-                session.session_id,
-                cache_tax,
-                prompt_tokens,
-                hit_ratio,
-            )
+        """Log this turn's cache hit rate and the session's running rate."""
+        turn_cached = float(session.metadata.get("last_turn_cached_tokens", 0.0))
+        turn_prompt = int(session.metadata.get("last_turn_prompt_tokens", 0))
+        if session.cache_tax <= 0 and session.prompt_tokens_total <= 0:
+            return
+        turn_ratio = turn_cached / turn_prompt if turn_prompt > 0 else 0.0
+        logger.info(
+            "Session %s cached_tokens=%.0f prompt_tokens=%d turn_hit_ratio=%.4f "
+            "session_cached=%.0f session_prompt=%d session_hit_ratio=%.4f",
+            session.session_id,
+            turn_cached,
+            turn_prompt,
+            turn_ratio,
+            session.cache_tax,
+            session.prompt_tokens_total,
+            self._session_hit_ratio(session),
+        )
 
     # ── Streaming helpers ───────────────────────────────────────────────────
 
@@ -497,6 +935,8 @@ class ProxyRouter:
                 chunk_dict = chunk.model_dump(exclude_none=True)
             else:
                 chunk_dict = chunk
+            if isinstance(chunk_dict, dict) and chunk_dict.get("model"):
+                chunk_dict["model"] = self._label(str(chunk_dict["model"]))
             yield f"data: {json.dumps(chunk_dict, default=str)}\n\n".encode()
         yield b"data: [DONE]\n\n"
 
@@ -505,14 +945,17 @@ class ProxyRouter:
         message_id = f"msg_{int(time.time() * 1000)}"
         model_name = ""
         role_seen = False
+        # Owned here, not per chunk: a tool call's block spans many chunks.
+        state: dict[str, Any] = {}
 
         async for chunk in gen:
             if not role_seen and hasattr(chunk, "model") and chunk.model:
-                model_name = chunk.model
+                model_name = self._label(chunk.model)
             events = _openai_chunk_to_anthropic_sse(
                 chunk,
                 message_id=message_id,
                 model_name=model_name,
+                state=state,
             )
             for event in events:
                 yield event.encode("utf-8")
@@ -525,3 +968,10 @@ class ProxyRouter:
                 delta = choice.delta if hasattr(choice, "delta") else None
                 if delta and hasattr(delta, "role") and delta.role:
                     role_seen = True
+
+        trailing = final_sse_events(state)
+        for event in trailing:
+            yield event.encode("utf-8")
+            yield b"\n"
+        if trailing:
+            yield b"\n"

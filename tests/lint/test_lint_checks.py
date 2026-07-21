@@ -113,3 +113,44 @@ def test_sh005_ignores_modules_outside_src_shunt(tmp_path: Path) -> None:
 def test_sh005_passes_a_clean_router_module(tmp_path: Path) -> None:
     f = _src_shunt_file(tmp_path, "router/clean.py", "def f(cfg):\n    return cfg.tier\n")
     assert _run("check_pricing_isolation.py", str(f)) == 0
+
+
+def test_sh004_default_scan_covers_root_level_files() -> None:
+    # The default target list used to name five subtrees, so every root-level
+    # file except README.md shipped unscanned — a planted leak in CONTRIBUTING.md
+    # exited 0. The hook passes no filenames, so the default IS the coverage.
+    planted = _ROOT / "_sh004_root_probe.md"
+    planted.write_text("# tracked in STORY-9.9\n")  # noqa: SHUNT-ISO
+    try:
+        assert _run("check_internal_refs.py") == 1
+    finally:
+        planted.unlink()
+    assert _run("check_internal_refs.py") == 0
+
+
+def test_sh004_honours_the_wrapper_isolation_noqa_token() -> None:
+    # One suppression token serves both gates; two would drift apart.
+    planted = _ROOT / "_sh004_noqa_probe.py"
+    body = "x = 1  # tracked in STORY" + "-9.9  noqa: SHUNT-ISO\n"  # split: fixture, not a ref
+    planted.write_text(body)
+    try:
+        assert _run("check_internal_refs.py") == 0
+    finally:
+        planted.unlink()
+
+
+def test_sh006_catches_src_importing_benchmark(tmp_path: Path) -> None:
+    f = _src_shunt_file(tmp_path, "router/leak.py", "import benchmark.config\n")
+    assert _run("check_import_direction.py", str(f)) == 1
+
+
+def test_sh006_allows_benchmark_importing_src(tmp_path: Path) -> None:
+    f = tmp_path / "benchmark" / "uses_shunt.py"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("import shunt.router\n")
+    assert _run("check_import_direction.py", str(f)) == 0
+
+
+def test_sh006_passes_a_clean_src_module(tmp_path: Path) -> None:
+    f = _src_shunt_file(tmp_path, "router/clean2.py", "import logging\n")
+    assert _run("check_import_direction.py", str(f)) == 0

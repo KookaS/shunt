@@ -42,7 +42,7 @@ def _outcome(**over: object) -> dict:
 
 def _arm_map() -> dict[str, dict[str, str]]:
     """The real deepseek arm-hash anchors from the shipped registry."""
-    config.load("benchmark/config.yaml")
+    config.load("benchmark/benchmark.yaml")
     return integrity.arm_hashes(config.resolved_models())
 
 
@@ -176,7 +176,7 @@ class TestArmHashStaleness:
 
 class TestAliasingSafety:
     def test_no_api_duplicate_arms_within_any_model(self):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         for name, model in config.resolved_models().items():
             if model.reasoning is None:
                 continue
@@ -187,7 +187,7 @@ class TestAliasingSafety:
 
     def test_deepseek_low_med_excluded_from_registry(self):
         # DeepSeek low/med alias to high and must NOT be distinct arms.
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         ds = config.resolved_models()["deepseek-v4-flash"]
         assert ds.reasoning is not None
         ids = {a.id for a in ds.reasoning.arms}
@@ -195,7 +195,7 @@ class TestAliasingSafety:
         assert ids == {"nothink", "high", "max"}
 
     def test_every_default_arm_matches_a_declared_arm(self):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         for name, model in config.resolved_models().items():
             if model.reasoning is None:
                 continue
@@ -233,7 +233,7 @@ class TestLegacyMigration:
         return base
 
     def test_legacy_default_aliases_to_model_default_arm(self, tmp_path):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         p = self._legacy_csv(tmp_path, [self._row("default")])
         cache = config.load_results(p)
         # deepseek's declared default_arm is "high": the legacy row resolves there.
@@ -241,13 +241,13 @@ class TestLegacyMigration:
 
     def test_legacy_row_unrewritten_on_disk(self, tmp_path):
         # Aliasing is read-time only: the CSV on disk still literally says "default".
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         p = self._legacy_csv(tmp_path, [self._row("default")])
         config.load_results(p)
         assert "deepseek-v4-flash,default," in p.read_text()
 
     def test_explicit_arm_row_not_aliased(self, tmp_path):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         p = self._legacy_csv(tmp_path, [self._row("none")])
         cache = config.load_results(p)
         assert list(cache["c1"]["deepseek-v4-flash"]) == ["none"]
@@ -258,7 +258,7 @@ class TestLegacyMigration:
         # load_results collapses them. Documented invariant: the resolution is
         # deterministic and prefers the explicit arm's data (sorted-write: default<high,
         # explicit read last-wins). No paid cell is LOST on disk (both rows persist).
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         arm_map = _arm_map()
         rows = [
             self._row("default", cost="0.99"),
@@ -277,7 +277,7 @@ class TestLegacyMigration:
 
 class TestSelectArmsDeterminism:
     def test_rerun_over_registry_selects_identical_sets(self):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         cfgs = config.reasoning_configs()
         weights = config.arm_sampling_weights()
         ids = [f"repo__task-{i}" for i in range(200)]
@@ -293,7 +293,7 @@ class TestSelectArmsDeterminism:
         assert sweep() == sweep()
 
     def test_default_arm_always_selected_every_model(self):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         cfgs = config.reasoning_configs()
         weights = config.arm_sampling_weights()
         for m in config.enabled_models():
@@ -301,7 +301,7 @@ class TestSelectArmsDeterminism:
                 assert cfgs[m].default_arm in sampling.select_arms(cid, m, cfgs[m], weights)
 
     def test_selection_is_a_subset_of_the_bracket(self):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         cfgs = config.reasoning_configs()
         weights = config.arm_sampling_weights()
         for m in config.enabled_models():
@@ -425,7 +425,7 @@ class TestSchema:
                     "model_version": "deepseek-v4-flash",
                 }
             )
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         cache = config.load_results(p)
         assert cache["c1"]["deepseek-v4-flash"]["high"]["arm_hash"] == ""
 

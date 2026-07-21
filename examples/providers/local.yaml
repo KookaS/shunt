@@ -2,7 +2,7 @@
 # Local (Ollama / vLLM) — a model on your own machine.
 #
 # Marked `skip`, not `probe`, and deliberately absent from the shipped registry
-# in src/shunt/models/default_config.yaml. A local server needs no key, so the
+# in src/shunt/config/models.yaml. A local server needs no key, so the
 # thing to check is reachability, not authentication — and `auth_probe` only
 # knows how to assert "this rejected me correctly". Rather than invent a
 # signature this file omits `auth_probe` entirely: no probe is honest, a

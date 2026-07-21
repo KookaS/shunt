@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 from shunt.router.embedder import (
     FALLBACK_MODEL,
@@ -90,14 +91,14 @@ class TestTruncationRate:
         assert e.truncation_rate("Hello world") == 0.0
 
     def test_long_text_truncated(self):
-        e = Embedder(lazy=True, model_name=FALLBACK_MODEL)  # 2048 context
-        # ~5000 chars → ~1250 tokens < 2048 → 0.0
-        assert e.truncation_rate("x" * 5000) == 0.0
+        e = Embedder(lazy=True, model_name=FALLBACK_MODEL)
+        # Measured against the BINDING limit — the char clip, not the model context.
+        assert e.truncation_rate("x" * (e.max_chars // 2)) == 0.0
+        assert e.truncation_rate("x" * e.max_chars) == 0.0
 
-        # ~50000 chars → ~12500 tokens > 2048 → truncated
-        rate = e.truncation_rate("x" * 50000)
-        assert rate > 0.0
-        assert rate <= 1.0
+        rate = e.truncation_rate("x" * (e.max_chars * 10))
+        assert rate == pytest.approx(0.9)
+        assert 0.0 < rate <= 1.0
 
     def test_very_long_text_caps_at_one(self):
         e = Embedder(lazy=True)

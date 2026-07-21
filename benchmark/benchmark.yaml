@@ -1,7 +1,7 @@
 # Shunt Benchmark Configuration
 # Human-editable. Changes here propagate to all scripts.
 # All model metadata (tier, pricing, provider) lives in the model registry
-# (src/shunt/models/default_config.yaml).
+# (src/shunt/config/models.yaml).
 # This file only controls which models are active and how routing behaves.
 
 models:                 # enabled models; a name must exist in the registry.
@@ -42,7 +42,6 @@ strategies:
     external_weight: 0.25   # down-weight of external neighbours vs our verified runs
 
 routing:
-  default_strategy: cascade
   control_model: kimi-k3    # strongest ENABLED frontier = kill-gate baseline (opus-4-6 priced but disabled)
   gamma: 0.1
 
@@ -88,7 +87,6 @@ collect:
                             #   the paired McNemar + audit, and savings vs `full` are modest at small N.
   audit_salt: frontier-audit-v1
   include_high: false       # add the 'high' tier to the frontier phase (extra oracle point)
-  sequential_stop: false    # advisory in v1 (e-process logged, --max-cost is the hard stop)
   noninferiority_margin: 0.05   # δ: the pre-registered 5pp equal-quality bar for paired McNemar
   budget_phase_a: null      # per-phase --max-cost override (null = shared ceiling)
   budget_phase_c: null

@@ -1,0 +1,23 @@
+# Reproducible benchmark runner — a CONTRIBUTOR tool, run from a git checkout.
+#
+#   docker compose -f benchmark/compose.yaml run --rm benchmark
+#
+# Kept out of the repo-root docker-compose.yml on purpose: that file is the deploy
+# example, run from the published image, while this one bind-mounts the source tree
+# and so only works from a checkout. The two cannot both be true of one file.
+#
+# Code is mounted READ-ONLY; only the outcome cache and plot output are writable.
+# Simulated by default (reports gaps, fabricates nothing) — pass `--live` for real
+# execution, which needs provider keys and spends real money.
+services:
+  benchmark:
+    build:
+      # Repo root: the Dockerfile copies the whole harness, not just benchmark/.
+      context: ..
+      dockerfile: benchmark/Dockerfile
+    image: shunt-benchmark:latest
+    volumes:
+      - ../:/app:ro
+      - ../benchmark/routing/results.csv:/app/benchmark/routing/results.csv:rw
+      - ../benchmark/routing/reports:/app/benchmark/routing/reports:rw
+    command: ["--no-summary"]

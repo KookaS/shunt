@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
 from shunt.models import TIER_ORDER
+
+logger = logging.getLogger(__name__)
 
 
 class ModelInfo(Protocol):
@@ -26,6 +29,8 @@ class ModelPoolProtocol(Protocol):
 
 
 _DEFAULT_COLD_START_MODEL = "qwen3.7-plus"
+# Raw library default for a bare SelectionRule(). Production does NOT use this: the server
+# builds the rule from KnnPolicy.success_rate_threshold (shipped 0.6), the single source.
 _DEFAULT_MIN_SUCCESS_RATE = 0.7
 _DEFAULT_MIN_SAMPLES = 3
 
@@ -78,6 +83,10 @@ class SelectionRule:
     def cold_start_model(self) -> str:
         return self._cold_start_model
 
+    @property
+    def min_success_rate(self) -> float:
+        return self._min_success_rate
+
     def select(
         self,
         neighbors: list[NeighborResult],
@@ -88,6 +97,13 @@ class SelectionRule:
             return (self._cold_start_model, "cold_start")
 
         if not neighbors:
+            # The silent-degradation case: no evidence at all, so `_escalate` returns the
+            # cheapest model and labels it `exploration_untested` — indistinguishable in
+            # the response from a learned choice unless the log says so here.
+            logger.debug(
+                "select: no model cleared the threshold — neighbourhood is EMPTY, "
+                "falling through to the cheapest untested model"
+            )
             return self._escalate(set(), model_pool)
 
         groups: dict[str, list[NeighborResult]] = {}
@@ -111,7 +127,18 @@ class SelectionRule:
                 sum(w * n.cost for w, n in zip(weights, group, strict=True)) / total_weight
             )
 
-            if weighted_success >= self._min_success_rate and len(group) >= self._min_samples:
+            passes = weighted_success >= self._min_success_rate and len(group) >= self._min_samples
+            logger.debug(
+                "select: model=%s samples=%d/%d success=%.3f/%.3f cost=%.6f -> %s",
+                model,
+                len(group),
+                self._min_samples,
+                weighted_success,
+                self._min_success_rate,
+                weighted_cost,
+                "ELIGIBLE" if passes else "rejected",
+            )
+            if passes:
                 eligible.append((model, weighted_cost))
 
         if eligible:
@@ -119,6 +146,12 @@ class SelectionRule:
             return (eligible[0][0], "cheapest_above_threshold")
 
         tested_models = set(groups.keys())
+        # Not a neutral fallback: this returns the CHEAPEST untested model, so a thin or
+        # empty neighbourhood makes the router look like always_cheap.
+        logger.debug(
+            "select: no model cleared the threshold; escalating past tested=%s",
+            sorted(tested_models) or "none",
+        )
         return self._escalate(tested_models, model_pool)
 
     def _escalate(

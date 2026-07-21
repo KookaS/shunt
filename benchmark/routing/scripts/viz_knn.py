@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""kNN clustering visualization for the challenges matrix. Uses model result
-vectors as a proxy for task-embedding similarity, then simulates kNN routing
-via a simplified nearest-neighbor classifier.
-"""
+"""Outcome-vector NN proxy — clustering visualization for the challenges matrix."""
+
+# Neighbours are found over MODEL-OUTCOME vectors (pass/cost/tokens/calls) as a
+# stand-in for task-embedding similarity, then a simplified nearest-neighbour
+# classifier picks a model. This is NOT the routed kNN strategy that
+# plot_strategies.py evaluates (routing.strategies.knn.kNNStrategy, which embeds
+# task text and gates on success_rate_threshold/min_samples), so its costs are
+# not comparable to strategy_comparison.png. Every reader-facing label here says
+# "outcome-vector NN proxy" for that reason.
 
 from __future__ import annotations
 
@@ -103,7 +108,7 @@ def _default_model_colors(models: list[str]) -> dict[str, str]:
     return {m: palette[i % len(palette)] for i, m in enumerate(models)}
 
 
-def main(config_path: str = "benchmark/config.yaml"):
+def main(config_path: str = "benchmark/benchmark.yaml"):
     config.load(config_path)
     import argparse
 
@@ -111,7 +116,15 @@ def main(config_path: str = "benchmark/config.yaml"):
     ap.add_argument("--config", default=config_path, help="Path to config YAML")
     ap.add_argument("--matrix", default=None)
     ap.add_argument("--output-dir", default="benchmark/routing/reports")
-    ap.add_argument("--k", type=int, default=10, help="k for kNN")
+    # Default k tracks the configured kNN strategy (benchmark.yaml
+    # strategies.knn.k) so the proxy at least uses the same neighbourhood size
+    # as the routed strategy — the neighbour SPACE still differs (see docstring).
+    ap.add_argument(
+        "--k",
+        type=int,
+        default=None,
+        help="neighbourhood size for the proxy (default: configured strategies.knn.k)",
+    )
     args = ap.parse_args()
 
     if args.config != config_path:
@@ -124,7 +137,7 @@ def main(config_path: str = "benchmark/config.yaml"):
     if not models_order:
         models_order = list(matrix.get("models", {}).keys())
 
-    k_neighbors = args.k
+    k_neighbors = args.k if args.k is not None else int(config.knn_params().get("k", 10))
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -148,7 +161,7 @@ def main(config_path: str = "benchmark/config.yaml"):
         selections[task_ids[i]] = knn_select(vecs, i, models_order, k=k_neighbors)
 
     unique, counts = np.unique(list(selections.values()), return_counts=True)
-    print("kNN model allocation:")
+    print("outcome-vector NN proxy — model allocation:")
     for m, c in sorted(zip(unique, counts, strict=True), key=lambda x: -x[1]):
         print(f"  {m}: {c} tasks ({c / n * 100:.1f}%)")
 
@@ -186,10 +199,10 @@ def main(config_path: str = "benchmark/config.yaml"):
                 label=m,
             )
         )
-    ax.legend(handles=legend_handles, title="kNN-selected model", fontsize=8)
+    ax.legend(handles=legend_handles, title="Proxy-selected model", fontsize=8)
     ax.set_xlabel(f"PC1 ({explained[0] * 100:.1f}% variance)")
     ax.set_ylabel(f"PC2 ({explained[1] * 100:.1f}% variance)")
-    ax.set_title("kNN Model Selection: PCA Projection of Task Features")
+    ax.set_title("Outcome-Vector NN Proxy: PCA Projection of Task Features")
     fig.tight_layout()
     fig.savefig(str(output_dir / "knn_pca_scatter.png"), dpi=150)
     print("Saved knn_pca_scatter.png")
@@ -251,7 +264,7 @@ def main(config_path: str = "benchmark/config.yaml"):
     axes[1].set_xticks(x_pos)
     axes[1].set_xticklabels(models_order, rotation=45, ha="right", fontsize=9)
     axes[1].set_ylabel("Mean neighborhood purity")
-    axes[1].set_title("kNN Neighborhood Purity by Selected Model")
+    axes[1].set_title("Outcome-Vector NN Proxy — Neighborhood Purity by Selected Model")
     axes[1].set_ylim(0, 1.05)
     axes[1].axhline(
         y=0.5, color="gray", linestyle="--", linewidth=0.5, alpha=0.7, label="0.5 baseline"
@@ -286,7 +299,7 @@ def main(config_path: str = "benchmark/config.yaml"):
     ax.set_xticks(range(len(models_order)))
     ax.set_xticklabels(models_order, rotation=45, ha="right", fontsize=10)
     ax.set_ylabel("Number of tasks routed")
-    ax.set_title(f"kNN Model Allocation Across {n} Tasks (k={k_neighbors})")
+    ax.set_title(f"Outcome-Vector NN Proxy — Model Allocation Across {n} Tasks (k={k_neighbors})")
 
     for bar, cnt in zip(bars, model_counts, strict=True):
         ax.text(
@@ -335,7 +348,11 @@ def main(config_path: str = "benchmark/config.yaml"):
     savings_pct = (1 - knn_total / frontier_cost) * 100 if frontier_cost else 0.0
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    labels = [f"cheapest\n({cheapest_model})", "kNN routing", f"frontier\n({frontier_model})"]
+    labels = [
+        f"cheapest\n({cheapest_model})",
+        "outcome-vector\nNN proxy",
+        f"frontier\n({frontier_model})",
+    ]
     values = [cheap_cost, knn_total, frontier_cost]
     bars = ax.bar(labels, values, color=["#2196F3", "#E69F00", "#F44336"], edgecolor="black")
     for bar, val in zip(bars, values, strict=True):
@@ -355,23 +372,37 @@ def main(config_path: str = "benchmark/config.yaml"):
         title_tail = (
             f"pass {knn_pass}/{n} ({knn_pass / n * 100:.0f}%), saves {savings_pct:.0f}% vs frontier"
         )
-    ax.set_title(f"kNN Routing Cost Across {n} Tasks (k={k_neighbors})\n{title_tail}")
+    ax.set_title(f"Outcome-Vector NN Proxy — Cost Across {n} Tasks (k={k_neighbors})\n{title_tail}")
+    ax.grid(True, axis="y", alpha=0.3)
+    ax.set_axisbelow(True)
+    fig.tight_layout()
+    # Figure-level captions BELOW the axes: drawn inside the bars, they collided
+    # with the value labels.
+    fig.subplots_adjust(bottom=0.34 if phantom_frontier else 0.22)
+    fig.text(
+        0.5,
+        0.02,
+        "Note: the middle bar is a similarity PROXY over model-outcome vectors "
+        "(pass/cost/tokens/calls),\nnot the routed kNN strategy — its cost is NOT "
+        "comparable to strategy_comparison.png",
+        ha="center",
+        va="bottom",
+        fontsize=8,
+        color="#444444",
+        style="italic",
+    )
     if phantom_frontier:
-        ax.text(
+        fig.text(
             0.5,
-            0.95,
+            0.13,
             f"⚠ PHANTOM BASELINE — {frontier_model} evaluated on {frontier_covered}/{n} "
             f"tasks;\nits bar sums only those, so a 'vs frontier' saving is not comparable",
-            transform=ax.transAxes,
             ha="center",
-            va="top",
+            va="bottom",
             fontsize=9,
             color="#B00020",
             fontweight="bold",
         )
-    ax.grid(True, axis="y", alpha=0.3)
-    ax.set_axisbelow(True)
-    fig.tight_layout()
     fig.savefig(str(output_dir / "knn_cost_comparison.png"), dpi=150)
     print("Saved knn_cost_comparison.png")
     plt.close(fig)
@@ -382,9 +413,10 @@ def main(config_path: str = "benchmark/config.yaml"):
         else f"saves {savings_pct:.1f}% vs frontier"
     )
     print(
-        f"Cost across {n} tasks: cheapest ${cheap_cost:.4f}, kNN ${knn_total:.4f}, "
+        f"Cost across {n} tasks: cheapest ${cheap_cost:.4f}, "
+        f"outcome-vector NN proxy ${knn_total:.4f}, "
         f"frontier ${frontier_cost:.4f} ({frontier_covered}/{n} tasks); "
-        f"kNN pass {knn_pass}/{n}, {savings_str}"
+        f"proxy pass {knn_pass}/{n}, {savings_str}"
     )
 
 

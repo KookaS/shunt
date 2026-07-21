@@ -203,15 +203,6 @@ models:
         - id: max
           rank: 0
           api: {reasoning_effort: max}
-  # ── frontier escalation tail (benchmark-DISABLED) ────────────────────────────
-  # Added 2026-07-19 as router-only escalation targets so the live router can reach
-  # the current best SWE/reasoning models WITHOUT running them in the (expensive)
-  # benchmark — they are simply omitted from benchmark/config.yaml's enabled list.
-  # Pricing + model IDs are RESEARCH-ESTIMATED (Artificial Analysis / vendor pages),
-  # NOT verified against a live Requesty listing — verify before relying on live
-  # routing to them. Placed BEFORE claude-opus-4-6 so the VERIFIED opus-4-6 stays
-  # the last frontier row and thus `_escalate`'s safe_fallback (the "don't fail"
-  # path) never depends on an unverified ID.
   gemini-3.1-pro:
     model_id: google/gemini-3.1-pro
     tier: frontier
@@ -229,7 +220,7 @@ models:
       price_note: >-
         RESEARCH-ESTIMATED (Artificial Analysis, 2026-07-19), NOT a live Requesty
         listing. Google length-tiered pricing: ≤200K-context tier ($2/$4 in,
-        $12/$18 out above 200K). Benchmark-DISABLED (omitted from config.yaml).
+        $12/$18 out above 200K). Benchmark-DISABLED (omitted from benchmark/benchmark.yaml).
     # reasoning_effort is the portable OpenAI-compatible knob requesty's `openai/`
     # driver passes through; Gemini's native `thinking_level` risks a 400 there.
     # UNVERIFIED against a live response — smoke-test before relying on it.
@@ -345,7 +336,7 @@ models:
       price_as_of: "2026-07-15"
       price_note: Requesty router listing (claude-opus-4-6, anthropic). $6.25/M cache-write, $0.500/M cache-read.
     # Bracket: realizable {none,low,med,high,max} dedupes to {none,high,max} —
-    # off by default; added for completeness (benchmark-disabled, see config.yaml).
+    # off by default; added for completeness (benchmark-disabled, see benchmark/benchmark.yaml).
     reasoning:
       default_arm: nothink
       arms:

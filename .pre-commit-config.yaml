@@ -69,8 +69,16 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      # SH006 enforces the dependency direction the architecture depends on:
+      # benchmark -> shunt only. Same always_run rationale as SH004/SH005. BLOCKING.
+      - id: sh006-import-direction
+        name: SH006 src/shunt must not import benchmark
+        entry: python tools/lint/check_import_direction.py
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: validate-benchmark-config
-        name: validate benchmark config.yaml
+        name: validate benchmark benchmark.yaml
         # Run as a module from the repo root (pre-commit's cwd) so `from benchmark
         # import config` resolves the harness via sys.path[0], not an installed
         # package — benchmark is deliberately NOT installed/shipped (see
@@ -80,7 +88,16 @@ repos:
         entry: bash -c 'PATH="$PWD/.venv/bin:$PATH" python -m benchmark.validate_config'
         language: system
         pass_filenames: false
-        files: ^benchmark/config\.yaml$
+        files: ^benchmark/benchmark\.yaml$
+      - id: uv-lock-check
+        name: uv.lock matches pyproject.toml
+        # No gate covered this, and it showed: scikit-learn was moved out of the core
+        # dependencies but the lock still pinned it there, so `uv sync` kept installing
+        # the old set. A dependency fix that never reaches the lock is not shipped.
+        entry: uv lock --check
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock)$
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:

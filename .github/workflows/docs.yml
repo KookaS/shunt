@@ -25,6 +25,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # gh-deploy needs history to update the gh-pages branch
+          # docs/assets/*.webp are LFS-tracked (.gitattributes). Without this the
+          # checkout leaves 130-byte pointer files, mkdocs copies them verbatim, and
+          # gh-pages publishes broken images with a green build.
+          lfs: true
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}

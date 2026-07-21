@@ -12,28 +12,28 @@ class TestStrategyFactoriesMatchEnabledSet:
     strategy silently dropped, no strategy added that isn't config-enabled."""
 
     def test_every_enabled_strategy_has_a_factory(self):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         enabled_names = {s.name for s in run_eval.get_strategies()}
         factories = report._build_strategy_factories(config.gamma())
         assert enabled_names <= factories.keys()
 
     def test_external_prior_is_not_silently_dropped(self):
-        # external_prior is enabled in config.yaml's strategies.enabled — a
+        # external_prior is enabled in benchmark.yaml's strategies.enabled — a
         # Pareto-front headline strategy that must appear on the regret plot.
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         factories = report._build_strategy_factories(config.gamma())
         assert "External-Prior" in factories
 
     def test_oracle_reward_always_present_as_internal_reference(self):
         # Oracle-reward is the regret plot's baseline every strategy is scored
-        # against — required even when config.yaml comments it out of `enabled`.
-        config.load("benchmark/config.yaml")
+        # against — required even when benchmark.yaml comments it out of `enabled`.
+        config.load("benchmark/benchmark.yaml")
         assert "oracle_reward" not in config.strategies().get("enabled", [])
         factories = report._build_strategy_factories(config.gamma())
         assert "Oracle-reward" in factories
 
     def test_no_strategy_added_beyond_enabled_plus_oracle_reward(self):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         enabled_names = {s.name for s in run_eval.get_strategies()}
         factories = report._build_strategy_factories(config.gamma())
         assert factories.keys() == enabled_names | {"Oracle-reward"}
@@ -90,7 +90,7 @@ class TestDisabledModelExcluded:
     def test_disabled_model_cannot_leak_via_stray_row(self):
         # A disabled model (opus) with a stray results row must never re-enter the
         # matrix — otherwise it silently re-promotes to frontier (opus $30 > k3 $18).
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         stray = {
             "t1": {
                 "deepseek-v4-flash": {"pass": True, "cost": 0.01},

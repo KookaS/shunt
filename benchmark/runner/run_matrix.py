@@ -751,7 +751,7 @@ def _dispatch(args: argparse.Namespace) -> int:
     return _run_full(args)
 
 
-def main(config_path: str = "benchmark/config.yaml") -> int:
+def main(config_path: str = "benchmark/benchmark.yaml") -> int:
     # Self-sufficient credentials: load a local .env (gitignored) if present so
     # `--live` works from a bare shunt checkout; real env vars still take precedence.
     load_dotenv_file()
@@ -802,7 +802,7 @@ def _run_full(args: argparse.Namespace) -> int:
             print(
                 f"  REFUSING --live: enabled models without caching {uncached} would burn "
                 "uncached budget (full-context resend every turn). Disable them in "
-                "config.yaml or add cache_read_cost_per_1m to the model registry.",
+                "benchmark.yaml or add cache_read_cost_per_1m to the model registry.",
                 file=sys.stderr,
             )
             return 2

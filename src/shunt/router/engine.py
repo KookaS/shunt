@@ -1,16 +1,28 @@
 from __future__ import annotations
 
 import logging
+import math
+import threading
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     import numpy as np
     import numpy.typing as npt
 
+from shunt.router.budget import ConservativeGate, ExplorationBudget
 from shunt.router.cold_start import ColdStartStrategy
 from shunt.router.embedder import Embedder
+from shunt.router.exploration import CandidateStats, ExplorationDecision, ThompsonSampler
+from shunt.router.policy import ExplorationPolicy
 from shunt.router.provenance import build_provenance
-from shunt.router.selection import ModelPoolProtocol, NeighborResult, SelectionRule
+from shunt.router.selection import (
+    ModelPoolProtocol,
+    NeighborResult,
+    SelectionRule,
+    _confidence_weight,
+)
+from shunt.router.strategies import RoutingStrategy
+from shunt.router.strategies.knn import KnnStrategy
 
 
 class SessionManagerProtocol(Protocol):
@@ -63,6 +75,12 @@ class RouterEngine:
         cold_start_threshold: int = 20,
         selection_rule: SelectionRule | None = None,
         cold_start_strategy: ColdStartStrategy | None = None,
+        exploration: ExplorationPolicy | None = None,
+        sampler: ThompsonSampler | None = None,
+        budget: ExplorationBudget | None = None,
+        conservative_gate: ConservativeGate | None = None,
+        strategy: RoutingStrategy | None = None,
+        neighbor_k: int = 20,
     ) -> None:
         self._model_pool = model_pool
         self._session_manager = session_manager
@@ -72,16 +90,44 @@ class RouterEngine:
         self._selection_rule = selection_rule or SelectionRule(
             cold_start_threshold=cold_start_threshold,
         )
+        # Default strategy = knn (wraps the selection rule) so engine-only callers keep
+        # today's behavior; the server injects the strategy named by router.strategy.
+        self._strategy: RoutingStrategy = strategy or KnnStrategy(self._selection_rule)
+        self._neighbor_k = neighbor_k
         self._cold_start_threshold = cold_start_threshold
         self._cache: dict[str, npt.NDArray[np.float32]] = {}
+        # Guards the embedding cache and the budget check→select→record section so the
+        # cap stays enforceable under the async/threaded ProxyRouter (no check-then-act race).
+        self._lock = threading.Lock()
+        self._exploration = exploration
+        self._sampler, self._budget, self._conservative_gate = self._build_exploration(
+            exploration, sampler, budget, conservative_gate
+        )
+
+    @staticmethod
+    def _build_exploration(
+        exploration: ExplorationPolicy | None,
+        sampler: ThompsonSampler | None,
+        budget: ExplorationBudget | None,
+        gate: ConservativeGate | None,
+    ) -> tuple[ThompsonSampler | None, ExplorationBudget | None, ConservativeGate | None]:
+        """Wire the exploration collaborators only when a policy enables exploration."""
+        if exploration is None or not exploration.enabled:
+            return (None, None, None)
+        import numpy as np_rt  # runtime RNG (injected sampler overrides in tests)
+
+        built_sampler = sampler or ThompsonSampler(
+            np_rt.random.default_rng(), exploration.prior_alpha, exploration.prior_beta
+        )
+        built_budget = budget or ExplorationBudget(exploration.explore_budget_frac)
+        built_gate = gate or ConservativeGate(exploration.conservative_alpha)
+        return (built_sampler, built_budget, built_gate)
 
     def _compute_candidate_model_scores(
         self,
         neighbors: list[NeighborResult],
     ) -> dict[str, float]:
         """Compute per-model weighted success rates from *neighbors*."""
-        from shunt.router.selection import _confidence_weight
-
         groups: dict[str, list[NeighborResult]] = {}
         for n in neighbors:
             groups.setdefault(n.model, []).append(n)
@@ -106,9 +152,27 @@ class RouterEngine:
         Checks cold-start; embeds and queries the outcome index; applies the
         selection rule.
         """
+        if not self._strategy.consults_neighbors:
+            return self._decide_fixed()
+
         n_total = self._outcome_index.count_total_labeled()
         n_tier2 = self._outcome_index.count_labeled()
         cold_start_active = self._cold_start_strategy.is_active(n_total, n_tier2)
+        logger.debug(
+            "decide[%s]: strategy=%s labeled_total=%d labeled_tier2=%d "
+            "cold_start_threshold=%d cold_start_active=%s",
+            session_id,
+            type(self._strategy).__name__,
+            n_total,
+            n_tier2,
+            self._cold_start_threshold,
+            cold_start_active,
+        )
+
+        # Embed every neighbor-consulting session, cold-start included: cold-start exists
+        # only to gather the kNN bootstrap corpus, so its sessions must be indexable —
+        # returning before this left the HNSW index permanently empty.
+        embedding = self._get_embedding(session_id, prompt_text)
 
         if cold_start_active:
             model_name = self._cold_start_strategy.select(self._model_pool)
@@ -121,18 +185,59 @@ class RouterEngine:
             )
             return (model_name, "cold_start", provenance)
 
-        embedding = self._get_embedding(session_id, prompt_text)
-        neighbors = self._outcome_index.query(embedding, k=20)
+        neighbors = self._outcome_index.query(embedding, k=self._neighbor_k)
+        if logger.isEnabledFor(logging.DEBUG):
+            # The routing evidence itself: too few neighbours here is the difference
+            # between a learned choice and a silent fall-through to the cheapest model.
+            logger.debug(
+                "decide[%s]: kNN k=%d returned=%d neighbors=[%s]",
+                session_id,
+                self._neighbor_k,
+                len(neighbors),
+                ", ".join(
+                    f"{n.model}/{'ok' if n.outcome else 'fail'}"
+                    f"/d={n.distance:.3f}/conf={n.verification_confidence:.2f}"
+                    for n in neighbors[:10]
+                )
+                or "none",
+            )
 
-        model_name, reason = self._selection_rule.select(
-            neighbors,
-            self._model_pool,
-            cold_start_active=False,
+        with self._lock:  # budget check→select→record is one critical section
+            model_name, reason, provenance = self._route_locked(neighbors)
+        logger.debug("decide[%s]: chose model=%s reason=%s", session_id, model_name, reason)
+        return (model_name, reason, provenance)
+
+    def _decide_fixed(self) -> tuple[str, str, dict[str, Any]]:
+        """Route a neighbor-independent (fixed) strategy: no cold-start, embedding, or query.
+
+        A fixed strategy (always_cheap/always_frontier) is a pure function of the pool, so it
+        must route deterministically from the first turn — never masked by cold-start warmup.
+        """
+        model_name, reason = self._strategy.select([], self._model_pool)
+        provenance = build_provenance(
+            model_chosen=model_name,
+            selection_rule_used=reason,
+            fallback_chain_triggered=False,
+            router_propensity=1.0,
+            candidate_model_scores={},
         )
+        return (model_name, reason, provenance)
+
+    def _route_locked(self, neighbors: list[NeighborResult]) -> tuple[str, str, dict[str, Any]]:
+        """Choose a model (exploration if budgeted, else selection rule) — caller holds the lock."""
+        explored = self._maybe_explore(neighbors)
+        if explored is not None:
+            return explored
+
+        model_name, reason = self._strategy.select(neighbors, self._model_pool)
+        if self._budget is not None:
+            # Every decision feeds the baseline, exploit ones included: the cap is a ratio
+            # against cumulative baseline spend, so a frozen denominator disables it.
+            cost = self._budget_cost(self._representative_cost(neighbors, model_name))
+            self._budget.record(baseline_cost=cost, actual_cost=cost, is_exploratory=False)
 
         candidate_scores = self._compute_candidate_model_scores(neighbors)
         fallback = reason in ("exploration_untested", "safe_fallback")
-
         provenance = build_provenance(
             model_chosen=model_name,
             selection_rule_used=reason,
@@ -144,19 +249,143 @@ class RouterEngine:
         )
         return (model_name, reason, provenance)
 
+    def _candidate_stats(self, neighbors: list[NeighborResult]) -> list[CandidateStats]:
+        """Aggregate the neighborhood's weighted verified counts per model."""
+        groups: dict[str, list[NeighborResult]] = {}
+        for n in neighbors:
+            groups.setdefault(n.model, []).append(n)
+        stats: list[CandidateStats] = []
+        for model, group in groups.items():
+            weights = [_confidence_weight(n) for n in group]
+            total = sum(weights)
+            if total <= 0:
+                continue
+            successes = sum(w for w, n in zip(weights, group, strict=True) if n.outcome)
+            cost = sum(w * n.cost for w, n in zip(weights, group, strict=True)) / total
+            if not math.isfinite(cost):  # a non-finite upstream cost must never sort cheapest
+                cost = math.inf
+            stats.append(
+                CandidateStats(
+                    model=model, successes=successes, failures=total - successes, cost=cost
+                )
+            )
+        return stats
+
+    def _representative_cost(self, neighbors: list[NeighborResult], model: str) -> float:
+        """Confidence-weighted cost of *model*; the priciest known model when it's untested."""
+        total_weight = 0.0
+        total_cost = 0.0
+        for n in neighbors:
+            if n.model != model:
+                continue
+            w = _confidence_weight(n)
+            total_weight += w
+            total_cost += w * n.cost
+        if total_weight > 0:
+            return total_cost / total_weight
+        # No history for this model — which is exactly the escalation case
+        # (exploration_untested / safe_fallback), i.e. the most expensive routes. Returning
+        # 0.0 booked those as free and let them inflate the budget's baseline for nothing;
+        # the priciest observed model is a conservative stand-in. Reading a price table here
+        # is not an option: the router must not depend on benchmark pricing (SH005).
+        known = [s.cost for s in self._candidate_stats(neighbors) if math.isfinite(s.cost)]
+        return max(known) if known else 0.0
+
+    @staticmethod
+    def _budget_cost(cost: float) -> float:
+        """Non-finite cost → 0.0 so it can never poison the cumulative budget counters."""
+        return cost if math.isfinite(cost) else 0.0
+
+    def _maybe_explore(
+        self, neighbors: list[NeighborResult]
+    ) -> tuple[str, str, dict[str, Any]] | None:
+        """Run the cost-aware Thompson layer if enabled and within budget; else None."""
+        if self._sampler is None or self._budget is None or self._exploration is None:
+            return None
+        if not self._budget.can_explore():
+            return None
+        stats = self._candidate_stats(neighbors)
+        if not stats:
+            return None
+        decision = self._sampler.select(
+            stats,
+            self._selection_rule.min_success_rate,
+            self._exploration.propensity_mc_samples,
+        )
+        model_name, reason, propensity = self._resolve_exploration(decision, stats)
+        chosen_cost = next((s.cost for s in stats if s.model == model_name), 0.0)
+        greedy_cost = next((s.cost for s in stats if s.model == decision.greedy_model), chosen_cost)
+        self._budget.record(
+            baseline_cost=self._budget_cost(greedy_cost),
+            actual_cost=self._budget_cost(chosen_cost),
+            is_exploratory=(reason == "exploration"),
+        )
+        provenance = build_provenance(
+            model_chosen=model_name,
+            selection_rule_used=reason,
+            neighbors=neighbors,
+            fallback_chain_triggered=False,
+            router_propensity=propensity,
+            candidate_model_scores=self._compute_candidate_model_scores(neighbors),
+        )
+        return (model_name, reason, provenance)
+
+    def _resolve_exploration(
+        self, decision: ExplorationDecision, stats: list[CandidateStats]
+    ) -> tuple[str, str, float]:
+        """Apply the conservative gate: block an exploratory *downshift* without slack."""
+        if not decision.is_exploratory:
+            return (decision.model, "exploration_exploit", decision.propensity)
+        costs = {s.model: s.cost for s in stats}
+        is_downshift = costs[decision.model] < costs[decision.greedy_model]
+        gate = self._conservative_gate
+        if is_downshift and gate is not None and not gate.allows_downshift():
+            return (decision.greedy_model, "conservative_fallback", 1.0)
+        return (decision.model, "exploration", decision.propensity)
+
+    def record_outcome(self, *, downshift: bool, success: bool) -> None:
+        """Feed a verified downshift-exploration outcome to the conservative safety gate."""
+        # `downshift` = the routed decision picked a cheaper/weaker model than the greedy
+        # exploit pick (persisted per-decision by the pending queue when the read-back
+        # loop is wired). Only these outcomes move the gate — see ConservativeGate.
+        # Under the same lock as routing: the gate's slack is a read-modify-write, and
+        # ExplorationBudget/ConservativeGate document that RouterEngine serializes their
+        # callers. Outcomes arrive from a different path than decisions, so without this a
+        # lost update would under-count verified downshift evidence and hold the gate shut.
+        if self._conservative_gate is not None:
+            with self._lock:
+                self._conservative_gate.record_outcome(downshift=downshift, success=success)
+
     def get_neighbors(
         self,
         session_id: str,
         prompt_text: str,
-        k: int = 20,
+        k: int | None = None,
     ) -> list[NeighborResult]:
-        """Return raw kNN neighbors for *prompt_text* (for ``SHUNT EXPLAIN``)."""
+        """Return raw kNN neighbors for *prompt_text* (for ``SHUNT EXPLAIN``).
+
+        Defaults to the configured ``neighbor_k`` so EXPLAIN shows the same neighborhood
+        that drove routing.
+        """
         embedding = self._get_embedding(session_id, prompt_text)
-        return self._outcome_index.query(embedding, k=k)
+        return self._outcome_index.query(embedding, k=k if k is not None else self._neighbor_k)
+
+    def cached_embedding(self, session_id: str) -> npt.NDArray[np.float32] | None:
+        """Return the embedding computed for *session_id* (None for fixed strategies)."""
+        with self._lock:
+            return self._cache.get(session_id)
+
+    def warm(self) -> None:
+        """Pre-load the embedding model so the first request does not pay for it."""
+        warm = getattr(self._embedder, "warm", None)
+        if callable(warm):
+            warm()
 
     def _get_embedding(self, session_id: str, prompt_text: str) -> npt.NDArray[np.float32]:
-        if session_id in self._cache:
-            return self._cache[session_id]
-        embedding = self._embedder.embed(prompt_text)
-        self._cache[session_id] = embedding
-        return embedding
+        with self._lock:
+            cached = self._cache.get(session_id)
+        if cached is not None:
+            return cached
+        embedding = self._embedder.embed(prompt_text)  # slow — computed outside the lock
+        with self._lock:
+            return self._cache.setdefault(session_id, embedding)

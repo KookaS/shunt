@@ -41,8 +41,10 @@ services:
     command:
       - |
         set -eu
-        npm install -g opencode-ai >/dev/null 2>&1
+        npm install -g opencode-ai@1.18.4 >/dev/null 2>&1
         mkdir -p /tmp/oc
+        # opencode's ai-sdk provider streams and needs a well-formed SSE (leading role
+        # delta) — the fake upstream serves that; a non-streaming stub yields empty text.
         out=$$(opencode run --model shunt/auto "say hi")
         printf '%s\n' "$$out"
         printf '%s' "$$out" | grep -qi ok

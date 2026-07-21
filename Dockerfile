@@ -7,6 +7,13 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential \
  && rm -rf /var/lib/apt/lists/*
 
+# hnswlib's setup.py defaults to `-march=native`, which bakes the BUILD host's CPU
+# instructions (e.g. AVX-512) into the wheel — a binary that SIGILLs (exit 132) on
+# any machine whose CPU lacks them. GitHub's runner fleet is heterogeneous, so a
+# `-march=native` build crashes on the legs that land on older CPUs. HNSWLIB_NO_NATIVE
+# drops that flag (keeps `-O3`), yielding a portable x86-64-baseline binary.
+ENV HNSWLIB_NO_NATIVE=1
+
 WORKDIR /build
 COPY --link uv.lock pyproject.toml ./
 
@@ -20,7 +27,13 @@ RUN pip install --no-cache-dir uv \
 COPY --link src/ src/
 RUN python -m venv /venv \
  && /venv/bin/pip install --no-cache-dir -r requirements.txt \
- && /venv/bin/pip install --no-cache-dir .
+ && /venv/bin/pip install --no-cache-dir . \
+ # Portability guard (structural check, not a note): a `-march=native` wheel bakes
+ # AVX-512 into the binary and SIGILLs (exit 132) on any runner whose CPU lacks it.
+ # objdump ships with build-essential's binutils; fail the build if an AVX-512 (zmm)
+ # opcode slipped into the compiled hnswlib extension despite HNSWLIB_NO_NATIVE.
+ && ! objdump -d /venv/lib/python3.12/site-packages/hnswlib*.so \
+      | grep -qiE '%zmm|avx512'
 
 FROM python:3.12-slim
 

@@ -206,7 +206,7 @@ class TestEscalation:
         # claude-fable-5, claude-opus-4-8) with research-estimated, unverified IDs.
         # claude-opus-4-6 is deliberately kept LAST — the only frontier model with a
         # verified live Requesty listing — so the safe_fallback ("don't fail" path)
-        # never depends on an unverified ID (see default_config.yaml comment).
+        # never depends on an unverified ID (see models.yaml comment).
         # This pins that ordering so a future append can't silently redirect it.
         rule = SelectionRule()
         pool = ModelPool()

@@ -1,4 +1,4 @@
-"""Out-of-sample generalization test of the external difficulty signal (~490 held-out)."""
+"""Out-of-sample generalization test of the external difficulty signal (held-out set)."""
 
 from __future__ import annotations
 
@@ -116,11 +116,21 @@ def _routers(
 def evaluate_heldout(
     threshold: float = 0.5, k: int = 20, gamma: float | None = None
 ) -> HeldoutReport:
-    """Leave-one-out over the ~490 held-out external instances."""
+    """Leave-one-out over the external instances our matrix never measured."""
     g = config.gamma() if gamma is None else gamma
-    our = {p.stem for p in config.challenge_dir("swebench_verified").glob("*.json")}
-    ext = _default_external_provider(exclude=our)
+    # Held-out = external instances our matrix never MEASURED. Excluding every
+    # materialised challenge spec instead was correct only while a handful of specs
+    # existed; once build_challenges materialised all 500 Verified specs it excluded
+    # the entire external table, leaving 0 instances and an IndexError in _build_hnsw.
+    measured = set(config.load_results().keys())
+    ext = _default_external_provider(exclude=measured)
     n = len(ext.iids)
+    if n == 0:
+        raise ValueError(
+            "No held-out external instances: every instance in external_swebench.csv "
+            f"is already measured in results.csv ({len(measured)} tasks). "
+            "Out-of-sample evaluation needs at least one unmeasured instance."
+        )
     psolve = np.array([ext.p_cheap[i] for i in ext.iids])  # cheap-tier signal := p_solve
     pfront = np.array([ext.p_frontier[i] for i in ext.iids])
     cheap_cost, esc_cost = _tier_costs()

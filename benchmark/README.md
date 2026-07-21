@@ -46,7 +46,14 @@ benchmark/
     run_eval.py                # Evaluate all strategies against a matrix
     metrics.py                 # Metric definitions (cost, quality, trade-offs)
     report.py                  # Comparison tables and plots (derived from results.csv)
-    scripts/plot_external.py   # External-signal plots (difficulty, ours-vs-external, held-out)
+    scripts/                   # Analysis + figure producers (read results.csv, write reports/)
+      compute_costs.py         # Per-model cost/pass rollup
+      embedding_compare.py     # TF-IDF vs embedding neighbourhoods
+      plot_exploration.py      # Exploit-only vs exploit+exploration cost/quality
+      plot_external.py         # External-signal plots (difficulty, ours-vs-external, held-out)
+      plot_strategies.py       # Strategy Pareto scatter (same rows as report.py)
+      threshold_sweep.py       # kNN hyperparameter sweep + reward heatmap
+      viz_knn.py               # kNN neighbourhood / routing-map visualisations
     reports/                   # Gitignored — regenerable plots + derived strategy_summary.csv
   .gitignore
   README.md                    # This file
@@ -60,7 +67,7 @@ directory — there is a **single committed source of truth**.
 
 ```sh
 # Evaluate strategies against the cached matrix (writes parameterized CSV to artifacts/)
-python3 routing/run_eval.py
+python3 -m benchmark.routing.run_eval
 
 # Runner (simulated by default). --strategy cost_optimal is the DEFAULT: adaptive
 # cheap+mid on all tasks, frontier only on disputed tasks + a random audit (minimises
@@ -74,7 +81,7 @@ python3 -m benchmark.runner.run_matrix --strategy full
 # `python -m benchmark.runner.collect` is a DEPRECATED alias for --strategy cost_optimal.
 
 # Integrity gate: hashes match, no removed challenges, versions current, no drift
-python3 runner/check_integrity.py --check-derived
+python3 -m benchmark.runner.check_integrity --check-derived
 ```
 
 ### Scaling the suite / cost-safe partial runs
@@ -86,7 +93,7 @@ python3 -m benchmark.runner.build_challenges         # materialise 500 specs + r
 python3 -m benchmark.runner.build_challenges --limit 5   # cheap dry build of the first few
 ```
 
-Live runs are gated by `benchmark.sample_size` in `config.yaml` (0 = all). Because
+Live runs are gated by `benchmark.sample_size` in `benchmark.yaml` (0 = all). Because
 `runner/sampling.py` orders challenges into a **fixed, diversity-first, nested**
 sequence (round-robin across repos × difficulty strata), raising `sample_size`
 `10 → 20 → 200 → 500` only *adds* tasks — already-computed `results.csv` cells are
@@ -110,14 +117,16 @@ don't over-read it. The kill-gate claim uses the full set (or the calibration ho
 The per-model outcome cache (`routing/results.csv`) is a long/tidy
 `(challenge × model)` table, **upserted** (one current row per
 `(challenge, model, reasoning)`). Its header is
-`challenge_id,model,reasoning,pass,cost,in_tok,out_tok,calls,version_hash,model_version,real_cost,estimated_cost,timeout_flag,image_digest,computed_at`
+`challenge_id,model,reasoning,pass,cost,in_tok,out_tok,calls,version_hash,model_version,arm_hash,real_cost,estimated_cost,timeout_flag,image_digest,computed_at`
 — the verified outcome plus integrity columns. Staleness is decided by
-**string-equality on three immutable anchors**: `version_hash` (SHA256 of the
+**string-equality on four immutable anchors**: `version_hash` (SHA256 of the
 instance spec's canonical JSON — base_commit + F2P/P2P + provenance),
-`model_version` (from the model registry), and `image_digest` (the canonical
-**manifest** digest of the SWE-bench image, resolved via `docker buildx
-imagetools inspect` — `:latest` is only a lookup key, identity is the manifest
-digest). `computed_at` is **audit-only, never a staleness key**. A cell is
+`model_version` (from the model registry), `arm_hash` (SHA256 of the reasoning
+arm's resolved API params, so re-mapping an arm's knobs invalidates only that
+arm's cells), and `image_digest` (the canonical **manifest** digest of the SWE-bench
+image, resolved via `docker buildx imagetools inspect` — `:latest` is only a
+lookup key, identity is the manifest digest). `computed_at` is **audit-only,
+never a staleness key**. A cell is
 **stale** iff any anchor drifted, **missing** iff no current row; an image
 rebuild invalidates a challenge's cells, a model bump only that model's. **A
 digest that can't be resolved (offline) never marks a cell stale.** Superseded
@@ -188,11 +197,13 @@ python -m benchmark.runner.run_matrix --strategy full --live --max-cost 20   # c
 `--strategy full --live` with **no** `--max-cost` prompts for interactive confirmation
 before spending (uncapped live spend is dangerous); a non-interactive stdin aborts.
 
-Keys are read from **environment variables only** (the OpenAI SDK convention) — set
-them however you like (shell export, direnv, a secrets manager). Each model in
-the registry (`src/shunt/models/default_config.yaml`) names a `provider`, and that provider's row carries the
+Keys are read from **environment variables** (the OpenAI SDK convention) — set them
+however you like (shell export, direnv, a secrets manager). At startup the runner
+also loads a gitignored `.env` from the working directory (or `$SHUNT_ENV_FILE`);
+a real environment variable always wins over a value in it. Each model in
+the registry (`src/shunt/config/models.yaml`) names a `provider`, and that provider's row carries the
 `base_url` and `api_key_env_var` used to reach it. The litellm route is derived as
-`<litellm_prefix>/<model_id>`. Nothing reads a checked-in credentials file.
+`<litellm_prefix>/<model_id>`. No credentials file is ever committed.
 
 ### Container / image lifecycle
 
@@ -207,5 +218,5 @@ All harness logs, predictions, and reports land in the gitignored
 
 ```sh
 docker build -f benchmark/Dockerfile -t shunt-benchmark .   # from repo root
-docker compose --profile benchmark run --rm benchmark        # code read-only, cache read-write
+docker compose -f benchmark/compose.yaml run --rm benchmark  # code read-only, cache read-write
 ```

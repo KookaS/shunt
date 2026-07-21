@@ -3,7 +3,8 @@
 # and runs one matrix leg per file. `service` names the compose service whose exit
 # code is the verdict; `expected_tier` must name a tier present in
 # tests/integrations/fake_registry.yaml (checked by tests/test_integrations_sync.py).
-# BEST-EFFORT: the CI matrix runs this leg continue-on-error (needs a seeded flow).
+# BEST-EFFORT: the CI matrix runs this leg continue-on-error — it self-seeds a flow
+# (see compose.yaml) but drives a heavy pinned Flowise server, so keep it non-blocking.
 tool: flowise
 wire: openai
 service: client

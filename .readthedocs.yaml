@@ -6,7 +6,11 @@ build:
     python: "3.12"
 
 mkdocs:
-  configuration: mkdocs.yaml
+  # The ONE config, shared with the gh-pages workflow (.github/workflows/docs.yml).
+  # There used to be a second mkdocs.yaml here for this target; the two silently
+  # diverged on site_url, site_description and nav, and only gh-pages was ever
+  # rebuilt — so the RTD site drifted with nothing to reveal it.
+  configuration: mkdocs.yml
 
 python:
   install:

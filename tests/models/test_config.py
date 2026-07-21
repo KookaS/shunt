@@ -215,6 +215,55 @@ def _all_model_names(pool: ModelPool) -> set[str]:
     return {m.name for tier in TIER_ORDER for m in pool.get_tier_models(tier)}
 
 
+class TestRestrictToLive:
+    """`models:` in router.yaml — live-routing subset, separate from the benchmark's."""
+
+    def test_empty_list_is_a_noop(self) -> None:
+        pool = ModelPool()
+        before = pool.model_names()
+        pool.restrict_to_live([])
+        assert pool.model_names() == before
+
+    def test_filters_to_named_models_preserving_registry_order(self) -> None:
+        pool = ModelPool()
+        # Pass names out of registry order; the pool must not reorder by it.
+        pool.restrict_to_live(["kimi-k3", "qwen3.7-plus", "gpt-5-mini"])
+        assert pool.model_names() == ["qwen3.7-plus", "gpt-5-mini", "kimi-k3"]
+
+    def test_get_tier_models_reflects_the_subset(self) -> None:
+        pool = ModelPool()
+        pool.restrict_to_live(["qwen3.7-plus", "kimi-k3"])
+        assert [m.name for m in pool.get_tier_models("cheap")] == ["qwen3.7-plus"]
+        assert pool.get_tier_models("mid") == []
+        assert [m.name for m in pool.get_tier_models("frontier")] == ["kimi-k3"]
+
+    def test_fallback_chain_only_contains_live_models(self) -> None:
+        pool = ModelPool()
+        pool.restrict_to_live(["qwen3.7-plus", "kimi-k3"])
+        chain = pool.fallback_chain("qwen3.7-plus")
+        assert set(chain) == {"qwen3.7-plus", "kimi-k3"}
+
+    def test_health_entries_for_removed_models_are_dropped(self) -> None:
+        pool = ModelPool()
+        pool.restrict_to_live(["qwen3.7-plus"])
+        assert pool.is_healthy("qwen3.7-plus") is True
+        # An unhealthy lookup on a removed model has no health entry to auto-recover,
+        # so it reads as unhealthy (False), not "recovered".
+        assert pool.is_healthy("kimi-k3") is False
+
+    def test_unknown_model_name_raises_naming_the_offender(self) -> None:
+        pool = ModelPool()
+        with pytest.raises(ValueError, match="nonexistent-model"):
+            pool.restrict_to_live(["qwen3.7-plus", "nonexistent-model"])
+
+    def test_unknown_model_error_names_all_offenders(self) -> None:
+        pool = ModelPool()
+        with pytest.raises(ValueError) as exc_info:
+            pool.restrict_to_live(["bogus-a", "bogus-b"])
+        assert "bogus-a" in str(exc_info.value)
+        assert "bogus-b" in str(exc_info.value)
+
+
 class TestFallbackChain:
     def test_same_tier_fallback(self) -> None:
         pool = ModelPool()
