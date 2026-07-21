@@ -27,10 +27,6 @@ from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
 # ---------------------------------------------------------------------------
 
 
-def _cost_per_1m_from_config(model: str) -> float:
-    return config.cost_per_1m(model)
-
-
 def _input_share_from_config(model: str) -> float:
     pricing = config.enabled_pricing()
     p = pricing.get(model, {})
@@ -368,11 +364,28 @@ def decide_verdict(
     if cost_delta["ci_lower"] > 0:
         return (1, "FAIL \u2014 Shunt is more expensive at equal quality")
 
-    return (
-        2,
-        f"INCONCLUSIVE \u2014 unexpected CI state "
-        f"[{cost_delta['ci_lower']}, {cost_delta['ci_upper']}]",
-    )
+    lo, hi = cost_delta["ci_lower"], cost_delta["ci_upper"]
+    # A CI bound landing exactly on 0.0 is ROUTINE for a discrete paired bootstrap
+    # over few tasks (a resample where no task differs), not an internal error. Name
+    # each boundary state for what it is rather than reporting "unexpected".
+    if lo == 0.0 and hi == 0.0:
+        return (2, f"INCONCLUSIVE \u2014 zero measured cost difference (N={n})")
+    if lo == 0.0:
+        return (
+            2,
+            f"INCONCLUSIVE \u2014 no saving demonstrated: cost-delta CI [0.0, {hi}] lies "
+            f"entirely \u2265 0, i.e. Shunt is weakly MORE expensive (the boundary of FAIL); "
+            f"extend N by 10 (current N={n})",
+        )
+    if hi == 0.0:
+        return (
+            2,
+            f"INCONCLUSIVE \u2014 weakly cheaper only: cost-delta CI [{lo}, 0.0] lies "
+            f"entirely \u2264 0 but touches zero, so the saving is not significant; "
+            f"extend N by 10 (current N={n})",
+        )
+
+    return (2, f"INCONCLUSIVE \u2014 non-finite CI state [{lo}, {hi}]")
 
 
 # ---------------------------------------------------------------------------
@@ -530,8 +543,8 @@ def _format_report(  # noqa: PLR0913
 
     lines.append("")
     lines.append("\u2500" * 72)
-    lines.append("  DATA CAVEAT: model availability determined by config.yaml.")
-    lines.append("  Models absent from config.yaml's `models` list are excluded.")
+    lines.append("  DATA CAVEAT: model availability determined by benchmark.yaml.")
+    lines.append("  Models absent from benchmark.yaml's `models` list are excluded.")
     lines.append("\u2500" * 72)
     _, verdict_label = decide_verdict(
         cost_delta, pr_delta, verifier_threshold, n, cache_aware_ratio
@@ -615,7 +628,7 @@ def run_kill_gate(
 # ---------------------------------------------------------------------------
 
 
-def main(config_path: str = "benchmark/config.yaml") -> None:
+def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     config.load(config_path)
 
     bm = config.benchmark_params()
@@ -626,7 +639,7 @@ def main(config_path: str = "benchmark/config.yaml") -> None:
     ap.add_argument("--config", default=config_path, help="Path to config YAML")
     ap.add_argument("--matrix", default=None, help="Matrix JSON path")
     ap.add_argument(
-        "--pricing", default=None, help="Pricing JSON path (deprecated — uses config.yaml)"
+        "--pricing", default=None, help="Pricing JSON path (deprecated — uses benchmark.yaml)"
     )
     ap.add_argument("--log", default="benchmark/runner/kill_gate.log", help="Output log path")
     ap.add_argument("--n", type=int, default=bm.get("n_default", 20), help="Number of tasks")

@@ -1,4 +1,4 @@
-"""Tests for the pricing slice of the unified model registry (default_config.yaml)."""
+"""Tests for the pricing slice of the unified model registry (models.yaml)."""
 
 from typing import Final
 
@@ -219,7 +219,7 @@ class TestCachingGate:
             assert config.model_has_cache(name), f"{name} has no cache-read discount"
 
     def test_all_enabled_models_pass_the_caching_gate(self):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         assert config.models_missing_cache() == []
 
     def test_model_has_cache_requires_discount_below_input(self):
@@ -274,7 +274,7 @@ class TestValidatorChecksConfigReferences:
 
 
 class TestEnabledModelsList:
-    """`models:` in config.yaml is a LIST of enabled names; in-list = enabled,
+    """`models:` in benchmark.yaml is a LIST of enabled names; in-list = enabled,
     registry-only = disabled, listed-but-unregistered = hard error."""
 
     def _load(self, monkeypatch, models: list[str]) -> None:
@@ -344,7 +344,7 @@ class TestDefaultArmIds:
 
 class TestArmSamplingWeights:
     def test_returns_declared_config_weights(self):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         weights = config.arm_sampling_weights()
         assert weights and all(0.0 <= w <= 1.0 for w in weights)
         assert weights == sorted(weights, reverse=True), "weight must decrease with rank"

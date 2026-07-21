@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Strategy comparison visualization — Pareto scatter plot.
+"""Strategy comparison Pareto scatter — rows derived exactly as report.py does."""
 
-Directly imports strategy classes and evaluates them against the benchmark
-matrix, then produces a publication-quality Pareto frontier plot.
-"""
+# Rows come from report.derive_tasks/derive_rows (i.e. summary.py), so this figure and
+# report.py always print the SAME pass rates and costs off ONE denominator: coverage-gap
+# cells are excluded, never scored as fail@$0.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
 import matplotlib
@@ -17,74 +16,56 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 from benchmark import config  # noqa: E402
-from benchmark.routing.metrics import compute_metrics, compute_pareto  # noqa: E402
-from benchmark.routing.strategies import Strategy  # noqa: E402
-from benchmark.routing.strategies.external_prior import ExternalPriorCascade  # noqa: E402
-from benchmark.routing.strategies.fixed import (  # noqa: E402
-    AlwaysCheap,
-    AlwaysFrontier,
-    Random,
-)
-from benchmark.routing.strategies.knn import kNNStrategy  # noqa: E402
-from benchmark.routing.strategies.knn_blended import kNNBlended  # noqa: E402
-from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy  # noqa: E402
-from benchmark.routing.strategies.oracle import Oracle, OracleRewardAware  # noqa: E402
+from benchmark.routing import report  # noqa: E402
+from benchmark.routing.metrics import compute_pareto  # noqa: E402
 
 
 def load_matrix(path: Path) -> dict:
     return config.load_matrix(path)
 
 
-def evaluate(strategy, matrix: dict, tasks: list[str]) -> list[tuple[str, str, bool, float]]:
-    decisions: list[tuple[str, str, bool, float]] = []
-    for tid in tasks:
-        task_meta = matrix["tasks"].get(tid, {})
-        model = strategy.select(tid, task_meta, matrix)
-        outcome = matrix["results"].get(tid, {}).get(model, {})
-        passed = outcome.get("pass", False)
-        if hasattr(strategy, "cascade_total_cost") and strategy.cascade_total_cost is not None:
-            cost = strategy.cascade_total_cost
-        else:
-            cost = outcome.get("cost", 0.0)
-        decisions.append((tid, model, passed, cost))
-    return decisions
+def _coverage_note(matrix: dict, tasks: list[str], results: list[dict]) -> str | None:
+    """Honest coverage caption: how many tasks the frontier model actually ran on."""
+    # Plotted pass rates EXCLUDE unmeasured cells (summary.py drops them), so the
+    # frontier number is real — but on a smaller denominator than its peers, and the
+    # figure must say so.
+    pricing = config.enabled_pricing()
+    if not pricing:
+        return None
+    frontier_model = max(pricing, key=lambda m: config.cost_per_1m(m, pricing))
+    covered = sum(1 for tid in tasks if frontier_model in matrix["results"].get(tid, {}))
+    if covered >= len(tasks):
+        return None
+    row = next((r for r in results if r["strategy"] == "Always-Frontier"), None)
+    scored = int(row["n_tasks"]) if row else covered
+    return (
+        f"Coverage caveat — Always-Frontier ({frontier_model}) ran on "
+        f"{covered}/{len(tasks)} tasks; its pass rate is scored on the "
+        f"{scored} measured tasks only (unmeasured cells excluded, not auto-failed)"
+    )
 
 
-def get_strategies() -> list[tuple[str, Strategy]]:
-    """Read strategy list and params from config, return (name, instance) pairs."""
-    g = config.gamma()
-    strat_cfg = config.strategies()
-    enabled = strat_cfg.get("enabled", [])
-    if not enabled:
-        enabled = [
-            "oracle",
-            "oracle_reward",
-            "always_cheap",
-            "always_frontier",
-            "random",
-            "knn",
-            "knn_cascade",
+def _declutter(fig, anns: list, step: float = 3.0, passes: int = 40) -> None:
+    """Nudge overlapping point labels apart along y (in offset-point space)."""
+    if len(anns) < 2:
+        return
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    for _ in range(passes):
+        boxes = [a.get_window_extent(renderer) for a in anns]
+        pairs = [
+            (i, j)
+            for i in range(len(anns))
+            for j in range(i + 1, len(anns))
+            if boxes[i].overlaps(boxes[j])
         ]
-
-    knn_p = dict(strat_cfg.get("knn", {}))
-    cascade_p = dict(strat_cfg.get("knn", {}))
-    cascade_p.update(strat_cfg.get("knn_cascade", {}))
-    ext_p = dict(strat_cfg.get("external_prior", {}))
-    blend_p = dict(strat_cfg.get("knn_blended", {}))
-
-    registry: dict[str, Callable[[], Strategy]] = {
-        "oracle": lambda: Oracle(),
-        "oracle_reward": lambda: OracleRewardAware(gamma=g),
-        "always_cheap": lambda: AlwaysCheap(),
-        "always_frontier": lambda: AlwaysFrontier(),
-        "random": lambda: Random(seed=42),
-        "knn": lambda: kNNStrategy(**knn_p),
-        "knn_cascade": lambda: kNNCascadeStrategy(**cascade_p),
-        "external_prior": lambda: ExternalPriorCascade(**ext_p),
-        "knn_blended": lambda: kNNBlended(**blend_p),
-    }
-
-    return [(name, registry[name]()) for name in enabled if name in registry]
+        if not pairs:
+            return
+        for i, j in pairs:
+            lo, hi = (i, j) if boxes[i].y0 <= boxes[j].y0 else (j, i)
+            anns[lo].xyann = (anns[lo].xyann[0], anns[lo].xyann[1] - step)
+            anns[hi].xyann = (anns[hi].xyann[0], anns[hi].xyann[1] + step)
+        fig.canvas.draw()
 
 
 def plot_pareto(
@@ -135,9 +116,14 @@ def plot_pareto(
     costs = np.array([float(r["TotalCost"]) for r in results], dtype=float)
     perfs = np.array([float(r["AvgPerf%"]) for r in results], dtype=float)
 
-    pareto_map = compute_pareto({r["strategy"]: r for r in results})
+    # Zero-evidence rows are excluded from the frontier: ($0, 0%) is un-dominated
+    # by construction, so including them would draw "measured nothing" as optimal.
+    pareto_map = compute_pareto(
+        {r["strategy"]: r for r in results if int(float(r.get("n_tasks", 1) or 0)) > 0}
+    )
 
     fig, ax = plt.subplots(figsize=(12, 8))
+    point_labels: list = []
 
     for i, name in enumerate(names):
         key = display_name_key.get(name, "random")
@@ -158,14 +144,16 @@ def plot_pareto(
         )
 
         label = f"{name}\n({perfs[i]:.0f}%, ${costs[i]:.2f})"
-        ax.annotate(
-            label,
-            (costs[i], perfs[i]),
-            fontsize=8,
-            xytext=(8, 8),
-            textcoords="offset points",
-            arrowprops=dict(arrowstyle="-", color="gray", lw=0.5),
-            bbox=dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.7),
+        point_labels.append(
+            ax.annotate(
+                label,
+                (costs[i], perfs[i]),
+                fontsize=8,
+                xytext=(8, 8),
+                textcoords="offset points",
+                arrowprops=dict(arrowstyle="-", color="gray", lw=0.5),
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.7),
+            )
         )
 
     # Pareto frontier
@@ -203,18 +191,9 @@ def plot_pareto(
         label=f"Best pass rate ({best_perf:.0f}%)",
     )
 
-    # Sweet spot annotation
-    ax.annotate(
-        "SWEET SPOT\nhigh pass, low cost",
-        xy=(0.15, 0.85),
-        xycoords="axes fraction",
-        fontsize=10,
-        fontweight="bold",
-        color="#009E73",
-        ha="center",
-        va="center",
-        bbox=dict(boxstyle="round,pad=0.3", facecolor="#E8F5E9", edgecolor="#009E73", alpha=0.8),
-    )
+    # No "SWEET SPOT" annotation: it floated over an empty region of the axes,
+    # implying a data point that does not exist. The Pareto step line already
+    # shows where the cheap/high-pass corner is.
 
     ax.set_xscale("log")
     ax.set_xlabel("Total Cost ($, log scale)", fontsize=11)
@@ -231,8 +210,8 @@ def plot_pareto(
     ax.set_axisbelow(True)
 
     if warning:
-        # Sparse-frontier honesty: a fixed-frontier strategy auto-fails every task
-        # its model never ran on, dragging its pass rate to a phantom value.
+        # Sparse-frontier honesty: the fixed-frontier strategy is scored on the
+        # subset its model actually ran on — a smaller denominator than its peers.
         ax.annotate(
             warning,
             xy=(0.5, 1.09),  # clear of the bold title (~1.06) and the lower-right legend
@@ -247,11 +226,12 @@ def plot_pareto(
             ),
         )
 
+    _declutter(fig, point_labels)
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
-def main(config_path: str = "benchmark/config.yaml") -> None:
+def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     config.load(config_path)
 
     import argparse
@@ -273,8 +253,18 @@ def main(config_path: str = "benchmark/config.yaml") -> None:
     out_path = Path(args.output)
 
     matrix = load_matrix(matrix_path)
-    tasks = sorted(matrix["results"].keys())
 
+    if not matrix.get("results"):
+        print(
+            "No results yet — results.csv holds no rows. "
+            "Run the live matrix first: python -m benchmark.runner.run_matrix --live"
+        )
+        return
+
+    # Same task set AND same metric derivation as report.py: one denominator for
+    # both producers (report.derive_tasks/derive_rows go through summary.py, which
+    # drops coverage-gap cells instead of scoring them as fail@$0).
+    tasks = report.derive_tasks(matrix, config.benchmark_params().get("seed", 42))
     if not tasks:
         print(
             "No results yet — results.csv holds no rows. "
@@ -282,46 +272,21 @@ def main(config_path: str = "benchmark/config.yaml") -> None:
         )
         return
 
-    strategies = get_strategies()
-    if not strategies:
+    results = report.derive_rows(matrix, tasks)
+    if not results:
         print("No strategies enabled — nothing to plot.")
         return
 
-    print(f"Evaluating {len(strategies)} strategies on {len(tasks)} tasks")
-    gamma = config.gamma()
-
-    results: list[dict] = []
-    for _name, strategy in strategies:
-        decisions = evaluate(strategy, matrix, tasks)
-        metrics = compute_metrics(decisions, gamma=gamma)
-        results.append(
-            {
-                "strategy": strategy.name,
-                "TotalCost": metrics["TotalCost"],
-                "AvgPerf%": metrics["AvgPerf%"],
-            }
-        )
+    print(f"Evaluating {len(results)} strategies on {len(tasks)} tasks")
+    for row in results:
         print(
-            f"  {strategy.name:25}  pass={metrics['AvgPerf%']:>5.2f}%  "
-            f"cost=${metrics['TotalCost']:<8.4f}"
+            f"  {row['strategy']:25}  pass={row['AvgPerf%']:>5.2f}%  "
+            f"cost=${row['TotalCost']:<8.4f}  (n={row['n_tasks']}, "
+            f"{row['n_unscorable']} unscorable excluded)"
         )
-
-    # Phantom-frontier guard (matches report.py::_frontier_coverage): the fixed
-    # Always-Frontier strategy auto-fails every task its model never ran on, so a
-    # sparsely-covered frontier model produces a misleadingly low pass rate.
-    pricing = config.enabled_pricing()
-    warning = None
-    if pricing:
-        frontier_model = max(pricing, key=lambda m: config.cost_per_1m(m, pricing))
-        covered = sum(1 for tid in tasks if frontier_model in matrix["results"].get(tid, {}))
-        if covered < len(tasks):
-            warning = (
-                f"⚠ PHANTOM BASELINE — Always-Frontier ({frontier_model}) ran on "
-                f"{covered}/{len(tasks)} tasks; the rest auto-fail, so its pass rate is not real"
-            )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    plot_pareto(results, out_path, warning=warning)
+    plot_pareto(results, out_path, warning=_coverage_note(matrix, tasks, results))
     print(f"\nPlot saved to {out_path}")
 
 

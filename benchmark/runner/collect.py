@@ -121,7 +121,7 @@ def _resolve_digests(tasks: list[str], live: bool) -> dict[str, str | None] | No
 
 
 def run_collect(
-    config_path: str = "benchmark/config.yaml",
+    config_path: str = "benchmark/benchmark.yaml",
     *,
     live: bool = False,
     timeout: int = 600,
@@ -250,7 +250,7 @@ def _add_args(ap: argparse.ArgumentParser, config_path: str) -> None:
     )
 
 
-def main(config_path: str = "benchmark/config.yaml") -> int:
+def main(config_path: str = "benchmark/benchmark.yaml") -> int:
     print(
         "DEPRECATED: `python -m benchmark.runner.collect` is now "
         "`python -m benchmark.runner.run_matrix --strategy cost_optimal`.",

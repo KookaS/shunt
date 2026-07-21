@@ -351,7 +351,7 @@ def compute_overlap(feats: np.ndarray, k: int) -> np.ndarray:
     return neighbor_matrix
 
 
-def main(config_path: str = "benchmark/config.yaml") -> None:
+def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     config.load(config_path)
 
     ap = argparse.ArgumentParser()

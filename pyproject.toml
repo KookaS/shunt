@@ -26,7 +26,6 @@ dependencies = [
   "openai>=1.55",
   "fastembed>=0.4",
   "hnswlib>=0.8",
-  "scikit-learn>=1.5",
   "pydantic>=2.9",
   "numpy>=1.26",
   "pyyaml>=6.0",
@@ -54,6 +53,13 @@ docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
 # talks to its sandbox (a keyless install otherwise fails at first live call).
 benchmark = [
     "matplotlib>=3.9",
+    # scikit-learn/scipy are BENCHMARK-only (PCA, TF-IDF, cosine similarity, the
+    # held-out normal CDF). They were in the core dependency list, so every
+    # `pip install shunt-router` pulled ~100 MB the shipped router never imports:
+    # `grep -r sklearn src/` is empty. scipy was imported by heldout_eval.py while
+    # undeclared anywhere, surviving only as a transitive of scikit-learn.
+    "scikit-learn>=1.5",
+    "scipy>=1.13",
     "swebench>=4.1",
     "datasets>=3.0",
     "mini-swe-agent>=2.4",
@@ -85,14 +91,21 @@ namespaces = false
 # package mapping. This keeps `benchmark` out of the wheel without an in-test
 # sys.path mutation (which SH003/TID251 ban).
 pythonpath = ["."]
+# Scope collection to the suite. Without this, a bare `pytest` (the command the
+# end-of-session gate calls for) also walks benchmark/runner/artifacts/, where live runs
+# leave hundreds of files named test_output.txt — pytest's default --doctest-glob is
+# `test*.txt`, so collection ERRORS on the first one and the whole gate reports red for a
+# reason unrelated to the code. CI never saw it: a fresh checkout has no artifacts.
+testpaths = ["tests"]
 
 [tool.setuptools.package-data]
-# The bundled registry is loaded at startup via importlib.resources
-# (models/config.py). Without this it is excluded from the wheel, so a real
-# install (`pip install`, the Docker image) crashes on boot with
-# FileNotFoundError — editable installs and an external SHUNT_MODEL_CONFIG_PATH
-# both hide the gap. This is the shipped `shunt` product's ONLY bundled data file.
-"shunt.models" = ["*.yaml"]
+# The bundled defaults (models.yaml registry + router.yaml policy) are loaded at
+# startup via importlib.resources (models/config.py, router/policy.py). Without
+# this they are excluded from the wheel, so a real install (`pip install`, the
+# Docker image) crashes on boot with FileNotFoundError — editable installs and an
+# external SHUNT_MODEL_CONFIG_PATH both hide the gap. `shunt.config` holds the
+# shipped product's ONLY bundled data files.
+"shunt.config" = ["*.yaml"]
 
 [tool.vulture]
 min_confidence = 80
@@ -113,7 +126,10 @@ DEP001 = ["_shared"]
 # matplotlib lives in the `benchmark` extra, consumed only by benchmark/ scripts.
 # swebench is invoked as a CLI (`python -m swebench…`), never imported, so deptry
 # sees it as unused — it is not.
-DEP002 = ["matplotlib", "swebench"]
+# orjson is swe-rex's transitive runtime need (see the benchmark extra comment): never
+# imported by us, but a keyless install fails at the first live call without it. Listed
+# here so deptry stays GREEN — a permanently-red advisory hides the next real finding.
+DEP002 = ["matplotlib", "swebench", "orjson"]
 
 [tool.ruff]
 line-length = 100
@@ -140,7 +156,7 @@ select = [
 ]
 # Custom AST checks in tools/lint/ (SH0xx) — declared external so `# noqa: SH001`
 # opt-outs coexist with ruff without tripping its invalid-noqa detection.
-external = ["SH001", "SH002", "SH003"]
+external = ["SH001", "SH002", "SH003", "SH004", "SH005"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
@@ -151,7 +167,7 @@ max-args = 6
 max-branches = 12
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-"sys.path".msg = "No sys.path mutation — benchmark is an installed package (pip install -e .); use absolute imports."
+"sys.path".msg = "No sys.path mutation — tests reach `benchmark` via pythonpath = [\".\"] (it is deliberately not installed); use absolute imports."
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

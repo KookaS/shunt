@@ -8,7 +8,7 @@ from pathlib import Path
 from benchmark import config
 
 
-def main(config_path: str = "benchmark/config.yaml"):
+def main(config_path: str = "benchmark/benchmark.yaml"):
     config.load(config_path)
     import argparse
 

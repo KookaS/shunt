@@ -36,6 +36,10 @@ def _now_iso() -> str:
     return _datetime.datetime.now(_datetime.timezone.utc).isoformat()  # noqa: UP017
 
 
+class OutcomeStoreUnavailableError(RuntimeError):
+    """The outcome database could not be opened — actionable, unlike the raw driver error."""
+
+
 class OutcomeStore:
     def __init__(
         self,
@@ -46,18 +50,29 @@ class OutcomeStore:
         self._db_path = db_path or _get_default_db_path()
         self._lock = threading.Lock()
 
-        os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
-        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-
-        run_migrations(self._conn)
+        try:
+            os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+            self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            run_migrations(self._conn)
+        except (sqlite3.Error, OSError) as exc:
+            # A corrupt or unwritable store used to abort startup with a bare driver
+            # error naming neither the file nor a remedy, which reads like a crash.
+            raise OutcomeStoreUnavailableError(
+                f"could not open the outcome database at {self._db_path}: {exc}. "
+                "Check the path is writable, or move/delete the file to start fresh "
+                "(it holds learned routing history only). Relocate with SHUNT_DATA_DIR."
+            ) from exc
 
         if hnsw_kwargs is None:
             hnsw_kwargs = {}
         self._index = HNSWIndex(**hnsw_kwargs)
 
-        self._index_path = index_path or (self._db_path + ".hnsw")
+        # `.hnsw2`: a `.hnsw` file written by an earlier build holds EVERY session, not
+        # just the labeled ones. Loading it would silently restore the dilution this
+        # index shape exists to prevent, so the old name is left to rot and we rebuild.
+        self._index_path = index_path or (self._db_path + ".hnsw2")
 
         if os.path.exists(self._index_path):
             try:
@@ -68,7 +83,7 @@ class OutcomeStore:
             self._rebuild_index()
 
     def _rebuild_index(self) -> None:
-        embeddings = self.get_all_embeddings()
+        embeddings = self.get_labeled_embeddings()
         if not embeddings:
             return
         np_embeddings: list[tuple[str, np.ndarray]] = []
@@ -112,8 +127,11 @@ class OutcomeStore:
             )
             self._conn.commit()
 
-        if embedding is not None:
-            self._index.add(session_id, embedding)
+        # Deliberately NOT indexed here. Only a session carrying an outcome can be a
+        # neighbour, and outcomes arrive later — indexing every session let ordinary
+        # traffic crowd the labeled ones out of the k nearest, so selection fell through
+        # to the cheapest model. The embedding is durable in `sessions`, so
+        # `store_outcome` indexes it the moment the session becomes usable.
 
     def store_outcome(  # noqa: PLR0913 (config-heavy outcome-row writer, one arg per column)
         self,
@@ -148,6 +166,14 @@ class OutcomeStore:
                 ),
             )
             self._conn.commit()
+            row = self._conn.execute(
+                "SELECT embedding_blob FROM sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
+
+        # The session becomes a usable neighbour exactly now, so this is when it joins
+        # the index. Inside no lock: HNSWIndex guards its own slot allocation.
+        if row is not None and row["embedding_blob"] is not None:
+            self._index.add(session_id, _blob_to_embedding(row["embedding_blob"]))
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -183,6 +209,50 @@ class OutcomeStore:
                 "SELECT session_id, embedding_blob FROM sessions WHERE embedding_blob IS NOT NULL"
             )
             return [(row["session_id"], row["embedding_blob"]) for row in cursor.fetchall()]
+
+    def get_labeled_embeddings(self) -> list[tuple[str, bytes]]:
+        """Embeddings of sessions carrying an outcome — i.e. exactly the index members."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT s.session_id, s.embedding_blob FROM sessions s "
+                "JOIN outcomes o ON o.session_id = s.session_id "
+                "WHERE s.embedding_blob IS NOT NULL"
+            )
+            return [(row["session_id"], row["embedding_blob"]) for row in cursor.fetchall()]
+
+    # Both counts join `sessions` and require an embedding. These decide when cold start
+    # ends — i.e. when the kNN index is trusted to answer — so an outcome on a session
+    # that was never embedded (any fixed strategy returns before embedding) can never be
+    # anyone's neighbour. Counting it ended cold start against an empty index.
+    def count_outcomes(self) -> int:
+        """Count embedded sessions carrying any labeled outcome."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT COUNT(*) AS c FROM outcomes o "
+                "JOIN sessions s ON s.session_id = o.session_id "
+                "WHERE s.embedding_blob IS NOT NULL"
+            )
+            return int(cursor.fetchone()["c"])
+
+    def count_verified_outcomes(self) -> int:
+        """Count embedded sessions with a Tier-2 (verified) outcome."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT COUNT(*) AS c FROM outcomes o "
+                "JOIN sessions s ON s.session_id = o.session_id "
+                "WHERE o.tier2_outcome IS NOT NULL AND s.embedding_blob IS NOT NULL"
+            )
+            return int(cursor.fetchone()["c"])
+
+    def query_index(self, embedding: np.ndarray, k: int = 20) -> list[tuple[str, float]]:
+        """Return ``(session_id, distance)`` for the *k* nearest embedded sessions."""
+        hits = self._index.query(embedding, k)
+        out: list[tuple[str, float]] = []
+        for idx, distance in hits:
+            session_id = self._index.get_session_id(idx)
+            if session_id is not None:
+                out.append((session_id, float(distance)))
+        return out
 
     def update_human_label(self, session_id: str, label: str) -> None:
         with self._lock:

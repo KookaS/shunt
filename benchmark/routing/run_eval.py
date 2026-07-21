@@ -286,7 +286,7 @@ def _print_rows(rows: list[dict]) -> None:
         )
 
 
-def main(config_path: str = "benchmark/config.yaml") -> None:
+def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     config.load(config_path)
     bm = config.benchmark_params()
     strat_cfg = config.strategies()

@@ -63,7 +63,7 @@ class TestArmRequestWiring:
         raise AssertionError("expected a multi-arm registry model to exercise arm wiring")
 
     def test_distinct_arms_yield_distinct_model_kwargs(self):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         model = self._multi_arm_model()
         cfg = config.reasoning_configs()[model]
         assert cfg is not None
@@ -74,7 +74,7 @@ class TestArmRequestWiring:
         assert len(distinct) == len(arm_ids), f"arms aliased to identical kwargs: {kwargs}"
 
     def test_arm_params_overlay_target_and_base(self):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         model = self._multi_arm_model()
         cfg = config.reasoning_configs()[model]
         assert cfg is not None

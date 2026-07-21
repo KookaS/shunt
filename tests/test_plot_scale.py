@@ -59,13 +59,13 @@ class TestOursVsExternalScale:
         return rcsv, ext
 
     def test_agreement_matrix_at_500_tasks(self, tmp_path):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         rcsv, ext = self._write(tmp_path, 500)
         out = plot_external.plot_ours_vs_external(rcsv, ext, tmp_path)
         assert out.exists() and out.stat().st_size > 0
 
     def test_bars_at_small_n(self, tmp_path):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         rcsv, ext = self._write(tmp_path, 12)
         out = plot_external.plot_ours_vs_external(rcsv, ext, tmp_path)
         assert out.exists() and out.stat().st_size > 0

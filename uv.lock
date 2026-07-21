@@ -3244,7 +3244,6 @@ dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pyyaml" },
-    { name = "scikit-learn" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -3254,6 +3253,8 @@ benchmark = [
     { name = "matplotlib" },
     { name = "mini-swe-agent" },
     { name = "orjson" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
     { name = "swebench" },
 ]
 dev = [
@@ -3293,7 +3294,8 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
-    { name = "scikit-learn", specifier = ">=1.5" },
+    { name = "scikit-learn", marker = "extra == 'benchmark'", specifier = ">=1.5" },
+    { name = "scipy", marker = "extra == 'benchmark'", specifier = ">=1.13" },
     { name = "swebench", marker = "extra == 'benchmark'", specifier = ">=4.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
     { name = "vulture", marker = "extra == 'dev'", specifier = ">=2.11" },

@@ -7,7 +7,8 @@
 <!-- Theme-aware wordmark; the emoji + text alt is the placeholder if the SVG fails to load. -->
 
 <p align="center">
-  <b>Open-source AI router to 100+ LLMs. Self-hosted. Call any LLM in OpenAI format.</b>
+  <b>Open-source, self-hosted LLM router. Ships a registry of 11 models across
+  Requesty and DeepSeek; add any OpenAI-compatible provider yourself.</b>
 </p>
 
 <p align="center">
@@ -67,11 +68,15 @@ What the platform is built to support today:
 - 🧠 **A decision core.** Task embedding → nearest-neighbour lookup → a
   cheapest-that-succeeds selection rule, plus pluggable strategies (fixed, kNN,
   blended, cascade, oracle).
-- ✅ **Outcome verification.** Async, auto-detected test and typecheck verifiers
-  that grade a result and feed the *next* decision — never blocking the response.
+- 🚧 **Outcome verification.** Async, auto-detected test and typecheck verifiers
+  that grade a result without blocking the response. They are not yet wired into
+  the live loop, so their grades do not feed the next decision yet.
 - 🔒 **Cache-safety as a design center.** Decisions land at task and session
-  boundaries, never mid-cached-turn, so switching a model never silently
-  re-reads the whole history at full price.
+  boundaries, never mid-cached-turn, so normal operation never silently
+  re-reads a cached conversation at full price. The one exception is an upstream
+  failure: falling back to another model means that model must prefill the whole
+  conversation, because a provider's cache is per-model and cannot be transferred.
+  Shunt's job is to make that rare and deliberate, not to pretend it is free.
 - 📊 **An offline benchmark.** Scores any routing strategy against a cache of
   verified outcomes — reward (quality minus cost), bootstrap confidence
   intervals, and a Pareto check against a perfect-oracle baseline.
@@ -80,8 +85,13 @@ What the platform is built to support today:
 
 ## Current Status
 
-**Pre-alpha.** The proxy runs; the routing intelligence is designed, unit-tested,
-and validated offline, but is **not yet on the live request path**. Honestly:
+**Pre-alpha.** The proxy runs and calls the router to decide the session model on
+the first turn; the routing intelligence is designed, unit-tested, and validated
+offline. Outcomes can be manually recorded via `shunt flag <session_id> good|bad`,
+but automatic capture from test runs is not yet wired. With no outcomes recorded,
+the router cold-starts to a cheap default every session. The shipped `router.yaml`
+also enables exploration, but with no outcomes it never fires and costs nothing extra.
+Honestly:
 
 **✅ Achieved**
 
@@ -113,10 +123,8 @@ and validated offline, but is **not yet on the live request path**. Honestly:
 
 **⬜ Not yet**
 
-- ⬜ **Routing on the live path** — the decision core is built and tested but not
-  yet called by the proxy.
 - ⬜ **The live learning loop** — verifiers writing outcomes the router reads
-  from, plus per-key spend caps.
+  from to learn beyond cold-start, plus per-key spend caps.
 - ⬜ **Verify-and-escalate live** — try cheap, check the result, escalate on
   failure with an upfront recompute-cost quote.
 
@@ -138,7 +146,7 @@ shunt
 Or with Docker:
 
 ```bash
-docker run -p 8080:8080 ghcr.io/kookas/shunt-router
+docker run -p 127.0.0.1:8080:8080 --env-file .env ghcr.io/kookas/shunt-router
 ```
 
 Then point your agent at it — one line, and it talks to Shunt instead of the
@@ -229,13 +237,14 @@ providers on demand, and a faster runtime if concurrency calls for it.
 ├── src/shunt/             Router package
 │   ├── cli.py             CLI entry point (shunt start, explain, flag, version)
 │   ├── proxy/             HTTP server: /health, /v1/chat/completions, /v1/messages, /v1/models
-│   │                      (today: forwards to a cheap default model)
+│   │                      (calls router to decide model; cold-starts to cheap default)
 │   ├── router/            Decision core — embed → nearest-neighbour → selection rule
-│   │                      (built and unit-tested; NOT yet called by the live proxy)
+│   │                      (called on the first turn; outcomes not yet writing to learn)
 │   ├── verifiers/         Async outcome backfill (auto-detected tests, typecheck) — not yet on the live loop
 │   ├── db/                SQLite persistence for sessions, outcomes, index
 │   ├── session/           Session lifecycle, inactivity timeout, model lock
-│   └── models/            Provider config, capability tiers, fallback chain
+│   ├── models/            Provider config, capability tiers, fallback chain
+│   └── config/            Shipped defaults: models.yaml registry, router.yaml policy
 ├── benchmark/             Offline model-capability and routing evaluation
 ├── docs/                  User documentation (MkDocs)
 ├── examples/providers/    Copy-paste registry config, one file per provider

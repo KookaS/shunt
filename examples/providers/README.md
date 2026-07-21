@@ -82,7 +82,7 @@ These fragments carry only **connection facts** (`base_url`, `api_key_env_var`,
 `litellm_prefix`) and a sample model — everything a user needs to copy and route.
 Two other files complete the picture, each the single owner of its part:
 
-- `src/shunt/models/default_config.yaml` — the runtime registry, listing only the
+- `src/shunt/config/models.yaml` — the runtime registry, listing only the
   providers a shipped model routes to (Requesty, DeepSeek). The wider catalog here
   is never loaded by the router.
 - `tools/provider_auth_signatures.yaml` — the measured auth-rejection signatures

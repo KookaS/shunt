@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS outcomes (
     aggregated_confidence REAL NOT NULL,
     human_label TEXT,
     human_label_timestamp TEXT,
+    -- Persisted but NEVER read: no routing path applies it, so a two-year-old
+    -- outcome weighs exactly as much as one from five minutes ago. Reserved for
+    -- non-stationarity handling (model versions churn); until something reads it,
+    -- do not treat a stored value as having any effect on routing.
     time_decay_weight REAL DEFAULT 1.0,
     created_at TEXT NOT NULL,
     FOREIGN KEY (session_id) REFERENCES sessions(session_id)

@@ -37,7 +37,8 @@ def check(path: str, tree: ast.Module) -> list[Finding]:
                     path,
                     node.lineno,
                     node.col_offset,
-                    "no sys.path mutation — use absolute imports (installed package)",
+                    "no sys.path mutation — use absolute imports "
+                    "(`benchmark` is reached via pytest pythonpath, not installed)",
                 )
             )
         if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):

@@ -24,7 +24,7 @@ _pricing: dict | None = None
 
 # Cost-weighted p(arm|model) fractions, indexed by within-model
 # rank (index 0 = cheapest rank). Decreasing so a cheaper arm samples more often
-# than a pricier one; overridable via `arm_sampling.weights` in config.yaml.
+# than a pricier one; overridable via `arm_sampling.weights` in benchmark.yaml.
 DEFAULT_ARM_SAMPLING_WEIGHTS: Final[tuple[float, ...]] = (0.5, 0.35, 0.25)
 
 # Legacy literal every pre-arm-hash results.csv row was written under (mirrors
@@ -36,7 +36,7 @@ _LEGACY_DEFAULT_REASONING: Final[str] = "default"
 def load(path: str | Path | None = None) -> dict:
     global _config  # noqa: PLW0603, SH001 (module load-once config cache)
     if path is None:
-        path = Path(__file__).resolve().parent / "config.yaml"
+        path = Path(__file__).resolve().parent / "benchmark.yaml"
     with open(path) as f:
         _config = yaml.safe_load(f)
     return _config
@@ -195,9 +195,9 @@ def enabled_models() -> list[str]:
     unregistered = [m for m in listed if m not in pricing]
     if unregistered:
         raise ValueError(
-            "benchmark/config.yaml lists model(s) the benchmark cannot see "
+            "benchmark/benchmark.yaml lists model(s) the benchmark cannot see "
             f"(absent from the registry, or registered without a pricing block): {unregistered}. "
-            "A listed model must exist in src/shunt/models/default_config.yaml with pricing."
+            "A listed model must exist in src/shunt/config/models.yaml with pricing."
         )
     # dict.fromkeys dedupes a repeated list entry while preserving order, so a typo'd
     # duplicate can't make classify_cells enumerate (and pay for) the same cell twice.
@@ -238,12 +238,6 @@ def models_missing_cache(models: list[str] | None = None) -> list[str]:
     """Enabled (or given) benchmark models that lack a real cache-read discount."""
     names = models if models is not None else enabled_models()
     return [m for m in names if not model_has_cache(m)]
-
-
-def cascade_order() -> list[str]:
-    """Cascade order = enabled models in tier order (cheap → mid → frontier),
-    cheapest-first within each tier. No manual list needed — avoids conflicts."""
-    return enabled_models()
 
 
 def frontier_model() -> str | None:
@@ -316,7 +310,7 @@ def challenge_dir(source: str = "swebench_verified") -> Path:
     """Return path to the directory containing individual challenge files.
 
     The ``challenge_store`` path is relative to this file's dir (benchmark/),
-    matching ``challenges_path()`` and the config.yaml comment.
+    matching ``challenges_path()`` and the benchmark.yaml comment.
     """
     cfg = get()
     rel = cfg.get("paths", {}).get("challenge_store", "challenges")
@@ -458,11 +452,22 @@ def load_matrix(path: str | Path | None = None) -> dict:
     # row) that strategies/coverage/summary score — load_results()'s full
     # challenge x model x arm cache is a benchmark-cache concern, flattened
     # here so the strategy layer is unaffected by the reasoning-arm axis.
+    # A file passed explicitly may be SELF-CONTAINED (it carries its own
+    # "results"/"models" — e.g. a hand-cut task slice). Honour those; stitching
+    # over them would silently discard the caller's matrix. challenges.json has
+    # neither key, so the default path still stitches from results.csv.
     p = Path(path) if path else challenges_path()
     matrix = json.loads(Path(p).read_text())
+    own_results = matrix.get("results") if path is not None else None
+    own_models = matrix.get("models") if path is not None else None
+    if isinstance(own_results, dict) and own_results:
+        if not (isinstance(own_models, dict) and own_models):
+            matrix["models"] = models_matrix(own_results)
+        return matrix
     results = load_results()
     matrix["results"] = flatten_default_arm(results)
-    matrix["models"] = models_matrix(results)
+    if not (isinstance(own_models, dict) and own_models):
+        matrix["models"] = models_matrix(results)
     return matrix
 
 
@@ -499,10 +504,10 @@ def sample_tasks(tasks: list[str], seed: int = 42) -> list[str]:
 # Validation
 # ---------------------------------------------------------------------------
 def validate(config_path: str | Path | None = None) -> list[str]:
-    """Validate config.yaml against the registry. Returns list of errors (empty = valid).
+    """Validate benchmark.yaml against the registry. Returns list of errors (empty = valid).
 
     Registry *schema* (required fields, tier vocabulary, provider FK) is enforced
-    by pydantic at load; this checks only config.yaml's references into it.
+    by pydantic at load; this checks only benchmark.yaml's references into it.
     """
     errors: list[str] = []
     cfg = load(config_path)
@@ -512,13 +517,13 @@ def validate(config_path: str | Path | None = None) -> list[str]:
     models_cfg = cfg.get("models", [])
     if not isinstance(models_cfg, list):
         errors.append(
-            "config.yaml 'models' must be a list of model names "
+            "benchmark.yaml 'models' must be a list of model names "
             "(the legacy '{model: {enabled: bool}}' dict form is no longer supported)"
         )
     else:
         for name in models_cfg:
             if name not in pricing:
-                errors.append(f"Model '{name}' in config.yaml not found in the model registry")
+                errors.append(f"Model '{name}' in benchmark.yaml not found in the model registry")
 
     # Check strategies
     strat_cfg = cfg.get("strategies", {})
@@ -535,7 +540,7 @@ def validate(config_path: str | Path | None = None) -> list[str]:
     }
     for name in strat_cfg.get("enabled", []):
         if name not in known:
-            errors.append(f"Unknown strategy '{name}' in config.yaml strategies.enabled")
+            errors.append(f"Unknown strategy '{name}' in benchmark.yaml strategies.enabled")
 
     # Check control_model
     control = cfg.get("routing", {}).get("control_model")

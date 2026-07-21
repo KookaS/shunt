@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate benchmark config.yaml against the model registry (``--config PATH`` to
+"""Validate benchmark benchmark.yaml against the model registry (``--config PATH`` to
 override the default path). Exit 0 = valid, 1 = validation errors found.
 """
 
@@ -12,8 +12,8 @@ from benchmark import config
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Validate benchmark config.yaml")
-    ap.add_argument("--config", default="benchmark/config.yaml", help="Path to config.yaml")
+    ap = argparse.ArgumentParser(description="Validate benchmark benchmark.yaml")
+    ap.add_argument("--config", default="benchmark/benchmark.yaml", help="Path to benchmark.yaml")
     ap.add_argument("--dry", action="store_true", help="Alias for running validation")
     args = ap.parse_args()
 

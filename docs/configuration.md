@@ -25,7 +25,7 @@ that file at startup, and a real environment variable always wins over a value i
 it. `.env` is gitignored; keep it that way.
 
 To find the variable for a provider, look at its `api_key_env_var` — in
-`src/shunt/models/default_config.yaml` for the two shipped providers, or in that
+`src/shunt/config/models.yaml` for the two shipped providers, or in that
 provider's `examples/providers/<name>.yaml` fragment for the rest. `OPENAI_API_KEY`
 for OpenAI, `GROQ_API_KEY` for Groq, and so on. Two of the providers are
 aggregators — Requesty and OpenRouter — where one key reaches many vendors. Local
@@ -33,7 +33,7 @@ models (Ollama, vLLM) need no key at all.
 
 ## Add a model
 
-The registry lives at `src/shunt/models/default_config.yaml` inside the package.
+The registry lives at `src/shunt/config/models.yaml` inside the package.
 To change it, write your own at `~/.config/shunt/models.yaml`, or point
 `SHUNT_CONFIG_DIR` somewhere else.
 
@@ -46,11 +46,12 @@ your own, start from a copy of the packaged file.
 Three fields make a model registerable — `model_id`, `tier`, and `provider`. A
 model row is picked up the moment it exists; `tier` is the prior the routing is
 designed to start from before real outcomes accumulate. (Pre-alpha note: the live
-proxy forwards to a single cheap default today and does not yet choose between
-registered models — see [architecture.md](architecture.md). Registering models
-now sets up the pool the router will use once routing is wired in, and makes them
-scoreable in the offline benchmark.) The two `supports_*` fields below are
-optional; they default to streaming on, cache control off.
+proxy now calls `engine.decide()` to choose a model on the first turn. Outcomes can be
+manually recorded via `shunt flag`, but automatic capture is not yet wired, so the router
+typically cold-starts every session to the cheap default — see [architecture.md](architecture.md).
+Registering models sets up the pool the router uses for decision seeding and
+makes them scoreable in the offline benchmark.) The two `supports_*` fields below
+are optional; they default to streaming on, cache control off.
 
 ```yaml
 providers:
@@ -73,6 +74,10 @@ cache breakpoints. Claiming support that isn't there earns a 400 mid-request;
 claiming less than the truth just costs you the discount. Guess low.
 
 The `examples/providers/` directory has one of these per provider, ready to copy.
+
+Adding a model to the registry makes it *known*, not *live*. To have the running
+router actually pick it, also add its name to `router.yaml`'s `models:` list — see
+[Choose which models are live-routable](#choose-which-models-are-live-routable).
 
 **Order matters.** Models are read in file order, and that order is load-bearing
 for the routing being built: when the router escalates, it is designed to try the
@@ -180,10 +185,199 @@ reasoning)`; `default_arm` is the arm a new model routes to until real outcomes
 accumulate. Effort is chosen once per task and held for the session — never switched
 mid-conversation, which would break the provider's prompt cache.
 
+## Tune the router
+
+Which models shunt knows is one question; how it picks between them is another.
+The routing policy ships at `src/shunt/config/router.yaml` inside the package —
+the active strategy, its knobs, and the exploration settings. Override it the same
+way as the registry: write your own `router.yaml` in `~/.config/shunt/`, or point
+`SHUNT_CONFIG_DIR` at a directory holding one. Both files resolve from the same
+place, so a single directory holds everything you edit.
+
+### Choose which models are live-routable
+
+The registry (`models.yaml`) defines every model shunt *knows*. `router.yaml`'s
+`models:` list decides which of those the running router may actually pick:
+
+```yaml
+router:
+  models:                 # live-routable models; each name must exist in the registry
+    - deepseek-v4-flash
+    - qwen3.7-plus
+    - gpt-5-mini
+    - kimi-k2.5
+    - zai-glm-5.2
+    - kimi-k3
+```
+
+Omit the key, or leave it empty, and every registry model is live-routable — the
+backward-compatible default. A name in the list that isn't in the registry fails
+loudly at startup, naming the offender, the same way an unregistered benchmark
+model does (see [Choose which models the benchmark runs](#choose-which-models-the-benchmark-runs)).
+That benchmark list is a separate setting — it decides what the offline benchmark
+scores, not what the live proxy routes to.
+
+If you supply your **own** `models.yaml` (a custom registry), keep the two in sync:
+the packaged `router.yaml` names the shipped models, so against a different registry
+its list won't match and startup fails. Ship a matching `router.yaml`, or set an
+empty `models:` list to route over whatever registry is active.
+
+To restrict live routing to a smaller set — say, the core cheap/mid models plus
+one frontier model you trust — write your own `router.yaml` at
+`$SHUNT_CONFIG_DIR/router.yaml` (or mount one into the container at that path).
+Like the registry, this replaces the packaged file wholesale, not a per-key merge,
+so restate every setting you care about:
+
+```yaml
+router:
+  strategy: knn
+  models:
+    - qwen3.7-plus
+    - deepseek-v4-flash
+    - gpt-5-mini
+    - kimi-k2.5
+    - zai-glm-5.2
+    - claude-opus-4-8   # the one frontier model this deployment allows
+```
+
+Because those overrides stack, the config actually in force is not always the file you
+last edited. Shunt prints it at startup, so you never have to guess:
+
+```
+Shunt config | strategy=knn
+Shunt config | knn: k=20 success_rate_threshold=0.60 min_samples=3
+Shunt config | exploration: enabled=True budget_frac=0.15 conservative_alpha=0.10 ...
+Shunt config | models: cheap:qwen3.7-plus, mid:gpt-5-mini, frontier:kimi-k3
+Shunt config | session: inactivity_timeout=900s grace_period=120s retry_count=3
+```
+
+Only names and chosen values are printed — never a credential, and never the value of
+an API-key variable.
+
+Three settings are worth flipping without opening a file, and each has a flag and an
+env var:
+
+| What | Flag on `shunt start` | Environment variable |
+|------|----------------------|----------------------|
+| Active strategy | `--strategy knn` | `SHUNT_ROUTER_STRATEGY` |
+| Exploration on/off | `--explore` / `--no-explore` | `SHUNT_EXPLORATION_ENABLED` |
+| Exploration budget | `--explore-budget-frac 0.2` | `SHUNT_EXPLORE_BUDGET_FRAC` |
+| Log verbosity | `--log-level debug` | `SHUNT_LOG_LEVEL` |
+
+You don't need debug for the headline outcome: at the default `info` level, Shunt
+logs one line per session the first time it routes — `Session <id> routed to
+model=<name> reason=<source>` — so which model handled a session is always visible
+without opening a file or flipping a flag.
+
+`--log-level debug` traces the decision that produced it: which config file was
+loaded, the cold-start counts, the neighbours the kNN query returned, and why each
+candidate model passed or failed the success threshold. Third-party HTTP libraries
+deliberately stay at INFO even then — their debug output includes `Authorization`
+headers, and Shunt holds your provider keys.
+
+They resolve in one order, most specific first:
+
+**CLI flags → environment variables → `$SHUNT_CONFIG_DIR/router.yaml` → the packaged
+`router.yaml`.**
+
+A flag beats an env var, an env var beats your file, and your file replaces the
+shipped one wholesale — it is not merged key by key, so copy the packaged file
+before editing it.
+
+Exploration ships on, but it is mostly inert. Outcomes can be manually recorded via
+`shunt flag <session_id> good|bad`, but automatic capture from test runs is not yet
+wired, so the outcome count typically stays near zero and the exploration branch
+rarely fires. Today the settings below describe configured behaviour — for the benefit
+of operators who manually record outcomes. Exploration costs nothing extra today because
+it rarely fires. Read the rest of this section as what happens once automatic
+outcome write-back lands.
+
+A router that never tries a model it is unsure about never learns which ones it
+can trust, so the shipped default spends a bounded slice of your budget probing
+alternatives. `explore_budget_frac` is that bound: at the
+default 0.4, the router holds exploratory spend to 40% of exploit spend, putting your
+bill around **~1.4× what pure exploitation would cost**. Read that as a target rather
+than a hard ceiling — the cap counts the router's own confidence-weighted
+neighbourhood costs, not realized ones, so the *realized* ratio can overshoot the cap
+substantially on an unlucky seed (measured up to 1.29 against a 0.4 cap in the offline
+replay — roughly 3× the bound). In practice it usually
+runs looser than the bound (replaying the shipped policy over the benchmark's
+measured outcome matrix averages 1.10×, worst seed 1.22×; see
+[benchmark](benchmark.md#evaluating-the-exploration-policy-without-spending-money)).
+
+Two honest caveats. The cap is enforced against the **cost the provider reports**
+for each call (`usage.cost` on OpenAI-compatible responses); a provider that does
+not report a cost contributes nothing to either side of the ratio, so the cap
+cannot bind on that traffic. Measured 2026-07-20: Requesty **does** report
+`usage.cost`; DeepSeek's direct API **does not** (it returns token counts only) —
+so traffic routed to `deepseek-v4-flash` through the direct provider is cost-blind.
+Note the consequence for selection: a model whose cost is never reported reads as
+`0.0`, i.e. *free*, to the cheapest-first rule. That happens to be harmless for
+deepseek (it genuinely is the cheapest model), but it would mis-rank any pricier
+model on a provider that omits the field. And exploration is not free on quality: in the same
+offline replay, exploring cost **−2.8 pp pass rate** against exploration-off on
+the paired per-task comparison (95% CI −6.5 to +0.3, n=43), measured with
+exploration's learning benefit set to zero. To turn it off entirely:
+
+```bash
+shunt start --no-explore
+```
+
+or `exploration.enabled: false` in your `router.yaml` for a permanent setting.
+
+## The rest of the environment variables
+
+Defaults that are fine to leave alone, but which you can override without editing
+a file. Each is read once at startup.
+
+**Where things live**
+
+| Variable | Default | Effect |
+|---|---|---|
+| `SHUNT_CONFIG_DIR` | `~/.config/shunt` | Directory holding your `models.yaml` and `router.yaml` overrides |
+| `SHUNT_MODEL_CONFIG_PATH` | unset | Path to a single registry file, bypassing the config-directory lookup |
+| `SHUNT_DATA_DIR` | `~/.local/share/shunt` | Directory for the outcomes database (`outcomes.db`) |
+| `SHUNT_ENV_FILE` | `./.env` | The `.env` file loaded at startup; real environment variables still win |
+
+**Where it listens**
+
+| Variable | Default | Effect |
+|---|---|---|
+| `SHUNT_HOST` | `127.0.0.1` | Address the proxy binds to. It defaults to loopback because Shunt holds your provider keys and does not authenticate its callers — change it only behind a network you trust |
+| `SHUNT_PORT` | `8080` | Port the proxy listens on |
+
+**Sessions and upstream calls**
+
+| Variable | Default | Effect |
+|---|---|---|
+| `SHUNT_SESSION_INACTIVITY_TIMEOUT` | `900` | Seconds before an idle open session is closed |
+| `SHUNT_SESSION_GRACE_PERIOD` | `120` | Seconds reserved after a session closes for outcome verification; configured but not yet acted on |
+| `SHUNT_RETRY_COUNT` | `3` | Attempts per upstream model before falling back, with exponential backoff |
+
+**Routing and embeddings**
+
+| Variable | Default | Effect |
+|---|---|---|
+| `SHUNT_COLD_START_THRESHOLD_TIER2` | `20` | Mid-tier outcomes needed to leave cold start |
+| `SHUNT_COLD_START_THRESHOLD_TIER1` | `50` | Total labelled outcomes needed to leave cold start (either threshold ends it) |
+| `SHUNT_EMBEDDER_MODEL` | `jinaai/jina-embeddings-v2-base-code` | Fastembed model used to embed a task for kNN routing |
+| `SHUNT_EMBED_MAX_CHARS` | `4000` | Prompt characters fed to the embedder |
+| `SHUNT_EMBED_CACHE_DIR` | `$SHUNT_DATA_DIR/models` | Where the ~600MB embedding model is cached. Shunt downloads it once at startup and reuses it; keep this on durable storage or every restart re-downloads it |
+| `SHUNT_RESPONSE_MODEL_LABEL` | unset | Prefix added to the response `model` field (e.g. `shunt:` → `shunt:qwen3.7-plus`), so a client shows which model actually served the turn |
+| `SHUNT_LOG_LEVEL` | `info` | Log verbosity; `debug` traces the routing decision |
+
+`SHUNT_EMBED_MAX_CHARS` bounds only the text the router embeds to make its
+decision. The prompt itself is forwarded upstream untouched — truncation never
+reaches the model.
+
 ## Choose which models the benchmark runs
 
 The registry above defines every model shunt knows. The benchmark harness runs a
-subset of them, chosen by the `models` list in `benchmark/config.yaml`:
+subset of them, chosen by the `models` list in `benchmark/benchmark.yaml` — a
+separate list from `router.yaml`'s `models:` (see
+[Choose which models are live-routable](#choose-which-models-are-live-routable)),
+since what the benchmark scores and what the live proxy routes to are independent
+decisions:
 
 ```yaml
 models:                 # enabled models; each name must exist in the registry

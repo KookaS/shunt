@@ -1,6 +1,6 @@
 # Reproducible benchmark image — runs the caching/orchestration loop identically
 # on any machine. Code is baked in; mount results.csv + reports read-write (see
-# docker-compose.yml `benchmark` service) to persist regenerated data and plots.
+# benchmark/compose.yaml `benchmark` service) to persist regenerated data and plots.
 #
 # Build from the REPO ROOT so the `benchmark` package is importable:
 #   docker build -f benchmark/Dockerfile -t shunt-benchmark .

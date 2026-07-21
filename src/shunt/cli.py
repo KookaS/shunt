@@ -3,9 +3,54 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from shunt import __version__
+from shunt.log_config import LEVELS, LOG_LEVEL_ENV
+
+
+def _apply_router_flag_overrides(args: argparse.Namespace) -> None:
+    """Translate `shunt start` routing flags into env vars (CLI > env > file > default).
+
+    Only flags actually passed override; absent flags leave any existing env var intact.
+    """
+    strategy = getattr(args, "strategy", None)
+    explore = getattr(args, "explore", None)
+    budget = getattr(args, "explore_budget_frac", None)
+    if strategy is not None:
+        os.environ["SHUNT_ROUTER_STRATEGY"] = strategy
+    if explore is not None:
+        os.environ["SHUNT_EXPLORATION_ENABLED"] = "1" if explore else "0"
+    if budget is not None:
+        os.environ["SHUNT_EXPLORE_BUDGET_FRAC"] = str(budget)
+
+
+def _add_start_flags(parser: argparse.ArgumentParser) -> None:
+    """Register the routing-override flags on the `start` subcommand."""
+    parser.add_argument(
+        "--strategy",
+        default=None,
+        help="Active routing strategy (overrides router.yaml / env).",
+    )
+    parser.add_argument(
+        "--explore",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable/disable exploration (--explore / --no-explore).",
+    )
+    parser.add_argument(
+        "--explore-budget-frac",
+        type=float,
+        default=None,
+        help="Exploration budget fraction (~1.4x cost at 0.4).",
+    )
+    parser.add_argument(
+        "--log-level",
+        default=None,
+        choices=[level.lower() for level in LEVELS],
+        help="Log verbosity (overrides SHUNT_LOG_LEVEL). Use debug to trace routing.",
+    )
 
 
 def _start(args: argparse.Namespace) -> None:
@@ -15,6 +60,11 @@ def _start(args: argparse.Namespace) -> None:
     # Load a local .env (gitignored) if present so provider keys are available;
     # real env vars still win. Missing file is a no-op (env-only setups unaffected).
     load_dotenv_file()
+    _apply_router_flag_overrides(args)
+    # Export rather than pass through: `run()` configures logging for the whole process
+    # (uvicorn included), and the env var is the same knob the container sets.
+    if getattr(args, "log_level", None):
+        os.environ[LOG_LEVEL_ENV] = args.log_level.upper()
     run()
 
 
@@ -67,8 +117,33 @@ def _explain(args: argparse.Namespace) -> None:
 
 
 def _flag(args: argparse.Namespace) -> None:
-    print("shunt flag: not yet implemented (planned)")
-    sys.exit(1)
+    """Record a human-verified outcome for a routed session."""
+    # This is the router's outcome write-back path. Until it is used, no outcome row exists,
+    # every neighbourhood is empty, the engine stays in cold-start and routes to the cheap
+    # default — so kNN and exploration are configured but inert. A human rating counts as a
+    # Tier-2 (verified) label: it is a person confirming the task actually worked, which is
+    # exactly the ground truth the routing is meant to learn from. Automatic Tier-2 capture
+    # from a test/typecheck run is a separate, larger piece of work.
+    from shunt.db.store import OutcomeStore
+
+    store = OutcomeStore()
+    if store.get_session(args.session_id) is None:
+        # Fail loudly: silently accepting an unknown id would poison the corpus with labels
+        # attached to nothing, and the router cannot tell a typo from a real session.
+        print(f"Session not found: {args.session_id}")
+        sys.exit(1)
+
+    outcome = "success" if args.rating == "good" else "failure"
+    store.store_outcome(
+        session_id=args.session_id,
+        tier1_outcome=outcome,
+        tier1_confidence=1.0,
+        tier2_outcome=outcome,
+        tier2_confidence=1.0,
+        aggregated_confidence=1.0,
+        human_label=args.rating,
+    )
+    print(f"Flagged {args.session_id} as {args.rating} ({outcome}).")
 
 
 def main() -> None:
@@ -81,6 +156,7 @@ def main() -> None:
     sub = parser.add_subparsers(title="commands")
 
     start = sub.add_parser("start", help="Start the proxy server (default)")
+    _add_start_flags(start)
     start.set_defaults(func=_start)
 
     explain = sub.add_parser("explain", help="Explain a routing decision")

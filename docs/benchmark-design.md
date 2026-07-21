@@ -1,22 +1,22 @@
 ---
 title: Benchmark design
-description: Two-part benchmark structure — model run logging and offline routing strategy evaluation.
+description: Two-part benchmark structure — live model execution and offline routing strategy evaluation.
 ---
 
 # Benchmark design
 
-The benchmark has two parts. `.runs/` collects raw model results from eval sessions. `routing/` evaluates routing strategies offline against those results.
+The benchmark has two parts. `runner/` executes models against SWE-bench Verified instances and records the outcomes. `routing/` evaluates routing strategies offline against those recorded outcomes.
 
 | Tree | Question | Output |
 |---|---|---|
-| `.runs/` | Which models solve which tasks? | Per-model pass/fail on tasks from real sessions |
+| `runner/` | Which models solve which tasks? | Verified per-cell pass/fail, cost, and tokens, written to `routing/results.csv` |
 | `routing/` | Which routing strategy maximizes reward? | Per-strategy metrics across a task × model matrix |
 
-`.runs/` is the empirical source. `routing` consumes its output matrix — no dependency on runner infrastructure.
+`runner/` is the empirical source; `routing/results.csv` is the committed record it produces. `routing/` consumes that file — no dependency on runner infrastructure at eval time.
 
 ## Why split them
 
-`.runs/` answers a model-selection question: given N models, which is the cheapest that solves each task? This is the discrimination test. If every model passes everything, routing is pointless.
+`runner/` answers a model-selection question: given N models, which is the cheapest that solves each task? This is the discrimination test. If every model passes everything, routing is pointless.
 
 `routing/` answers a strategy-selection question: given a known task × model matrix, which algorithm (kNN, cascade, bandit, fixed) maximizes pass rate minus cost?
 
@@ -27,9 +27,14 @@ They share a `benchmark/` root because both evaluate model-decision capability. 
 ```
 benchmark/
   README.md                               Model-capability benchmark overview
+  benchmark.yaml                          Enabled models, strategies, and run settings
 
-  .runs/                                  Per-model run data from evals
-    <model>__<capability>__<task-id>/     One directory per run
+  challenges/swebench_verified/           Instance specs (the sole challenge source)
+
+  runner/                                 Live execution against the SWE-bench harness
+    run_matrix.py                         Runs the (challenge x model x arm) matrix, upserts rows
+    collect.py                            Adaptive collection (phase A + frontier tail)
+    check_integrity.py                    Anchor/authenticity audit of the committed rows
 
   routing/                                Routing strategy evaluation
     results.csv                           THE committed source of truth (per-cell outcomes)
@@ -40,6 +45,11 @@ benchmark/
       __init__.py                         Strategy protocol
       oracle.py                           Best per-task (upper bound)
       fixed.py                            Always-cheap, always-frontier, random
+      knn.py                              Embed task → retrieve neighbours → cheapest capable
+      knn_cascade.py                      kNN-informed try-verify-escalate
+      knn_blended.py                      kNN over our runs + down-weighted external neighbours
+      external_prior.py                   SWE-bench leaderboard difficulty prior
+      _template.py                        Skeleton for a new strategy
     run_eval.py                           Evaluate all strategies × tasks
     metrics.py                            Reward, regret, efficiency
 ```
@@ -80,8 +90,8 @@ Cost is recorded from actual model API responses: litellm's computed cost for di
 | **Always-Frontier** | Always most expensive model (derived from pricing matrix). Maximum cost baseline. |
 | **Random** | Random model per task (mean over N seeds). Null baseline. |
 
-Additional strategies: kNN and kNN-cascade, both implemented in `strategies/`.
+Additional strategies in `strategies/`: kNN, kNN-cascade, kNN-blended, and External-Prior.
 
 ## Relationship to src/shunt/
 
-The strategies in `benchmark/routing/strategies/` are evaluation copies — they consume a known matrix and compute metrics offline. They are separate from `src/shunt/router/`, the decision module that is built and unit-tested but not yet wired into the live proxy (which currently forwards to a cheap default). The offline kNN strategy is designed to mirror that module's algorithm, so that if the module clears the kill gate and is wired in, live behavior matches what the benchmark scored.
+The strategies in `benchmark/routing/strategies/` are evaluation copies — they consume a known matrix and compute metrics offline. They are separate from `src/shunt/router/`, the decision module that is now called on the first turn by the live proxy but does not yet have a learning loop (outcomes not yet being written). The offline kNN strategy is designed to mirror that module's algorithm, so that when the outcome-writing loop is wired and the router can learn from past results, live behavior matches what the benchmark scored.

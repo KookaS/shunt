@@ -1,0 +1,47 @@
+# Shipped router policy — the production routing defaults.
+# Override by writing your own at $SHUNT_CONFIG_DIR/router.yaml (or
+# ~/.config/shunt/router.yaml). Your file replaces this one; it is not merged.
+# Env vars (SHUNT_ROUTER_STRATEGY, SHUNT_EXPLORATION_ENABLED,
+# SHUNT_EXPLORE_BUDGET_FRAC) and CLI flags win over both.
+router:
+  # Active algorithm — one of: knn | always_cheap | always_frontier.
+  strategy: knn
+
+  # Knobs for the active strategy.
+  policy:
+    k: 20
+    success_rate_threshold: 0.6   # lower = more cost savings, higher = more reliability
+    min_samples: 3
+
+  # Cost-aware Thompson-sampling exploration. Shipped ON so the router can gather
+  # evidence, but be clear about what that costs today: outcome capture is manual
+  # (`shunt flag`), and the one offline replay measured exploration at -2.8pp pass
+  # rate and +$0.013/task with its learning benefit set to zero. Set
+  # `enabled: false` to route on current beliefs only.
+  exploration:
+    enabled: true
+    prior_alpha: 1.0              # Beta(alpha, beta) prior over per-model success
+    prior_beta: 1.0
+    explore_budget_frac: 0.4      # cumulative cap -> total spend <= ~1.4x exploit-only
+    conservative_alpha: 0.1       # safety slack vs the fixed-cheap baseline
+    propensity_mc_samples: 100    # logged TS propensity, for off-policy evaluation
+
+  # Which registry models (src/shunt/config/models.yaml) the live router may pick.
+  # Empty/absent = every registry model. This is core + the latest frontier tier,
+  # EXCLUDING the superseded claude-opus-4-6 (it stays in the registry as the old
+  # kill-gate baseline, just not live by default). A model absent from this list is
+  # known to the registry but NOT chosen for live inference. The frontier entries
+  # need their provider key (ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY)
+  # or the router marks them unhealthy and falls back. Benchmark model selection is
+  # separate (benchmark/benchmark.yaml `models:`).
+  models:
+    - qwen3.7-plus
+    - deepseek-v4-flash
+    - gpt-5-mini
+    - kimi-k2.5
+    - zai-glm-5.2
+    - kimi-k3
+    - gemini-3.1-pro
+    - gpt-5.6-sol
+    - claude-fable-5
+    - claude-opus-4-8

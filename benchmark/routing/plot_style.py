@@ -7,7 +7,7 @@
 # pass/fail/not-sampled encoding.
 #
 # Color note: the model palette is genuine Okabe-Ito (matches the existing
-# CB_PALETTE convention in plot_timing.py / plot_strategies.py and the task's
+# CB_PALETTE convention in plot_strategies.py and the task's
 # design brief), validated with the dataviz skill's six-check validator — all
 # 6 slots PASS in both light (surface #fcfcfb) and dark (#1a1a19) modes on the
 # adjacent pairlist; the all-pairs pairlist (scatter/bubble/small-multiples,

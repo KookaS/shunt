@@ -56,7 +56,12 @@ jobs:
         run: |
           python -m venv /tmp/boot-smoke
           /tmp/boot-smoke/bin/pip install dist/*.whl
-          /tmp/boot-smoke/bin/shunt version
+          # Assert on the OUTPUT, don't just run it. This step used to invoke
+          # `shunt version` and discard the result, so a version that printed
+          # 0.0.0 sailed through every release.
+          REPORTED=$(/tmp/boot-smoke/bin/shunt version | awk '{print $NF}')
+          test "$REPORTED" = "${RELEASE_VERSION}" \
+            || { echo "::error::shunt version reports '${REPORTED}', tag is '${RELEASE_VERSION}'"; exit 1; }
           /tmp/boot-smoke/bin/python -c "import shunt; print('shunt import OK')"
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

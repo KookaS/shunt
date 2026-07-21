@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import hnswlib
 import numpy as np
 
-import shunt.models
-from shunt.models.config import ModelPool
+from shunt.models.config import ModelPool, default_registry_path
 from shunt.router.cold_start import ColdStartStrategy
 from shunt.router.embedder import Embedder
 from shunt.router.engine import RouterEngine
@@ -22,7 +20,7 @@ if TYPE_CHECKING:
 
 # The shipped default model config — pinned so benchmark tiering is reproducible
 # regardless of a dev's ambient SHUNT_CONFIG_DIR / ~/.config/shunt/models.yaml.
-_BUNDLED_MODEL_CONFIG = str(Path(shunt.models.__file__).parent / "default_config.yaml")
+_BUNDLED_MODEL_CONFIG = str(default_registry_path())
 
 # ---------------------------------------------------------------------------
 # Embedder — the shipped router's Embedder (honors SHUNT_EMBEDDER_MODEL +
@@ -224,7 +222,7 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
 
         # The SHIPPED model pool — tiers come from src/shunt config, not a
         # benchmark-local price heuristic, so the benchmark measures production tiering.
-        # Pinned to the bundled default_config.yaml so an ambient SHUNT_CONFIG_DIR /
+        # Pinned to the packaged shunt/config/models.yaml so an ambient SHUNT_CONFIG_DIR /
         # ~/.config/shunt override can't silently change the benchmark's tiering.
         model_pool = ModelPool(_BUNDLED_MODEL_CONFIG)
 

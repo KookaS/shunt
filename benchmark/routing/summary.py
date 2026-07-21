@@ -87,10 +87,14 @@ def compute_strategy_rows(
                 strategy, matrix, tasks, oracle_decisions, oracle_unscorable, gamma, bootstrap
             )
         )
-        strat_metrics[rows[-1]["strategy"]] = {
-            "AvgPerf%": rows[-1].get("AvgPerf%", 0.0),
-            "TotalCost": rows[-1].get("TotalCost", 0.0),
-        }
+        # Zero-evidence rows (no scorable task) are kept in the output but NEVER
+        # enter the Pareto comparison: (cost $0, pass 0%) is un-dominated by
+        # construction, so including them certifies "measured nothing" as optimal.
+        if int(rows[-1].get("n_tasks", 0) or 0) > 0:
+            strat_metrics[rows[-1]["strategy"]] = {
+                "AvgPerf%": rows[-1].get("AvgPerf%", 0.0),
+                "TotalCost": rows[-1].get("TotalCost", 0.0),
+            }
     pareto = compute_pareto(strat_metrics)
     for r in rows:
         r["Pareto"] = pareto.get(r["strategy"], False)

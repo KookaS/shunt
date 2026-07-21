@@ -16,7 +16,7 @@ on:
       - "tests/integrations/**"
       - "Dockerfile"
       - "pyproject.toml"
-      - "src/shunt/models/default_config.yaml"
+      - "src/shunt/config/models.yaml"
       - ".github/workflows/integration-handshake.yml"
 
 jobs:
@@ -53,7 +53,7 @@ jobs:
       - name: Build Shunt image
         run: docker build -t shunt-router:handshake -f Dockerfile .
       # Boot the PLAIN product image with NO external config, so it must load the
-      # registry BAKED INTO THE WHEEL. Catches the packaging gap (default_config.yaml
+      # registry BAKED INTO THE WHEEL. Catches the packaging gap (models.yaml
       # missing from the wheel) that an editable install and the config-injected
       # handshake legs both hide — the exact crash `release.yml` would otherwise ship.
       - name: Boot smoke — bundled default registry loads

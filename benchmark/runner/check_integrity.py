@@ -136,7 +136,7 @@ def _report(
     return ok
 
 
-def main(config_path: str = "benchmark/config.yaml") -> int:
+def main(config_path: str = "benchmark/benchmark.yaml") -> int:
     ap = argparse.ArgumentParser(description="Benchmark integrity + derived-artifact drift gate.")
     ap.add_argument("--config", default=config_path, help="Path to config YAML")
     ap.add_argument(

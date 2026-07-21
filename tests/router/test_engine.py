@@ -8,6 +8,7 @@ import numpy as np
 from shunt.router.embedder import Embedder
 from shunt.router.engine import RouterEngine
 from shunt.router.selection import NeighborResult
+from shunt.router.strategies.fixed import AlwaysCheapStrategy
 
 from .conftest import FakeModelPool
 
@@ -78,7 +79,10 @@ class TestDecide:
         model, reason, provenance = engine.decide("session-1", "some prompt")
         assert model == "qwen3.7-plus"
         assert reason == "cold_start"
-        assert embedder.call_count == 0  # no embedding needed
+        # Cold-start still embeds: its whole purpose is gathering the kNN bootstrap
+        # corpus, so the session must be indexable even though routing ignores neighbors.
+        assert embedder.call_count == 1
+        assert engine.cached_embedding("session-1") is not None
         assert provenance["model_chosen"] == "qwen3.7-plus"
         assert provenance["selection_rule_used"] == "cold_start"
         assert provenance["fallback_chain_triggered"] is False
@@ -196,6 +200,54 @@ class TestCaching:
         engine.decide("session-1", "prompt")
         engine.decide("session-2", "prompt")
         assert embedder.call_count == 2
+
+
+class TestStrategyAndNeighborK:
+    def test_injected_strategy_overrides_selection(self):
+        # A frontier-favouring neighbourhood, but always_cheap must ignore it.
+        neighbors = [_neighbor("model-b", outcome=True, cost=9.0) for _ in range(5)]
+        index = MockOutcomeIndex(count=50, neighbors=neighbors)
+        pool = FakeModelPool("model-a", "model-b")  # both land in the cheap tier
+        engine = RouterEngine(
+            model_pool=pool,
+            session_manager=MagicMock(),
+            outcome_index=index,
+            embedder=RecordingEmbedder(),
+            strategy=AlwaysCheapStrategy(),
+        )
+        model, reason, _ = engine.decide("session-1", "prompt")
+        assert model == "model-a"
+        assert reason == "always_cheap"
+
+    def test_fixed_strategy_bypasses_cold_start_and_query(self):
+        # Empty store (cold-start would be active for knn); a fixed strategy must still
+        # route to its model and never touch the embedder or the index.
+        index = MockOutcomeIndex(count=0, neighbors=[])
+        embedder = RecordingEmbedder()
+        engine = RouterEngine(
+            model_pool=FakeModelPool("model-a", "model-b"),
+            session_manager=MagicMock(),
+            outcome_index=index,
+            embedder=embedder,
+            strategy=AlwaysCheapStrategy(),
+        )
+        model, reason, _ = engine.decide("session-1", "prompt")
+        assert reason == "always_cheap"
+        assert model == "model-a"
+        assert embedder.call_count == 0  # no embedding
+        assert index.queries == []  # no kNN query
+
+    def test_neighbor_k_drives_query(self):
+        index = MockOutcomeIndex(count=50, neighbors=[])
+        engine = RouterEngine(
+            model_pool=FakeModelPool("model-a"),
+            session_manager=MagicMock(),
+            outcome_index=index,
+            embedder=RecordingEmbedder(),
+            neighbor_k=7,
+        )
+        engine.decide("session-1", "prompt")
+        assert index.queries[0][1] == 7
 
 
 class TestGetNeighbors:

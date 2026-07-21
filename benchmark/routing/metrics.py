@@ -100,7 +100,19 @@ def discriminating_stats(
 
 def compute_metrics(decisions: list[tuple[str, str, bool, float]], gamma: float = 0.1) -> dict:
     if not decisions:
-        return {}
+        # Zero-evidence, but SHAPED: every consumer (summary rows, the CSV writer,
+        # report.py's plots) indexes these keys. Returning {} used to emit a row with
+        # blank TotalCost/AvgPerf% that still got Pareto-flagged, then KeyError'd at
+        # plot time. n_tasks == 0 is the explicit "no scorable task" signal.
+        return {
+            "n_tasks": 0,
+            "n_pass": 0,
+            "AvgPerf%": 0.0,
+            "TotalCost": 0.0,
+            "AvgCost": 0.0,
+            "Reward": 0.0,
+            "AvgReward": 0.0,
+        }
 
     n = len(decisions)
     passes = sum(1 for _, _, p, _ in decisions if p)
@@ -250,39 +262,6 @@ def compute_cost_decomposition(
         "volume_pct": round(volume_pct, 2),
         "interaction_pct": round(ixn_pct, 2),
     }
-
-
-def compute_timing(decisions: list[tuple]) -> dict:
-    """Compute timing metrics from decision tuples with calls field.
-
-    Decision tuple: (task_id, model, passed, cost, in_tok, out_tok, calls)
-    """
-    if not decisions:
-        return {}
-    total_calls = sum(d[6] for d in decisions)
-    avg_calls = total_calls / len(decisions)
-    return {
-        "total_calls": total_calls,
-        "avg_calls_per_task": round(avg_calls, 2),
-    }
-
-
-def compute_timing_per_model(
-    strategies_decisions: dict[str, list[tuple]],
-) -> dict:
-    """Compute avg calls per model across all strategies.
-
-    Each decision tuple has calls at index 6.
-    """
-    model_calls: dict[str, int] = {}
-    model_counts: dict[str, int] = {}
-    for _strategy_name, decisions in strategies_decisions.items():
-        for d in decisions:
-            model = d[1]
-            calls = d[6]
-            model_calls[model] = model_calls.get(model, 0) + calls
-            model_counts[model] = model_counts.get(model, 0) + 1
-    return {m: round(model_calls[m] / model_counts[m], 1) for m in model_calls}
 
 
 def compute_pareto(strategies_metrics: dict[str, dict]) -> dict[str, bool]:

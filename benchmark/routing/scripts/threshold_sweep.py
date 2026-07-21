@@ -25,7 +25,7 @@ def load_matrix(path: Path) -> dict:
     return config.load_matrix(path)
 
 
-def oracle(model_map: dict, results: dict) -> str:
+def oracle(results: dict) -> str:
     candidates: list[tuple[str, float]] = []
     for model, outcome in results.items():
         if outcome.get("pass"):
@@ -137,7 +137,7 @@ def evaluate_params(
     }
 
 
-def main(config_path: str = "benchmark/config.yaml") -> None:
+def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     config.load(config_path)
 
     ap = argparse.ArgumentParser()
@@ -185,7 +185,11 @@ def main(config_path: str = "benchmark/config.yaml") -> None:
     features = vectorizer.fit_transform(task_descs).toarray()
     print(f"Feature matrix: {features.shape}")
 
-    ks = args.ks if args.ks is not None else list(range(2, 21, 2))
+    # Sweep k up to the largest usable neighbourhood (n-1 neighbours, self excluded)
+    # rather than a hardcoded 20: the reward optimum sat at k=18/20, the edge of the
+    # old window, so the sweep never bracketed its own maximum.
+    k_max = max(2, len(task_ids) - 1)
+    ks = args.ks if args.ks is not None else [k for k in range(2, k_max + 1, 2)] or [2]
     thresholds = (
         args.thresholds
         if args.thresholds is not None
@@ -260,73 +264,116 @@ def main(config_path: str = "benchmark/config.yaml") -> None:
     param_names = ["k", "success_rate_thresh", "min_samples"]
     param_values = [ks, thresholds, mins_samples]
 
-    variances = []
-    for pi, (_pname, pvals) in enumerate(zip(param_names, param_values, strict=True)):
-        group_means = []
-        for v in pvals:
-            mask = np.isclose(results_arr[:, pi], v)
-            group_means.append(np.mean(results_arr[mask, 3]))
-        variances.append(np.var(group_means))
-
-    most_sensitive = param_names[np.argmax(variances)]
-    third_idx = np.argsort(variances)[::-1][2]
+    eta_sq = _variance_explained(results_arr, param_values)
+    most_sensitive = param_names[int(np.argmax(eta_sq))]
     print("\n=== SENSITIVITY ANALYSIS ===")
-    for pn, pv in zip(param_names, variances, strict=True):
-        print(f"  {pn}: variance explained = {pv:.4f}")
+    print("  eta^2 = fraction of Reward variance explained by that parameter (0-1)")
+    for pn, pv in zip(param_names, eta_sq, strict=True):
+        print(f"  {pn}: variance explained (eta^2) = {pv:.4f}")
     print(f"  Most sensitive parameter: {most_sensitive}")
 
-    p3_idx = third_idx
-    p3_name = param_names[p3_idx]
-
     if most_sensitive in ("success_rate_thresh", "k"):
-        fixed_val = best["min_samples"]
-        filtered = [r for r in all_results if abs(r["min_samples"] - fixed_val) < 0.1]
-        x_vals = sorted(set(r["k"] for r in filtered))
-        y_vals = sorted(set(r["success_rate_thresh"] for r in filtered))
-        x_name, y_name = "k", "success_rate_thresh"
+        fixed_name, fixed_val = "min_samples", best["min_samples"]
+        y_name = "success_rate_thresh"
     else:
-        fixed_val = best["success_rate_thresh"]
-        filtered = [r for r in all_results if abs(r["success_rate_thresh"] - fixed_val) < 0.1]
-        x_vals = sorted(set(r["k"] for r in filtered))
-        y_vals = sorted(set(r["min_samples"] for r in filtered))
-        x_name, y_name = "k", "min_samples"
+        fixed_name, fixed_val = "success_rate_thresh", best["success_rate_thresh"]
+        y_name = "min_samples"
+    filtered = [r for r in all_results if abs(r[fixed_name] - fixed_val) < 0.1]
 
+    _plot_sweep_heatmap(
+        filtered,
+        Path(args.plot),
+        y_name=y_name,
+        fixed=(fixed_name, fixed_val),
+        swept_ks=ks,
+    )
+    print(f"\nHeatmap saved to {args.plot}")
+
+
+def _variance_explained(results_arr: np.ndarray, param_values: list[list]) -> list[float]:
+    """Per-parameter eta^2: the fraction (0-1) of Reward variance between its levels.
+
+    The previous ``np.var(group_means)`` was an UNNORMALIZED variance of group
+    means — it printed values above 1 while labelled "variance explained".
+    """
+    rewards = results_arr[:, 3]
+    total_ss = float(np.sum((rewards - rewards.mean()) ** 2))
+    out: list[float] = []
+    for pi, pvals in enumerate(param_values):
+        between_ss = 0.0
+        for v in pvals:
+            mask = np.isclose(results_arr[:, pi], v)
+            n_g = int(mask.sum())
+            if n_g:
+                between_ss += n_g * (float(np.mean(rewards[mask])) - float(rewards.mean())) ** 2
+        out.append(between_ss / total_ss if total_ss > 0 else 0.0)
+    return out
+
+
+def _plot_sweep_heatmap(
+    filtered: list[dict],
+    plot_path: Path,
+    *,
+    y_name: str,
+    fixed: tuple[str, float],
+    swept_ks: list[int],
+) -> None:
+    """Reward heatmap over (k, y_name) at a fixed third parameter."""
+    x_name = "k"
+    x_vals = sorted({r[x_name] for r in filtered})
+    y_vals = sorted({r[y_name] for r in filtered})
     heat_data = np.full((len(y_vals), len(x_vals)), np.nan)
     for r in filtered:
-        xi = x_vals.index(r[x_name])
-        yi = y_vals.index(r[y_name])
-        heat_data[yi, xi] = r["Reward"]
+        heat_data[y_vals.index(r[y_name]), x_vals.index(r[x_name])] = r["Reward"]
 
     fig, ax = plt.subplots(figsize=(10, 7))
     cmap = plt.cm.viridis.copy()
     cmap.set_bad("white")
-
     im = ax.imshow(heat_data, aspect="auto", cmap=cmap, interpolation="nearest")
-
     ax.set_xticks(range(len(x_vals)))
     ax.set_xticklabels(x_vals)
     ax.set_yticks(range(len(y_vals)))
     ax.set_yticklabels(y_vals)
 
+    cmid = (np.nanmax(heat_data) + np.nanmin(heat_data)) / 2
+    # Shrink the in-cell labels as the k sweep widens, or they run into each other.
+    fontsize = 8 if len(x_vals) <= 12 else 5.0
     for yi in range(len(y_vals)):
         for xi in range(len(x_vals)):
             val = heat_data[yi, xi]
             if not np.isnan(val):
-                cmid = (np.nanmax(heat_data) + np.nanmin(heat_data)) / 2
                 color = "white" if val > cmid else "black"
-                ax.text(xi, yi, f"{val:.2f}", ha="center", va="center", fontsize=8, color=color)
+                ax.text(
+                    xi, yi, f"{val:.2f}", ha="center", va="center", fontsize=fontsize, color=color
+                )
 
     ax.set_xlabel(x_name)
     ax.set_ylabel(y_name)
-    ax.set_title(f"Reward by {x_name} and {y_name}\n(fixed {p3_name})")
+    fixed_name, fixed_val = fixed
+    ax.set_title(f"Reward by {x_name} and {y_name}\n(fixed {fixed_name} = {fixed_val})")
+
+    # Bracketing honesty: an optimum sitting on the first/last swept k is not a
+    # located maximum — the true optimum may lie outside the swept window.
+    best_row = max(filtered, key=lambda r: r["Reward"])
+    if swept_ks and best_row["k"] in (min(swept_ks), max(swept_ks)):
+        ax.text(
+            0.5,
+            -0.13,
+            f"⚠ max Reward ({best_row['Reward']:.2f}) sits at k={best_row['k']}, the EDGE of the "
+            f"swept range k∈[{min(swept_ks)}, {max(swept_ks)}] — the optimum is not bracketed",
+            transform=ax.transAxes,
+            ha="center",
+            va="top",
+            fontsize=9,
+            color="#B00020",
+        )
 
     cb = fig.colorbar(im, ax=ax, label="Reward")
     cb.ax.tick_params(labelsize=9)
-
     fig.tight_layout()
-    Path(args.plot).parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(args.plot, dpi=150)
-    print(f"\nHeatmap saved to {args.plot}")
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(plot_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
 
 if __name__ == "__main__":

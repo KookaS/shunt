@@ -9,7 +9,8 @@ from __future__ import annotations
 # * ours_vs_external.png      — TOGETHER on our tasks: external p_solve vs our cheap-model
 #                               pass; per-task bars for a small set, a 2x2 agreement
 #                               matrix at scale (exposes field-easy-yet-we-fail cases).
-# * heldout_generalization.png — out-of-sample test over the ~490 held-out instances.
+# * heldout_generalization.png — out-of-sample test over the held-out (unmeasured)
+#                               external instances.
 # Light plots need only the CSVs; the held-out plot needs the embedding cache.
 import argparse
 import csv
@@ -249,15 +250,19 @@ def _draw_ours_agreement(ext_rate: np.ndarray, our_pass: np.ndarray, path: Path)
 
 def plot_heldout(out_dir: Path, *, strict: bool = False) -> Path | None:
     """Held-out generalization figure. Deletes any stale PNG rather than silently
-    keeping it when embeddings are unavailable (a stale image must never survive a
-    regen). With ``strict=True`` an unavailable embedding cache raises instead.
+    keeping it when the embedding backend is unavailable (a stale image must never
+    survive a regen). Any OTHER failure is a real bug and propagates.
     """
     from benchmark.routing import heldout_eval
 
     path = out_dir / "heldout_generalization.png"
     try:
         rep = heldout_eval.evaluate_heldout()
-    except Exception as exc:  # noqa: BLE001 (embedding cache / HF absent)
+    except (ImportError, OSError) as exc:
+        # ONLY a genuinely missing dependency degrades to a skip: no fastembed/hnswlib
+        # (ImportError) or no reachable model cache (OSError). A blanket `except
+        # Exception` here reported an empty held-out set (IndexError) as an
+        # "embedding cache absent" skip and kept the exit code green for months.
         if strict:
             raise
         # Do NOT leave a stale artifact behind — a regen that can't recompute must
@@ -342,7 +347,7 @@ def _draw_heldout(rep, path: Path) -> None:  # noqa: ANN001 (HeldoutReport, loca
 def main() -> int:
     ap = argparse.ArgumentParser(description="Plot the external SWE-bench signal (with our runs).")
     ap.add_argument("--out-dir", default="benchmark/routing/reports", help="output dir")
-    ap.add_argument("--config", default="benchmark/config.yaml")
+    ap.add_argument("--config", default="benchmark/benchmark.yaml")
     args = ap.parse_args()
     config.load(args.config)
     out_dir = Path(args.out_dir)

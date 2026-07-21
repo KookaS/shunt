@@ -246,6 +246,8 @@ def test_persist_and_reload_index(tmp_path: pytest.TempPathFactory) -> None:
     s1 = OutcomeStore(db_path=db_path)
     emb = _random_emb()
     s1.store_session("persist-s1", "hello", emb, "m", 0.1, {}, 1.0)
+    # An outcome is what puts a session in the index; without it there is nothing to save.
+    s1.store_outcome("persist-s1", tier1_outcome="success", tier1_confidence=0.9)
     s1.persist_index()
     s1.close()
 

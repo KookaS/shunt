@@ -50,7 +50,7 @@ def load_matrix(path: Path) -> dict:
     return config.load_matrix(path)
 
 
-def main(config_path: str = "benchmark/config.yaml") -> None:
+def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     config.load(config_path)
     if len(sys.argv) > 1 and not sys.argv[1].startswith("--"):
         path = Path(sys.argv[1])

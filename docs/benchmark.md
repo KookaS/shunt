@@ -32,7 +32,7 @@ dataset revision `c104f840`.
 
 Prices below are the **Requesty router listing** rates (as of mid-July 2026), in
 USD per 1M tokens; each entry carries its own `price_as_of`, `price_note`, and
-cache-read/write rate in the model registry (`src/shunt/models/default_config.yaml`). Four tiers — cheap → mid → high → frontier.
+cache-read/write rate in the model registry (`src/shunt/config/models.yaml`). Four tiers — cheap → mid → high → frontier.
 
 | Model | Tier | Input $/1M | Output $/1M |
 |-------|------|-----------:|------------:|
@@ -44,9 +44,9 @@ cache-read/write rate in the model registry (`src/shunt/models/default_config.ya
 | kimi-k3 | frontier | 3.00 | 15.00 |
 
 Spread: ~21x input, ~54x output between the cheapest and the frontier model.
-The model registry (`src/shunt/models/default_config.yaml`) is the single source of truth — the table above is a
+The model registry (`src/shunt/config/models.yaml`) is the single source of truth — the table above is a
 snapshot of it. (claude-opus-4-6 is priced in the registry for provenance but is left out of
-`benchmark/config.yaml`'s `models` list — excluded from runs; the strongest enabled frontier model is the baseline.)
+`benchmark/benchmark.yaml`'s `models` list — excluded from runs; the strongest enabled frontier model is the baseline.)
 
 ## Benchmark execution
 
@@ -66,7 +66,7 @@ reproducible Docker job:
 Which arms run is `p(arm|model)` exploration sampling: a model's default arm
 always runs, and each extra arm runs on a deterministic, cost-skewed fraction of
 challenges (hash-thresholded on the challenge id, so a re-run selects the identical
-arms). Set `arm_sampling.enabled: false` in `benchmark/config.yaml` to run
+arms). Set `arm_sampling.enabled: false` in `benchmark/benchmark.yaml` to run
 default-arm-only, or list models under `arm_sampling.default_only_models` to pin
 just those (e.g. the expensive high/frontier tiers) to their default arm while the
 rest keep exploring.
@@ -111,7 +111,7 @@ once, then run it:
 
 ```bash
 pip install -e '.[dev,benchmark]'
-python3 benchmark/routing/run_eval.py
+python3 -m benchmark.routing.run_eval
 ```
 
 It scores each strategy by looking up cached `(challenge × model)` cells (the
@@ -143,9 +143,11 @@ Metrics per strategy:
 | Random | Uniform random per task (mean over seeds) |
 | kNN | Embed task → retrieve similar → cheapest capable model |
 | kNN-cascade | kNN-informed try-verify-escalate |
+| External-Prior | SWE-bench leaderboard per-task difficulty prior; escalate on external p_solve signal |
+| kNN-blended | kNN over our verified runs plus down-weighted external neighbours (off by default — embedding the external statements is slow) |
 
-These last two are **offline evaluation strategies**, not live product behavior —
-the proxy today forwards to a cheap default and calls neither. The cascade
+The embedding-based strategies are **offline evaluation strategies**, not live product behavior —
+the proxy today forwards to a cheap default and calls none of them. The cascade
 (try-verify-escalate) exists only here in the benchmark; it is not implemented on
 the live request path.
 
@@ -157,9 +159,50 @@ Scored offline, the embedding-based routing strategies split by workload:
   cheap-solvable from frontier-only work, so kNN has signal to route on.
 - On the **agentic-coding** tasks this benchmark targets, it did **not** clear
   our viability bar. Ranking hard tasks from easy ones off the prompt embedding
-  came out near chance, so a kNN router has little to exploit. That is the load-
-  bearing reason routing is not yet wired into the live proxy — we do not ship a
-  decision the evidence does not support.
+  came out near chance, so a kNN router has little to exploit. The router is now
+  wired into the live proxy (it decides the first turn). Outcomes can be manually
+  recorded via `shunt flag`, but automatic capture is not yet wired, so the router
+  typically cold-starts every session, and we do not yet claim a live advantage on
+  a workload where the embedding signal did not support it.
+
+### Evaluating the exploration policy without spending money
+
+Exploration ships on ([configuration](configuration.md#tune-the-router)), so the
+obvious question is what it costs. You can answer it from the committed data alone.
+`results.csv` is a near-dense grid of *measured* (task, model) outcomes: 285 of the
+49 × 6 cells are filled (96.9%), and 44 tasks have a result for all six models.
+Scoring uses each model's default reasoning arm, which drops one more cell — so the
+sub-grid the replay actually runs on is 43 tasks × 6 models (the largest fully dense
+block, found greedily). On a fully
+dense sub-grid, replaying a routing policy is exact rather than estimated: look up
+the model the policy picks, read the outcome that was actually recorded for that
+cell, average. Nothing is simulated and no request is sent.
+
+```bash
+python -m benchmark.routing.scripts.plot_exploration
+```
+
+This replays the shipped router — the same Thompson sampler, budget cap, and
+conservative gate that run in the proxy — over the matrix, once with exploration
+off and once with it on, and writes `routing/reports/exploration_replay.png` plus a
+summary to stdout. Cells the policy routes to but the benchmark never ran are
+skipped and counted, never filled in with a guess.
+
+On the 43-task dense slice, averaged over 20 seeds: exploration costs **1.10× the
+exploration-off bill** on average and **1.22× on the worst seed**, inside the ~1.4×
+the default budget allows. The paired per-task difference is **−2.8 pp pass rate
+(95% CI −6.5 to +0.3)** and **+$0.013 per task (95% CI −$0.000 to +$0.027)** — the
+paired numbers are the ones to read, since the two arms' marginal intervals are far
+too wide to separate at n=43.
+
+Three caveats keep this honest. The replay's outcome matrix is **static**, so an
+exploratory pull can never improve a later decision — this measures exploration's
+cost with its learning benefit set to zero, which is the pessimistic half of the
+ledger, not a verdict on whether exploration pays. The budget cap counts the
+router's own confidence-weighted neighbourhood costs, not realized ones, so the
+realized explore/exploit spend ratio can exceed `explore_budget_frac` on an unlucky
+seed (0.85 against a 0.4 cap here) even though the cap is doing its job. And 43
+tasks from one benchmark is a small, single-workload sample.
 
 ## Deciding the kill-gate on partial frontier coverage
 
@@ -208,7 +251,7 @@ fixed-frontier is near zero — a near-zero edge is itself the signal to stop.
   `constants_pinned` safety guard and needs no such prompt.
 
 `python -m benchmark.runner.collect` is a **deprecated alias** for `--strategy
-cost_optimal`. Key `cost_optimal` knobs live under `collect:` in `benchmark/config.yaml`:
+cost_optimal`. Key `cost_optimal` knobs live under `collect:` in `benchmark/benchmark.yaml`:
 `phase_a_mode` (`single` = one representative model per tier, or `full` = every cheap+mid
 model), `include_high` (add the high tier to the frontier phase), and the two sizing
 constants `audit_fraction` (audit sampling probability π) and `noninferiority_margin`

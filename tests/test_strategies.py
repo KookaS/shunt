@@ -116,7 +116,7 @@ class TestExternalPrior:
     def _prior(self, tmp_path):
         from benchmark import config
 
-        config.load("benchmark/config.yaml")  # so tier lookup resolves
+        config.load("benchmark/benchmark.yaml")  # so tier lookup resolves
         p = tmp_path / "ext.csv"
         # external_prior keys on p_solve (p_cheap is degenerate on the leaderboard).
         p.write_text("instance_id,p_solve\neasy,1.0\nhard,0.0\n")

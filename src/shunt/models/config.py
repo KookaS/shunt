@@ -249,7 +249,7 @@ def default_registry_path() -> Path:
     """Path to the registry file shipped inside the package."""
     import importlib.resources
 
-    ref = importlib.resources.files("shunt.models") / "default_config.yaml"
+    ref = importlib.resources.files("shunt.config") / "models.yaml"
     with importlib.resources.as_file(ref) as path:
         return Path(path)
 
@@ -300,6 +300,23 @@ class ModelPool:
         with self._lock:
             for name in self._config:
                 self._health[name] = {"healthy": True, "last_failure": None}
+
+    def restrict_to_live(self, names: list[str]) -> None:
+        """Keep only the named models routable; empty list = no-op (all stay)."""
+        if not names:
+            return
+        unknown = [name for name in names if name not in self._config]
+        if unknown:
+            raise ValueError(
+                f"router.yaml lists model(s) not in the registry: {unknown}. "
+                "Each live model must exist in the active models.yaml (the registry). "
+                "Fix the name, add the model to the registry, or set an empty "
+                "`models:` list to route over the whole registry."
+            )
+        live = set(names)
+        with self._lock:
+            self._config = {name: cfg for name, cfg in self._config.items() if name in live}
+            self._health = {name: h for name, h in self._health.items() if name in live}
 
     def model_names(self) -> list[str]:
         """Return every registered model name, in config order."""

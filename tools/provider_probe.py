@@ -25,7 +25,7 @@
 #     line-1 marker is `# shunt-ci: probe` are probed (`local` is `skip`).
 #   - SIGNATURES (endpoint/expect_status/expect_body_pattern) come from
 #     tools/provider_auth_signatures.yaml, measured 2026-07-17 for 11 providers.
-# The runtime registry (src/shunt/models/default_config.yaml) is NEVER read here.
+# The runtime registry (src/shunt/config/models.yaml) is NEVER read here.
 #
 # WHY THE SIGNATURE IS PER-PROVIDER DATA: there is no universal shape. Most answer
 # 401; Requesty answers 403; xAI answers 400 carrying "Incorrect API key provided"

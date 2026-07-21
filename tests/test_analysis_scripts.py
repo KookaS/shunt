@@ -15,18 +15,20 @@ from benchmark import config
 from benchmark.routing.scripts import (
     compute_costs,
     embedding_compare,
+    plot_exploration,
     plot_strategies,
     threshold_sweep,
     viz_knn,
 )
 
 # Absolute config path so the test is independent of the process CWD.
-CONFIG_PATH = str(Path(config.__file__).resolve().parent / "config.yaml")
+CONFIG_PATH = str(Path(config.__file__).resolve().parent / "benchmark.yaml")
 
 # The analysis scripts that must exit cleanly on a header-only results.csv.
 _GUARDED_SCRIPTS: Final = [
     compute_costs.main,
     embedding_compare.main,
+    plot_exploration.main,
     plot_strategies.main,
     threshold_sweep.main,
     viz_knn.main,
@@ -82,3 +84,40 @@ class TestReportRegretFactories:
         assert "kNN-cascade" in factories
         assert factories["kNN"]().name == "kNN"
         assert factories["kNN-cascade"]().name == "kNN-cascade"
+
+
+class TestZeroEvidenceRows:
+    """A strategy with no scorable task must never be certified Pareto-optimal,
+    and a degenerate row set must fail loudly instead of crashing mid-report."""
+
+    def test_empty_decisions_yield_shaped_zero_metrics(self):
+        from benchmark.routing.metrics import compute_metrics
+
+        m = compute_metrics([])
+        # Every key report.py/plot_strategies.py index must exist (was: {} -> KeyError).
+        assert m["n_tasks"] == 0
+        assert m["TotalCost"] == 0.0
+        assert m["AvgPerf%"] == 0.0
+
+    def test_zero_task_strategy_is_not_pareto(self):
+        from benchmark.routing.report import _is_pareto
+
+        assert _is_pareto({"strategy": "kNN", "n_tasks": 0, "Pareto": True}) is False
+        assert _is_pareto({"strategy": "kNN", "n_tasks": "", "Pareto": "True"}) is False
+        assert _is_pareto({"strategy": "kNN", "n_tasks": 3, "Pareto": True}) is True
+
+    def test_thin_rows_are_rejected_with_a_reason(self):
+        from benchmark.routing.report import _validate_rows
+
+        missing = _validate_rows([{"strategy": "kNN", "n_tasks": 3}])
+        assert missing is not None and "TotalCost" in missing
+
+        no_evidence = _validate_rows(
+            [{"strategy": "kNN", "n_tasks": 0, "TotalCost": 0.0, "AvgPerf%": 0.0}]
+        )
+        assert no_evidence is not None and "scorable" in no_evidence
+
+        assert (
+            _validate_rows([{"strategy": "kNN", "n_tasks": 2, "TotalCost": 1.0, "AvgPerf%": 50.0}])
+            is None
+        )

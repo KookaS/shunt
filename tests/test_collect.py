@@ -32,7 +32,7 @@ def _cache(defaults: dict[str, str]) -> dict:
 
 class TestPhaseModels:
     def setup_method(self):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
 
     def test_single_picks_one_representative_per_tier(self):
         models = collect.phase_a_models("single")
@@ -51,7 +51,7 @@ class TestPhaseModels:
 
 class TestDeriveStrata:
     def setup_method(self):
-        config.load("benchmark/config.yaml")
+        config.load("benchmark/benchmark.yaml")
         self.defaults = config.default_arm_ids(_MODELS_A)
         self.cache = _cache(self.defaults)
         self.tasks = ["t_disc", "t_allpass", "t_allfail", "t_uncov"]
@@ -105,7 +105,7 @@ class TestSimulatedRun:
         manifest = tmp_path / "collect_manifest.json"
         monkeypatch.setattr(collect, "_MANIFEST_PATH", manifest)
         # Simulated run against the real registry + challenge store: no keys ⇒ no spend.
-        rc = collect.run_collect("benchmark/config.yaml", live=False)
+        rc = collect.run_collect("benchmark/benchmark.yaml", live=False)
         assert rc == 0
         assert manifest.exists()
         data = json.loads(manifest.read_text())
@@ -117,7 +117,7 @@ class TestSimulatedRun:
         monkeypatch.setattr(
             config, "collect_config", lambda: {"audit_salt": "calib-v1", "audit_fraction": 0.2}
         )
-        assert collect.run_collect("benchmark/config.yaml", live=False) == 2
+        assert collect.run_collect("benchmark/benchmark.yaml", live=False) == 2
 
     def test_refuses_live_when_constants_unpinned(self, monkeypatch):
         # --live must not spend real money with placeholder audit_fraction / margin.
@@ -131,7 +131,7 @@ class TestSimulatedRun:
                 "constants_pinned": False,
             },
         )
-        assert collect.run_collect("benchmark/config.yaml", live=True) == 2
+        assert collect.run_collect("benchmark/benchmark.yaml", live=True) == 2
 
 
 class TestFrontierGate:

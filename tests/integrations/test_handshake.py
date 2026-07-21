@@ -29,6 +29,12 @@ def handshake_client(
         registry_path = tmp_path / "fake_registry.yaml"
         registry_path.write_text(registry)
         monkeypatch.setattr(server, "_MODEL_CONFIG_PATH", str(registry_path))
+        # The packaged router.yaml enumerates the SHIPPED registry's models; against
+        # this fake registry those names don't exist, so restrict_to_live would (rightly)
+        # refuse to boot. An empty `models:` list is the escape hatch — route over the
+        # whole active registry — which is what a custom-registry deployment wants.
+        monkeypatch.setenv("SHUNT_CONFIG_DIR", str(tmp_path))
+        (tmp_path / "router.yaml").write_text("router:\n  models: []\n")
         with TestClient(server.app) as client:
             yield client, upstream
 
