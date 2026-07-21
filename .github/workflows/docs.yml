@@ -1,33 +1,46 @@
 name: Docs
 
-# Build the mkdocs site and publish it to the gh-pages branch. GitHub Pages then
-# serves it at https://kookas.github.io/shunt/. Runs only when the docs or their
-# config change, so unrelated pushes don't redeploy.
+# Build the mkdocs site and publish it straight to GitHub Pages via the Pages
+# deployment API — no gh-pages branch. The built site is an ephemeral artifact,
+# so no generated HTML ever lands in git. Runs only when the docs or their config
+# change on main, so unrelated pushes don't redeploy.
+#
+# Requires the repo's Pages source to be set to "GitHub Actions"
+# (Settings → Pages → Build and deployment → Source: GitHub Actions).
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - "docs/**"
       - "mkdocs.yml"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
+# Least privilege: read the source, write only to Pages, mint a short-lived OIDC
+# token for the deploy. No contents:write — this workflow never pushes a branch.
 permissions:
-  contents: write # gh-deploy pushes the built site to the gh-pages branch
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; don't cancel an in-flight publish (the recommended Pages
+# pattern — a cancelled deploy can leave the site half-updated).
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 env:
   PYTHON_VERSION: "3.12"
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # gh-deploy needs history to update the gh-pages branch
           # docs/assets/*.webp are LFS-tracked (.gitattributes). Without this the
           # checkout leaves 130-byte pointer files, mkdocs copies them verbatim, and
-          # gh-pages publishes broken images with a green build.
+          # the site publishes broken images with a green build.
           lfs: true
       - uses: actions/setup-python@v5
         with:
@@ -36,5 +49,16 @@ jobs:
         run: pip install -r docs/requirements.txt
       - name: Build (strict — broken links / nav fail the build)
         run: mkdocs build --strict
-      - name: Deploy to gh-pages
-        run: mkdocs gh-deploy --force --no-history
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
