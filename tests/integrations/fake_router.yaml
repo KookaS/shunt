@@ -1,0 +1,11 @@
+# Hermetic handshake router policy — pairs with fake_registry.yaml.
+#
+# The packaged router.yaml (src/shunt/config/router.yaml) enumerates the SHIPPED
+# registry's live models; against the 3-model fake registry those names don't
+# exist, so `restrict_to_live` would (rightly) refuse to boot. An empty `models:`
+# list is the escape hatch — route over the WHOLE active registry — which is what
+# a custom-registry deployment (and this hermetic harness) wants. Baked into the
+# image and pointed at by SHUNT_CONFIG_DIR (see Dockerfile.shunt), mirroring the
+# in-process fixture in test_handshake.py.
+router:
+  models: []
