@@ -47,8 +47,9 @@ Three fields make a model registerable — `model_id`, `tier`, and `provider`. A
 model row is picked up the moment it exists; `tier` is the prior the routing is
 designed to start from before real outcomes accumulate. (Pre-alpha note: the live
 proxy now calls `engine.decide()` to choose a model on the first turn. Outcomes can be
-manually recorded via `shunt flag`, but automatic capture is not yet wired, so the router
-typically cold-starts every session to the cheap default — see [architecture.md](architecture.md).
+recorded manually via `shunt flag`, or captured automatically at session close once you
+configure a capture work_dir (see [Tune the router](#tune-the-router)); with neither, the
+router typically cold-starts every session to the cheap default — see [architecture.md](architecture.md).
 Registering models sets up the pool the router uses for decision seeding and
 makes them scoreable in the offline benchmark.) The two `supports_*` fields below
 are optional; they default to streaming on, cache control off.
@@ -284,13 +285,34 @@ A flag beats an env var, an env var beats your file, and your file replaces the
 shipped one wholesale — it is not merged key by key, so copy the packaged file
 before editing it.
 
-Exploration ships on, but it is mostly inert. Outcomes can be manually recorded via
-`shunt flag <session_id> good|bad`, but automatic capture from test runs is not yet
-wired, so the outcome count typically stays near zero and the exploration branch
-rarely fires. Today the settings below describe configured behaviour — for the benefit
-of operators who manually record outcomes. Exploration costs nothing extra today because
-it rarely fires. Read the rest of this section as what happens once automatic
-outcome write-back lands.
+Exploration ships on, but its effect is limited today. Outcomes can be recorded
+manually via `shunt flag <session_id> good|bad`, or automatically once you configure a
+capture work_dir (below); with neither, the outcome count typically stays near zero and
+the exploration branch rarely fires. Exploration costs nothing extra today because it
+rarely fires. Read the rest of this section as configured behaviour that grows as
+verified outcomes accumulate.
+
+### Record verified outcomes automatically
+
+Exploration and the kNN neighbourhood only learn from *verified* outcomes. By default
+those are recorded by hand (`shunt flag <session_id> good|bad`). To capture them
+automatically, point Shunt at the repo it should test when a session goes idle:
+
+```yaml
+router:
+  capture:
+    work_dir: /path/to/your/repo        # single repo — the dogfooding default
+    # work_dirs:                        # or several repos, keyed by tool identity:
+    #   <tool_identity>: /path/to/repo-a
+```
+
+or set `SHUNT_WORK_DIR=/path/to/your/repo` (it overrides the file's single `work_dir`).
+At session close Shunt re-runs the repo's test suite off the request path — pytest /
+jest / `go test` / `cargo test`, auto-detected — and records the pass/fail as a verified
+outcome. A session with no configured work_dir, or whose tests can't be detected or run,
+is left unlabeled: Shunt never guesses an outcome, and the test path comes only from your
+config, never from a request. Startup states which mode is in force (`Shunt capture is
+ON` / `MANUAL-ONLY`).
 
 A router that never tries a model it is unsure about never learns which ones it
 can trust, so the shipped default spends a bounded slice of your budget probing
@@ -325,6 +347,101 @@ shunt start --no-explore
 
 or `exploration.enabled: false` in your `router.yaml` for a permanent setting.
 
+### Prior seeding from offline model estimates
+
+The exploration layer initializes Thompson priors from offline per-model success-rate
+estimates, improving inference when outcomes are sparse. A model's prior is seeded with
+its global confidence-weighted success rate from Tier-2 (verified) outcomes, with the
+strength capped by `exploration.prior_strength_cap` (default 20.0 pseudo-observations).
+This empirical-Bayes regularization means a model with historic evidence starts close to
+its learned rate, while one without evidence falls back to the flat `Beta(1, 1)`. Adjust
+the strength cap if you have strong offline data and want faster learning, or if you want
+the priors to regularize more conservatively:
+
+```yaml
+router:
+  exploration:
+    prior_strength_cap: 20.0      # default; raise to trust offline estimates more
+```
+
+### Batch offline re-fit
+
+The kNN index is rebuilt from the append-only outcome log periodically, not on every
+outcome. This batch-first design trades real-time precision for robustness (HNSW cannot
+delete in place; rebuild is cheaper than per-outcome updates at scale). By default, the
+index rebuilds every 50 captured outcomes:
+
+```yaml
+router:
+  refit:
+    every_n_outcomes: 50          # 0 disables (only boot-time rebuild runs)
+```
+
+The index always rebuilds on startup. If you want no runtime re-fit (frozen index after
+boot), set `every_n_outcomes: 0`; if you want tighter coupling, lower the threshold
+(beware: frequent rebuilds are CPU-intensive). Monitor logs for `index rebuild` messages.
+
+## Choose the embedding model (and stay swap-safe)
+
+The embedder turns each task into the vector every kNN neighbour is measured against, so
+it is the corpus's foundation. It has its own config file, `embedding.yaml`, resolved with
+the same precedence as `router.yaml` (explicit path → `$SHUNT_CONFIG_DIR/embedding.yaml` →
+the packaged default). Your file **replaces** the packaged one wholesale — it is not merged
+key by key.
+
+```yaml
+embedding:
+  active: jina-code            # a KEY into models below, not a raw repo
+  max_chars: 4000              # part of the fingerprint (see below)
+  models:
+    jina-code: { repo: jinaai/jina-embeddings-v2-base-code, dim: 768, context_length: 8192 }
+    arctic:    { repo: Snowflake/snowflake-arctic-embed-m-long, dim: 768, context_length: 2048 }
+  cache_dir: null              # null → SHUNT_EMBED_CACHE_DIR / SHUNT_DATA_DIR resolution
+```
+
+`SHUNT_EMBEDDER_MODEL` still wins over the file and now selects a **key** (`jina-code`) —
+or, for back-compat, any model's full `repo` string. An unresolvable value is a loud error
+listing the valid keys, never a silent fallback. `SHUNT_EMBED_MAX_CHARS` overrides
+`max_chars`, and `SHUNT_EMBED_CACHE_DIR` overrides `cache_dir`.
+
+### Swap-safety: the fingerprint and `shunt reindex`
+
+The active model's `repo`, its `dim`, and `max_chars` form the corpus **fingerprint** — the
+tuple that fully determines the vector space. Two models can share a dimension yet produce
+vectors in completely different geometries, so switching the model silently would leave the
+stored corpus and every new query in disagreeing spaces, and the router would route on
+garbage.
+
+To prevent that, Shunt stores the fingerprint alongside the corpus and compares it at
+startup:
+
+- **Match (or a genuinely fresh database — no fingerprint *and* no embeddings):** the index
+  is trusted and kNN routing serves as normal. A fresh corpus adopts the current config.
+- **Legacy database (embeddings present but no stored fingerprint):** the vectors predate
+  fingerprinting, so their space can't be proven to match the configured embedder. Shunt
+  refuses kNN neighbours (cold-start) and logs one line asking you to `shunt reindex`, which
+  re-embeds into the current space and stamps the fingerprint.
+- **Mismatch:** the stored vectors are in a foreign space. Shunt still starts and stays
+  healthy, but **refuses to serve kNN neighbours** — it routes every request via the
+  cold-start / cheap default and logs one line telling you to reindex. It never
+  auto-reindexes on boot (re-embedding the whole corpus is a heavy, surprising side effect).
+
+When you deliberately change the embedding model or `max_chars`, re-embed the corpus into
+the new space with the server **stopped**:
+
+```bash
+shunt reindex
+```
+
+This re-embeds every stored task, rebuilds the index atomically, and advances the
+fingerprint last (as the commit marker). If it is interrupted, the old fingerprint remains,
+so the next boot safely refuses neighbours and asks you to reindex again — it never serves a
+half-migrated corpus. Restart the server afterward to pick up the new space.
+
+> **Residual risk:** upstream **revision drift** is unguarded. If a model repo re-publishes
+> different weights under the same name, the fingerprint still matches and the swap goes
+> undetected. Pin the cache or re-benchmark if that matters for your deployment.
+
 ## The rest of the environment variables
 
 Defaults that are fine to leave alone, but which you can override without editing
@@ -334,7 +451,7 @@ a file. Each is read once at startup.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `SHUNT_CONFIG_DIR` | `~/.config/shunt` | Directory holding your `models.yaml` and `router.yaml` overrides |
+| `SHUNT_CONFIG_DIR` | `~/.config/shunt` | Directory holding your `models.yaml`, `router.yaml`, and `embedding.yaml` overrides |
 | `SHUNT_MODEL_CONFIG_PATH` | unset | Path to a single registry file, bypassing the config-directory lookup |
 | `SHUNT_DATA_DIR` | `~/.local/share/shunt` | Directory for the outcomes database (`outcomes.db`) |
 | `SHUNT_ENV_FILE` | `./.env` | The `.env` file loaded at startup; real environment variables still win |
@@ -358,10 +475,10 @@ a file. Each is read once at startup.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `SHUNT_COLD_START_THRESHOLD_TIER2` | `20` | Mid-tier outcomes needed to leave cold start |
-| `SHUNT_COLD_START_THRESHOLD_TIER1` | `50` | Total labelled outcomes needed to leave cold start (either threshold ends it) |
-| `SHUNT_EMBEDDER_MODEL` | `jinaai/jina-embeddings-v2-base-code` | Fastembed model used to embed a task for kNN routing |
-| `SHUNT_EMBED_MAX_CHARS` | `4000` | Prompt characters fed to the embedder |
+| `SHUNT_COLD_START_THRESHOLD_TIER2` | `20` | Effective sample size (nₑ) of Tier-2 outcomes to leave cold start (either threshold ends it) |
+| `SHUNT_COLD_START_THRESHOLD_TIER1` | `50` | Effective sample size (nₑ) of all labelled outcomes to leave cold start (either threshold ends it) |
+| `SHUNT_EMBEDDER_MODEL` | `jina-code` | Active embedding model — a key (or `repo`) from `embedding.yaml`; overrides the file. See [Choose the embedding model](#choose-the-embedding-model-and-stay-swap-safe) |
+| `SHUNT_EMBED_MAX_CHARS` | `4000` | Prompt characters fed to the embedder; overrides `embedding.yaml`'s `max_chars` |
 | `SHUNT_EMBED_CACHE_DIR` | `$SHUNT_DATA_DIR/models` | Where the ~600MB embedding model is cached. Shunt downloads it once at startup and reuses it; keep this on durable storage or every restart re-downloads it |
 | `SHUNT_RESPONSE_MODEL_LABEL` | unset | Prefix added to the response `model` field (e.g. `shunt:` → `shunt:qwen3.7-plus`), so a client shows which model actually served the turn |
 | `SHUNT_LOG_LEVEL` | `info` | Log verbosity; `debug` traces the routing decision |

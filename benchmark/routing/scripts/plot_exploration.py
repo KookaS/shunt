@@ -22,10 +22,15 @@ from benchmark import config  # noqa: E402
 from benchmark.routing.exploration_replay import ReplayReport, evaluate  # noqa: E402
 from shunt.router.policy import load_router_policy  # noqa: E402
 
-# Okabe-Ito, matching plot_strategies.CB_PALETTE's convention.
-BASELINE_COLOR: Final = "#0072B2"
-EXPLORE_COLOR: Final = "#D55E00"
-CAP_COLOR: Final = "#999999"
+# Documented data-viz palette (light mode): slot-1 blue vs slot-2 orange for the two
+# arms (worst-adjacent CVD clears the target), plus muted ink for the cap reference.
+BASELINE_COLOR: Final = "#2a78d6"
+EXPLORE_COLOR: Final = "#eb6834"
+CAP_COLOR: Final = "#898781"
+_INK: Final = "#0b0b0b"
+_INK2: Final = "#52514e"
+_GRID: Final = "#e1e0d9"
+_SURFACE: Final = "#fcfcfb"
 
 DEFAULT_OUT: Final = Path(__file__).resolve().parents[1] / "reports" / "exploration_replay.png"
 
@@ -38,23 +43,27 @@ def _panel_cost_quality(ax, report: ReplayReport) -> None:
     passes = [report.baseline_pass_rate, report.exploration_pass_rate]
 
     x = np.arange(len(labels))
+    ax.set_axisbelow(True)
+    ax.grid(True, axis="y", color=_GRID, linewidth=0.6)
     ax.bar(
         x,
         [e.value for e in costs],
         color=colors,
         width=0.55,
-        edgecolor="white",
+        edgecolor=_SURFACE,
+        linewidth=1.5,
         yerr=[
             [e.value - e.lo for e in costs],
             [e.hi - e.value for e in costs],
         ],
         capsize=6,
-        error_kw={"ecolor": "#333333", "lw": 1.2},
+        error_kw={"ecolor": _INK2, "lw": 1.2},
+        zorder=3,
     )
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=9)
-    ax.set_ylabel("mean cost per task (USD)")
-    ax.set_title("Short-run cost and quality of exploration", fontsize=11)
+    ax.set_xticklabels(labels, fontsize=9, color=_INK)
+    ax.set_ylabel("mean cost per task (USD)", color=_INK)
+    ax.set_title("Short-run cost and quality of exploration", fontsize=11, color=_INK)
     top = max(e.hi for e in costs)
     ax.set_ylim(0, top * 1.85)
     for xi, cost, quality in zip(x, costs, passes, strict=True):
@@ -66,6 +75,7 @@ def _panel_cost_quality(ax, report: ReplayReport) -> None:
             ha="center",
             va="bottom",
             fontsize=8.5,
+            color=_INK,
         )
     # The marginal CIs above overlap heavily; the PAIRED difference is what this slice
     # can actually resolve, so it is stated rather than left to the eye.
@@ -80,48 +90,72 @@ def _panel_cost_quality(ax, report: ReplayReport) -> None:
         ha="center",
         va="top",
         fontsize=8.5,
-        bbox={"boxstyle": "round,pad=0.4", "fc": "#f2f2f2", "ec": "#cccccc"},
+        color=_INK,
+        bbox={"boxstyle": "round,pad=0.4", "fc": "#f2f2f2", "ec": _GRID},
     )
     ax.margins(x=0.15)
 
 
 def _panel_explore_share(ax, report: ReplayReport, budget_frac: float) -> None:
     """Running exploratory share of decisions, averaged over replay seeds."""
+    ax.set_axisbelow(True)
+    ax.grid(True, axis="y", color=_GRID, linewidth=0.6)
     shares = report.explore_share_by_round
+    share_max = max(shares) if shares else 0.0
     if shares:
         rounds = np.arange(1, len(shares) + 1)
-        ax.plot(rounds, shares, color=EXPLORE_COLOR, lw=2, label="exploratory share of decisions")
+        ax.plot(
+            rounds,
+            shares,
+            color=EXPLORE_COLOR,
+            lw=2,
+            zorder=4,
+            label="exploratory share of decisions",
+        )
         ax.set_xlim(1, len(shares))
     ax.axhline(
         budget_frac,
         color=CAP_COLOR,
         ls="--",
         lw=1.4,
+        zorder=3,
         label=f"explore_budget_frac={budget_frac:g} (cap on the router's OWN counter)",
     )
     ax.axhline(
         report.explore_ratio,
         color=BASELINE_COLOR,
         ls=":",
-        lw=1.4,
+        lw=1.6,
+        zorder=3,
         label=(
             f"realized explore/exploit SPEND: mean {report.explore_ratio:.2f}, "
             f"worst seed {report.explore_ratio_worst_seed:.2f}"
         ),
     )
-    ax.set_xlabel("decisions routed (replay round)")
-    ax.set_ylabel("fraction exploratory")
-    ax.set_ylim(0, max(0.6, budget_frac * 1.5, report.explore_ratio_worst_seed * 1.15))
+    ax.set_xlabel("decisions routed (replay round)", color=_INK)
+    ax.set_ylabel("fraction (of decisions, and of exploit spend)", color=_INK)
+    # Fit the plotted marks (share line, cap, realized-spend mean) with room for the
+    # legend; the worst-seed spend ratio is text-only in the legend, so it must NOT
+    # stretch the axis and leave the panel half-empty.
+    ax.set_ylim(0, max(0.6, budget_frac * 1.5, report.explore_ratio * 1.5, share_max * 1.5))
     ax.set_title(
         f"Exploration overhead: {report.cost_multiple:.2f}x the exploration-off bill "
         f"(worst seed {report.cost_multiple_worst_seed:.2f}x)",
         fontsize=11,
+        color=_INK,
     )
-    ax.legend(fontsize=7.5, loc="upper right", framealpha=0.9)
+    leg = ax.legend(fontsize=7.5, loc="upper right", framealpha=0.95)
+    leg.get_frame().set_edgecolor(_GRID)
 
 
 def plot(report: ReplayReport, out_path: Path, budget_frac: float) -> None:
     fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(12.5, 5.0))
+    fig.patch.set_facecolor(_SURFACE)
+    for ax in (ax_left, ax_right):
+        ax.set_facecolor(_SURFACE)
+        ax.tick_params(colors=_INK2)
+        for spine in ax.spines.values():
+            spine.set_edgecolor(_GRID)
     _panel_cost_quality(ax_left, report)
     _panel_explore_share(ax_right, report, budget_frac)
     slice_ = report.slice_
@@ -129,6 +163,7 @@ def plot(report: ReplayReport, out_path: Path, budget_frac: float) -> None:
         "Offline matrix replay of the production exploration policy "
         "(measured outcomes, no live calls)",
         fontsize=13,
+        color=_INK,
     )
     fig.text(
         0.5,
@@ -144,11 +179,11 @@ def plot(report: ReplayReport, out_path: Path, budget_frac: float) -> None:
         "not a verdict on whether exploration pays.",
         ha="center",
         fontsize=8,
-        color="#555555",
+        color=_INK2,
     )
     fig.tight_layout(rect=(0, 0.155, 1, 0.94))
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=150, facecolor=_SURFACE)
     plt.close(fig)
 
 

@@ -6,8 +6,8 @@
 # (non-decreasing convex hull) + an AIQ-style area scalar, and the tri-state
 # pass/fail/not-sampled encoding.
 #
-# Color note: the model palette is genuine Okabe-Ito (matches the existing
-# CB_PALETTE convention in plot_strategies.py and the task's
+# Color note: the model palette is genuine Okabe-Ito (a colorblind-safe standard,
+# the categorical convention shared across the benchmark's figures and the task's
 # design brief), validated with the dataviz skill's six-check validator — all
 # 6 slots PASS in both light (surface #fcfcfb) and dark (#1a1a19) modes on the
 # adjacent pairlist; the all-pairs pairlist (scatter/bubble/small-multiples,

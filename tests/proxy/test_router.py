@@ -29,6 +29,40 @@ _ACOMPLETION_PATCH = "shunt.proxy.router._acompletion"
 # ── Fixtures ────────────────────────────────────────────────────────────────
 
 
+class _FakeEmbedder:
+    """A fixed-vector embedder so the full-app lifespan never loads real ONNX in tests."""
+
+    def embed(self, text: str) -> Any:
+        import numpy as np
+
+        return np.full(768, 0.1, dtype=np.float32)
+
+    def fingerprint(self) -> dict[str, Any]:
+        return {"repo": "fake", "dim": 768, "max_chars": 4000, "revision": None}
+
+    @property
+    def model_name(self) -> str:
+        return "fake"
+
+    @property
+    def max_chars(self) -> int:
+        return 4000
+
+    def warm(self) -> None:
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _fake_lifespan_embedder() -> Any:
+    """Tests that boot the whole app (TestClient(app)) get a fake embedder in the lifespan.
+
+    Without this the real ONNX load is (correctly) blocked by SHUNT_DISALLOW_REAL_EMBEDDER,
+    so the routing path would 502. Injecting a fake keeps these endpoint tests hermetic.
+    """
+    with patch("shunt.proxy.server.Embedder", _FakeEmbedder):
+        yield
+
+
 @pytest.fixture
 def model_pool() -> ModelPool:
     pool = ModelPool()

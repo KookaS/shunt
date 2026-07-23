@@ -62,6 +62,16 @@ class ColdStartStrategy:
             return False
         return count_labeled < self._threshold_tier1
 
+    def is_active_effective(self, ne_labeled: float, ne_tier2: float) -> bool:
+        """Effective-sample-size gate: same thresholds, measured in ``nₑ=(Σw)²/Σw²``."""
+        # The engine's live entry — low-confidence/old outcomes count for less, so cold-start
+        # persists longer than a raw-count gate would. When every outcome weight is equal
+        # (e.g. all confidence 1.0), nₑ equals the raw count, so this reduces to is_active and
+        # the shipped threshold semantics are preserved.
+        if ne_tier2 >= self._threshold_tier2:
+            return False
+        return ne_labeled < self._threshold_tier1
+
     def select(self, model_pool: ModelPoolProtocol) -> str:
         """Return the cold-start model — prefers qwen3.7-plus, falling back
         through the configured chain then escalating through the pool if

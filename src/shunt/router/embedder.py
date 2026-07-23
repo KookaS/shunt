@@ -6,26 +6,36 @@ from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
 
+from shunt.router.embedding_config import EmbeddingConfig, EmbeddingModel, load_embedding_config
+
 if TYPE_CHECKING:
     import numpy.typing as npt
 
 logger = logging.getLogger(__name__)
 
-PRIMARY_MODEL = "jinaai/jina-embeddings-v2-base-code"
-FALLBACK_MODEL = "Snowflake/snowflake-arctic-embed-m-long"
+# Setting this refuses a real ONNX load — the unit suite sets it (autouse fixture) so a
+# test that instantiates a real Embedder (instead of a fake) fails loudly instead of
+# silently downloading ~600MB. Benchmark/live runs leave it unset.
+DISALLOW_REAL_EMBEDDER_ENV: Final[str] = "SHUNT_DISALLOW_REAL_EMBEDDER"
 
 
 class EmbedderUnavailableError(RuntimeError):
     """The embedding model could not be loaded — actionable, unlike the raw cause."""
 
 
-def embedding_cache_dir() -> str:
+class RealEmbedderBlockedError(RuntimeError):
+    """A real ONNX load was attempted while ``SHUNT_DISALLOW_REAL_EMBEDDER`` is set."""
+
+
+def embedding_cache_dir(config_cache_dir: str | None = None) -> str:
     """Where the ONNX model is cached on disk — durable, not a temp dir."""
     # Defaults under SHUNT_DATA_DIR so the ~600MB download survives a restart. The
-    # library default is a temp dir, which in a container meant re-downloading from
-    # HuggingFace on every start — slow, and a hard failure with no network.
+    # library default is a temp dir, which in a container meant re-downloading on every
+    # start. Precedence: SHUNT_EMBED_CACHE_DIR env > embedding.yaml cache_dir > data dir.
     if override := os.environ.get("SHUNT_EMBED_CACHE_DIR"):
         return override
+    if config_cache_dir:
+        return config_cache_dir
     data_dir = os.environ.get("SHUNT_DATA_DIR")
     if data_dir:
         return os.path.join(data_dir, "models")
@@ -40,21 +50,15 @@ def embedding_cache_dir() -> str:
 #
 # 4000 is not arbitrary: re-embedding the routing corpus at a 4000-char cap raised the
 # held-out correlation from 0.068 to 0.113, so it is the value the routing evidence
-# already points at, and it costs ~400 MB over the model itself.
+# already points at, and it costs ~400 MB over the model itself. It is the packaged
+# embedding.yaml default; SHUNT_EMBED_MAX_CHARS still overrides it.
 DEFAULT_MAX_EMBED_CHARS: Final[int] = 4000
 
-MODEL_METADATA: Final[dict[str, tuple[int, int]]] = {
-    "jinaai/jina-embeddings-v2-base-code": (768, 8192),
-    "jina-embeddings-v2-base-code": (768, 8192),
-    "Snowflake/snowflake-arctic-embed-m-long": (768, 2048),
-    "arctic-embed-m-long": (768, 2048),
-}
 
-
-def _parse_max_chars(raw: str | None) -> int:
+def _parse_max_chars(raw: str | None, default: int) -> int:
     """Resolve SHUNT_EMBED_MAX_CHARS, failing loud on a value that is not an int."""
     if raw is None or raw.strip() == "":
-        return DEFAULT_MAX_EMBED_CHARS
+        return default
     try:
         value = int(raw)
     except ValueError:
@@ -68,8 +72,8 @@ def _parse_max_chars(raw: str | None) -> int:
 
 
 class Embedder:
-    """Fastembed wrapper for prompt embedding (default
-    jina-embeddings-v2-base-code, 768d; override via ``SHUNT_EMBEDDER_MODEL``).
+    """Fastembed wrapper for prompt embedding. The active model, dim, and max_chars come
+    from ``embedding.yaml`` (env ``SHUNT_EMBEDDER_MODEL`` / ``SHUNT_EMBED_MAX_CHARS`` win).
     Lazy-loads the ONNX model on the first ``embed()`` call.
     """
 
@@ -77,19 +81,35 @@ class Embedder:
         self,
         model_name: str | None = None,
         lazy: bool = True,
+        model: EmbeddingModel | None = None,
+        max_chars: int | None = None,
+        config: EmbeddingConfig | None = None,
     ) -> None:
-        self._model_name = model_name or os.environ.get("SHUNT_EMBEDDER_MODEL", PRIMARY_MODEL)
-        dim, ctx = MODEL_METADATA.get(self._model_name, (768, 8192))
-        self._dim = dim
-        self._context_length = ctx
-        self._max_chars = _parse_max_chars(os.environ.get("SHUNT_EMBED_MAX_CHARS"))
+        cfg = config
+        if model is None:
+            cfg = cfg or load_embedding_config()
+            model = (
+                cfg.resolve(model_name)
+                if model_name is not None
+                else cfg.resolve_active(os.environ)
+            )
+        self._repo = model.repo
+        self._dim = model.dim
+        self._context_length = model.context_length
+        default_max = cfg.max_chars if cfg is not None else DEFAULT_MAX_EMBED_CHARS
+        self._max_chars = (
+            max_chars
+            if max_chars is not None
+            else _parse_max_chars(os.environ.get("SHUNT_EMBED_MAX_CHARS"), default_max)
+        )
+        self._cache_dir_cfg = cfg.cache_dir if cfg is not None else None
         self._model: Any = None
         if not lazy:
             self._load_model()
 
     @property
     def model_name(self) -> str:
-        return self._model_name
+        return self._repo
 
     @property
     def dims(self) -> int:
@@ -99,18 +119,44 @@ class Embedder:
     def context_length(self) -> int:
         return self._context_length
 
+    @property
+    def max_chars(self) -> int:
+        return self._max_chars
+
+    def fingerprint(self) -> dict[str, object]:
+        """The corpus fingerprint for this embedder — ``(repo, dim, max_chars, revision?)``."""
+        return EmbeddingModel(
+            repo=self._repo, dim=self._dim, context_length=self._context_length
+        ).fingerprint(max_chars=self._max_chars, revision=self._revision())
+
+    def _revision(self) -> str | None:
+        """Best-effort resolved model revision; ``None`` when fastembed exposes none."""
+        # fastembed pins by name, not a content revision, so this is documented residual
+        # risk (ADR): a null revision leaves an upstream re-publish undetected. Kept as a
+        # seam so a future fastembed that surfaces a cheap handle promotes it here only.
+        return None
+
     def _load_model(self) -> None:
+        if os.environ.get(DISALLOW_REAL_EMBEDDER_ENV):
+            # Structural wall for "real-only in benchmark and live": a unit test that reaches
+            # a real ONNX load (instead of injecting a fake via RouterEngine(embedder=...))
+            # would otherwise silently download ~600MB. Fail loud, naming the fix.
+            raise RealEmbedderBlockedError(
+                f"real embedder blocked ({DISALLOW_REAL_EMBEDDER_ENV} is set); inject a fake "
+                "via RouterEngine(embedder=...) in tests. Only benchmark/live may load the "
+                "real ONNX model."
+            )
         from fastembed import TextEmbedding
 
-        cache_dir = embedding_cache_dir()
+        cache_dir = embedding_cache_dir(self._cache_dir_cfg)
         try:
             os.makedirs(cache_dir, exist_ok=True)
-            self._model = TextEmbedding(model_name=self._model_name, cache_dir=cache_dir)
+            self._model = TextEmbedding(model_name=self._repo, cache_dir=cache_dir)
         except Exception as exc:
             # The first load downloads ~600MB from HuggingFace. Offline, the raw error
             # surfaces as a bare 502 that names neither the download nor the cache path.
             raise EmbedderUnavailableError(
-                f"could not load embedding model {self._model_name!r} (cache: {cache_dir}). "
+                f"could not load embedding model {self._repo!r} (cache: {cache_dir}). "
                 "The first run downloads it from HuggingFace — check network access, or "
                 "pre-populate the cache dir. Set SHUNT_EMBED_CACHE_DIR to relocate it."
             ) from exc
@@ -122,10 +168,6 @@ class Embedder:
     def _ensure_model(self) -> None:
         if self._model is None:
             self._load_model()
-
-    @property
-    def max_chars(self) -> int:
-        return self._max_chars
 
     def _clip(self, text: str) -> str:
         """Bound the encoder input so one long prompt cannot exhaust memory."""

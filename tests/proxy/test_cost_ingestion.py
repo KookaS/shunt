@@ -185,18 +185,37 @@ async def test_streaming_usage_with_zero_cost_is_reported(
 
 
 @pytest.mark.asyncio
-async def test_streaming_with_no_usage_chunk_never_signals_anything(
+async def test_streaming_with_no_usage_chunk_flags_unreported(
     router: ProxyRouter,
     session: Session,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    # Pins the CURRENT behaviour: when no chunk carries usage at all, _accumulate_cost is
-    # never invoked, so the "cost unreported" signal is neither flagged nor logged — the
-    # session simply looks free. A future fix that surfaces this must update this test.
+    # A stream that ends having seen NO usage chunk (provider omitted it, or an early
+    # disconnect) is cost-UNKNOWN, not a genuine free 0.0. Persist must record cost_known=0
+    # so the kNN read-back never surfaces it as a real zero that sorts cheapest.
     with caplog.at_level(logging.INFO, logger="shunt.proxy.router"):
         await _drain(router, session, [_content_chunk()])
 
     assert session.total_cost == 0.0
-    assert "cost_unreported" not in session.metadata
-    assert not [r for r in caplog.records if "usage.cost" in r.getMessage()]
+    assert session.metadata["cost_unreported"] is True
+    assert [r for r in caplog.records if "usage.cost" in r.getMessage()]
     assert session.prompt_length_tokens == 0
+
+
+@pytest.mark.asyncio
+async def test_streaming_early_disconnect_flags_unreported(
+    router: ProxyRouter, session: Session
+) -> None:
+    # Client disconnects before the trailing usage chunk arrives: aclose() throws
+    # GeneratorExit into _track_cache_tax at its yield. The finally must still flag the
+    # session cost UNKNOWN — otherwise persist writes a fabricated cost_known=1, cost=0.0.
+    async def upstream() -> AsyncGenerator[Any, None]:
+        yield _content_chunk()
+        yield _content_chunk()  # a usage chunk would follow, but the client leaves first
+
+    agen = router._track_cache_tax(upstream(), session)
+    await agen.__anext__()  # consume one chunk, then disconnect
+    await agen.aclose()
+
+    assert session.total_cost == 0.0
+    assert session.metadata["cost_unreported"] is True

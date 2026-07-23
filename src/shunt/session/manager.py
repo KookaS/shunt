@@ -35,6 +35,14 @@ class SessionManager:
         # durable record is in SQLite, so eviction loses nothing but the cache entry.
         self._retention_seconds = retention_seconds
 
+    def set_verifier_callback(self, callback: Callable[[Session], None]) -> None:
+        """Wire the close→capture callback after construction (breaks the wiring cycle).
+
+        The worker needs this manager (for its sweep) and this manager needs the
+        worker's enqueue, so one side is set post-construction rather than in __init__.
+        """
+        self._verifier_callback = callback
+
     @staticmethod
     def compute_tool_identity(source_ip: str, user_agent: str) -> str:
         """Deterministic hash of source IP + User-Agent for session grouping."""
@@ -144,8 +152,9 @@ class SessionManager:
 
     def _evict_settled(self, now: datetime) -> None:
         # Closing a session only flipped `state`; the entry stayed in `_sessions`
-        # forever. Session identity is sha256(source_ip + user_agent), so any local
-        # caller varying its User-Agent minted unbounded permanent entries.
+        # forever. Each new tool identity (the sha256(source_ip + user_agent) key of
+        # `_identity_to_session`) mints a fresh session, so any local caller varying
+        # its User-Agent accreted unbounded permanent entries.
         with self._lock:
             for session_id, session in list(self._sessions.items()):
                 if session.state != SessionState.closed:

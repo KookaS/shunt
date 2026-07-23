@@ -79,7 +79,7 @@ The evaluator iterates tasks, calls `select()` per strategy, looks up the outcom
 
 γ defaults to 0.1, matching the `agent-as-a-router` cost-weight baseline.
 
-Cost is recorded from actual model API responses: litellm's computed cost for direct routes (deepseek), and provider-returned `usage.cost` for Requesty-routed models (including cache-aware rates). For offline eval, costs come from the cached `results.csv` (recorded during live benchmark matrix runs). Recording per-request API cost on the live proxy path is roadmap, not a current feature.
+Cost is recorded from actual model API responses: the provider-returned cache-aware `usage.cost` when present (e.g. Requesty-routed models, including cache-aware rates), falling back to litellm's computed cost otherwise (e.g. direct routes litellm can price, such as deepseek). For offline eval, costs come from the cached `results.csv` (recorded during live benchmark matrix runs). Recording per-request API cost on the live proxy path is roadmap, not a current feature.
 
 ## Baselines
 
@@ -94,4 +94,4 @@ Additional strategies in `strategies/`: kNN, kNN-cascade, kNN-blended, and Exter
 
 ## Relationship to src/shunt/
 
-The strategies in `benchmark/routing/strategies/` are evaluation copies — they consume a known matrix and compute metrics offline. They are separate from `src/shunt/router/`, the decision module that is now called on the first turn by the live proxy but does not yet have a learning loop (outcomes not yet being written). The offline kNN strategy is designed to mirror that module's algorithm, so that when the outcome-writing loop is wired and the router can learn from past results, live behavior matches what the benchmark scored.
+The strategies in `benchmark/routing/strategies/` are evaluation copies — they consume a known matrix and compute metrics offline. They are separate from `src/shunt/router/`, the decision module that is now called on the first turn by the live proxy and learns from verified outcomes recorded at session close. The offline kNN strategy is designed to mirror that module's algorithm, so that live behavior matches what the benchmark scored.

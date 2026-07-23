@@ -17,6 +17,7 @@ from benchmark.routing.scripts import (
     embedding_compare,
     plot_exploration,
     plot_strategies,
+    plot_timing,
     threshold_sweep,
     viz_knn,
 )
@@ -30,6 +31,7 @@ _GUARDED_SCRIPTS: Final = [
     embedding_compare.main,
     plot_exploration.main,
     plot_strategies.main,
+    plot_timing.main,
     threshold_sweep.main,
     viz_knn.main,
 ]
@@ -84,6 +86,162 @@ class TestReportRegretFactories:
         assert "kNN-cascade" in factories
         assert factories["kNN"]().name == "kNN"
         assert factories["kNN-cascade"]().name == "kNN-cascade"
+
+
+class TestRegretExcludesUnscorable:
+    """F1: cumulative_regret must EXCLUDE a coverage-gap decision (chosen model
+    unmeasured on a task), not score it fail@$0 into the regret series."""
+
+    def test_evaluate_strategies_flags_unmeasured_cell(self):
+        from benchmark.routing.report import _evaluate_strategies
+
+        class _Fake:
+            name = "Fake"
+
+            def select(self, tid, meta, matrix):  # noqa: ANN001, ANN201, ARG002
+                return "frontier-model"
+
+        matrix = {
+            "tasks": {"t1": {}, "t2": {}},
+            "results": {
+                "t1": {"frontier-model": {"pass": True, "cost": 10.0}},
+                # t2 has NO frontier-model cell -> a coverage gap.
+                "t2": {"cheap-model": {"pass": True, "cost": 1.0}},
+            },
+        }
+        evaluated = _evaluate_strategies({"Fake": _Fake}, matrix, ["t1", "t2"])
+        decisions, unscorable = evaluated["Fake"]
+        assert unscorable == {"t2"}
+        # The gap cell is still present positionally but must be excluded downstream.
+        assert decisions[1] == ("t2", "frontier-model", False, 0.0)
+
+    def test_compute_per_task_regret_drops_excluded_task(self):
+        from benchmark.routing.report import _compute_per_task_regret
+
+        strat = [("t1", "m", True, 1.0), ("t2", "m", False, 0.0), ("t3", "m", True, 1.0)]
+        oracle = [("t1", "o", True, 1.0), ("t2", "o", True, 2.0), ("t3", "o", True, 1.0)]
+        # t2 is the coverage gap: dropped, so the series covers 2 tasks not 3, and the
+        # phantom fail@$0 regret it would have contributed never enters the curve.
+        excluded = _compute_per_task_regret(strat, oracle, 0.1, {"t2"})
+        assert len(excluded) == 2
+        imputed = _compute_per_task_regret(strat, oracle, 0.1, None)
+        assert len(imputed) == 3
+        # The dropped task carried real regret under imputation -> curves differ.
+        assert float(excluded[-1]) != float(imputed[-1])
+
+
+class TestThresholdSweepExcludesUnscorable:
+    """F2: evaluate_params must EXCLUDE a coverage-gap escalation (swept kNN rule
+    lands on a model unmeasured on the task), not impute fail@$0."""
+
+    def test_unmeasured_chosen_cell_excluded_from_aggregation(self):
+        config.load(CONFIG_PATH)
+        models = {
+            "cheap-model": {"input_price": 0.1, "output_price": 0.1},
+            "frontier-model": {"input_price": 5.0, "output_price": 5.0},
+        }
+        matrix = {"models": models}
+        results_map = {
+            "t1": {"cheap-model": {"pass": True, "cost": 1.0}},
+            "t2": {"cheap-model": {"pass": True, "cost": 1.0}},
+            # t3 measured ONLY on frontier -> neighbours vote cheap, so the chosen
+            # cheap cell is missing here: a coverage gap that must be excluded.
+            "t3": {"frontier-model": {"pass": True, "cost": 10.0}},
+        }
+        task_ids = ["t1", "t2", "t3"]
+        # Near-identical embeddings so every task's neighbourhood is the other two.
+        features = np.array([[1.0, 0.0], [1.0, 0.01], [0.99, 0.0]])
+
+        chosen, _passed, _cost, scored = threshold_sweep.knn_select(
+            2,
+            task_ids,
+            task_ids,
+            features,
+            results_map,
+            matrix,
+            k=2,
+            success_rate_thresh=0.5,
+            min_samples=1,
+        )
+        assert chosen == "cheap-model"
+        assert scored is False  # unmeasured chosen cell -> unscorable
+
+        row = threshold_sweep.evaluate_params(
+            task_ids,
+            task_ids,
+            features,
+            results_map,
+            matrix,
+            k=2,
+            success_rate_thresh=0.5,
+            min_samples=1,
+        )
+        assert row["n_excluded"] == 1
+        assert row["n_scored"] == 2
+        # AvgPerf% is over the 2 SCORED tasks (both pass), not diluted to 66% by a
+        # phantom fail on t3.
+        assert row["AvgPerf%"] == 100.0
+
+
+class TestPlotTimingStrategyCalls:
+    """plot_timing._strategy_calls must unpack _evaluate_strategies' (decisions,
+    unscorable) pair — a populated matrix, since the empty-matrix guard early-returns
+    before reaching it (this is the shape the guard could not catch).
+    """
+
+    def test_strategy_calls_on_populated_matrix(self):
+        config.load(CONFIG_PATH)
+        matrix = {
+            "tasks": {"t1": {}, "t2": {}},
+            "results": {
+                "t1": {"kNN": {"pass": True, "cost": 1.0, "calls": 3}},
+                "t2": {"kNN": {"pass": True, "cost": 1.0, "calls": 5}},
+            },
+        }
+
+        class _Fake:
+            name = "kNN"
+
+            def select(self, tid, meta, matrix):  # noqa: ANN001, ANN201, ARG002
+                return "kNN"
+
+        # Patch the factory builder so the replay uses a measured model on every task.
+        import benchmark.routing.report as report_mod
+
+        orig = report_mod._build_strategy_factories
+        report_mod._build_strategy_factories = lambda gamma: {"kNN": _Fake}
+        try:
+            out = plot_timing._strategy_calls(matrix, ["t1", "t2"], gamma=0.1)
+        finally:
+            report_mod._build_strategy_factories = orig
+        assert out == {"kNN": [3, 5]}
+
+    def test_strategy_calls_excludes_coverage_gap(self):
+        config.load(CONFIG_PATH)
+        matrix = {
+            "tasks": {"t1": {}, "t2": {}},
+            "results": {
+                "t1": {"kNN": {"pass": True, "cost": 1.0, "calls": 4}},
+                # t2 has no kNN cell -> unscorable; its calls must not be counted.
+                "t2": {"other": {"pass": True, "cost": 1.0, "calls": 9}},
+            },
+        }
+
+        class _Fake:
+            name = "kNN"
+
+            def select(self, tid, meta, matrix):  # noqa: ANN001, ANN201, ARG002
+                return "kNN"
+
+        import benchmark.routing.report as report_mod
+
+        orig = report_mod._build_strategy_factories
+        report_mod._build_strategy_factories = lambda gamma: {"kNN": _Fake}
+        try:
+            out = plot_timing._strategy_calls(matrix, ["t1", "t2"], gamma=0.1)
+        finally:
+            report_mod._build_strategy_factories = orig
+        assert out == {"kNN": [4]}
 
 
 class TestZeroEvidenceRows:

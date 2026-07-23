@@ -157,13 +157,14 @@ Scored offline, the embedding-based routing strategies split by workload:
 
 - On **QA and reasoning-style** tasks, the task embedding separates
   cheap-solvable from frontier-only work, so kNN has signal to route on.
-- On the **agentic-coding** tasks this benchmark targets, it did **not** clear
-  our viability bar. Ranking hard tasks from easy ones off the prompt embedding
-  came out near chance, so a kNN router has little to exploit. The router is now
-  wired into the live proxy (it decides the first turn). Outcomes can be manually
-  recorded via `shunt flag`, but automatic capture is not yet wired, so the router
-  typically cold-starts every session, and we do not yet claim a live advantage on
-  a workload where the embedding signal did not support it.
+- On the **agentic-coding** tasks this benchmark targets, the embedding-based
+  difficulty signal did not clear the viability bar for cost-at-equal-quality
+  relative to fixed-frontier-with-caching. Ranking hard tasks from easy ones off the
+  prompt embedding came out near chance. The router is wired into the live proxy
+  (it decides the first turn), outcomes are recorded automatically at session close
+  (via off-wire test re-execution when configured), and the learning loop is live.
+  On this particular workload, the embedding signal is not presently strong enough
+  to justify routing below frontier, though outcomes continue to accumulate.
 
 ### Evaluating the exploration policy without spending money
 
@@ -201,7 +202,7 @@ cost with its learning benefit set to zero, which is the pessimistic half of the
 ledger, not a verdict on whether exploration pays. The budget cap counts the
 router's own confidence-weighted neighbourhood costs, not realized ones, so the
 realized explore/exploit spend ratio can exceed `explore_budget_frac` on an unlucky
-seed (0.85 against a 0.4 cap here) even though the cap is doing its job. And 43
+seed (1.29 against a 0.4 cap here) even though the cap is doing its job. And 43
 tasks from one benchmark is a small, single-workload sample.
 
 ## Deciding the kill-gate on partial frontier coverage

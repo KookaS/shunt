@@ -87,6 +87,19 @@ class MatrixOutcomeIndex:
     def count_total_labeled(self) -> int:
         return len(self._task_ids)
 
+    def effective_labeled(self) -> float:
+        # Matrix tasks are labeled at confidence 1.0, so nₑ == raw count (uniform weights).
+        return float(len(self._task_ids))
+
+    def effective_tier2(self) -> float:
+        return float(len(self._task_ids))
+
+    def model_priors(self) -> dict[str, tuple[float, float]]:
+        # Flat prior in the benchmark: the leave-one-out neighborhood already supplies the
+        # evidence, and seeding from a global matrix aggregate would change eval numbers —
+        # out of scope here (the offline-prior seeding is evaluated on the live loop).
+        return {}
+
     def query(self, embedding: npt.NDArray, k: int = 20) -> list[NeighborResult]:
         """Return k neighbours (excluding self) as per-model NeighborResults."""
         k_search = min(k + 1, len(self._task_ids))

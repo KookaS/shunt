@@ -6,9 +6,10 @@ storage internals (SQL + hnswlib), the router keeps its ``NeighborResult`` domai
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any
 
-from shunt.router.selection import NeighborResult
+from shunt.router.selection import NeighborResult, effective_sample_size
 
 if TYPE_CHECKING:
     import numpy as np
@@ -41,6 +42,44 @@ class OutcomeIndexAdapter:
         """Sessions with any labeled outcome (Tier-1 or Tier-2)."""
         return self._store.count_outcomes()
 
+    def effective_labeled(self) -> float:
+        """Effective sample size ``nₑ`` over all labeled outcomes, weighted by confidence.
+
+        Reuses the same per-outcome confidence the neighbour path weights with, so uniform
+        confidences make ``nₑ`` equal the raw ``count_total_labeled`` (backward-compat).
+        """
+        return self._effective_sample_size(tier2_only=False)
+
+    def effective_tier2(self) -> float:
+        """Effective sample size ``nₑ`` over Tier-2 (verified) outcomes only."""
+        return self._effective_sample_size(tier2_only=True)
+
+    def _effective_sample_size(self, *, tier2_only: bool) -> float:
+        rows = self._store.labeled_outcome_rows(tier2_only=tier2_only)
+        return effective_sample_size([self._resolve_confidence(r) for r in rows])
+
+    def model_priors(self) -> dict[str, tuple[float, float]]:
+        """Per-model ``(estimate, strength)`` offline Tier-2 aggregate, for prior seeding."""
+        # estimate = the model's global confidence-weighted success rate; strength = the
+        # effective sample size nₑ of that history. Seeds an informative Thompson prior
+        # (empirical-Bayes shrinkage) so a model with evidence doesn't restart at Beta(1,1)
+        # each decision. Verified (Tier-2) outcomes only — the trusted population.
+        rows = self._store.labeled_outcome_rows(tier2_only=True)
+        by_model: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            by_model.setdefault(str(row["model_chosen"]), []).append(row)
+        priors: dict[str, tuple[float, float]] = {}
+        for model, model_rows in by_model.items():
+            weights = [self._resolve_confidence(r) for r in model_rows]
+            total = sum(weights)
+            if total <= 0.0:
+                continue
+            weighted_success = sum(
+                w for w, r in zip(weights, model_rows, strict=True) if self._resolve_success(r)
+            )
+            priors[model] = (weighted_success / total, effective_sample_size(weights))
+        return priors
+
     def query(self, embedding: npt.NDArray[np.float32], k: int = 20) -> list[NeighborResult]:
         """Nearest *labeled* sessions to *embedding*.
 
@@ -66,11 +105,21 @@ class OutcomeIndexAdapter:
         return NeighborResult(
             model=str(session["model_chosen"]),
             outcome=self._resolve_success(outcome),
-            cost=float(session["cost"]),
+            cost=self._resolve_cost(session),
             verification_confidence=self._resolve_confidence(outcome),
             distance=distance,
             session_id=str(session["session_id"]),
         )
+
+    @staticmethod
+    def _resolve_cost(session: dict[str, Any]) -> float:
+        """UNKNOWN cost (``cost_known=0``) surfaces as ``+inf`` so it never sorts cheapest."""
+        # A stored ``0.0`` with ``cost_known=1`` is a genuine free/fully-cached call and stays
+        # ``0.0``; only an unreported cost — indistinguishable from a real zero in ``cost`` alone
+        # — is lifted to ``+inf``, reusing the engine's existing non-finite guards.
+        if session.get("cost_known", 1) == 0:
+            return math.inf
+        return float(session["cost"])
 
     @staticmethod
     def _resolve_success(outcome: dict[str, Any]) -> bool:

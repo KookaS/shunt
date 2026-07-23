@@ -63,3 +63,10 @@ benchmark/routing/strategy_summary.csv
 .idea/
 .DS_Store
 reports/
+
+# …but DO ship the benchmark plots — users read the routing insights from them, and
+# they are regenerable from the committed benchmark/routing/results.csv. ALL PNGs in
+# this dir are tracked; the derived intermediate CSVs stay ignored above.
+!benchmark/routing/reports/
+benchmark/routing/reports/*
+!benchmark/routing/reports/*.png

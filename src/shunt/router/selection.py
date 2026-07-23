@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -55,6 +56,25 @@ def _confidence_weight(n: NeighborResult) -> float:
     don't produce negative weights.
     """
     return n.verification_confidence * max(0.0, 1.0 - n.distance)
+
+
+def effective_sample_size(weights: Sequence[float]) -> float:
+    """Kish effective sample size ``nₑ = (Σwᵢ)² / Σ(wᵢ²)`` over per-outcome weights."""
+    # Equals the raw count when weights are uniform (the backward-compat invariant); a spread
+    # of confidences drives nₑ below the count. Non-positive weights (zeroed by the confidence
+    # clamp) drop out; an all-zero vector yields 0.0. Non-finite weights are dropped too — a
+    # NaN/inf would poison the ratio (the DB NOT NULL wall keeps them out, but keep the pure
+    # function total regardless), mirroring the ``math.isfinite`` guard in exploration._cost_key.
+    total = 0.0
+    sq = 0.0
+    for w in weights:
+        if not math.isfinite(w) or w <= 0.0:
+            continue
+        total += w
+        sq += w * w
+    if sq <= 0.0:
+        return 0.0
+    return (total * total) / sq
 
 
 class SelectionRule:
@@ -126,6 +146,12 @@ class SelectionRule:
             weighted_cost = (
                 sum(w * n.cost for w, n in zip(weights, group, strict=True)) / total_weight
             )
+            # A neighbour with UNKNOWN cost surfaces as +inf; a zero-weight one makes the
+            # term `0 * inf = nan`, and nan sorts as neither cheap nor dear (all comparisons
+            # False), so a nan group could be returned as "cheapest". Collapse any non-finite
+            # weighted cost to +inf — never cheapest — matching the engine's guard.
+            if not math.isfinite(weighted_cost):
+                weighted_cost = math.inf
 
             passes = weighted_success >= self._min_success_rate and len(group) >= self._min_samples
             logger.debug(

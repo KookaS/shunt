@@ -139,6 +139,30 @@ class HNSWIndex:
                     {"ids": self._ids, "dim": self._dim, "max_elements": self._max_elements}, f
                 )
 
+    def save_atomic(self, path: str) -> None:
+        """Save via temp files + ``os.replace`` so a live index is never mutated in place.
+
+        Used by reindex: a concurrent reader of *path* sees either the whole old index or
+        the whole new one, never a half-written file.
+        """
+        with self._lock:
+            if self._index is None:
+                raise ValueError("Cannot save empty index")
+
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp_path = path + ".tmp"
+            tmp_ids = path + ".ids.json.tmp"
+            self._index.save_index(tmp_path)
+            with open(tmp_ids, "w") as f:
+                json.dump(
+                    {"ids": self._ids, "dim": self._dim, "max_elements": self._max_elements}, f
+                )
+            # Swap the vector file first, then its sidecar: both replaces are atomic, and
+            # boot loads the sidecar before the vectors, so this order never leaves a new
+            # sidecar pointing at an old vector file.
+            os.replace(tmp_path, path)
+            os.replace(tmp_ids, path + ".ids.json")
+
     def load(self, path: str) -> None:
         if not os.path.exists(path):
             raise FileNotFoundError(f"Index file not found: {path}")

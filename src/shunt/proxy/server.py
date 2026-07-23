@@ -17,8 +17,9 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from shunt.capture import CaptureCoordinator, CaptureWorker, RefitScheduler, WorkDirResolver
 from shunt.db.outcome_index import OutcomeIndexAdapter
-from shunt.db.store import OutcomeStore
+from shunt.db.store import OutcomeStore, SessionProvenance
 from shunt.log_config import configure_logging
 from shunt.models import ModelPool
 from shunt.proxy.redaction import header_safe, redact_secrets
@@ -35,6 +36,7 @@ from shunt.router.policy import (
 from shunt.router.selection import SelectionRule
 from shunt.router.strategies import EXPLORATORY_STRATEGIES, build_strategy
 from shunt.session import Session, SessionManager
+from shunt.verifiers import AutoDetectVerifier
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,12 @@ def _model_inventory(model_pool: ModelPool) -> str:
     return ", ".join(listed) or "(none)"
 
 
-def _log_config_disclosure(policy: RouterPolicy, model_pool: ModelPool) -> None:
+def _log_config_disclosure(
+    policy: RouterPolicy,
+    model_pool: ModelPool,
+    embedder: Embedder | None = None,
+    fingerprint_trusted: bool | None = None,
+) -> None:
     """Print the loaded configuration at startup, so what is in force is never a guess."""
     # Names and choices only. Never an api_key_env_var VALUE, never a resolved key —
     # this line goes to container logs, which are routinely pasted into issues.
@@ -82,12 +89,38 @@ def _log_config_disclosure(policy: RouterPolicy, model_pool: ModelPool) -> None:
         _GRACE_PERIOD,
         _RETRY_COUNT,
     )
-    logger.info(
-        "Shunt config | embedder=%s max_chars=%s data_dir=%s",
-        os.environ.get("SHUNT_EMBEDDER_MODEL", "(default)"),
-        os.environ.get("SHUNT_EMBED_MAX_CHARS", "(default)"),
-        os.environ.get("SHUNT_DATA_DIR", "(default)"),
-    )
+    if embedder is not None:
+        # The RESOLVED embedder (from embedding.yaml, env applied), not the raw env var —
+        # plus whether its fingerprint matches the stored corpus space.
+        status = (
+            "unknown"
+            if fingerprint_trusted is None
+            else ("trusted" if fingerprint_trusted else "STALE→reindex")
+        )
+        logger.info(
+            "Shunt config | embedder=%s max_chars=%d fingerprint=%s data_dir=%s",
+            embedder.model_name,
+            embedder.max_chars,
+            status,
+            os.environ.get("SHUNT_DATA_DIR", "(default)"),
+        )
+    else:
+        logger.info(
+            "Shunt config | embedder=%s max_chars=%s data_dir=%s",
+            os.environ.get("SHUNT_EMBEDDER_MODEL", "(default)"),
+            os.environ.get("SHUNT_EMBED_MAX_CHARS", "(default)"),
+            os.environ.get("SHUNT_DATA_DIR", "(default)"),
+        )
+
+
+def _capture_auto_configured(policy: RouterPolicy) -> bool:
+    """True when off-wire capture can auto-record outcomes (a work_dir is resolvable).
+
+    With one set, a verified Tier-2 downshift outcome feeds the in-process ConservativeGate
+    at session close, so the downshift gate can open within this process's lifetime.
+    """
+    capture = policy.capture
+    return bool(os.environ.get("SHUNT_WORK_DIR") or capture.work_dir or capture.work_dirs)
 
 
 def _log_exploration_disclosure(policy: RouterPolicy, *, cold_start_active: bool) -> None:
@@ -112,20 +145,27 @@ def _log_exploration_disclosure(policy: RouterPolicy, *, cold_start_active: bool
             "outcomes. Disable with `shunt start --no-explore` or SHUNT_EXPLORATION_ENABLED=0.",
             policy.exploration.explore_budget_frac,
         )
-        # Say which HALF is running. The conservative gate only permits a downshift
-        # once it has banked slack from verified downshift successes, and it banks
-        # that slack in this process's memory — while the only outcome-write path
-        # (`shunt flag`) is a separate CLI process writing SQLite. So slack is
-        # always 0 here and downshift exploration cannot fire, however the alpha is
-        # tuned. Reporting conservative_alpha without saying this reads as though a
-        # safety valve is regulating something that never runs.
-        logger.warning(
-            "Shunt will only explore UPWARD (conservative_alpha=%.2f): the downshift "
-            "gate banks slack in-process from verified downshift outcomes, and nothing "
-            "feeds outcomes back in-process yet, so it cannot open. Trying a cheaper "
-            "model is therefore off, however the alpha is tuned.",
-            policy.exploration.conservative_alpha,
-        )
+        # Say which HALF is running. The conservative gate only permits a downshift once
+        # it has banked slack from verified downshift successes, and it banks that slack in
+        # this process's memory. Whether it can open depends on the outcome-write path:
+        # auto-capture (a configured work_dir) feeds verified downshift outcomes back
+        # in-process at session close, so the gate CAN open; with manual-only `shunt flag`
+        # (a separate CLI process writing SQLite) slack stays 0 and a downshift never fires.
+        if _capture_auto_configured(policy):
+            logger.warning(
+                "Shunt downshift exploration is ARMED (conservative_alpha=%.2f): the "
+                "gate banks slack from auto-captured verified downshift outcomes at session "
+                "close, so it can open within this run and the router may try cheaper models.",
+                policy.exploration.conservative_alpha,
+            )
+        else:
+            logger.warning(
+                "Shunt will only explore UPWARD (conservative_alpha=%.2f): no work_dir is "
+                "configured, so outcomes are recorded only via the separate `shunt flag` CLI "
+                "and never feed the in-process gate — so it cannot open and trying a cheaper "
+                "model is off, however the alpha is tuned. Set a work_dir to arm it.",
+                policy.exploration.conservative_alpha,
+            )
 
 
 def _build_engine(
@@ -133,6 +173,8 @@ def _build_engine(
     session_manager: SessionManager,
     outcome_store: OutcomeStore,
     policy: RouterPolicy,
+    embedder: Embedder | None = None,
+    trust_neighbors: bool = True,
 ) -> RouterEngine:
     """Compose the live RouterEngine from the resolved router policy."""
     # KnnPolicy is the single source of the knn knobs: threshold + min_samples feed the
@@ -147,12 +189,49 @@ def _build_engine(
         model_pool=model_pool,
         session_manager=session_manager,
         outcome_index=OutcomeIndexAdapter(outcome_store),
-        embedder=Embedder(),
+        embedder=embedder or Embedder(),
         selection_rule=selection_rule,
         strategy=strategy,
         neighbor_k=policy.policy.k,
         exploration=_effective_exploration(policy),
+        trust_neighbors=trust_neighbors,
     )
+
+
+def _resolve_embedding_trust(embedder: Embedder, outcome_store: OutcomeStore) -> bool:
+    """Trust kNN only when the configured fingerprint matches the stored one, or the corpus
+    is genuinely fresh (no fingerprint AND no embeddings)."""
+    # A mismatch, or a legacy pre-fingerprint corpus that already holds embeddings of an
+    # unknown space, refuses neighbours (cold-start) until `shunt reindex` re-stamps.
+    configured = embedder.fingerprint()
+    stored = outcome_store.load_embedding_fingerprint()
+    if stored is None:
+        # No fingerprint recorded. Adopt + trust ONLY for a truly empty corpus. A legacy DB
+        # that already holds embeddings from an unrecorded (possibly custom/foreign) embedder
+        # must NOT be trusted blindly — same dims but a different space silently mis-routes.
+        # Refuse until `shunt reindex` re-embeds with the configured embedder and stamps a
+        # fingerprint (the same remedy as a mismatch below).
+        if outcome_store.get_labeled_embeddings():
+            logger.warning(
+                "Shunt corpus holds embeddings but no recorded fingerprint (a pre-fingerprint "
+                "DB). Serving cold-start (no kNN) to avoid routing on possibly foreign-space "
+                "neighbours. Run `shunt reindex` (server stopped) to re-embed the corpus with "
+                "the configured embedder %s and stamp its fingerprint.",
+                configured,
+            )
+            return False
+        outcome_store.save_embedding_fingerprint(configured)
+        return True
+    if stored == configured:
+        return True
+    logger.warning(
+        "Shunt embedding space MISMATCH: the stored corpus fingerprint %s differs from the "
+        "configured one %s. Serving cold-start (no kNN) to avoid routing on foreign-space "
+        "neighbours. Run `shunt reindex` (server stopped) to re-embed the corpus.",
+        stored,
+        configured,
+    )
+    return False
 
 
 def _log_missing_credentials(model_pool: ModelPool) -> None:
@@ -202,6 +281,23 @@ def _effective_exploration(policy: RouterPolicy) -> ExplorationPolicy | None:
     return policy.exploration
 
 
+def _log_capture_disclosure(policy: RouterPolicy) -> None:
+    """Say whether automatic outcome capture can run, or is manual-only (least-surprise)."""
+    # Off-wire capture needs an operator-configured repo root. With none set, no session
+    # can auto-label — the loop is inert and `shunt flag` is the only outcome-write path.
+    if _capture_auto_configured(policy):
+        logger.info(
+            "Shunt capture is ON: verified outcomes are recorded automatically at session "
+            "close by re-running the repo's tests off the wire."
+        )
+    else:
+        logger.warning(
+            "Shunt capture is MANUAL-ONLY: no work_dir configured (SHUNT_WORK_DIR / "
+            "capture.work_dir), so no session is labelled automatically. Record outcomes "
+            "with `shunt flag`, or set a work_dir to enable off-wire auto-capture."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     session_manager = SessionManager(
@@ -213,16 +309,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     policy = apply_env_overrides(load_router_policy())
     model_pool.restrict_to_live(policy.models)
     _index = OutcomeIndexAdapter(outcome_store)
-    _log_config_disclosure(policy, model_pool)
+    # Build the embedder once; its fingerprint gates whether the stored corpus (a
+    # possibly-foreign embedding space) may be trusted for kNN. Decided here, where both
+    # fingerprints are visible, and injected into the engine as a boolean.
+    embedder = Embedder()
+    trust_neighbors = _resolve_embedding_trust(embedder, outcome_store)
+    _log_config_disclosure(policy, model_pool, embedder, fingerprint_trusted=trust_neighbors)
     _log_missing_credentials(model_pool)
     _log_exploration_disclosure(
         policy,
-        cold_start_active=ColdStartStrategy().is_active(
-            _index.count_total_labeled(), _index.count_labeled()
+        cold_start_active=ColdStartStrategy().is_active_effective(
+            _index.effective_labeled(), _index.effective_tier2()
         ),
     )
-    engine = _build_engine(model_pool, session_manager, outcome_store, policy)
+    engine = _build_engine(
+        model_pool,
+        session_manager,
+        outcome_store,
+        policy,
+        embedder=embedder,
+        trust_neighbors=trust_neighbors,
+    )
+    # Reload the exploration budget cap + gate slack persisted by the prior run, so a
+    # restart does not silently reset the cost cap and downshift evidence to zero.
+    engine.restore_exploration_state(outcome_store.load_router_state())
     _warm_embedder_in_background(engine)
+    worker = _wire_capture(session_manager, outcome_store, policy, engine)
     router = ProxyRouter(
         model_pool=model_pool,
         session_manager=session_manager,
@@ -234,7 +346,52 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.router = router
     app.state.outcome_store = outcome_store
     yield
+    worker.stop()
+    _persist_exploration_state(engine, outcome_store)  # exact state on a clean shutdown
     outcome_store.close()
+
+
+def _persist_exploration_state(engine: RouterEngine, outcome_store: OutcomeStore) -> None:
+    """Flush the router's mutable exploration state to disk (no-op when nothing to persist)."""
+    state = engine.snapshot_exploration_state()
+    if state:
+        outcome_store.save_router_state(state)
+
+
+def _wire_capture(
+    session_manager: SessionManager,
+    outcome_store: OutcomeStore,
+    policy: RouterPolicy,
+    engine: RouterEngine,
+) -> CaptureWorker:
+    """Build the capture worker+coordinator and wire close→enqueue."""
+    resolver = WorkDirResolver.from_config(
+        work_dir=policy.capture.work_dir, work_dirs=policy.capture.work_dirs
+    )
+    _log_capture_disclosure(policy)
+    coordinator = CaptureCoordinator(
+        resolver=resolver,
+        verifier=AutoDetectVerifier(),
+        store=outcome_store,
+        # The live caller: a verified Tier-2 outcome escalates/downshifts the NEXT session
+        # by moving the in-process ConservativeGate — never mid-session (cache-safety).
+        record_outcome_callback=engine.record_outcome,
+        # Batch-first learning: re-fit the kNN index from the log every N captured outcomes.
+        refit_scheduler=RefitScheduler(outcome_store, policy.refit.every_n_outcomes),
+    )
+    worker = CaptureWorker(
+        coordinator=coordinator,
+        session_manager=session_manager,
+        # Crash-tolerant cadence: flush the exploration budget cap + gate slack on the
+        # existing periodic sweep (no extra timer thread). The budget advances on every
+        # decision, so this bounds loss to one sweep interval; clean shutdown is exact.
+        on_sweep=functools.partial(_persist_exploration_state, engine, outcome_store),
+    )
+    # Always wire: a per-session resolve returning None just means manual-only for that
+    # session, and the sweeper must run so untrafficked sessions still close.
+    session_manager.set_verifier_callback(worker.enqueue)
+    worker.start()
+    return worker
 
 
 app = FastAPI(
@@ -281,6 +438,14 @@ def _store_session_with_provenance(
         cache_stats={"cache_tax": session.cache_tax, "prompt_tokens": session.prompt_length_tokens},
         duration=time.time() - session.start_time.timestamp(),
         decision_provenance=provenance,
+        # Cost is UNKNOWN (not 0.0) when the provider reported no usage.cost.
+        # Selection propensity and resolved model-version fingerprint are decided-once,
+        # first-class columns — they cannot be reconstructed later, so persist them now.
+        provenance=SessionProvenance(
+            cost_known=not session.metadata.get("cost_unreported", False),
+            selection_propensity=provenance.get("router_propensity"),
+            model_fingerprint=router.model_fingerprint(model_name),
+        ),
     )
 
 
@@ -325,6 +490,34 @@ async def _build_decision_headers(
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+def _loop_health_payload(outcome_store: OutcomeStore, model_pool: ModelPool) -> dict[str, Any]:
+    """Aggregate loop-health metrics as a JSON-able dict — no prompt_text, no PII."""
+    from dataclasses import asdict
+
+    from shunt.db.loop_health import LoopHealthThresholds, compute_loop_health
+
+    thresholds = LoopHealthThresholds()
+    snapshot = outcome_store.loop_health_snapshot(recent_window=thresholds.recent_window)
+    names = set(model_pool.model_names())
+    frontier = {name for name in names if model_pool.get_tier(name) == "frontier"}
+    health = compute_loop_health(
+        snapshot,
+        frontier_models=frontier,
+        candidate_models=names,
+        thresholds=thresholds,
+    )
+    return asdict(health)
+
+
+@app.get("/admin/loop-health")
+async def loop_health(request: Request) -> dict[str, Any]:
+    """Read-only loop-health telemetry. Aggregates only (no prompts); access control is the
+    deployment's bind/port reach (localhost default; container publishes to loopback only)."""
+    outcome_store: OutcomeStore = request.app.state.outcome_store
+    model_pool: ModelPool = request.app.state.model_pool
+    return _loop_health_payload(outcome_store, model_pool)
 
 
 @app.get("/v1/models")

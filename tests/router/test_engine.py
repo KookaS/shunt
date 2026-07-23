@@ -29,6 +29,16 @@ class MockOutcomeIndex:
     def count_total_labeled(self) -> int:
         return self._count
 
+    def effective_labeled(self) -> float:
+        # Uniform weights ⇒ nₑ == raw count, so the effective gate matches the count gate.
+        return float(self._count)
+
+    def effective_tier2(self) -> float:
+        return float(self._count)
+
+    def model_priors(self) -> dict[str, tuple[float, float]]:
+        return {}
+
     def query(self, embedding: Any, k: int = 20) -> list[NeighborResult]:
         self.queries.append((embedding, k))
         return self._neighbors
@@ -62,6 +72,42 @@ def _neighbor(
         session_id="test",
         truncation_rate=0.0,
     )
+
+
+class TestStaleEmbeddingSpace:
+    def test_stale_space_short_circuits_to_cold_start_no_embed_no_query(self):
+        # Kill-gate: a fingerprint mismatch (trust_neighbors=False) must route via the
+        # cold-start default WITHOUT embedding or querying the foreign-space index.
+        index = MockOutcomeIndex(count=100, neighbors=[_neighbor("gpt4", outcome=True)])
+        pool = FakeModelPool("qwen3.7-plus", "gpt4")
+        embedder = RecordingEmbedder()
+        engine = RouterEngine(
+            model_pool=pool,
+            session_manager=MagicMock(),
+            outcome_index=index,
+            embedder=embedder,
+            trust_neighbors=False,
+        )
+        model, reason, provenance = engine.decide("session-1", "some prompt")
+        assert model == "qwen3.7-plus"
+        assert reason == "stale_embedding_space"
+        assert provenance["selection_rule_used"] == "stale_embedding_space"
+        # No embed, no index query — the whole point of refusing a foreign space.
+        assert embedder.call_count == 0
+        assert index.queries == []
+
+    def test_trusted_space_still_queries(self):
+        index = MockOutcomeIndex(count=100, neighbors=[_neighbor("gpt4", outcome=True)])
+        pool = FakeModelPool("qwen3.7-plus", "gpt4")
+        engine = RouterEngine(
+            model_pool=pool,
+            session_manager=MagicMock(),
+            outcome_index=index,
+            embedder=RecordingEmbedder(),
+            trust_neighbors=True,
+        )
+        engine.decide("session-1", "some prompt")
+        assert len(index.queries) == 1
 
 
 class TestDecide:

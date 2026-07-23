@@ -37,6 +37,17 @@ class TestBuildProvenance:
         assert prov["neighbor_confidence_scores"] == []
         assert prov["candidate_model_scores"] == {}
         assert prov["router_propensity"] == 1.0
+        # downshift defaults False: only an exploratory-downshift decision sets it, and
+        # the capture read-back feeds it to the ConservativeGate (which ignores non-downshifts).
+        assert prov["downshift"] is False
+
+    def test_downshift_flag_is_carried(self):
+        prov = build_provenance(
+            model_chosen="cheap",
+            selection_rule_used="exploration",
+            downshift=True,
+        )
+        assert prov["downshift"] is True
 
     def test_with_neighbors(self):
         neighbors = [

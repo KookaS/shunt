@@ -19,11 +19,37 @@ _REGISTRY = Path(__file__).parent / "fake_registry.yaml"
 _DOCKER_BASE_URL = "http://fake-upstream:9099/v1"
 
 
+class _FakeEmbedder:
+    """A fixed-vector embedder so the in-process handshake never loads real ONNX."""
+
+    def embed(self, text: str) -> object:
+        import numpy as np
+
+        return np.full(768, 0.1, dtype=np.float32)
+
+    def fingerprint(self) -> dict[str, object]:
+        return {"repo": "fake", "dim": 768, "max_chars": 4000, "revision": None}
+
+    @property
+    def model_name(self) -> str:
+        return "fake"
+
+    @property
+    def max_chars(self) -> int:
+        return 4000
+
+    def warm(self) -> None:
+        return None
+
+
 @pytest.fixture
 def handshake_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[tuple[TestClient, FakeUpstream]]:
     """Shunt (TestClient) wired to a live FakeUpstream via a port-rewritten registry."""
+    # Real ONNX loading is (correctly) blocked in the unit suite; inject a fake so the
+    # routing path stays hermetic and never downloads the ~600MB model.
+    monkeypatch.setattr(server, "Embedder", _FakeEmbedder)
     with FakeUpstream() as upstream:
         registry = _REGISTRY.read_text().replace(_DOCKER_BASE_URL, f"{upstream.base_url}/v1")
         registry_path = tmp_path / "fake_registry.yaml"

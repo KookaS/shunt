@@ -171,12 +171,12 @@ def _build_row(
     out_tok = int(outcome.get("out_tok", 0))
     real_cost = float(outcome.get("real_cost", 0.0))
     estimated_cost = integrity.estimated_cost(model, in_tok, out_tok, pricing)
-    # `cost` is what every metric/strategy/kill-gate reads. Prefer the litellm-measured
-    # (cache-aware) real_cost, but fall back to the registry's listing estimate when
-    # litellm can't price the route (e.g. requesty `openai/<provider>/<model>` strings)
-    # — otherwise those cells would cache cost=0 and score as free. NOTE: this makes the
-    # basis mixed (measured for litellm-priceable models, listing-estimate otherwise) —
-    # a known limitation to reconcile before running the live kill-gate.
+    # `cost` is what every metric/strategy/kill-gate reads. Prefer the provider-returned
+    # cache-aware real_cost (see infer._call_cost), and fall back to the registry's listing
+    # estimate only when no measured cost exists at all (provider AND litellm both silent)
+    # — otherwise those cells would cache cost=0 and score as free. NOTE: the fallback still
+    # mixes the basis (measured where a cost is reported, listing-estimate otherwise) — a
+    # known limitation to reconcile before running the live kill-gate.
     cost = real_cost if real_cost > 0 else estimated_cost
     return {
         "challenge_id": cid,

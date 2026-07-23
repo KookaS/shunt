@@ -19,6 +19,31 @@ from benchmark import config  # noqa: E402
 from benchmark.routing import report  # noqa: E402
 from benchmark.routing.metrics import compute_pareto  # noqa: E402
 
+# Documented data-viz palette (light mode), the 6 best-separated categorical slots.
+# Every strategy also carries a UNIQUE marker and a direct label, so identity never
+# rests on hue alone — the required secondary encoding for a >3-series scatter, where
+# no 6-hue subset can clear the all-pairs CVD floor (see dataviz color-formula).
+_PALETTE = ("#2a78d6", "#eb6834", "#1baf7a", "#4a3aa7", "#e87ba4", "#e34948")
+_MARKERS = ("D", "s", "^", "v", "o", "P", "X", "*", "h", "<", ">", "d")
+# Chart chrome & ink tokens (light surface #fcfcfb).
+_INK = "#0b0b0b"
+_INK2 = "#52514e"
+_MUTED = "#898781"
+_GRID = "#e1e0d9"
+_SURFACE = "#fcfcfb"
+
+
+def _style_maps(names: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+    """Assign color + marker per strategy, data-driven from a stable name sort.
+
+    Enumerated from the results (never a hardcoded strategy list); a fixed sort keeps
+    each strategy's hue/marker stable across runs (colour follows the entity).
+    """
+    ordered = sorted(names)
+    colors = {n: _PALETTE[i % len(_PALETTE)] for i, n in enumerate(ordered)}
+    markers = {n: _MARKERS[i % len(_MARKERS)] for i, n in enumerate(ordered)}
+    return colors, markers
+
 
 def load_matrix(path: Path) -> dict:
     return config.load_matrix(path)
@@ -68,51 +93,31 @@ def _declutter(fig, anns: list, step: float = 3.0, passes: int = 40) -> None:
         fig.canvas.draw()
 
 
+def _label_offset(cost: float, perf: float, cost_mid: float, perf_hi: float) -> dict:
+    """Point a label away from the crowded top-right and away from the top frame.
+
+    High-pass points get their label BELOW the marker (never above, where it would
+    collide with the title); high-cost points get it to the LEFT (into the plot).
+    """
+    right = cost >= cost_mid
+    top = perf >= perf_hi
+    dx = -10 if right else 10
+    dy = -13 if top else 11
+    return {
+        "xytext": (dx, dy),
+        "ha": "right" if dx < 0 else "left",
+        "va": "top" if dy < 0 else "bottom",
+    }
+
+
 def plot_pareto(
     results: list[dict],
     out_path: Path,
-    display_name_key: dict[str, str] | None = None,
-    colors: dict[str, str] | None = None,
-    markers: dict[str, str] | None = None,
     warning: str | None = None,
+    frontier_cost: float | None = None,
 ) -> None:
-    if display_name_key is None:
-        display_name_key = {
-            "Oracle": "oracle",
-            "Oracle-reward": "oracle_reward",
-            "Always-Cheap": "always_cheap",
-            "Always-Frontier": "always_frontier",
-            "Random": "random",
-            "kNN": "knn",
-            "kNN-cascade": "knn_cascade",
-            "External-Prior": "external_prior",
-            "kNN-blended": "knn_blended",
-        }
-    if colors is None:
-        colors = {
-            "oracle": "#0072B2",
-            "oracle_reward": "#56B4E9",
-            "always_cheap": "#009E73",
-            "always_frontier": "#D55E00",
-            "random": "#CC79A7",
-            "knn": "#E69F00",
-            "knn_cascade": "#F0E442",
-            "external_prior": "#882255",
-            "knn_blended": "#44AA99",
-        }
-    if markers is None:
-        markers = {
-            "oracle": "D",
-            "oracle_reward": "s",
-            "always_cheap": "^",
-            "always_frontier": "v",
-            "random": "o",
-            "knn": "P",
-            "knn_cascade": "X",
-            "external_prior": "*",
-            "knn_blended": "h",
-        }
     names = [r["strategy"] for r in results]
+    colors, markers = _style_maps(names)
     costs = np.array([float(r["TotalCost"]) for r in results], dtype=float)
     perfs = np.array([float(r["AvgPerf%"]) for r in results], dtype=float)
 
@@ -122,41 +127,54 @@ def plot_pareto(
         {r["strategy"]: r for r in results if int(float(r.get("n_tasks", 1) or 0)) > 0}
     )
 
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(11, 7.5))
+    fig.patch.set_facecolor(_SURFACE)
+    ax.set_facecolor(_SURFACE)
     point_labels: list = []
 
+    # Geometric-mid cost (log axis) and a high-pass threshold steer label placement.
+    cost_mid = float(np.sqrt(costs.min() * costs.max()))
+    perf_hi = float(perfs.max()) - 12.0
+
     for i, name in enumerate(names):
-        key = display_name_key.get(name, "random")
-        color = colors.get(key, "#999999")
-        marker = markers.get(key, "o")
+        color = colors[name]
+        marker = markers[name]
         is_pareto = pareto_map.get(name, False)
 
         ax.scatter(
             costs[i],
             perfs[i],
             c=color,
-            s=180 if is_pareto else 100,
+            s=170 if is_pareto else 95,
             marker=marker,
-            zorder=5,
-            edgecolors="white",
-            linewidth=0.8,
+            zorder=6,
+            edgecolors=_SURFACE,
+            linewidth=1.2,
             label=name,
         )
 
-        label = f"{name}\n({perfs[i]:.0f}%, ${costs[i]:.2f})"
+        off = _label_offset(costs[i], perfs[i], cost_mid, perf_hi)
+        label = f"{name}\n{perfs[i]:.0f}%, ${costs[i]:.2f}"
         point_labels.append(
             ax.annotate(
                 label,
                 (costs[i], perfs[i]),
                 fontsize=8,
-                xytext=(8, 8),
+                color=_INK,
                 textcoords="offset points",
-                arrowprops=dict(arrowstyle="-", color="gray", lw=0.5),
-                bbox=dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.7),
+                arrowprops={"arrowstyle": "-", "color": _MUTED, "lw": 0.6},
+                bbox={
+                    "boxstyle": "round,pad=0.25",
+                    "facecolor": _SURFACE,
+                    "edgecolor": "none",
+                    "alpha": 0.75,
+                },
+                zorder=7,
+                **off,
             )
         )
 
-    # Pareto frontier
+    # Pareto frontier — a constructed reference (recessive), not a measured series.
     pareto_idx = [i for i, name in enumerate(names) if pareto_map.get(name, False)]
     if pareto_idx:
         pts = sorted([(costs[i], perfs[i]) for i in pareto_idx], key=lambda p: p[0])
@@ -167,67 +185,67 @@ def plot_pareto(
                 fx.append(pts[i][0])
                 fy.append(pts[i][1])
         if fx[0] > 0:
-            fx = [0.0] + fx
+            fx = [costs.min() * 0.6] + fx
             fy = [fy[0]] + fy
         ax.step(
             fx,
             fy,
             where="post",
-            color="#333333",
-            linewidth=2,
-            linestyle="--",
-            label="Pareto frontier",
+            color=_INK2,
+            linewidth=1.5,
+            zorder=3,
+            label="Pareto frontier (best pass rate per cost)",
         )
-        ax.fill_between(fx, 0, fy, step="post", alpha=0.05, color="#333333")
 
-    # Reference line at frontier pass rate (highest pass rate among all)
-    best_perf = max(perfs)
+    # "What good looks like" — the top-left corner: oracle-level pass rate (top) at a
+    # cost well below the fixed-frontier baseline (left of the vertical guide).
+    best_perf = float(perfs.max())
     ax.axhline(
         y=best_perf,
-        color="#666666",
-        linestyle=":",
-        linewidth=1,
-        alpha=0.6,
-        label=f"Best pass rate ({best_perf:.0f}%)",
+        color=_MUTED,
+        linestyle=(0, (1, 2)),
+        linewidth=1.0,
+        zorder=2,
+        label=f"Best measured pass rate ({best_perf:.0f}%)",
     )
-
-    # No "SWEET SPOT" annotation: it floated over an empty region of the axes,
-    # implying a data point that does not exist. The Pareto step line already
-    # shows where the cheap/high-pass corner is.
+    if frontier_cost is not None and frontier_cost > 0:
+        ax.axvline(
+            x=frontier_cost,
+            color=_MUTED,
+            linestyle=(0, (1, 2)),
+            linewidth=1.0,
+            zorder=2,
+            label=f"Frontier baseline cost (${frontier_cost:.2f})",
+        )
 
     ax.set_xscale("log")
-    ax.set_xlabel("Total Cost ($, log scale)", fontsize=11)
-    ax.set_ylabel("Average Performance (%)", fontsize=11)
-    ax.set_title("Strategy Comparison — Pass Rate vs Cost", fontsize=13, fontweight="bold")
-    ax.set_xlim(left=costs.min() * 0.7)
-    ax.legend(
-        loc="lower right",
-        fontsize=8,
-        framealpha=0.9,
-        ncol=1 if len(names) <= 4 else 2,
+    ax.set_xlabel("Total cost over the task suite  ($, log scale)", fontsize=11, color=_INK)
+    ax.set_ylabel("Pass rate — % of tasks passing tests/typecheck", fontsize=11, color=_INK)
+    ax.set_title(
+        "Routing strategies — pass rate vs cost (cheaper is left, better is up)",
+        fontsize=13,
+        fontweight="bold",
+        color=_INK,
+        pad=12,
     )
-    ax.grid(True, alpha=0.3, which="both")
+    ax.set_xlim(left=costs.min() * 0.55, right=costs.max() * 1.7)
+    ax.set_ylim(top=min(103.0, best_perf + 7.0))
+    leg = ax.legend(loc="lower right", fontsize=8, framealpha=0.95, ncol=1)
+    leg.get_frame().set_edgecolor(_GRID)
+    ax.grid(True, which="major", color=_GRID, linewidth=0.6)
+    ax.grid(False, which="minor")
+    ax.tick_params(colors=_INK2)
+    for spine in ax.spines.values():
+        spine.set_edgecolor(_GRID)
     ax.set_axisbelow(True)
 
     if warning:
-        # Sparse-frontier honesty: the fixed-frontier strategy is scored on the
-        # subset its model actually ran on — a smaller denominator than its peers.
-        ax.annotate(
-            warning,
-            xy=(0.5, 1.09),  # clear of the bold title (~1.06) and the lower-right legend
-            xycoords="axes fraction",
-            fontsize=9,
-            fontweight="bold",
-            color="#B00020",
-            ha="center",
-            va="bottom",
-            bbox=dict(
-                boxstyle="round,pad=0.3", facecolor="#FDECEA", edgecolor="#B00020", alpha=0.9
-            ),
-        )
+        # Sparse-frontier honesty as a recessive footnote (not a loud banner): the
+        # fixed-frontier strategy is scored on the subset its model actually ran on.
+        fig.text(0.5, -0.02, warning, ha="center", va="top", fontsize=8.5, color=_INK2, wrap=True)
 
     _declutter(fig, point_labels)
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight", facecolor=_SURFACE)
     plt.close(fig)
 
 
@@ -285,8 +303,18 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
             f"{row['n_unscorable']} unscorable excluded)"
         )
 
+    # Fixed-frontier baseline cost anchors the "well left of frontier cost" guide
+    # (data-driven: read from the Always-Frontier row if that baseline is present).
+    frontier_row = next((r for r in results if r["strategy"] == "Always-Frontier"), None)
+    frontier_cost = float(frontier_row["TotalCost"]) if frontier_row else None
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    plot_pareto(results, out_path, warning=_coverage_note(matrix, tasks, results))
+    plot_pareto(
+        results,
+        out_path,
+        warning=_coverage_note(matrix, tasks, results),
+        frontier_cost=frontier_cost,
+    )
     print(f"\nPlot saved to {out_path}")
 
 
