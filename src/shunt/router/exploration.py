@@ -19,14 +19,49 @@ def _cost_key(stats: CandidateStats) -> float:
     return stats.cost if math.isfinite(stats.cost) else math.inf
 
 
+# Default cap on the informative prior's pseudo-count strength: even a model with a huge
+# offline history contributes at most this many prior pseudo-observations, so the prior
+# regularizes the sparse local neighborhood rather than swamping it.
+_DEFAULT_PRIOR_STRENGTH_CAP = 20.0
+
+
+def beta_prior_from_estimate(
+    estimate: float,
+    strength: float,
+    *,
+    base_alpha: float = 1.0,
+    base_beta: float = 1.0,
+    strength_cap: float = _DEFAULT_PRIOR_STRENGTH_CAP,
+) -> tuple[float, float]:
+    """Map an offline success-rate ``estimate`` + effective ``strength`` to a Beta prior."""
+    # Beta(base_alpha + est·k, base_beta + (1-est)·k) with k = min(strength, cap) clamped to
+    # [0, cap]. The prior mean (base_alpha + est·k)/(base_alpha+base_beta+k) → estimate as k
+    # grows and stays near 0.5 (the flat base) for a tiny sample — so a strong estimate seeds
+    # near itself while a thin one stays regularized. strength=0 reproduces flat Beta(a, b).
+    # Coerce non-finite inputs to neutral values before the min/max clamps (NaN would else
+    # propagate through both and hand np.random.beta a NaN parameter → crash). Unreachable
+    # today — the priors derive from DB confidences the NOT NULL constraint keeps non-NaN —
+    # but keep the map total, like exploration._cost_key's finite guard.
+    safe_strength = strength if math.isfinite(strength) else 0.0
+    safe_estimate = estimate if math.isfinite(estimate) else 0.5
+    k = min(max(safe_strength, 0.0), strength_cap)
+    clamped = min(max(safe_estimate, 0.0), 1.0)
+    return (base_alpha + clamped * k, base_beta + (1.0 - clamped) * k)
+
+
 @dataclass(frozen=True)
 class CandidateStats:
     """Per-model verified evidence aggregated from the neighborhood."""
 
+    # prior_estimate/prior_strength carry the offline kNN aggregate (the model's global
+    # weighted success rate + its effective sample size) to seed an informative Beta prior;
+    # a None estimate falls back to the sampler's flat prior.
     model: str
     successes: float  # weighted count of verified passes nearby
     failures: float  # weighted count of verified failures nearby
     cost: float  # representative cost (cheaper models sort first)
+    prior_estimate: float | None = None  # offline global weighted success rate (empirical Bayes)
+    prior_strength: float = 0.0  # effective sample size backing prior_estimate
 
 
 @dataclass(frozen=True)
@@ -48,18 +83,37 @@ class ThompsonSampler:
         rng: np.random.Generator,
         prior_alpha: float = 1.0,
         prior_beta: float = 1.0,
+        prior_strength_cap: float = _DEFAULT_PRIOR_STRENGTH_CAP,
     ) -> None:
         if prior_alpha <= 0.0 or prior_beta <= 0.0:
             raise ValueError("prior_alpha and prior_beta must be > 0 (Beta needs positive params)")
         self._rng = rng
         self._prior_alpha = prior_alpha
         self._prior_beta = prior_beta
+        self._prior_strength_cap = prior_strength_cap
+
+    def _prior(self, stats: CandidateStats) -> tuple[float, float]:
+        """The Beta prior for a model: informative (from its offline estimate) or flat.
+
+        With an offline aggregate, shrink toward the model's global rate (empirical Bayes);
+        with none, fall back to the flat ``Beta(prior_alpha, prior_beta)``.
+        """
+        if stats.prior_estimate is None:
+            return (self._prior_alpha, self._prior_beta)
+        return beta_prior_from_estimate(
+            stats.prior_estimate,
+            stats.prior_strength,
+            base_alpha=self._prior_alpha,
+            base_beta=self._prior_beta,
+            strength_cap=self._prior_strength_cap,
+        )
 
     def _posterior(self, stats: CandidateStats) -> tuple[float, float]:
         """Beta posterior (alpha, beta) from prior + neighborhood counts (>=0 clamped)."""
+        prior_alpha, prior_beta = self._prior(stats)
         return (
-            self._prior_alpha + max(0.0, stats.successes),
-            self._prior_beta + max(0.0, stats.failures),
+            prior_alpha + max(0.0, stats.successes),
+            prior_beta + max(0.0, stats.failures),
         )
 
     def _draw(self, stats: CandidateStats) -> float:

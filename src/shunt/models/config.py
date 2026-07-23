@@ -245,6 +245,15 @@ def arm_api_params(model: ModelConfig, arm_id: str) -> dict[str, Any]:
     raise ValueError(f"unknown reasoning arm {arm_id!r} for model {model.name!r}")
 
 
+def model_fingerprint(model: ModelConfig) -> str:
+    """Resolved model-version fingerprint for the outcome log."""
+    # ``version`` is the registry's opt-in model-identity / staleness key (a sibling of
+    # tier/provider, not a pricing field); joined to the resolved provider ``model_id`` it is
+    # the strongest version tag the registry carries. A genuine weight change is a new id.
+    resolved_id = model.model_id or model.name
+    return f"{resolved_id}@{model.version}" if model.version else resolved_id
+
+
 def default_registry_path() -> Path:
     """Path to the registry file shipped inside the package."""
     import importlib.resources

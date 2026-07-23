@@ -345,19 +345,25 @@ def _evaluate_strategies(
     factory_map: dict[str, Callable[[], Strategy]],
     matrix: dict,
     tasks: list[str],
-) -> dict[str, list[tuple[str, str, bool, float]]]:
-    evaluated: dict[str, list[tuple[str, str, bool, float]]] = {}
+) -> dict[str, tuple[list[tuple[str, str, bool, float]], set[str]]]:
+    """Per strategy: ``(decisions, unscorable)`` where ``unscorable`` is the set of
+    task ids whose chosen model was never measured (a coverage gap, NOT a real
+    fail@$0 — callers exclude them, mirroring summary.evaluate)."""
+    evaluated: dict[str, tuple[list[tuple[str, str, bool, float]], set[str]]] = {}
     for name, factory in factory_map.items():
         strategy = factory()
         decisions: list[tuple[str, str, bool, float]] = []
+        unscorable: set[str] = set()
         for tid in tasks:
             task_meta = matrix.get("tasks", {}).get(tid, {})
             model = strategy.select(tid, task_meta, matrix)
             outcome = matrix.get("results", {}).get(tid, {}).get(model, {})
+            if not outcome:
+                unscorable.add(tid)
             passed = outcome.get("pass", False)
             cost = outcome.get("cost", 0.0)
             decisions.append((tid, model, passed, cost))
-        evaluated[name] = decisions
+        evaluated[name] = (decisions, unscorable)
     return evaluated
 
 
@@ -365,9 +371,16 @@ def _compute_per_task_regret(
     strategy_decisions: list[tuple[str, str, bool, float]],
     oracle_decisions: list[tuple[str, str, bool, float]],
     gamma: float = 0.1,
+    excluded: set[str] | None = None,
 ) -> np.ndarray:
+    """Cumulative regret over scorable tasks only; a task in ``excluded`` (a
+    coverage gap) is DROPPED, never scored fail@$0. Filtering both series on the
+    same task id keeps strategy and oracle position-aligned."""
+    excluded = excluded or set()
     regrets: list[float] = []
     for sd, od in zip(strategy_decisions, oracle_decisions, strict=True):
+        if sd[0] in excluded:
+            continue
         sr = _reward(sd[2], sd[3], gamma)
         or_ = _reward(od[2], od[3], gamma)
         regrets.append(or_ - sr)
@@ -441,16 +454,30 @@ def plot_cumulative_regret(
     if matrix_path is not None and strategy_factories is not None:
         matrix = load_matrix(matrix_path)
         if matrix is not None:
-            tasks = sorted(matrix.get("results", {}).keys())
+            # Same sampled denominator the summary rows use (derive_tasks), not the
+            # full results.csv key set — otherwise this plot scores a different task
+            # set than run_eval/plot_strategies.
+            tasks = derive_tasks(matrix, config.benchmark_params().get("seed", 42))
             if tasks:
                 all_decisions = _evaluate_strategies(strategy_factories, matrix, tasks)
-                oracle_decisions = all_decisions.get("Oracle-reward")
-                if oracle_decisions:
+                oracle_pair = all_decisions.get("Oracle-reward")
+                if oracle_pair:
+                    oracle_decisions, oracle_unscorable = oracle_pair
                     finals: dict[str, float] = {}
+                    # Tasks dropped from ≥1 series as a coverage gap (chosen model
+                    # unmeasured) — disclosed on canvas, never imputed fail@$0.
+                    excluded_union: set[str] = set(oracle_unscorable)
                     for name in [r["strategy"] for r in results]:
-                        decisions = all_decisions.get(name)
-                        if decisions and name != "Oracle-reward":
-                            cumreg = _compute_per_task_regret(decisions, oracle_decisions, gamma)
+                        pair = all_decisions.get(name)
+                        if pair and name != "Oracle-reward":
+                            decisions, strat_unscorable = pair
+                            excluded = strat_unscorable | oracle_unscorable
+                            excluded_union |= strat_unscorable
+                            cumreg = _compute_per_task_regret(
+                                decisions, oracle_decisions, gamma, excluded
+                            )
+                            if not len(cumreg):
+                                continue
                             label = name + f" (total={cumreg[-1]:.2f})"
                             ax.plot(range(1, len(cumreg) + 1), cumreg, label=label, lw=1.5)
                             finals[name] = float(cumreg[-1])
@@ -463,8 +490,10 @@ def plot_cumulative_regret(
                         ):
                             extra_decisions = fn(raw_sampled, tasks, gamma)
                             cumreg = _compute_per_task_regret(
-                                extra_decisions, oracle_decisions, gamma
+                                extra_decisions, oracle_decisions, gamma, oracle_unscorable
                             )
+                            if not len(cumreg):
+                                continue
                             label = f"{extra_name} (total={cumreg[-1]:.2f})"
                             ax.plot(
                                 range(1, len(cumreg) + 1),
@@ -479,14 +508,13 @@ def plot_cumulative_regret(
                     caveat = f" — {plot_style.ARM_SWEEP_PENDING_NOTE}" if single_arm else ""
                     ax.set_xlabel("Task (evaluation order)")
                     ax.set_ylabel(f"Cumulative regret vs Oracle-reward (γ={gamma}, reward units)")
-                    # Exclude "Oracle" itself from the headline pick — it is compared
-                    # against the (near-identical) Oracle-reward baseline, so its
-                    # near-zero regret is tautological, not an informative takeaway.
-                    # In the single-arm-only case, "Arm-oracle" is DEFINITIONALLY
-                    # identical to Oracle-reward too (only one arm exists per model),
-                    # so exclude it there as well — it only competes fairly once
-                    # multiple arms are actually sampled.
-                    excluded = {"Oracle", "Arm-oracle"} if single_arm else {"Oracle"}
+                    # Headline the best deployable ROUTER, never an oracle.
+                    # "Oracle" is measured against the near-identical Oracle-reward
+                    # baseline (tautological ~0 regret), and "Arm-oracle" picks the
+                    # best REALIZED arm per task in hindsight — both peek at outcomes
+                    # a live router cannot see, so both are excluded from the pick
+                    # regardless of arm count (they still show as reference lines).
+                    excluded = {"Oracle", "Arm-oracle"}
                     candidates = {k: v for k, v in finals.items() if k not in excluded}
                     if candidates:
                         best_name, best_val = min(candidates.items(), key=lambda kv: kv[1])
@@ -498,6 +526,21 @@ def plot_cumulative_regret(
                         ax.set_title(f"Cumulative Regret vs Oracle (Per-Task){caveat}")
                     ax.legend(fontsize=8)
                     ax.grid(True, alpha=0.3)
+
+                    if excluded_union:
+                        fig.text(
+                            0.5,
+                            0.005,
+                            f"Coverage-gap decisions excluded (chosen model unmeasured on the "
+                            f"task): {len(excluded_union)} of {len(tasks)} sampled task(s) "
+                            "dropped from ≥1 series — never scored fail@$0.",
+                            ha="center",
+                            va="bottom",
+                            fontsize=8,
+                            color="#B71C1C",
+                            style="italic",
+                        )
+                        fig.subplots_adjust(bottom=0.13)
 
                     path = out_dir / "cumulative_regret.png"
                     fig.savefig(path, dpi=150, bbox_inches="tight")
@@ -593,11 +636,12 @@ def plot_cost_savings(
             fontsize=7.5,
         )
 
-    ax.set_xlabel("Strategy")
-    ax.set_ylabel("Total Cost ($)")
+    ax.set_xlabel("Strategy (routing rule — bars are what each router SELECTS, not per-model data)")
+    ax.set_ylabel("Total cost over all tasks ($)")
     ax.set_title(
-        f"Cost Comparison by Strategy — equal-quality framing "
-        f"(pass rate, {plot_style.ci_footer()}, bracketed)"
+        "Total cost by routing strategy — equal-quality framing\n"
+        f"(pass rate bracketed above each bar; {plot_style.ci_footer()})",
+        fontsize=11,
     )
     ax.grid(True, axis="y", alpha=0.3)
 
@@ -965,10 +1009,28 @@ def _draw_arm_monotonicity_facet(
             ecolor="#555555",
             capsize=3,
             markersize=7,
+            zorder=3,
         )
-        for x, y, arm, n in zip(xs, ys, arms, ns, strict=True):
+        n_pts = len(xs)
+        for i, (x, y, arm, n) in enumerate(zip(xs, ys, arms, ns, strict=True)):
+            # Label toward the facet centre (leftmost point labels right, the
+            # rightmost labels left) so text never runs off the facet edge; a
+            # two-line label keeps it narrow and a translucent box lifts it off
+            # the marker + error-bar cap it would otherwise sit on.
+            last = n_pts > 1 and i == n_pts - 1
+            ha = "right" if last else "left"
+            dx = -7 if last else 7
+            dy, va = (12, "bottom") if y < 82 else (-12, "top")
             ax.annotate(
-                f"{arm} (n={n})", (x, y), fontsize=7, xytext=(4, 4), textcoords="offset points"
+                f"{arm}\n(n={n})",
+                (x, y),
+                fontsize=7,
+                xytext=(dx, dy),
+                textcoords="offset points",
+                ha=ha,
+                va=va,
+                zorder=6,
+                bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.7),
             )
         if len(xs) >= 2:
             ax.annotate(
@@ -976,10 +1038,11 @@ def _draw_arm_monotonicity_facet(
                 xy=(xs[-1], ys[-1]),
                 xytext=(xs[0], ys[0]),
                 arrowprops=dict(arrowstyle="->", color=color, alpha=0.4, lw=1.2),
+                zorder=2,
             )
             ax.text(
                 0.5,
-                -0.20,
+                -0.22,
                 "→ more effort",
                 transform=ax.transAxes,
                 ha="center",
@@ -989,7 +1052,17 @@ def _draw_arm_monotonicity_facet(
     ax.set_title(model, fontsize=9)
     ax.set_xlabel("avg cost/task ($)", fontsize=8)
     ax.set_ylabel("pass rate (%)", fontsize=8)
-    ax.set_ylim(-5, 105)
+    ax.set_ylim(-5, 112)
+    ax.margins(x=0.18)
+    # Few, plain, rotated x-ticks: arm costs can be near-identical (e.g. the two
+    # kimi-k2.5 arms differ by <$0.001), and the default locator then jams six
+    # 6-digit labels into a collision — cap the count and rotate instead.
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4, prune="both"))
+    ax.ticklabel_format(axis="x", style="plain", useOffset=False)
+    for lbl in ax.get_xticklabels():
+        lbl.set_rotation(30)
+        lbl.set_ha("right")
+        lbl.set_fontsize(7)
     ax.grid(True, alpha=0.3)
 
 
@@ -1106,12 +1179,23 @@ def plot_arm_cloud(
     plotted_max_rank = max((arm_ranks.get((p["model"], p["arm"]), 0) for p in points), default=0)
     size_handles = _arm_size_legend_handles(plotted_max_rank)
     if handles:
+        # Opaque frame at lower-right, drawn on top: the right margin is taken by
+        # the per-point leader labels, so the model key stays inside the axes and
+        # its solid box masks the leader lines that would otherwise cross it.
         model_legend = ax.legend(
-            handles=handles, fontsize=7, loc="lower right", title="model (hue)"
+            handles=handles, fontsize=7, loc="lower right", title="model (hue)", framealpha=1.0
         )
+        model_legend.set_zorder(20)
         ax.add_artist(model_legend)
     if size_handles:
-        ax.legend(handles=size_handles, fontsize=6.5, loc="upper left", title="size = arm rank")
+        size_legend = ax.legend(
+            handles=size_handles,
+            fontsize=6.5,
+            loc="upper left",
+            title="size = arm rank",
+            framealpha=1.0,
+        )
+        size_legend.set_zorder(20)
     ax.grid(True, alpha=0.3)
 
     path = out_dir / "arm_cost_quality_cloud.png"
@@ -1145,6 +1229,7 @@ def plot_chosen_arm_vs_difficulty(
         return None
 
     xs, ys, colors, sizes = [], [], [], []
+    chosen_models: set[str] = set()
     for tid in tasks:
         per_model = raw_results.get(tid, {})
         sampled = [(m, a) for m, per_arm in per_model.items() for a in per_arm]
@@ -1163,6 +1248,7 @@ def plot_chosen_arm_vs_difficulty(
         xs.append(solved + jitter)
         ys.append(float(row.get("cost", 0.0)))
         colors.append(model_colors.get(model, "#9E9E9E"))
+        chosen_models.add(model)
         max_rank = max(
             (arm_ranks.get((model, a), 0) for m2, a in sampled if m2 == model), default=0
         )
@@ -1181,15 +1267,23 @@ def plot_chosen_arm_vs_difficulty(
     )
     ax.set_ylabel("chosen (model, default-arm) cost ($/task)")
     ax.set_title(
-        "kNN-cascade's chosen model cost vs task solve-breadth\n"
-        "(arm choice is always the default arm — live per-arm routing isn't wired up yet)",
+        "What kNN-cascade SELECTS: chosen model cost vs task solve-breadth\n"
+        "(strategy-conditioned — one routed model per task, not per-model data; "
+        "arm is always the default — live per-arm routing isn't wired up yet)",
         fontsize=9,
     )
+    # Legend covers only the models this strategy actually routed to; models in the
+    # palette it never selected are omitted (noted) rather than shown as dead keys.
     handles = [
         Line2D([0], [0], marker="o", color="w", markerfacecolor=c, markersize=9, label=m)
         for m, c in model_colors.items()
+        if m in chosen_models
     ]
-    ax.legend(handles=handles, fontsize=7, loc="upper right", title="model (hue)")
+    omitted = [m for m in model_colors if m not in chosen_models]
+    title = "model routed to (hue)"
+    if omitted:
+        title += f"\nnever selected: {_cap_names(omitted, 3)}"
+    ax.legend(handles=handles, fontsize=7, loc="upper right", title=title)
     ax.grid(True, alpha=0.3)
 
     path = out_dir / "chosen_arm_vs_difficulty.png"
@@ -1201,51 +1295,55 @@ def plot_chosen_arm_vs_difficulty(
 def plot_embedding_routing_map(
     matrix: dict, out_dir: Path, model_colors: dict[str, str], k: int = 10
 ) -> Path | None:
-    """N6 — 2-D PCA projection of the per-task feature vectors (reusing
-    viz_knn's engineered model-outcome vectors; None if sklearn is unavailable),
-    colored by the outcome-vector NN PROXY's (model, default-arm) — not kNNStrategy.
+    """N6 — PCA of the REAL jina prompt embeddings, coloured by each task's measured
+    p_solve: does task difficulty cluster in the shipped embedding space? (~no here).
     """
+    _ = (model_colors, k)  # coloured by continuous p_solve now, not per-model arms
     try:
         from sklearn.decomposition import PCA
 
-        from benchmark.routing.scripts import viz_knn
+        from benchmark.routing.strategies.knn import _embed_texts
     except ImportError:
         return None
 
-    models_order = list(model_colors.keys())
     results = matrix.get("results", {})
-    if not results or not models_order:
-        return None
-    task_ids, vecs = viz_knn.build_feature_vectors(results, models_order)
+    tasks = matrix.get("tasks", {})
+    task_ids = [t for t in sorted(results.keys()) if t in tasks and tasks[t].get("description")]
     if len(task_ids) < 3:
         return None
 
-    k_eff = min(k, len(task_ids) - 1)
-    selections = {
-        tid: viz_knn.knn_select(vecs, i, models_order, k=k_eff) for i, tid in enumerate(task_ids)
-    }
+    # p_solve = fraction of MEASURED models that passed (real outcomes only, no imputation).
+    p_solve = []
+    for tid in task_ids:
+        cells = [c for c in results[tid].values() if isinstance(c, dict)]
+        passes = [1.0 if c.get("pass") else 0.0 for c in cells]
+        p_solve.append(float(np.mean(passes)) if passes else 0.0)
+
+    embeddings = np.asarray(_embed_texts([tasks[tid]["description"] for tid in task_ids]))
     pca = PCA(n_components=2)
-    coords = pca.fit_transform(vecs)
+    coords = pca.fit_transform(embeddings)
     explained = pca.explained_variance_ratio_
-    colors = [model_colors.get(selections[tid], "#9E9E9E") for tid in task_ids]
 
     fig, ax = plt.subplots(figsize=(9, 7))
-    ax.scatter(
-        coords[:, 0], coords[:, 1], c=colors, s=40, alpha=0.8, edgecolors="black", linewidth=0.3
+    sc = ax.scatter(
+        coords[:, 0],
+        coords[:, 1],
+        c=p_solve,
+        cmap="viridis",
+        vmin=0.0,
+        vmax=1.0,
+        s=48,
+        alpha=0.9,
+        edgecolors="black",
+        linewidth=0.3,
     )
-    seen = set(selections.values())
-    handles = [
-        Line2D([0], [0], marker="o", color="w", markerfacecolor=c, markersize=9, label=m)
-        for m, c in model_colors.items()
-        if m in seen
-    ]
-    ax.legend(handles=handles, fontsize=7, title="chosen (model, default arm)")
+    fig.colorbar(sc, ax=ax, label="own p_solve  (fraction of models that passed)")
     ax.set_xlabel(f"PC1 ({explained[0] * 100:.1f}% variance)")
     ax.set_ylabel(f"PC2 ({explained[1] * 100:.1f}% variance)")
     ax.set_title(
-        "Routing map — outcome-vector NN proxy selection per task "
-        "(PCA of model-outcome vectors, NOT the routed kNN strategy)\n"
-        "arm is always the default arm until the live executor wires per-arm routing",
+        "Does task difficulty cluster in the REAL jina embedding space?\n"
+        "PCA of the shipped jina-embeddings-v2-base-code vectors, coloured by measured p_solve\n"
+        "— hard (dark) and easy (bright) tasks intermix ⇒ difficulty is ~not embedding-separable",
         fontsize=9,
     )
     fig.tight_layout()

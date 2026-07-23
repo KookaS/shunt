@@ -169,11 +169,15 @@ def _load_instance(instance_id: str) -> dict[str, Any]:
 
 
 def _call_cost(extra: dict[str, Any], usage: dict[str, Any]) -> float:
-    """Real cost of one call: litellm's computed cost, else the provider-returned one."""
-    litellm_cost = float(extra.get("cost", 0.0) or 0.0)
-    if litellm_cost > 0.0:
-        return litellm_cost
-    return float(usage.get("cost", 0.0) or 0.0)
+    """One call's real cost: the provider's cache-aware usage.cost, else litellm's estimate."""
+    # Prefer what the provider actually charged (Requesty's usage.cost is cache-aware and
+    # authoritative) over litellm's client-side static-table computation; litellm is only the
+    # fallback when the provider reports no cost. This keeps the kill-gate's cost basis on the
+    # real cache-aware figure, never a pricing table that can shadow it.
+    provider_cost = float(usage.get("cost", 0.0) or 0.0)
+    if provider_cost > 0.0:
+        return provider_cost
+    return float(extra.get("cost", 0.0) or 0.0)
 
 
 def _sum_usage(messages: list[dict[str, Any]]) -> tuple[int, int, int, float]:

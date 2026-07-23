@@ -57,6 +57,15 @@ class FakeOutcomeIndex:
     def count_total_labeled(self) -> int:
         return self._count
 
+    def effective_labeled(self) -> float:
+        return float(self._count)  # uniform weights ⇒ nₑ == raw count
+
+    def effective_tier2(self) -> float:
+        return float(self._count)
+
+    def model_priors(self) -> dict[str, tuple[float, float]]:
+        return {}
+
     def query(self, embedding: Any, k: int = 20) -> list[NeighborResult]:
         self.queries.append((embedding, k))
         return self._neighbors
@@ -468,6 +477,95 @@ def test_cold_start_sessions_are_embedded_and_indexed(
         for session_id in session_ids:
             store.store_outcome(session_id, tier1_outcome="success", tier1_confidence=0.9)
         assert store.get_stats()["index_size"] == n_sessions
+    finally:
+        store.close()
+
+
+class _FpEmbedder(FakeEmbedder):
+    """FakeEmbedder carrying a chosen fingerprint (no ONNX load)."""
+
+    def __init__(self, repo: str) -> None:
+        super().__init__()
+        self._fp = {"repo": repo, "dim": 768, "max_chars": 4000, "revision": None}
+
+    def fingerprint(self) -> dict[str, Any]:
+        return self._fp
+
+
+def test_missing_stored_fingerprint_is_adopted_and_trusted(tmp_path: Any) -> None:
+    from shunt.proxy.server import _resolve_embedding_trust
+
+    store = OutcomeStore(db_path=str(tmp_path / "fp1.db"))
+    try:
+        embedder = _FpEmbedder("jinaai/jina-embeddings-v2-base-code")
+        assert store.load_embedding_fingerprint() is None
+        trust = _resolve_embedding_trust(embedder, store)  # type: ignore[arg-type]
+        assert trust is True
+        # Adopted: the current config is now the stored space.
+        assert store.load_embedding_fingerprint() == embedder.fingerprint()
+    finally:
+        store.close()
+
+
+def test_matching_fingerprint_trusts_neighbours(tmp_path: Any) -> None:
+    from shunt.proxy.server import _resolve_embedding_trust
+
+    store = OutcomeStore(db_path=str(tmp_path / "fp2.db"))
+    try:
+        embedder = _FpEmbedder("jinaai/jina-embeddings-v2-base-code")
+        store.save_embedding_fingerprint(embedder.fingerprint())
+        assert _resolve_embedding_trust(embedder, store) is True  # type: ignore[arg-type]
+    finally:
+        store.close()
+
+
+def test_mismatched_fingerprint_refuses_neighbours(tmp_path: Any) -> None:
+    from shunt.proxy.server import _resolve_embedding_trust
+
+    store = OutcomeStore(db_path=str(tmp_path / "fp3.db"))
+    try:
+        store.save_embedding_fingerprint(
+            {
+                "repo": "Snowflake/snowflake-arctic-embed-m-long",
+                "dim": 768,
+                "max_chars": 4000,
+                "revision": None,
+            }
+        )
+        embedder = _FpEmbedder("jinaai/jina-embeddings-v2-base-code")
+        assert _resolve_embedding_trust(embedder, store) is False  # type: ignore[arg-type]
+        # Refusal does not overwrite the stored fingerprint — only `shunt reindex` does.
+        assert store.load_embedding_fingerprint()["repo"].startswith("Snowflake")
+    finally:
+        store.close()
+
+
+def test_mismatch_engine_serves_cold_start_no_query(
+    model_pool: ModelPool,
+    session_manager: SessionManager,
+    session: Session,
+    tmp_path: Any,
+) -> None:
+    # End-to-end: a stale fingerprint → _build_engine(trust_neighbors=False) → the engine
+    # serves cold-start and never queries the foreign-space index.
+    from shunt.proxy.server import _build_engine
+    from shunt.router.policy import RouterPolicy
+
+    store = OutcomeStore(db_path=str(tmp_path / "fp4.db"))
+    try:
+        index = FakeOutcomeIndex(count=100, neighbors=_knn_neighbors())
+        engine = _build_engine(
+            model_pool,
+            session_manager,
+            store,
+            RouterPolicy(),
+            embedder=FakeEmbedder(),
+            trust_neighbors=False,
+        )
+        engine._outcome_index = index
+        _, reason, _ = engine.decide(session.session_id, "refactor this")
+        assert reason == "stale_embedding_space"
+        assert index.queries == []
     finally:
         store.close()
 

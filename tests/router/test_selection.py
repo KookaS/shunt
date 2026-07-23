@@ -253,3 +253,51 @@ class TestConfidenceWeighting:
         # model-b is cheaper and eligible
         model, reason = rule.select(neighbors, pool, cold_start_active=False)
         assert model == "model-b"
+
+
+class TestUnknownCostNeverSortsCheapest:
+    """With realized costs the cheap model wins; an UNKNOWN cost (surfaced as +inf
+    by the read-back seam) must never sort cheapest and invert the router upward."""
+
+    def _rule(self) -> SelectionRule:
+        return SelectionRule(min_success_rate=0.6, min_samples=3)
+
+    def test_cheap_wins_when_costs_realized(self) -> None:
+        pool = FakeModelPool("cheap", "frontier")
+        neighbors = [_neighbor("cheap", outcome=True, cost=1.0) for _ in range(3)] + [
+            _neighbor("frontier", outcome=True, cost=5.0) for _ in range(3)
+        ]
+        model, reason = self._rule().select(neighbors, pool, cold_start_active=False)
+        assert model == "cheap"
+        assert reason == "cheapest_above_threshold"
+
+    def test_unknown_cost_model_does_not_sort_cheapest(self) -> None:
+        import math
+
+        pool = FakeModelPool("cheap", "frontier")
+        # frontier's cost is UNKNOWN → +inf; a 0.0 here (the cost-unknown bug) makes it cheapest.
+        neighbors = [_neighbor("cheap", outcome=True, cost=2.0) for _ in range(3)] + [
+            _neighbor("frontier", outcome=True, cost=math.inf) for _ in range(3)
+        ]
+        model, _reason = self._rule().select(neighbors, pool, cold_start_active=False)
+        assert model == "cheap"
+
+    def test_zero_weight_unknown_cost_neighbour_does_not_poison_sort(self) -> None:
+        import math
+
+        # Regression: a zero-weight neighbour (distance>=1.0 → weight 0) with UNKNOWN cost
+        # (+inf) makes the term `0 * inf = nan`, poisoning the group's weighted_cost. Since
+        # every nan comparison is False, an unpatched sort leaves the frontier group (inserted
+        # FIRST) as "cheapest_above_threshold" over a genuinely cheaper known-cost model — the
+        # cost-inversion the engine already guards but SelectionRule did not.
+        pool = FakeModelPool("cheap", "frontier")
+        frontier = [
+            _neighbor("frontier", outcome=True, cost=math.inf, distance=0.1),
+            _neighbor("frontier", outcome=True, cost=math.inf, distance=0.1),
+            _neighbor("frontier", outcome=True, cost=math.inf, distance=1.0),  # weight 0 → nan term
+        ]
+        cheap = [_neighbor("cheap", outcome=True, cost=1.0, distance=0.1) for _ in range(3)]
+        # frontier inserted first so a nan-poisoned group would win the stable sort.
+        model, reason = self._rule().select(frontier + cheap, pool, cold_start_active=False)
+        assert model == "cheap"
+        assert reason == "cheapest_above_threshold"

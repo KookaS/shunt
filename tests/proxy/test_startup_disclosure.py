@@ -7,11 +7,17 @@ import logging
 import pytest
 
 from shunt.proxy.server import _log_exploration_disclosure
-from shunt.router.policy import ExplorationPolicy, RouterPolicy
+from shunt.router.policy import CapturePolicy, ExplorationPolicy, RouterPolicy
 
 
-def _policy(*, enabled: bool = True, strategy: str = "knn") -> RouterPolicy:
-    return RouterPolicy(strategy=strategy, exploration=ExplorationPolicy(enabled=enabled))
+def _policy(
+    *, enabled: bool = True, strategy: str = "knn", work_dir: str | None = None
+) -> RouterPolicy:
+    return RouterPolicy(
+        strategy=strategy,
+        exploration=ExplorationPolicy(enabled=enabled),
+        capture=CapturePolicy(work_dir=work_dir),
+    )
 
 
 def test_enabled_but_still_cold_starting_discloses_inert(
@@ -55,15 +61,27 @@ def test_fixed_strategy_never_claims_exploration(caplog: pytest.LogCaptureFixtur
     assert "exploration is OFF" in caplog.text
 
 
-def test_past_cold_start_says_only_upward_exploration_can_fire(
-    caplog: pytest.LogCaptureFixture,
+def test_manual_only_says_only_upward_exploration_can_fire(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The conservative gate banks slack in this process's memory, but the only
-    # outcome-write path (`shunt flag`) is a separate CLI process. So downshift
-    # exploration cannot fire, and reporting conservative_alpha without saying so
-    # reads as though a safety valve regulates something that never runs.
+    # With no work_dir the only outcome-write path (`shunt flag`) is a separate CLI
+    # process, so the in-process gate never gets slack and downshift exploration cannot
+    # fire — reporting conservative_alpha without saying so reads as a live safety valve.
+    monkeypatch.delenv("SHUNT_WORK_DIR", raising=False)
     with caplog.at_level(logging.WARNING):
         _log_exploration_disclosure(_policy(), cold_start_active=False)
 
     assert "only explore UPWARD" in caplog.text
     assert "cheaper model" in caplog.text
+
+
+def test_configured_work_dir_arms_the_downshift_gate(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # With auto-capture configured, verified downshift outcomes feed the in-process gate
+    # at session close, so it CAN open — the "cannot open" disclosure must not appear.
+    with caplog.at_level(logging.WARNING):
+        _log_exploration_disclosure(_policy(work_dir="/repo"), cold_start_active=False)
+
+    assert "ARMED" in caplog.text
+    assert "cannot open" not in caplog.text

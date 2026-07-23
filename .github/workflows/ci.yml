@@ -49,6 +49,26 @@ jobs:
         run: |
           pip install uv
           uv sync --extra dev --extra benchmark
+      - name: Embedding pipeline (faithful fake — no ONNX download)
+        # Proves the real embedding SETUP (embed -> store -> HNSW index -> kNN query) works
+        # end-to-end via a fidelity-checked FakeEmbedder that mirrors the real Embedder's
+        # interface/dims/clipping. SHUNT_DISALLOW_REAL_EMBEDDER makes a real 600MB ONNX
+        # download fail loudly, so this stays hermetic — real models are benchmark/live only.
+        env:
+          SHUNT_DISALLOW_REAL_EMBEDDER: "1"
+        run: >-
+          uv run pytest -v
+          tests/router/test_fake_embedder_fidelity.py
+          tests/router/test_embedding_pipeline_ci.py
+      - name: Packaged config loads from installed package
+        # Locks the install-anywhere guarantee: the wheel bundles embedding.yaml (the
+        # `*.yaml` package-data glob), it resolves via importlib.resources — not a source
+        # tree or CWD — parses, and wires into an Embedder. A packaging regression that
+        # dropped the file from the wheel fails HERE, loudly, instead of at boot on a user's
+        # fresh `pip install`. SHUNT_DISALLOW_REAL_EMBEDDER keeps it hermetic (no ONNX).
+        env:
+          SHUNT_DISALLOW_REAL_EMBEDDER: "1"
+        run: uv run pytest -v tests/config/test_packaged_config_bundling.py
       - name: Test
         run: uv run pytest tests/ -v --tb=short
 

@@ -177,3 +177,44 @@ def test_unembedded_outcomes_do_not_end_cold_start(tmp_path: Path) -> None:
 
     assert store.count_outcomes() == 0
     assert store.count_verified_outcomes() == 0
+
+
+# ── an UNKNOWN cost surfaces as +inf, never a real 0.0 that sorts cheapest ──
+def test_unknown_cost_neighbor_surfaces_as_inf(store: OutcomeStore) -> None:
+    import math
+
+    from shunt.db.store import SessionProvenance
+
+    store.store_session(
+        session_id="u",
+        prompt_text="p",
+        embedding=_vec(0.1),
+        model_chosen="frontier",
+        cost=0.0,  # stored zero, but UNKNOWN — must NOT read as cheapest
+        cache_stats={},
+        duration=1.0,
+        provenance=SessionProvenance(cost_known=False),
+    )
+    store.store_outcome("u", "success", 0.9, aggregated_confidence=0.9)
+
+    neighbors = OutcomeIndexAdapter(store).query(_vec(0.1), k=5)
+    assert len(neighbors) == 1
+    assert math.isinf(neighbors[0].cost)
+
+
+def test_known_zero_cost_neighbor_stays_zero(store: OutcomeStore) -> None:
+    # A genuinely reported 0.0 (fully cached / free) stays 0.0 — only UNKNOWN maps to inf.
+    store.store_session(
+        session_id="z",
+        prompt_text="p",
+        embedding=_vec(0.2),
+        model_chosen="cheap",
+        cost=0.0,
+        cache_stats={},
+        duration=1.0,
+    )
+    store.store_outcome("z", "success", 0.9, aggregated_confidence=0.9)
+
+    neighbors = OutcomeIndexAdapter(store).query(_vec(0.2), k=5)
+    assert len(neighbors) == 1
+    assert neighbors[0].cost == 0.0

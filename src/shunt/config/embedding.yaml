@@ -1,0 +1,27 @@
+# Shipped embedding config — the production embedding-model defaults.
+# Override by writing your own at $SHUNT_CONFIG_DIR/embedding.yaml (or
+# ~/.config/shunt/embedding.yaml). Your file REPLACES this one wholesale; it is
+# not merged key by key. Env vars (SHUNT_EMBEDDER_MODEL, SHUNT_EMBED_MAX_CHARS)
+# win over both.
+#
+# The active model, its dim, and max_chars form the corpus FINGERPRINT. Change any
+# of them and the stored vectors are in a foreign space: the router refuses kNN
+# neighbours and asks you to run `shunt reindex` (which re-embeds the corpus).
+embedding:
+  # A KEY into `models` below (not a raw HF repo). Env SHUNT_EMBEDDER_MODEL wins and
+  # may name either a key here or a model's `repo` string.
+  active: jina-code
+
+  # Part of the fingerprint. 4000 is evidence-tuned (held-out correlation 0.068 -> 0.113)
+  # and bounds the O(n^2) attention allocation. SHUNT_EMBED_MAX_CHARS overrides it.
+  max_chars: 4000
+
+  # The closed set of models the router knows. A third model is one more row here,
+  # not a new mechanism — there is deliberately no URL/S3/plugin source abstraction.
+  models:
+    jina-code: { repo: jinaai/jina-embeddings-v2-base-code, dim: 768, context_length: 8192 }
+    arctic: { repo: Snowflake/snowflake-arctic-embed-m-long, dim: 768, context_length: 2048 }
+
+  # null -> existing SHUNT_EMBED_CACHE_DIR / SHUNT_DATA_DIR resolution. A path here
+  # relocates the ~600MB ONNX cache; SHUNT_EMBED_CACHE_DIR still wins over it.
+  cache_dir: null

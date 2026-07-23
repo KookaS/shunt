@@ -20,11 +20,27 @@ router:
   # `enabled: false` to route on current beliefs only.
   exploration:
     enabled: true
-    prior_alpha: 1.0              # Beta(alpha, beta) prior over per-model success
+    prior_alpha: 1.0              # Beta(alpha, beta) base prior over per-model success
     prior_beta: 1.0
     explore_budget_frac: 0.4      # cumulative cap -> total spend <= ~1.4x exploit-only
     conservative_alpha: 0.1       # safety slack vs the fixed-cheap baseline
     propensity_mc_samples: 100    # logged TS propensity, for off-policy evaluation
+    prior_strength_cap: 20.0      # max pseudo-counts an offline per-model estimate can seed
+
+  # Off-wire automatic outcome capture. With a work_dir set, at each session's close shunt
+  # re-runs THAT repo's test suite (pytest/jest/go/cargo, auto-detected) off the wire and
+  # records the verified pass/fail as a Tier-2 outcome — no human `shunt flag` needed. Unset
+  # ⇒ capture is MANUAL. Runs only where shunt sits alongside the code+tests (`shunt start`
+  # with SHUNT_WORK_DIR); see docs/feedback.md.
+  capture:
+    work_dir: null
+    # work_dirs: { "<tool_identity_hash>": "/path/to/repo" }   # per-tool override map
+
+  # Batch offline re-fit: rebuild the kNN index from the append-only outcome log every
+  # N captured outcomes (0 disables; the boot-time rebuild still runs). Learning is
+  # batch-first — the index is a rebuildable projection, not updated online per outcome.
+  refit:
+    every_n_outcomes: 50
 
   # Which registry models (src/shunt/config/models.yaml) the live router may pick.
   # Empty/absent = every registry model. This is core + the latest frontier tier,

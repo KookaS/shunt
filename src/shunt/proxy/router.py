@@ -20,6 +20,8 @@ from openai import AsyncOpenAI
 from starlette.concurrency import run_in_threadpool
 
 from shunt.models import ModelConfig, ModelPool
+from shunt.models.config import model_fingerprint as _resolve_fingerprint
+from shunt.proxy.wire_signals import WireSignalCollector
 from shunt.session import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -535,6 +537,15 @@ def _openai_message_to_anthropic_content(message: Any) -> list[dict[str, Any]]:
     return blocks or [{"type": "text", "text": ""}]
 
 
+def _response_finish_reason(response: Any) -> str | None:
+    """Raw OpenAI ``finish_reason`` of the first choice, or None when absent."""
+    choices = getattr(response, "choices", None)
+    if not choices:
+        return None
+    choice = choices[0]
+    return getattr(choice, "finish_reason", None) or None
+
+
 def _openai_response_to_anthropic(response: Any) -> dict[str, Any]:
     """Convert an OpenAI-format *ModelResponse* to an Anthropic /v1/messages response dict."""
     choice = response.choices[0] if response.choices and len(response.choices) > 0 else None
@@ -580,6 +591,9 @@ class ProxyRouter:
         self._sessions = session_manager
         self.retry_count = retry_count
         self._engine = engine
+        # Accumulates structured, non-model-authored wire signals (tool_result.is_error,
+        # terminal stop_reason) onto session.metadata — the weak, quarantined Tier-1 prior.
+        self._wire_collector = WireSignalCollector()
         # Serializes the first-turn decision so concurrent first turns of one session
         # cannot both route (which would break the one-decision-per-session guarantee).
         self._decision_lock = threading.Lock()
@@ -623,6 +637,10 @@ class ProxyRouter:
         result = await self._route_with_fallback(openai_kwargs, session)
         response, model_name = result
 
+        # Structured tool-error signals live in the resent request history, so they are
+        # collected the same way whether or not the response streams.
+        self._wire_collector.observe_tool_errors(body, session)
+
         stream = body.get("stream", False)
         if stream:
             tracked = self._track_cache_tax(response, session)
@@ -635,6 +653,9 @@ class ProxyRouter:
         # The label was applied on the OpenAI path only, so Claude Code — the one client
         # that can actually surface it — never saw which model served the turn.
         anthropic_body["model"] = self._label(str(anthropic_body.get("model") or ""))
+        # stop_reason is already Anthropic-normalized; the collector drops loop-reopening
+        # stops (tool_use/pause_turn) so only a terminal close contributes a prior.
+        self._wire_collector.observe_terminal_stop(anthropic_body.get("stop_reason"), session)
         return anthropic_body, model_name, model_name
 
     # ── Internal routing ────────────────────────────────────────────────────
@@ -673,6 +694,12 @@ class ProxyRouter:
         payload = response.model_dump() if hasattr(response, "model_dump") else response
         if isinstance(payload, dict) and payload.get("model"):
             payload["model"] = self._label(str(payload["model"]))
+        # OpenAI has no structured per-tool is_error on the wire, so only the terminal
+        # finish_reason contributes a prior (normalized to the Anthropic vocab so a
+        # loop-reopening tool_calls is dropped by the collector).
+        raw_finish = _response_finish_reason(response)
+        normalized = _ANTHROPIC_STOP_REASON.get(raw_finish, raw_finish) if raw_finish else None
+        self._wire_collector.observe_terminal_stop(normalized, session)
         return payload, model_name, model_name
 
     async def _route_with_fallback(
@@ -796,6 +823,14 @@ class ProxyRouter:
             return None
         return self._engine.cached_embedding(session_id)
 
+    def model_fingerprint(self, model_name: str) -> str | None:
+        """Resolved version fingerprint of *model_name* at route time.
+
+        None only when the name is not in the registry — never a fabricated tag.
+        """
+        config = self._pool.get_model(model_name)
+        return _resolve_fingerprint(config) if config is not None else None
+
     def _decide_via_engine(self, session: Session, prompt_text: str) -> str:
         """Route the first turn through the injected engine and lock the result."""
         assert self._engine is not None
@@ -858,20 +893,28 @@ class ProxyRouter:
         session: Session,
     ) -> AsyncGenerator[Any, None]:
         """Wrap a streaming generator, extracting cache tax from the final chunk."""
+        # try/finally so cost is settled even on an early disconnect: aclose() throws
+        # GeneratorExit at the yield, and a stream that ended having seen NO usage is
+        # cost-UNKNOWN, not a free 0.0 — flag it (the None path) so persist writes
+        # cost_known=0 rather than a fabricated zero that sorts cheapest in the read-back.
         last_usage = None
-        async for chunk in gen:
-            if hasattr(chunk, "usage") and chunk.usage:
-                last_usage = chunk.usage
-            yield chunk
-        if last_usage is not None:
-            self._accumulate_cost(session, last_usage)
-            details = getattr(last_usage, "prompt_tokens_details", None)
-            self._record_cache_turn(
-                session,
-                float(getattr(details, "cached_tokens", 0) or 0),
-                getattr(last_usage, "prompt_tokens", 0) or 0,
-            )
-            self._log_cache_metrics(session)
+        try:
+            async for chunk in gen:
+                if hasattr(chunk, "usage") and chunk.usage:
+                    last_usage = chunk.usage
+                yield chunk
+        finally:
+            if last_usage is not None:
+                self._accumulate_cost(session, last_usage)
+                details = getattr(last_usage, "prompt_tokens_details", None)
+                self._record_cache_turn(
+                    session,
+                    float(getattr(details, "cached_tokens", 0) or 0),
+                    getattr(last_usage, "prompt_tokens", 0) or 0,
+                )
+                self._log_cache_metrics(session)
+            else:
+                self._accumulate_cost(session, None)
 
     @staticmethod
     def _extract_prompt_tokens(response: Any) -> int:

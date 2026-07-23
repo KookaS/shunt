@@ -54,6 +54,34 @@ class ExplorationPolicy(BaseModel):
     explore_budget_frac: float = Field(default=0.4, ge=0.0)
     conservative_alpha: float = Field(default=0.1, ge=0.0, le=1.0)
     propensity_mc_samples: int = Field(default=100, ge=0)
+    # Cap on the offline-seeded prior's pseudo-count strength (empirical-Bayes shrinkage):
+    # even a large model history contributes at most this many prior observations, so it
+    # regularizes the sparse local neighborhood rather than swamping it.
+    prior_strength_cap: float = Field(default=20.0, ge=0.0)
+
+
+class CapturePolicy(BaseModel):
+    """Off-wire capture config: where the router re-runs the repo's tests.
+
+    ``work_dir`` is a single repo root; ``work_dirs`` maps ``tool_identity`` → repo.
+    Both are operator config only — never a wire path (RCE via subprocess cwd).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    work_dir: str | None = None
+    work_dirs: dict[str, str] = Field(default_factory=dict)
+
+
+class RefitPolicy(BaseModel):
+    """Batch offline re-fit cadence: rebuild the kNN index from the append-only log."""
+
+    # Learning is batch-first (research pattern #4) — the index is a rebuildable projection,
+    # re-fit every every_n_outcomes captured outcomes. 0 disables the trigger (the boot-time
+    # rebuild still runs); mid-decision safety is the store lock.
+    model_config = ConfigDict(extra="forbid")
+
+    every_n_outcomes: int = Field(default=50, ge=0)
 
 
 class RouterPolicy(BaseModel):
@@ -64,6 +92,8 @@ class RouterPolicy(BaseModel):
     strategy: str = "knn"
     policy: KnnPolicy = Field(default_factory=KnnPolicy)
     exploration: ExplorationPolicy = Field(default_factory=ExplorationPolicy)
+    capture: CapturePolicy = Field(default_factory=CapturePolicy)
+    refit: RefitPolicy = Field(default_factory=RefitPolicy)
     # Which registry models are live-routable. Empty = every model in models.yaml
     # (backward compatible). Each name must exist in the registry; that cross-check
     # happens at ModelPool wiring (this schema has no registry access). Benchmark

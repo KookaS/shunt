@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Compare general (char n-gram) vs code-specific (word) embedding spaces.
+"""Compare two REAL embedding spaces — general (Arctic) vs code-specific (Jina-code)."""
 
-Simulates two TF-IDF pipelines and plots kNN-neighbor Jaccard overlap and
-optimal-model agreement at k=5/10 (reports/embedding_compare.png).
-"""
+# Embeds the tasks with the shipped fastembed models (no proxy) and plots kNN-neighbour
+# Jaccard overlap + optimal-model agreement at k=5/10 (reports/embedding_compare.png).
 
 from __future__ import annotations
 
@@ -15,262 +14,15 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
-from sklearn.feature_extraction.text import TfidfVectorizer  # noqa: E402
 from sklearn.metrics.pairwise import cosine_similarity  # noqa: E402
 
 from benchmark import config  # noqa: E402
+from benchmark.routing.strategies.knn import _embed_texts  # noqa: E402
+from shunt.router.embedder import Embedder  # noqa: E402
 
-
-def _code_keywords() -> list[str]:
-    return [
-        "implement",
-        "write",
-        "function",
-        "class",
-        "method",
-        "interface",
-        "type",
-        "generic",
-        "template",
-        "async",
-        "await",
-        "promise",
-        "callback",
-        "closure",
-        "lambda",
-        "decorator",
-        "context",
-        "manager",
-        "iterator",
-        "generator",
-        "thread",
-        "lock",
-        "mutex",
-        "atomic",
-        "concurrent",
-        "parallel",
-        "cache",
-        "memoize",
-        "buffer",
-        "pool",
-        "queue",
-        "stack",
-        "heap",
-        "tree",
-        "graph",
-        "list",
-        "map",
-        "filter",
-        "reduce",
-        "sort",
-        "search",
-        "merge",
-        "parse",
-        "serialize",
-        "deserialize",
-        "encode",
-        "decode",
-        "compress",
-        "encrypt",
-        "hash",
-        "index",
-        "query",
-        "join",
-        "select",
-        "insert",
-        "update",
-        "delete",
-        "recursive",
-        "iterate",
-        "traverse",
-        "validate",
-        "normalize",
-        "middleware",
-        "handler",
-        "router",
-        "pipeline",
-        "stream",
-        "event",
-        "observer",
-        "pubsub",
-        "singleton",
-        "factory",
-        "builder",
-        "adapter",
-        "proxy",
-        "decorator",
-        "composite",
-        "strategy",
-        "python",
-        "typescript",
-        "rust",
-        "golang",
-        "shell",
-        "bash",
-        "sql",
-        "react",
-        "hook",
-        "http",
-        "rest",
-        "grpc",
-        "websocket",
-        "tcp",
-        "udp",
-        "array",
-        "tuple",
-        "record",
-        "struct",
-        "enum",
-        "union",
-        "optional",
-        "error",
-        "exception",
-        "result",
-        "option",
-        "unwrap",
-        "macro",
-        "derive",
-        "trait",
-        "lifetime",
-        "borrow",
-        "ownership",
-        "goroutine",
-        "channel",
-        "defer",
-        "panic",
-        "recover",
-        "cte",
-        "window",
-        "partition",
-        "lateral",
-        "pivot",
-        "funnel",
-        "import",
-        "export",
-        "module",
-        "package",
-        "dependency",
-        "test",
-        "assert",
-        "mock",
-        "stub",
-        "fixture",
-        "coverage",
-        "benchmark",
-        "profile",
-        "trace",
-        "log",
-        "monitor",
-        "alert",
-        "config",
-        "env",
-        "secret",
-        "token",
-        "auth",
-        "session",
-    ]
-
-
-def _code_stop_words() -> list[str]:
-    return [
-        "a",
-        "an",
-        "the",
-        "is",
-        "are",
-        "was",
-        "were",
-        "be",
-        "been",
-        "being",
-        "have",
-        "has",
-        "had",
-        "do",
-        "does",
-        "did",
-        "will",
-        "would",
-        "could",
-        "should",
-        "may",
-        "might",
-        "shall",
-        "can",
-        "need",
-        "dare",
-        "ought",
-        "used",
-        "to",
-        "of",
-        "in",
-        "for",
-        "on",
-        "with",
-        "at",
-        "by",
-        "from",
-        "as",
-        "into",
-        "through",
-        "during",
-        "before",
-        "after",
-        "above",
-        "below",
-        "between",
-        "out",
-        "off",
-        "over",
-        "under",
-        "again",
-        "further",
-        "then",
-        "once",
-        "here",
-        "there",
-        "when",
-        "where",
-        "why",
-        "how",
-        "all",
-        "each",
-        "every",
-        "both",
-        "few",
-        "more",
-        "most",
-        "other",
-        "some",
-        "such",
-        "no",
-        "nor",
-        "not",
-        "only",
-        "own",
-        "same",
-        "so",
-        "than",
-        "too",
-        "very",
-        "just",
-        "because",
-        "but",
-        "and",
-        "or",
-        "if",
-        "while",
-        "that",
-        "this",
-        "these",
-        "those",
-        "it",
-        "its",
-        "which",
-        "who",
-        "whom",
-        "what",
-    ]
+# The general-purpose comparison model. Jina-code (the shipped router default) is the
+# code-specific space; Arctic is a general-text embedder run through the SAME Embedder.
+_ARCTIC_MODEL = "Snowflake/snowflake-arctic-embed-m-long"
 
 
 def load_matrix(path: Path) -> dict:
@@ -296,44 +48,12 @@ def jaccard_overlap(neighbors_a: list[int], neighbors_b: list[int]) -> float:
     return len(set_a & set_b) / len(set_a | set_b)
 
 
-def build_feature_pipelines(
-    task_descs: list[str],
-    code_keywords: list[str] | None = None,
-    code_stop_words: list[str] | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    if code_keywords is None:
-        code_keywords = _code_keywords()
-    if code_stop_words is None:
-        code_stop_words = _code_stop_words()
-
-    arctic_vec = TfidfVectorizer(
-        analyzer="char",
-        ngram_range=(2, 4),
-        max_features=384,
-        sublinear_tf=True,
-    )
-    arctic_feats = arctic_vec.fit_transform(task_descs).toarray()
-
-    jina_vec = TfidfVectorizer(
-        analyzer="word",
-        ngram_range=(1, 3),
-        max_features=1024,
-        sublinear_tf=True,
-        stop_words=code_stop_words,
-        vocabulary=code_keywords,
-    )
-    try:
-        jina_feats = jina_vec.fit_transform(task_descs).toarray()
-    except ValueError:
-        jina_vec = TfidfVectorizer(
-            analyzer="word",
-            ngram_range=(1, 3),
-            max_features=1024,
-            sublinear_tf=True,
-            stop_words=code_stop_words,
-        )
-        jina_feats = jina_vec.fit_transform(task_descs).toarray()
-
+def build_feature_pipelines(task_descs: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    """Embed the tasks in two REAL fastembed spaces: Arctic (general) and Jina-code."""
+    # Both are shipped models the router itself can run — never a TF-IDF stand-in.
+    arctic = Embedder(model_name=_ARCTIC_MODEL)
+    arctic_feats = np.asarray(arctic.embed_batch(task_descs), dtype=np.float32)
+    jina_feats = _embed_texts(task_descs)  # jina-embeddings-v2-base-code (shipped default)
     return arctic_feats, jina_feats
 
 
@@ -379,13 +99,11 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
 
     print(f"Loaded {len(task_ids)} tasks from {matrix_path}")
 
-    print("Building simulated embedding spaces...")
-    arctic_feats, jina_feats = build_feature_pipelines(
-        task_descs, _code_keywords(), _code_stop_words()
-    )
+    print("Building real embedding spaces (Arctic + Jina-code, fastembed)...")
+    arctic_feats, jina_feats = build_feature_pipelines(task_descs)
 
-    print(f"  Arctic (char n-grams, 384d): {arctic_feats.shape}")
-    print(f"  Jina-code (word-level, {jina_feats.shape[1]}d): {jina_feats.shape}")
+    print(f"  Arctic (general, real): {arctic_feats.shape}")
+    print(f"  Jina-code (code-specific, real): {jina_feats.shape}")
 
     overlap_stats: dict[int, dict[str, float]] = {}
     for k in (5, 10):
@@ -413,7 +131,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         }
 
         print(f"  k={k}:")
-        print(f"    Mean neighbor overlap (Jaccard): {mean_overlap:.4f} \u00b1 {std_overlap:.4f}")
+        print(f"    Mean neighbor overlap (Jaccard): {mean_overlap:.4f} ± {std_overlap:.4f}")
         print(f"    Range: [{min_overlap:.4f}, {max_overlap:.4f}]")
         hpct = 100 * n_high_overlap // len(task_ids)
         lpct = 100 * n_low_overlap // len(task_ids)
@@ -481,6 +199,15 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     print(f"\nPlot written to {plot_path}")
 
 
+# Validated categorical palette (dataviz skill reference instance). The Arctic /
+# Jina-code / Both trio uses the first three slots — they clear the all-pairs CVD
+# floor (worst ΔE 9.2) with the direct value labels supplying the relief channel.
+_BLUE = "#2a78d6"  # slot 1
+_ORANGE = "#eb6834"  # slot 2
+_AQUA = "#1baf7a"  # slot 3
+_SURFACE = "#fcfcfb"  # chart surface — used as the inter-bar gap (no black borders)
+
+
 def _plot_comparison(
     plot_path: Path,
     matrix_path: Path,
@@ -494,15 +221,18 @@ def _plot_comparison(
     ks = sorted(overlap_stats.keys())
     x = np.arange(len(ks))
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6.4))
 
     means = [overlap_stats[k]["mean"] for k in ks]
     stds = [overlap_stats[k]["std"] for k in ks]
-    bars = ax1.bar(x, means, yerr=stds, capsize=6, color="#4C72B0", edgecolor="black", width=0.5)
-    for bar, m in zip(bars, means, strict=True):
+    bars = ax1.bar(
+        x, means, yerr=stds, capsize=6, color=_BLUE, edgecolor=_SURFACE, linewidth=1.5, width=0.5
+    )
+    for bar, m, s in zip(bars, means, stds, strict=True):
+        # Sit the value label clear ABOVE the ± std whisker cap, never on top of it.
         ax1.text(
             bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + 0.01,
+            bar.get_height() + s + 0.03,
             f"{m:.2f}",
             ha="center",
             va="bottom",
@@ -511,26 +241,33 @@ def _plot_comparison(
         )
     ax1.set_xticks(x)
     ax1.set_xticklabels([f"k={k}" for k in ks])
-    ax1.set_ylabel("Mean neighbor-set Jaccard (± std)")
+    ax1.set_xlabel("k  (number of nearest neighbours retrieved)")
+    ax1.set_ylabel("mean neighbour-set Jaccard overlap  (± std)")
     ax1.set_ylim(0, 1.05)
-    ax1.set_title("Arctic vs Jina-code neighbor overlap")
+    ax1.set_title(
+        "Do the two spaces retrieve the SAME neighbours?\n"
+        "Jaccard overlap of the k-NN sets  (1.0 = identical, 0 = disjoint)",
+        fontsize=11,
+    )
     ax1.grid(True, axis="y", alpha=0.3)
     ax1.set_axisbelow(True)
 
     width = 0.25
     series = [
-        ("Arctic", "arctic", "#4C72B0"),
-        ("Jina-code", "jina", "#DD8452"),
-        ("Both", "both", "#55A868"),
+        ("Arctic (general, 768d)", "arctic", _BLUE),
+        ("Jina-code (code, 768d)", "jina", _ORANGE),
+        ("Both agree", "both", _AQUA),
     ]
     for idx, (label, key, color) in enumerate(series):
         vals = [100 * agreement_stats[k][key] / n_tasks for k in ks]
         offset = (idx - 1) * width
-        b = ax2.bar(x + offset, vals, width, label=label, color=color, edgecolor="black")
+        b = ax2.bar(
+            x + offset, vals, width, label=label, color=color, edgecolor=_SURFACE, linewidth=1.5
+        )
         for bar, v in zip(b, vals, strict=True):
             ax2.text(
                 bar.get_x() + bar.get_width() / 2,
-                bar.get_height() + 0.5,
+                bar.get_height() + 0.8,
                 f"{v:.0f}%",
                 ha="center",
                 va="bottom",
@@ -538,18 +275,38 @@ def _plot_comparison(
             )
     ax2.set_xticks(x)
     ax2.set_xticklabels([f"k={k}" for k in ks])
-    ax2.set_ylabel("Optimal model in neighbors (% of tasks)")
-    ax2.set_title("Optimal-model agreement among neighbors")
-    ax2.legend(fontsize=9)
+    ax2.set_xlabel("k  (number of nearest neighbours retrieved)")
+    ax2.set_ylabel("optimal model present in neighbourhood  (% of tasks)")
+    ax2.set_ylim(0, 112)  # headroom for a horizontal legend clear of the ~90% bars
+    ax2.set_title(
+        "Does the neighbourhood contain each task's optimal model?\n"
+        "higher = better  (the cheapest passing model also wins nearby tasks)",
+        fontsize=11,
+    )
+    ax2.legend(fontsize=9, title="embedding space", loc="upper center", ncol=3, framealpha=0.95)
     ax2.grid(True, axis="y", alpha=0.3)
     ax2.set_axisbelow(True)
 
     fig.suptitle(
-        f"Embedding comparison — {n_tasks} tasks ({matrix_path.name})",
+        f"General vs code-specific embedding neighbourhoods — {n_tasks} tasks ({matrix_path.name})",
         fontsize=13,
         fontweight="bold",
     )
-    fig.tight_layout()
+    # These ARE the real shipped fastembed models, not proxies.
+    fig.text(
+        0.5,
+        0.005,
+        "Real fastembed vectors: Arctic (Snowflake arctic-embed-m-long, general) vs Jina-code "
+        "(jina-embeddings-v2-base-code, the shipped router default) — actual 768-d embeddings, "
+        "no TF-IDF proxy.",
+        ha="center",
+        va="bottom",
+        fontsize=8,
+        style="italic",
+        color="#52514e",
+        wrap=True,
+    )
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
     plot_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(plot_path), dpi=150)
     plt.close(fig)

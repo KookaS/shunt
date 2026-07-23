@@ -1,0 +1,21 @@
+# Owner-labeled calibration set — ground truth for validating the automatic labeler.
+#
+# HOW TO USE
+#   1. Copy this file to `labels.yaml` in the same directory (labels.yaml is the file the
+#      eval script reads by default; this template stays committed and untouched).
+#   2. For each routed session you have judged, add a line under `labels:` mapping its
+#      session_id to "good" (the run genuinely succeeded) or "bad" (it did not).
+#   3. Aim for at least 30 entries (40-50 is better); over-sample the "bad" minority.
+#      The set MUST include "bad" examples — with none, the false-positive-rate bound
+#      has an empty denominator and cannot flag a labeler that calls everything good.
+#
+# PRIVACY: session_id ONLY. Never paste prompts, diffs, or any raw text here — this file
+#          maps ids to a good/bad label and nothing else, so no PII can leak into it.
+#
+# The `null` placeholders below show the shape and are ignored by the eval script until
+# you replace them with "good" or "bad" (or delete them and add your own session_ids).
+
+labels:
+  REPLACE_WITH_SESSION_ID_0001: null   # good | bad
+  REPLACE_WITH_SESSION_ID_0002: null   # good | bad
+  REPLACE_WITH_SESSION_ID_0003: null   # good | bad

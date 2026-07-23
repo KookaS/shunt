@@ -13,6 +13,7 @@ def build_provenance(  # noqa: PLR0913 (config-heavy provenance builder, one arg
     tier_escalation_reason: str | None = None,
     router_propensity: float = 1.0,
     candidate_model_scores: dict[str, float] | None = None,
+    downshift: bool = False,
 ) -> dict[str, Any]:
     """Build a JSON-serializable decision provenance dict."""
     top_k_neighbor_ids: list[str] = []
@@ -30,4 +31,7 @@ def build_provenance(  # noqa: PLR0913 (config-heavy provenance builder, one arg
         "tier_escalation_reason": tier_escalation_reason,
         "router_propensity": router_propensity,
         "candidate_model_scores": candidate_model_scores or {},
+        # Decided-once at route time; read back at capture to feed the ConservativeGate,
+        # which banks slack only from verified *downshift*-exploration outcomes.
+        "downshift": downshift,
     }

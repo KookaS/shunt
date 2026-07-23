@@ -212,15 +212,16 @@ class TestLiveGating:
 
 
 class TestCostAggregation:
-    """Real cost prefers litellm's number, falling back to the provider usage.cost."""
+    """Real cost prefers the provider's cache-aware usage.cost, falling back to litellm's."""
 
-    def test_call_cost_uses_litellm_cost_when_priced(self):
-        # A direct route (deepseek) that litellm CAN price: use its cost, ignore usage.
-        assert infer._call_cost({"cost": 0.004}, {"cost": 999.0}) == 0.004
+    def test_call_cost_prefers_provider_usage_cost_when_present(self):
+        # The provider's own cache-aware cost is authoritative; a litellm static-table
+        # figure must not shadow it (that would put a non-cache-aware number on the path).
+        assert infer._call_cost({"cost": 0.004}, {"cost": 1.59e-05}) == 1.59e-05
 
-    def test_call_cost_falls_back_to_provider_usage_cost(self):
-        # A requesty route litellm can't price (cost=0) ⇒ use the real usage.cost.
-        assert infer._call_cost({"cost": 0.0}, {"cost": 1.59e-05}) == 1.59e-05
+    def test_call_cost_falls_back_to_litellm_when_provider_absent(self):
+        # A route the provider returns no usage.cost for ⇒ fall back to litellm's estimate.
+        assert infer._call_cost({"cost": 0.004}, {"cost": 0.0}) == 0.004
 
     def test_call_cost_zero_when_neither_present(self):
         assert infer._call_cost({}, {}) == 0.0

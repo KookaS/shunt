@@ -14,6 +14,17 @@ from tests.mock_openai_server import MockOpenAIServer, MockSignature
 
 
 @pytest.fixture(autouse=True)
+def _disallow_real_embedder(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse a real ONNX load for the whole unit suite (real-only in benchmark/live)."""
+    # A unit test that reaches ``Embedder._load_model`` instead of injecting a fake hits a
+    # loud error rather than silently downloading ~600MB. A test that legitimately exercises
+    # the load path with a mocked fastembed unsets this locally.
+    from shunt.router.embedder import DISALLOW_REAL_EMBEDDER_ENV
+
+    monkeypatch.setenv(DISALLOW_REAL_EMBEDDER_ENV, "1")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_benchmark_config_caches() -> Iterator[None]:
     """Snapshot/restore ``benchmark.config``'s load-once module caches per test."""
     # _config/_pricing are intentional load-once globals in production, but a test

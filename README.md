@@ -27,31 +27,50 @@
 </p>
 <!-- Animated WebP where supported (GitHub renders it); the static hero.svg is the fallback/placeholder. -->
 
-**One cheap model for the routine 80%. A frontier model for the hard tail. The
-line learned from your own passing tests — not a guess.**
+**One cheap model for the routine 80%, a frontier model for the hard tail — the
+line learned from your own passing tests, not a guess.**
 
-Shunt is a local, cache-safe router that sits between your coding agent and the
-model API. Point your agent at it with one environment variable, and Shunt aims
-to send each request to the cheapest model that can actually do the job —
-cutting the bill without cutting quality, and proving it with a benchmark rather
-than a pitch.
-
-
+Shunt is a local, cache-safe router between your coding agent and the model API.
+Point your agent at it with one env var; it routes each request to the cheapest
+model that can do the job — cutting the bill without cutting quality, and proving
+it with a benchmark.
 
 ## The bet
 
 Most coding-agent requests are routine work a cheap open-weight model handles
-fine. Only a hard tail genuinely needs a frontier model. Today your agent pays
-frontier prices for all of it.
+fine; only a hard tail needs a frontier model — yet today your agent pays
+frontier prices for all of it. Shunt learns which is which from *verified
+outcomes* (did the tests pass?), not a model's own confidence, and routes
+accordingly. The hard, valuable part is that **decision**; the multi-provider
+plumbing is commoditizing to free.
 
-Shunt's bet is that a router can learn which is which — from *verified outcomes*
-(did the tests pass? did it typecheck?), not from a model's own confidence — and
-route accordingly. The hard, valuable part is that **decision**. The
-multi-provider plumbing is commoditizing to free; the judgment of *which model
-for which task*, grounded in your own results and safe for prompt caches, is
-what doesn't exist yet as a shippable, self-hosted, Apache-2.0 product.
+This is a **first step, not a one-time implementation**. Long term we expect to
+run more than one model per task and to keep adding routing algorithms, more
+evaluation data, and more features — a continuous project aimed at the best
+cost-effective success rate for any task. Prior work (e.g. the academic
+[ACRouter](https://arxiv.org/abs/2606.22902)) shows a learned, outcome-grounded
+router can match frontier quality at lower cost; we aim to bring that to every CLI
+and agentic tool, and to prove it on our own SWE-bench-based
+[benchmark](#benchmark) rather than borrowed numbers.
 
-That's what Shunt is being built to be.
+**Goal: find the cheapest model for your task, without losing quality.**
+
+## How it's different
+
+Most routers sit at one of two extremes. **Model fusion** (mixture-of-agents,
+ensembling) runs several models per request and combines their answers — it chases
+frontier-level quality, but calling many models costs *more* than calling one.
+**Rule-based routing** (regexes, keyword patterns) is cheap but blunt: a handful of
+hand-written rules can't capture what actually makes a request hard, so they
+mis-route the moment a query doesn't fit the pattern. Neither is really built for
+*cost* — one overspends for quality, the other is too coarse to trust.
+
+Shunt takes a third path. A **locally-hosted ML model** (a task embedding +
+nearest-neighbour lookup) picks the model for each task, and the pick is grounded
+in *verified outcomes* — did your tests pass? — not a hand-written rule or a
+model's own confidence. The approach is measured on our own SWE-bench benchmark,
+and it adapts to *your* work: the more you use Shunt, the more outcomes it has to
+learn from. All of it runs on your machine — **no data collection, no telemetry.**
 
 ## System Capabilities
 
@@ -68,9 +87,9 @@ What the platform is built to support today:
 - 🧠 **A decision core.** Task embedding → nearest-neighbour lookup → a
   cheapest-that-succeeds selection rule, plus pluggable strategies (fixed, kNN,
   blended, cascade, oracle).
-- 🚧 **Outcome verification.** Async, auto-detected test and typecheck verifiers
-  that grade a result without blocking the response. They are not yet wired into
-  the live loop, so their grades do not feed the next decision yet.
+- ✅ **Outcome verification.** Async, auto-detected test and typecheck verifiers
+  that grade a result without blocking the response at session close. Verified
+  outcomes feed the next decision via the kNN index and exploration priors.
 - 🔒 **Cache-safety as a design center.** Decisions land at task and session
   boundaries, never mid-cached-turn, so normal operation never silently
   re-reads a cached conversation at full price. The one exception is an upstream
@@ -83,56 +102,35 @@ What the platform is built to support today:
 - 🛡️ **Bring-your-own keys, zero telemetry.** Your provider accounts, your keys,
   localhost-bound by default. Nothing is phoned home, replayed, or resold.
 
-## Current Status
+## Current status
 
-**Pre-alpha.** The proxy runs and calls the router to decide the session model on
-the first turn; the routing intelligence is designed, unit-tested, and validated
-offline. Outcomes can be manually recorded via `shunt flag <session_id> good|bad`,
-but automatic capture from test runs is not yet wired. With no outcomes recorded,
-the router cold-starts to a cheap default every session. The shipped `router.yaml`
-also enables exploration, but with no outcomes it never fires and costs nothing extra.
-Honestly:
+**Pre-alpha.** The proxy runs and routes the session model on the first turn, and
+the learning loop is live: outcomes are recorded automatically at session close
+via off-wire test execution, or manually via `shunt flag`, and
+feed the next decision. With no outcomes yet, the router cold-starts to the cheap
+default. The immediate focus is the **kill gate** — dogfood on a real Claude Code /
+opencode workflow and ship routing only if it beats fixed-frontier-with-caching at
+equal quality.
 
-**✅ Achieved**
+**Achieved**
 
-- ✅ **Live proxy** — a single-process, localhost-bound server exposing
-  `/health`, `/v1/models`, `/v1/chat/completions`, and `/v1/messages`, speaking
-  both wire formats and forwarding to a cheap default model.
-- ✅ **Decision transparency** — every response carries an `X-Shunt-Decision`
-  header naming the model and the reason.
-- ✅ **Model registry** — multi-provider, tiered, with enable/disable and
-  fallback, driving the benchmark today.
-- ✅ **Offline benchmark harness** — routing strategies scored against
-  SWE-bench-Verified tasks judged by their own tests, six models spanning >50×
-  in output price.
-- ✅ **~18 tool integrations** — copy-paste config plus a dry-run handshake that
-  proves the wiring without spending a cent.
-- ✅ **Published distribution** — `shunt-router` on PyPI (`pip install`) and
-  `ghcr.io/kookas/shunt-router` on Docker, released on tag with a boot-smoke and
-  a live-index install check before it ships.
-- ✅ **Hosted docs** — [kookas.github.io/shunt](https://kookas.github.io/shunt/),
-  built strict (broken links fail the build) and deployed on every docs change.
+- **Live proxy**: localhost-bound server speaking both the OpenAI and Anthropic wire formats.
+- **Decision transparency**: every response carries an `X-Shunt-Decision` header (model + reason).
+- **Model registry**: multi-provider, tiered, with enable/disable and a fallback chain.
+- **Offline benchmark**: routing strategies scored on SWE-bench-Verified tasks judged by their own tests.
+- **~18 tool integrations**: copy-paste config plus a dry-run handshake that proves the wiring for free.
+- **Published distribution**: `shunt-router` on PyPI and `ghcr.io/kookas/shunt-router` on Docker.
+- **Hosted docs**: [kookas.github.io/shunt](https://kookas.github.io/shunt/), built strict.
+- **Live learning loop**: automatic off-wire outcome capture (plus manual `shunt flag`) that updates the kNN index, exploration priors, and escalation gate.
 
-**🚧 In progress**
+**Future**
 
-- 🚧 **The kill-gate experiment** — dogfood the router on a real Claude
-  Code / opencode workflow and measure it against fixed-frontier-with-caching.
-  Ship routing only if it wins.
-- 🚧 **Baseline measurement** — adaptive frontier collection with a doubly-robust
-  (PPI++/AIPW) cost estimator; partial coverage of the 500-task suite today.
-
-**⬜ Not yet**
-
-- ⬜ **The live learning loop** — verifiers writing outcomes the router reads
-  from to learn beyond cold-start, plus per-key spend caps.
-- ⬜ **Verify-and-escalate live** — try cheap, check the result, escalate on
-  failure with an upfront recompute-cost quote.
-
-An honest early result worth stating: offline, the prompt-embedding difficulty
-signal carried clear signal on QA/reasoning workloads but came out **near chance
-on agentic coding** — the workload we care about. That doesn't kill the project
-(the cache-safe proxy and the verify-and-escalate path don't depend on it), but
-it's why routing goes live only when a measurement earns it, not before.
+- **More routing algorithms** — kNN is only the first; we'll try and benchmark
+  others and pick the best router for the task.
+- **CLI / UI** to monitor and manage Shunt.
+- **Low-level performance** work on the hot path.
+- **Mid-session model adaptation** — if a session drifts in difficulty, re-adjust the model.
+- **Enterprise suite** — audit, RBAC, monitoring, and more.
 
 ## Quick start
 
@@ -170,26 +168,24 @@ without spending a cent — lives in
 
 ## How the decision works
 
-The intended mechanism is k-nearest-neighbours over task embeddings: embed the
-task, find similar past tasks with known pass/fail outcomes, and pick the
-cheapest model that succeeded on work like it. kNN over frozen embeddings has
-matched or beaten learned routers at lower sample complexity on published
-benchmarks — a fine-tuned model is overkill to start. The real lever is the
-labeled `(task → verified outcome)` store, not the model class.
+Shunt runs a **Context → Action → Feedback** loop: it sees the task (context),
+routes it to a model (action), then records a verified outcome at session close
+(feedback) that sharpens the next route. Today the routing algorithm is
+k-nearest-neighbours over task embeddings — embed the task, find similar past
+tasks with known pass/fail outcomes, pick the cheapest model that succeeded on
+work like it — because kNN matches or beats learned routers at lower sample
+complexity to start. The algorithm is **not fixed**: as the project grows we'll
+pick the best router for the task. The real lever is the labeled
+`(task → verified outcome)` store, not the model class.
 
 Verification is what grounds it: async test and typecheck runs grade each result
 and inform the *next* decision. Escalation, when it comes, decides at task and
 session boundaries — never mid-cached-turn — and quotes the recompute cost
-upfront.
+upfront. See [docs/feedback.md](docs/feedback.md) for the full loop.
 
 ## Measured, not marketed
 
-The decision is the whole product, so we hold it to a pre-registered kill gate:
-**beat fixed-frontier-with-caching at equal quality on a real coding workflow, or
-don't ship the router.** That gate has not been cleared yet. Published evidence
-puts single-turn code-gen savings at 15–30%, and the one study on *agentic*
-Claude Code found no benefit — so we measure our own workflow before quoting any
-number. There is no "beats Opus" claim here because we haven't earned one.
+Prior work is mixed, routing can cut cost at matched quality on some workloads, and the one study on *agentic* Claude Code found no benefit — so we don't quote anyone else's number. We measure our own workflow on our own [benchmark](#benchmark), and there is no "beats Opus" claim here because we haven't earned one on our own data.
 
 Running a frontier model on every task to set that bar is expensive, so Shunt
 collects outcomes adaptively — cheap and mid models on every task, the frontier
@@ -198,6 +194,45 @@ baseline with a doubly-robust estimator whose validity rests on that audit. The
 benchmark can *reject* a bad strategy; it can't *prove* a good one works in
 production, which is exactly why the kill gate is measured on a live workflow.
 See [`docs/benchmark.md`](docs/benchmark.md).
+
+## Benchmark
+
+We back every claim with our own benchmark: routing strategies scored on
+SWE-bench-Verified tasks judged by their own tests — reward (quality − cost),
+bootstrap confidence intervals, and a Pareto check against a perfect-information
+oracle. Method and how to run it: [`docs/benchmark.md`](docs/benchmark.md). These
+are our own runs and grow as the suite scales; contributions are welcome — please
+ask first ([Contributing](#contributing)).
+
+<details>
+<summary><b>Key plots</b> (click to expand)</summary>
+
+<br>
+
+**Strategy comparison** — pass rate (%) vs cost ($) per strategy, with the
+perfect-information oracle marked. *Look for:* a strategy that is **high-performing
+and cheap** — up near the oracle's pass rate but well left of the frontier
+baseline's cost. A good router beats always-cheap on quality and always-frontier on
+cost; the oracle is the ceiling.
+
+![Strategy comparison](benchmark/routing/reports/strategy_comparison.png)
+
+**Cumulative regret** — reward lost against the oracle's choices, accumulated over
+the run. *Look for:* a **low, flat line** hugging the bottom — that means the
+strategy tracks the oracle's picks. A steadily climbing line means costly mis-routes;
+the steeper the slope, the worse.
+
+![Cumulative regret](benchmark/routing/reports/cumulative_regret.png)
+
+**Embedding routing map** — a 2-D PCA of the **real** jina prompt embeddings (the
+same `jina-embeddings-v2-base-code` the router ships), each task colored by its
+measured `p_solve`. *Look for:* whether **hard (dark) and easy (bright) tasks
+separate**. They don't — difficulty intermixes across the embedding space, which is
+the near-chance signal we stay honest about.
+
+![Embedding routing map](benchmark/routing/reports/embedding_routing_map.png)
+
+</details>
 
 ## Why build it in the open
 
@@ -214,33 +249,17 @@ tool-agnostic, self-hosted, and Apache-2.0 all at once.
 - 🔐 **Secure because it holds your keys.** Localhost-bind by default, no exposed
   control plane, keys kept out of logs, dependencies pinned and locked.
 
-## Roadmap
-
-Where Shunt is headed, in order:
-
-1. **Wire routing onto the live path** — move the validated offline decision
-   (embed + kNN, cache-aware task-level selection) into the proxy, gated on
-   clearing the kill gate on a real workflow.
-2. **The learning loop** — async verifiers writing outcomes to a local store the
-   router reads from; per-key spend caps; graceful handling of models added or
-   pulled.
-3. **Reach and control** — verify-and-escalate on the live path with an upfront
-   recompute-cost quote, a pluggable-policy extension API, and bring-your-own
-   eval metric.
-
-Further out: a plugin ecosystem for third-party policies and verifiers, more
-providers on demand, and a faster runtime if concurrency calls for it.
-
 ## Repository layout
 
 ```
 ├── src/shunt/             Router package
-│   ├── cli.py             CLI entry point (shunt start, explain, flag, version)
+│   ├── cli.py             CLI entry point (shunt start, explain, flag, reindex, version)
 │   ├── proxy/             HTTP server: /health, /v1/chat/completions, /v1/messages, /v1/models
 │   │                      (calls router to decide model; cold-starts to cheap default)
 │   ├── router/            Decision core — embed → nearest-neighbour → selection rule
-│   │                      (called on the first turn; outcomes not yet writing to learn)
-│   ├── verifiers/         Async outcome backfill (auto-detected tests, typecheck) — not yet on the live loop
+│   │                      (called on the first turn; learns from verified outcomes)
+│   ├── capture/           Off-wire outcome capture at session close (work_dir resolver, coordinator, background worker)
+│   ├── verifiers/         Async outcome verification (auto-detected tests, typecheck runner)
 │   ├── db/                SQLite persistence for sessions, outcomes, index
 │   ├── session/           Session lifecycle, inactivity timeout, model lock
 │   ├── models/            Provider config, capability tiers, fallback chain
@@ -262,6 +281,10 @@ it.
   idea.
 - 📝 **Docs and typo fixes** make a low-friction first pull request. Contributions
   sign off under the [DCO](CONTRIBUTING.md); there's no CLA.
+- 📊 **Benchmark results** are especially welcome — the benchmark is how we back
+  every claim. **Ask before running one:** results are cost-expensive (a single
+  frontier-model datapoint can run $1–3), and we're adding per-contributor key
+  signing so every datapoint stays attributable to who produced it.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how changes get merged.
 

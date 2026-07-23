@@ -4,6 +4,9 @@ challenges matrix, reporting cost-at-equal-quality sensitivity. Output: CSV +
 heatmap in reports/.
 """
 
+# Neighbourhoods use the real shipped jina embedder (the same ``Embedder`` the router
+# runs), never a TF-IDF proxy.
+
 from __future__ import annotations
 
 import argparse
@@ -13,10 +16,12 @@ from pathlib import Path
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
+from matplotlib.axes import Axes
+from matplotlib.patches import Rectangle
 from sklearn.metrics.pairwise import cosine_similarity
 
 from benchmark import config
+from benchmark.routing.strategies.knn import _embed_texts
 
 matplotlib.use("Agg")
 
@@ -56,7 +61,10 @@ def knn_select(
     k: int,
     success_rate_thresh: float,
     min_samples: int,
-) -> tuple[str, bool, float]:
+) -> tuple[str, bool, float, bool]:
+    """Returns ``(chosen, passed, cost, scored)``. ``scored`` is False when the
+    chosen model has no measured cell on the query task — a coverage gap the caller
+    EXCLUDES from aggregation, never imputes as fail@$0."""
     sims = cosine_similarity(features[query_idx : query_idx + 1], features).flatten()
     sims[query_idx] = -1.0
 
@@ -87,8 +95,10 @@ def knn_select(
         scored.sort(key=lambda x: (x[1], -x[2]))
         chosen = scored[0][0]
 
-    outcome = results_map[task_ids[query_idx]].get(chosen, {"pass": False, "cost": 0.0})
-    return chosen, outcome.get("pass", False), outcome.get("cost", 0.0)
+    outcome = results_map[task_ids[query_idx]].get(chosen)
+    if outcome is None:
+        return chosen, False, 0.0, False
+    return chosen, outcome.get("pass", False), outcome.get("cost", 0.0), True
 
 
 def compute_reward(passed: bool, cost: float, gamma: float = 0.1) -> float:
@@ -110,9 +120,10 @@ def evaluate_params(
     total_cost = 0.0
     total_reward = 0.0
     n = len(task_ids)
+    scored = 0
 
     for i in range(n):
-        _, passed, cost = knn_select(
+        _, passed, cost, ok = knn_select(
             i,
             task_ids,
             task_descs,
@@ -123,6 +134,11 @@ def evaluate_params(
             success_rate_thresh,
             min_samples,
         )
+        # A coverage-gap escalation (chosen model unmeasured on this task) is
+        # UNSCORABLE — excluded from the aggregation, not imputed fail@$0.
+        if not ok:
+            continue
+        scored += 1
         passes += 1 if passed else 0
         total_cost += cost
         total_reward += compute_reward(passed, cost, g)
@@ -131,7 +147,9 @@ def evaluate_params(
         "k": k,
         "success_rate_thresh": success_rate_thresh,
         "min_samples": min_samples,
-        "AvgPerf%": round(passes / n * 100, 2),
+        "n_scored": scored,
+        "n_excluded": n - scored,
+        "AvgPerf%": round(passes / scored * 100, 2) if scored else 0.0,
         "TotalCost": round(total_cost, 6),
         "Reward": round(total_reward, 6),
     }
@@ -181,9 +199,8 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
 
     print(f"Loaded {len(task_ids)} tasks from {matrix_path}")
 
-    vectorizer = TfidfVectorizer(analyzer="char", ngram_range=(2, 4), max_features=500)
-    features = vectorizer.fit_transform(task_descs).toarray()
-    print(f"Feature matrix: {features.shape}")
+    features = _embed_texts(task_descs)
+    print(f"Real jina-embedding matrix: {features.shape}")
 
     # Sweep k up to the largest usable neighbourhood (n-1 neighbours, self excluded)
     # rather than a hardcoded 20: the reward optimum sat at k=18/20, the edge of the
@@ -231,7 +248,16 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     all_results.sort(key=lambda r: r["Reward"], reverse=True)
 
     with open(args.output, "w", newline="") as f:
-        fields = ["k", "success_rate_thresh", "min_samples", "AvgPerf%", "TotalCost", "Reward"]
+        fields = [
+            "k",
+            "success_rate_thresh",
+            "min_samples",
+            "n_scored",
+            "n_excluded",
+            "AvgPerf%",
+            "TotalCost",
+            "Reward",
+        ]
         w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
         for row in all_results:
@@ -244,9 +270,10 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     print(f"  k                   = {best['k']}")
     print(f"  success_rate_thresh = {best['success_rate_thresh']}")
     print(f"  min_samples         = {best['min_samples']}")
-    print(f"  AvgPerf%            = {best['AvgPerf%']}")
+    print(f"  AvgPerf%            = {best['AvgPerf%']} (over {best['n_scored']} scored tasks)")
     print(f"  TotalCost           = ${best['TotalCost']}")
     print(f"  Reward              = {best['Reward']}")
+    print(f"  excluded (coverage-gap escalations, unmeasured chosen cell) = {best['n_excluded']}")
     print()
 
     print("=== TOP 10 COMBOS ===")
@@ -280,12 +307,16 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         y_name = "min_samples"
     filtered = [r for r in all_results if abs(r[fixed_name] - fixed_val) < 0.1]
 
+    sensitivity = dict(zip(param_names, eta_sq, strict=True))
+    excluded_max = max((int(r["n_excluded"]) for r in all_results), default=0)
     _plot_sweep_heatmap(
         filtered,
         Path(args.plot),
         y_name=y_name,
         fixed=(fixed_name, fixed_val),
         swept_ks=ks,
+        sensitivity=sensitivity,
+        excluded_max=excluded_max,
     )
     print(f"\nHeatmap saved to {args.plot}")
 
@@ -310,6 +341,41 @@ def _variance_explained(results_arr: np.ndarray, param_values: list[list]) -> li
     return out
 
 
+def _annotate_cells(
+    ax: Axes,
+    heat_data: np.ndarray,
+    *,
+    best_yx: tuple[int, int],
+    label_step: int,
+    fontsize: float,
+) -> None:
+    """In-cell reward labels: every ``label_step``-th column plus the optimum.
+
+    Viridis is bright at HIGH values, so high cells take dark text and low cells
+    light text (the reverse trips readers up); the split is at the colour midpoint.
+    """
+    cmid = (np.nanmax(heat_data) + np.nanmin(heat_data)) / 2
+    best_yi, best_xi = best_yx
+    for yi in range(heat_data.shape[0]):
+        for xi in range(heat_data.shape[1]):
+            val = heat_data[yi, xi]
+            if np.isnan(val):
+                continue
+            is_best = yi == best_yi and xi == best_xi
+            if xi % label_step != 0 and not is_best:
+                continue
+            ax.text(
+                xi,
+                yi,
+                f"{val:.1f}",
+                ha="center",
+                va="center",
+                fontsize=fontsize + 1 if is_best else fontsize,
+                fontweight="bold" if is_best else "normal",
+                color="black" if val > cmid else "white",
+            )
+
+
 def _plot_sweep_heatmap(
     filtered: list[dict],
     plot_path: Path,
@@ -317,6 +383,8 @@ def _plot_sweep_heatmap(
     y_name: str,
     fixed: tuple[str, float],
     swept_ks: list[int],
+    sensitivity: dict[str, float],
+    excluded_max: int = 0,
 ) -> None:
     """Reward heatmap over (k, y_name) at a fixed third parameter."""
     x_name = "k"
@@ -326,7 +394,13 @@ def _plot_sweep_heatmap(
     for r in filtered:
         heat_data[y_vals.index(r[y_name]), x_vals.index(r[x_name])] = r["Reward"]
 
-    fig, ax = plt.subplots(figsize=(10, 7))
+    best_row = max(filtered, key=lambda r: r["Reward"])
+    best_yx = (y_vals.index(best_row[y_name]), x_vals.index(best_row[x_name]))
+
+    # Width scales with the (data-driven) k sweep so cells stay legible; a wide k
+    # range would otherwise crush the columns together.
+    fig_w = min(20.0, max(11.0, 0.55 * len(x_vals) + 3.0))
+    fig, ax = plt.subplots(figsize=(fig_w, 6.8))
     cmap = plt.cm.viridis.copy()
     cmap.set_bad("white")
     im = ax.imshow(heat_data, aspect="auto", cmap=cmap, interpolation="nearest")
@@ -335,40 +409,107 @@ def _plot_sweep_heatmap(
     ax.set_yticks(range(len(y_vals)))
     ax.set_yticklabels(y_vals)
 
-    cmid = (np.nanmax(heat_data) + np.nanmin(heat_data)) / 2
-    # Shrink the in-cell labels as the k sweep widens, or they run into each other.
-    fontsize = 8 if len(x_vals) <= 12 else 5.0
-    for yi in range(len(y_vals)):
-        for xi in range(len(x_vals)):
-            val = heat_data[yi, xi]
-            if not np.isnan(val):
-                color = "white" if val > cmid else "black"
-                ax.text(
-                    xi, yi, f"{val:.2f}", ha="center", va="center", fontsize=fontsize, color=color
-                )
+    # Many columns → label every 2nd one (plus the optimum) so text never collides;
+    # the colourbar carries the full gradient, the CSV the exact values.
+    label_step = 1 if len(x_vals) <= 12 else 2
+    _annotate_cells(ax, heat_data, best_yx=best_yx, label_step=label_step, fontsize=7.5)
 
-    ax.set_xlabel(x_name)
-    ax.set_ylabel(y_name)
+    # Ring the optimum so the brightest cell is unmistakable, not just "somewhere yellow".
+    ax.add_patch(
+        Rectangle(
+            (best_yx[1] - 0.5, best_yx[0] - 0.5),
+            1,
+            1,
+            fill=False,
+            edgecolor="#d03b3b",
+            linewidth=2.2,
+        )
+    )
+
+    # Human-readable axis labels: the swept params are kNN-strategy knobs, so spell
+    # out what each one is rather than printing the bare config key.
+    axis_labels = {
+        "k": "k  (number of nearest neighbours)",
+        "success_rate_thresh": (
+            "success_rate_thresh\n"
+            "(neighbour pass-rate below which the router escalates off the cheap model)"
+        ),
+        "min_samples": (
+            "min_samples\n(min neighbours with a recorded outcome before the router trusts them)"
+        ),
+    }
     fixed_name, fixed_val = fixed
-    ax.set_title(f"Reward by {x_name} and {y_name}\n(fixed {fixed_name} = {fixed_val})")
+    fixed_eta = sensitivity.get(fixed_name)
+    fixed_note = f", η²={fixed_eta:.2f} — negligible effect" if fixed_eta is not None else ""
+    ax.set_xlabel(axis_labels.get(x_name, x_name))
+    ax.set_ylabel(axis_labels.get(y_name, y_name), fontsize=9)
+    ax.set_title(
+        f"kNN routing reward over (k × {y_name})  —  brighter = higher reward = better\n"
+        f"real jina embeddings · reward = tasks passed − γ·cost;  "
+        f"fixed {fixed_name} = {fixed_val} (its best{fixed_note})",
+        fontsize=12,
+    )
 
-    # Bracketing honesty: an optimum sitting on the first/last swept k is not a
-    # located maximum — the true optimum may lie outside the swept window.
-    best_row = max(filtered, key=lambda r: r["Reward"])
-    if swept_ks and best_row["k"] in (min(swept_ks), max(swept_ks)):
+    # "What good looks like" + bracketing honesty, stacked below the x-axis so
+    # neither overlaps the labels. Data-driven from the sensitivity (η²) analysis.
+    y_eta, k_eta = sensitivity.get(y_name), sensitivity.get(x_name)
+    if y_eta is not None and k_eta is not None:
         ax.text(
             0.5,
-            -0.13,
-            f"⚠ max Reward ({best_row['Reward']:.2f}) sits at k={best_row['k']}, the EDGE of the "
-            f"swept range k∈[{min(swept_ks)}, {max(swept_ks)}] — the optimum is not bracketed",
+            -0.19,
+            f"What good looks like: settle in the brightest band. Reward is driven by "
+            f"{y_name} (η²={y_eta:.2f}); k barely moves it (η²={k_eta:.2f}) — "
+            f"pick k for stability, not reward.",
             transform=ax.transAxes,
             ha="center",
             va="top",
             fontsize=9,
-            color="#B00020",
+            color="#333333",
         )
 
-    cb = fig.colorbar(im, ax=ax, label="Reward")
+    lo, hi = min(swept_ks), max(swept_ks)
+    if swept_ks and best_row["k"] in (lo, hi):
+        # An optimum on the first/last swept k is not located — the true peak may
+        # lie outside the window.
+        note, colour = (
+            f"⚠ max reward ({best_row['Reward']:.1f}) sits at k={best_row['k']}, the EDGE of the "
+            f"swept range k∈[{lo}, {hi}] — the optimum is NOT bracketed (may lie beyond)",
+            "#d03b3b",
+        )
+    else:
+        note, colour = (
+            f"✓ optimum k={best_row['k']} lies inside the swept range k∈[{lo}, {hi}] "
+            f"— the maximum is bracketed",
+            "#0ca30c",
+        )
+    ax.text(
+        0.5,
+        -0.26,
+        note,
+        transform=ax.transAxes,
+        ha="center",
+        va="top",
+        fontsize=9,
+        color=colour,
+    )
+
+    if excluded_max > 0:
+        ax.text(
+            0.5,
+            -0.33,
+            f"Sweep EXCLUDES coverage-gap escalations (chosen model unmeasured on a task) "
+            f"per combo — up to {excluded_max} task(s) dropped; never imputed fail@$0.",
+            transform=ax.transAxes,
+            ha="center",
+            va="top",
+            fontsize=8,
+            color="#B71C1C",
+            style="italic",
+        )
+
+    cb = fig.colorbar(
+        im, ax=ax, label="Routing reward  =  tasks passed − γ·cost  (higher = better)"
+    )
     cb.ax.tick_params(labelsize=9)
     fig.tight_layout()
     plot_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,36 +1,56 @@
 # AGENTS.md — how to write code in this repo
 
-Rules a human or model must follow here. The linter is the backstop: if a rule
-matters, CI enforces it (`pre-commit run --all-files`). This file says *why* so
-you get it right the first time.
+Rules a human or model must follow here. This file says *why*; the linter is the
+backstop that says *whether* — if a rule matters, CI enforces it
+(`pre-commit run --all-files`), so get it right the first time.
 
-## Layout
+It is **thin and pointer-first by design.** For anything concrete — layout, docs,
+config, examples, the exact lint ceilings — follow the *entrypoint* in the map
+below rather than trusting a copy here to stay current. When you add an area, add a
+pointer row, not a paragraph. That is what lets this file scale with the codebase
+instead of rotting.
 
-- `src/shunt/` — the shipped router (product). Strictest rules apply here.
+## Where to look (entrypoints — the source of truth, not this file)
+
+Follow the entrypoint; it is the maintained copy. This table only routes you there,
+so it stays correct as the codebase grows.
+
+| Need | Start here |
+|------|-----------|
+| What Shunt is · status · quick start | `README.md` |
+| The repo & package layout | `README.md` → "Repository layout" |
+| **The docs map** — every doc, in order | `mkdocs.yml` (`nav:`) and `docs/index.md` (Contents) |
+| How the pieces fit at runtime | `docs/architecture.md` |
+| The feedback / learning loop (Context → Action → Feedback) | `docs/feedback.md` |
+| Configure providers, models, the router, the embedder | `docs/configuration.md` + `src/shunt/config/{models,router,embedding}.yaml` |
+| Add a provider or model | `examples/providers/README.md` — registry is `src/shunt/config/models.yaml`, **row order is semantic** |
+| Hook up a tool (Claude Code, opencode, aider, n8n, …) | `examples/integrations/README.md` + the shared handshake harness (`tests/integrations/`) |
+| The benchmark / eval harness | `docs/benchmark.md`, `docs/benchmark-design.md`, `benchmark/` |
+| Add a routing strategy | `benchmark/routing/strategies/_template.py` — copy it, don't invent structure |
+| The exact lint / type ceilings | `pyproject.toml` (the one manifest) |
+| The custom AST gates (`SH0xx`) | `tools/lint/` |
+
+New area? Add a row here pointing at its entrypoint — never restate what the
+entrypoint already says.
+
+### The tree, one line each
+
+- `src/shunt/` — the shipped router (product); **strictest rules apply here**.
 - `benchmark/` — the eval harness (not installed; tests reach it via pytest
-  `pythonpath = ["."]`). Absolute
-  imports only: `from benchmark import config`, never `sys.path` hacks.
-- `tools/lint/` — the custom `SH0xx` AST checks.
-- `tests/` — pytest suite.
-- `examples/providers/` — one copy-paste registry fragment per provider. Adding a
-  provider or model? Read `examples/providers/README.md` and `docs/configuration.md`
-  first; the registry is `src/shunt/config/models.yaml` and its row order
-  is semantic.
-- `examples/integrations/` — one directory per external tool (Claude Code, opencode,
-  aider, LangChain, n8n, …): a README with the copy-paste config, plus a `compose.yaml`
-  + `handshake.yaml` that dry-run the tool → Shunt roundtrip. Adding or using an
-  integration? Read `examples/integrations/README.md` first — it covers how to hook
-  any tool up and how the shared handshake harness (`tests/integrations/`) works.
+  `pythonpath = ["."]`). Absolute imports only: `from benchmark import config`,
+  never `sys.path` hacks.
+- `tools/lint/` — custom `SH0xx` AST checks · `tests/` — pytest suite · `examples/`
+  — provider + integration configs.
 
-Install once: `pip install -e '.[dev,benchmark]'` — then `benchmark` imports
-resolve everywhere with no path munging.
+Install once: `pip install -e '.[dev,benchmark]'` — then `benchmark` imports resolve
+everywhere with no path munging.
 
 **Run everything through `uv run` — never bare `python3`.** In a worktree, bare
 `python3 -m pytest` resolves `import shunt` to a *different* worktree's source and
 reports pass/fail for code you aren't editing. Check with
 `uv run python -c "import shunt.models as m; print(m.__file__)"`.
 
-## The rules (enforced by ruff + mypy — one manifest in `pyproject.toml`)
+## The rules — the *why* (the exact ceilings live in `pyproject.toml`; ruff + mypy enforce them)
 
 - **Types.** mypy `--strict` on `src/`; no untyped defs, no bare `dict`
   (use `dict[str, X]`), no un-coded `# type: ignore` (write `# type: ignore[code]`).

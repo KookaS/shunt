@@ -53,6 +53,15 @@ class OutcomeIndex(Protocol):
     def count_total_labeled(self) -> int:
         """Return the total number of sessions with any labeled outcome (Tier-1 or Tier-2)."""
 
+    def effective_labeled(self) -> float:
+        """Return the effective sample size ``nₑ`` over all labeled outcomes."""
+
+    def effective_tier2(self) -> float:
+        """Return the effective sample size ``nₑ`` over Tier-2 (verified) outcomes."""
+
+    def model_priors(self) -> dict[str, tuple[float, float]]:
+        """Return per-model ``(estimate, strength)`` offline aggregates for prior seeding."""
+
     def query(
         self,
         embedding: npt.NDArray[np.float32],
@@ -81,6 +90,7 @@ class RouterEngine:
         conservative_gate: ConservativeGate | None = None,
         strategy: RoutingStrategy | None = None,
         neighbor_k: int = 20,
+        trust_neighbors: bool = True,
     ) -> None:
         self._model_pool = model_pool
         self._session_manager = session_manager
@@ -94,6 +104,10 @@ class RouterEngine:
         # today's behavior; the server injects the strategy named by router.strategy.
         self._strategy: RoutingStrategy = strategy or KnnStrategy(self._selection_rule)
         self._neighbor_k = neighbor_k
+        # False when the configured embedding fingerprint mismatches the stored corpus:
+        # the stored vectors are in a foreign space, so kNN over them is garbage. Decided
+        # in server.py (where both fingerprints are visible) and injected here.
+        self._trust_neighbors = trust_neighbors
         self._cold_start_threshold = cold_start_threshold
         self._cache: dict[str, npt.NDArray[np.float32]] = {}
         # Guards the embedding cache and the budget check→select→record section so the
@@ -117,7 +131,10 @@ class RouterEngine:
         import numpy as np_rt  # runtime RNG (injected sampler overrides in tests)
 
         built_sampler = sampler or ThompsonSampler(
-            np_rt.random.default_rng(), exploration.prior_alpha, exploration.prior_beta
+            np_rt.random.default_rng(),
+            exploration.prior_alpha,
+            exploration.prior_beta,
+            exploration.prior_strength_cap,
         )
         built_budget = budget or ExplorationBudget(exploration.explore_budget_frac)
         built_gate = gate or ConservativeGate(exploration.conservative_alpha)
@@ -155,16 +172,24 @@ class RouterEngine:
         if not self._strategy.consults_neighbors:
             return self._decide_fixed()
 
-        n_total = self._outcome_index.count_total_labeled()
-        n_tier2 = self._outcome_index.count_labeled()
-        cold_start_active = self._cold_start_strategy.is_active(n_total, n_tier2)
+        if not self._trust_neighbors:
+            # Foreign embedding space: the stored corpus was built by a different embedder,
+            # so its neighbours are meaningless. Route as if cold (no embed, no query) until
+            # `shunt reindex` re-embeds the corpus and the fingerprint matches again.
+            return self._decide_stale_space()
+
+        # Effective-sample-size gate (nₑ), not raw count: a low-confidence or decayed outcome
+        # counts for less, so cold-start ends on *trustworthy* evidence, not row volume.
+        ne_total = self._outcome_index.effective_labeled()
+        ne_tier2 = self._outcome_index.effective_tier2()
+        cold_start_active = self._cold_start_strategy.is_active_effective(ne_total, ne_tier2)
         logger.debug(
-            "decide[%s]: strategy=%s labeled_total=%d labeled_tier2=%d "
+            "decide[%s]: strategy=%s ne_labeled=%.2f ne_tier2=%.2f "
             "cold_start_threshold=%d cold_start_active=%s",
             session_id,
             type(self._strategy).__name__,
-            n_total,
-            n_tier2,
+            ne_total,
+            ne_tier2,
             self._cold_start_threshold,
             cold_start_active,
         )
@@ -206,6 +231,21 @@ class RouterEngine:
             model_name, reason, provenance = self._route_locked(neighbors)
         logger.debug("decide[%s]: chose model=%s reason=%s", session_id, model_name, reason)
         return (model_name, reason, provenance)
+
+    def _decide_stale_space(self) -> tuple[str, str, dict[str, Any]]:
+        """Route via the cold-start default when the corpus is in a stale embedding space.
+
+        No embed, no index query — the reason token surfaces in ``shunt explain``.
+        """
+        model_name = self._cold_start_strategy.select(self._model_pool)
+        provenance = build_provenance(
+            model_chosen=model_name,
+            selection_rule_used="stale_embedding_space",
+            fallback_chain_triggered=False,
+            router_propensity=1.0,
+            candidate_model_scores={},
+        )
+        return (model_name, "stale_embedding_space", provenance)
 
     def _decide_fixed(self) -> tuple[str, str, dict[str, Any]]:
         """Route a neighbor-independent (fixed) strategy: no cold-start, embedding, or query.
@@ -249,8 +289,17 @@ class RouterEngine:
         )
         return (model_name, reason, provenance)
 
-    def _candidate_stats(self, neighbors: list[NeighborResult]) -> list[CandidateStats]:
-        """Aggregate the neighborhood's weighted verified counts per model."""
+    def _candidate_stats(
+        self,
+        neighbors: list[NeighborResult],
+        priors: dict[str, tuple[float, float]] | None = None,
+    ) -> list[CandidateStats]:
+        """Aggregate the neighborhood's weighted verified counts per model.
+
+        ``priors`` seeds each model's informative Thompson prior from its offline aggregate;
+        omitted (e.g. the cost-only ``_representative_cost`` path) leaves the flat prior.
+        """
+        priors = priors or {}
         groups: dict[str, list[NeighborResult]] = {}
         for n in neighbors:
             groups.setdefault(n.model, []).append(n)
@@ -264,9 +313,15 @@ class RouterEngine:
             cost = sum(w * n.cost for w, n in zip(weights, group, strict=True)) / total
             if not math.isfinite(cost):  # a non-finite upstream cost must never sort cheapest
                 cost = math.inf
+            prior = priors.get(model)
             stats.append(
                 CandidateStats(
-                    model=model, successes=successes, failures=total - successes, cost=cost
+                    model=model,
+                    successes=successes,
+                    failures=total - successes,
+                    cost=cost,
+                    prior_estimate=prior[0] if prior is not None else None,
+                    prior_strength=prior[1] if prior is not None else 0.0,
                 )
             )
         return stats
@@ -304,7 +359,9 @@ class RouterEngine:
             return None
         if not self._budget.can_explore():
             return None
-        stats = self._candidate_stats(neighbors)
+        # Seed informative priors from the offline per-model aggregate (empirical Bayes);
+        # a model with accumulated verified history no longer restarts at Beta(1,1).
+        stats = self._candidate_stats(neighbors, self._outcome_index.model_priors())
         if not stats:
             return None
         decision = self._sampler.select(
@@ -327,6 +384,9 @@ class RouterEngine:
             fallback_chain_triggered=False,
             router_propensity=propensity,
             candidate_model_scores=self._compute_candidate_model_scores(neighbors),
+            # A taken exploration cheaper than the greedy pick is the downshift the gate
+            # learns from; an upshift or a conservative_fallback to greedy is not.
+            downshift=(reason == "exploration" and chosen_cost < greedy_cost),
         )
         return (model_name, reason, provenance)
 
@@ -342,6 +402,32 @@ class RouterEngine:
         if is_downshift and gate is not None and not gate.allows_downshift():
             return (decision.greedy_model, "conservative_fallback", 1.0)
         return (decision.model, "exploration", decision.propensity)
+
+    def snapshot_exploration_state(self) -> dict[str, Any]:
+        """Serialize the mutable exploration state (budget cap + gate slack) for persistence.
+
+        Empty dict when exploration is disabled — nothing mutable to persist.
+        """
+        # Under the same lock as decide()/record_outcome(): the budget and gate are not
+        # thread-safe on their own, and a snapshot read concurrent with a decision's record()
+        # could serialize a torn counter pair. Reading is cheap; it never runs mid-decision.
+        state: dict[str, Any] = {}
+        with self._lock:
+            if self._budget is not None:
+                state["budget"] = self._budget.snapshot()
+            if self._conservative_gate is not None:
+                state["gate"] = self._conservative_gate.snapshot()
+        return state
+
+    def restore_exploration_state(self, state: dict[str, Any] | None) -> None:
+        """Load a persisted snapshot into the budget + gate; a missing/partial one no-ops."""
+        if not state:
+            return
+        with self._lock:
+            if self._budget is not None:
+                self._budget.restore(state.get("budget"))
+            if self._conservative_gate is not None:
+                self._conservative_gate.restore(state.get("gate"))
 
     def record_outcome(self, *, downshift: bool, success: bool) -> None:
         """Feed a verified downshift-exploration outcome to the conservative safety gate."""

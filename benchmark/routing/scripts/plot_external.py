@@ -46,21 +46,23 @@ def plot_external_difficulty(ext_csv: Path, out_dir: Path) -> Path:
         ],
         dtype=float,
     )
+    # Validated categorical palette (dataviz reference). p_cheap is drawn in MUTED
+    # GRAY on purpose — it carries no signal, so it must not read as a live series.
     series = [
         (
-            "p_solve (all 134 cohorts) — the usable difficulty signal",
+            "p_solve — the usable difficulty signal",
             _floats(rows, "p_solve"),
-            "#455A64",
+            "#2a78d6",  # slot 1 blue — the signal downstream keys on
         ),
         (
             "p_cheap (open-weight) — DEGENERATE ≡ 1.0, carries NO signal"
             if degenerate
             else "p_cheap (open-weight)",
             pc,
-            "#2196F3",
+            "#898781",  # muted gray — a dead column, not a live series
         ),
-        ("p_frontier (proprietary cohort)", _floats(rows, "p_frontier"), "#F44336"),
-        ("routing headroom = p_frontier − p_solve  (the real gap)", headroom, "#4CAF50"),
+        ("p_frontier (proprietary cohort)", _floats(rows, "p_frontier"), "#eb6834"),  # slot 2
+        ("routing headroom = p_frontier − p_solve  (the real gap)", headroom, "#1baf7a"),  # slot 3
     ]
     xlabels = (
         "resolve rate  (fraction of leaderboard submissions that solved the instance)",
@@ -96,7 +98,10 @@ def plot_external_difficulty(ext_csv: Path, out_dir: Path) -> Path:
         fontsize=7,
         bbox=dict(boxstyle="round,pad=0.3", fc="#FFF3E0", ec="#D55E00", alpha=0.9),
     )
-    fig.suptitle("External SWE-bench difficulty prior — per-instance resolve rates (n=500)")
+    fig.suptitle(
+        "SWE-bench Verified LEADERBOARD difficulty prior — per-instance resolve rates "
+        f"(n={len(rows)}) · a prior from others' submissions, NOT our own runs"
+    )
     fig.tight_layout()
     path = out_dir / "external_difficulty.png"
     fig.savefig(path, dpi=150, bbox_inches="tight")
@@ -155,7 +160,11 @@ def _draw_ours_bars(ids: list[str], ext_rate: np.ndarray, our_pass: np.ndarray, 
     x = np.arange(n)
     fig, ax = plt.subplots(figsize=(min(24.0, max(8.0, 0.55 * n)), 6))
     ax.bar(
-        x - 0.2, ext_rate, 0.4, label="external resolve rate p_solve (0–1, blue)", color="#2196F3"
+        x - 0.2,
+        ext_rate,
+        0.4,
+        label="SWE-bench leaderboard resolve rate p_solve (0–1, blue)",
+        color="#2196F3",
     )
     ax.bar(
         x + 0.2,
@@ -194,9 +203,9 @@ def _draw_ours_bars(ids: list[str], ext_rate: np.ndarray, our_pass: np.ndarray, 
     n_fail = int((our_pass == 0.0).sum())
     n_mis = int(((our_pass == 0.0) & (ext_rate >= 0.5)).sum())
     ax.set_title(
-        f"External prior vs our actual — cheapest model on {n} tasks\n"
+        f"SWE-bench Verified leaderboard prior (p_solve) vs our cheap model — {n} tasks\n"
         f"{n_fail}/{n} fail our cheap model (the routing headroom); "
-        f"{n_mis} look EASY to the field → prior would mislead",
+        f"{n_mis} look EASY to the leaderboard → prior would mislead",
         fontsize=10,
     )
     ax.legend(fontsize=8, loc="lower left")
@@ -218,30 +227,50 @@ def _draw_ours_agreement(ext_rate: np.ndarray, our_pass: np.ndarray, path: Path)
             [int((valid & ~easy & passed).sum()), int((valid & ~easy & ~passed).sum())],
         ]
     )
-    fig, ax = plt.subplots(figsize=(7, 6))
-    ax.imshow(counts, cmap="Blues", aspect="auto")
+    fig, ax = plt.subplots(figsize=(7.5, 6.5))
+    vmax = float(counts.max()) or 1.0
+    im = ax.imshow(counts, cmap="Blues", aspect="auto", vmin=0, vmax=vmax)
     ax.set_xticks([0, 1])
     ax.set_xticklabels(["our cheap model\nPASSES", "our cheap model\nFAILS"])
     ax.set_yticks([0, 1])
-    ax.set_yticklabels(["field says\nEASY (p_solve≥0.5)", "field says\nHARD (p_solve<0.5)"])
+    ax.set_yticklabels(
+        [
+            "SWE-bench prior says\nEASY (p_solve ≥ 0.5)",
+            "SWE-bench prior says\nHARD (p_solve < 0.5)",
+        ]
+    )
+    ax.set_xlabel("our own outcome on our tasks", fontsize=9)
+    ax.set_ylabel("leaderboard difficulty prior", fontsize=9)
+    key_cell = (0, 1)  # EASY-prior yet we FAIL → the prior misleads
     for i in range(2):
         for j in range(2):
-            ax.text(
-                j,
-                i,
-                str(counts[i, j]),
-                ha="center",
-                va="center",
-                fontsize=22,
-                color="#B71C1C" if (i == 0 and j == 1) else "#333",
-            )
+            # Contrast-aware ink: white on the darker (higher-count) fills, dark on light
+            # ones — never dark-on-dark. The key "misleading" cell always reads red.
+            shade = counts[i, j] / vmax
+            color = "#B71C1C" if (i, j) == key_cell else "white" if shade > 0.55 else "#0b0b0b"
+            ax.text(j, i, str(counts[i, j]), ha="center", va="center", fontsize=26, color=color)
     ax.add_patch(Rectangle((0.5, -0.5), 1, 1, fill=False, edgecolor="#B71C1C", lw=3))
+    # Callout INSIDE the key cell, below its count — no collision with the title.
+    ax.text(
+        1,
+        0.30,
+        "prior says EASY yet we FAIL\n→ prior MISLEADS the router",
+        ha="center",
+        va="center",
+        fontsize=8.5,
+        fontweight="bold",
+        color="#B71C1C",
+    )
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label("# tasks in cell", fontsize=8)
     n, mis = int(valid.sum()), int(counts[0, 1])
     ax.set_title(
-        f"External prior vs our actual — agreement on {n} tasks\n"
-        f"red box: field says EASY yet our cheap model FAILS ({mis}) → "
-        "a prior-only router would wrongly NOT escalate",
-        fontsize=10,
+        f"Leaderboard difficulty prior vs our cheap model, on our own tasks — {n} tasks\n"
+        f"prior = fraction of SWE-bench Verified leaderboard submissions that solved each "
+        f"instance (p_solve)\n"
+        f"good = a router keying only on the prior escalates correctly; the red cell "
+        f"({mis}) is where it would wrongly NOT escalate",
+        fontsize=8.5,
     )
     fig.tight_layout()
     fig.savefig(path, dpi=150, bbox_inches="tight")

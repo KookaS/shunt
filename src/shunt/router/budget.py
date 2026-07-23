@@ -5,6 +5,40 @@ exploring on live user tasks. No module globals; state lives on the instances.
 
 from __future__ import annotations
 
+import logging
+import math
+from collections.abc import Mapping
+from typing import TypedDict
+
+logger = logging.getLogger(__name__)
+
+
+class BudgetState(TypedDict):
+    """Serialized mutable budget counters — config (``_frac``) is deliberately excluded."""
+
+    explore_cost: float
+    exploit_cost: float
+    decisions: int
+    explorations: int
+
+
+class GateState(TypedDict):
+    """Serialized mutable gate state — config (``_alpha``) is deliberately excluded."""
+
+    slack: float
+
+
+def _as_number(value: object) -> float | None:
+    """Coerce a JSON scalar to a finite float, rejecting bool/non-numbers/Infinity/NaN."""
+    # json round-trips Infinity/NaN by default, so a tampered snapshot could carry them.
+    # Rejecting non-finite routes them into the fresh-zero fallback — closing both the money-cap
+    # disable (exploit_cost=inf → always explorable) and the int(inf/nan) startup crash.
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and math.isfinite(value):
+        return float(value)
+    return None
+
 
 class ExplorationBudget:
     """Cumulative cap keeping exploratory spend within a fraction of exploit spend."""
@@ -65,6 +99,39 @@ class ExplorationBudget:
         """Cumulative extra-exploration/baseline spend ratio (0 if no baseline yet)."""
         return self._explore_cost / self._exploit_cost if self._exploit_cost > 0 else 0.0
 
+    def snapshot(self) -> BudgetState:
+        """Serialize the mutable counters so the cap survives a process restart."""
+        return {
+            "explore_cost": self._explore_cost,
+            "exploit_cost": self._exploit_cost,
+            "decisions": self._decisions,
+            "explorations": self._explorations,
+        }
+
+    def restore(self, state: Mapping[str, object] | None) -> None:
+        """Load a prior snapshot; a missing/partial/corrupt one leaves a fresh zero state."""
+        # Robust by contract: never crash startup on a bad snapshot — fall back to zero and
+        # log once. All-or-nothing: a partial snapshot must not half-apply (a stale exploit
+        # denominator with a zeroed explore numerator would silently re-open the cap).
+        if state is None:
+            return
+        explore = _as_number(state.get("explore_cost"))
+        exploit = _as_number(state.get("exploit_cost"))
+        decisions = _as_number(state.get("decisions"))
+        explorations = _as_number(state.get("explorations"))
+        if None in (explore, exploit, decisions, explorations):
+            logger.warning("exploration budget snapshot unreadable; starting from zero")
+            return
+        assert explore is not None and exploit is not None  # narrowed by the guard above
+        assert decisions is not None and explorations is not None
+        if min(explore, exploit, decisions, explorations) < 0:
+            logger.warning("exploration budget snapshot has negative counters; starting from zero")
+            return
+        self._explore_cost = explore
+        self._exploit_cost = exploit
+        self._decisions = int(decisions)
+        self._explorations = int(explorations)
+
 
 class ConservativeGate:
     """Pragmatic v1 Conservative-Bandit gate (Wu et al. 2016) for exploring *down*."""
@@ -98,3 +165,17 @@ class ConservativeGate:
     @property
     def slack(self) -> float:
         return self._slack
+
+    def snapshot(self) -> GateState:
+        """Serialize the banked slack so downshift evidence survives a process restart."""
+        return {"slack": self._slack}
+
+    def restore(self, state: Mapping[str, object] | None) -> None:
+        """Load a prior snapshot; a missing/corrupt one leaves slack at zero (log once)."""
+        if state is None:
+            return
+        slack = _as_number(state.get("slack"))  # slack may be negative (banked failures)
+        if slack is None:
+            logger.warning("conservative gate snapshot unreadable; starting from zero")
+            return
+        self._slack = slack

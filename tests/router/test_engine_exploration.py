@@ -77,6 +77,8 @@ def test_exploratory_upshift_is_taken_with_propensity() -> None:
     assert model == "model-b"
     assert reason == "exploration"
     assert prov["router_propensity"] == 0.3
+    # an upshift (pricier than greedy) is NOT a downshift: the gate must not learn from it.
+    assert prov["downshift"] is False
 
 
 def test_conservative_gate_blocks_downshift_without_slack() -> None:
@@ -108,9 +110,12 @@ def test_banked_slack_unlocks_downshift() -> None:
     _m1, reason1, _p1 = engine.decide("s1", "p")
     assert reason1 == "conservative_fallback"  # no slack yet
     engine.record_outcome(downshift=True, success=True)  # bank downshift slack
-    model2, reason2, _p2 = engine.decide("s2", "p")
+    model2, reason2, prov2 = engine.decide("s2", "p")
     assert reason2 == "exploration"
     assert model2 == "model-b"
+    # the taken cheaper-than-greedy exploration is flagged downshift so the capture
+    # read-back feeds the ConservativeGate the evidence it gates future downshifts on.
+    assert prov2["downshift"] is True
 
 
 def test_budget_exhaustion_falls_back_to_selection_rule() -> None:

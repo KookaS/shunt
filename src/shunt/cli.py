@@ -146,6 +146,33 @@ def _flag(args: argparse.Namespace) -> None:
     print(f"Flagged {args.session_id} as {args.rating} ({outcome}).")
 
 
+def _reindex(args: argparse.Namespace) -> None:
+    """Re-embed the whole corpus into the active embedder's space (offline command)."""
+    # Run with the server STOPPED: it opens the same SQLite DB + .hnsw2 index. The rewrite
+    # is atomic (one txn for the blobs, temp-then-replace for the index, fingerprint last),
+    # so an interrupted run leaves the OLD space intact and boot simply asks again.
+    from shunt.db.store import OutcomeStore
+    from shunt.router.embedder import Embedder
+    from shunt.secrets import load_dotenv_file
+
+    load_dotenv_file()
+    print("shunt reindex: re-embedding the corpus (run with the server stopped)...")
+    embedder = Embedder()
+    store = OutcomeStore()
+    try:
+        summary = store.reindex_corpus(embedder)
+    except Exception as exc:
+        print(f"reindex FAILED: {exc}. The corpus is unchanged (old space intact).")
+        sys.exit(1)
+    finally:
+        store.close()
+    print(
+        f"reindex OK: {summary['reindexed']} session(s) re-embedded into "
+        f"{embedder.model_name}. Fingerprint {summary['old_fingerprint']} -> "
+        f"{summary['new_fingerprint']}. Restart the server to pick up the new space."
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="shunt",
@@ -167,6 +194,14 @@ def main() -> None:
     flag.add_argument("session_id", help="Session ID to flag")
     flag.add_argument("rating", choices=["good", "bad"], help="Outcome rating")
     flag.set_defaults(func=_flag)
+
+    reindex = sub.add_parser(
+        "reindex",
+        help="Re-embed the corpus into the active embedder's space (run offline)",
+        description="Offline: re-embed every stored session into the embedding.yaml active "
+        "model's space and advance the corpus fingerprint. Run with the server STOPPED.",
+    )
+    reindex.set_defaults(func=_reindex)
 
     version = sub.add_parser("version", help="Print version")
     version.set_defaults(func=_version)
