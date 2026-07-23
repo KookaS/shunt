@@ -6,6 +6,7 @@ storage internals (SQL + hnswlib), the router keeps its ``NeighborResult`` domai
 
 from __future__ import annotations
 
+import json
 import math
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +20,22 @@ if TYPE_CHECKING:
 
 # A stored outcome counts as a success iff its verified label is one of these.
 _SUCCESS_LABELS = ("success", "weak_success")
+
+
+def _is_non_policy(row: dict[str, Any]) -> bool:
+    """True when the session's decision was an imposed auto-escalation, not a policy pick."""
+    # An escalated turn ran a model/arm the failure signal forced, not one the router sampled —
+    # so its verified outcome must not train that model as a free (policy-attributable) choice.
+    raw = row.get("decision_provenance")
+    if not isinstance(raw, str):
+        return False
+    try:
+        provenance = json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(provenance, dict) and bool(provenance.get("auto_escalated"))
+
+
 # Fallback confidence when a neighbor has an outcome row carrying no confidence value
 # at all (no aggregated score and both tier fields absent) — a weak-but-nonzero prior so
 # the neighbor still contributes, without over-trusting an unquantified label.
@@ -64,7 +81,10 @@ class OutcomeIndexAdapter:
         # effective sample size nₑ of that history. Seeds an informative Thompson prior
         # (empirical-Bayes shrinkage) so a model with evidence doesn't restart at Beta(1,1)
         # each decision. Verified (Tier-2) outcomes only — the trusted population.
-        rows = self._store.labeled_outcome_rows(tier2_only=True)
+        # Exclude imposed auto-escalations — the Thompson prior is a policy signal too, so an
+        # escalated model must not seed its own prior as if the router had chosen it.
+        all_rows = self._store.labeled_outcome_rows(tier2_only=True)
+        rows = [r for r in all_rows if not _is_non_policy(r)]
         by_model: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
             by_model.setdefault(str(row["model_chosen"]), []).append(row)
@@ -86,6 +106,10 @@ class OutcomeIndexAdapter:
         Fetches the *k* nearest embedded sessions from the index and keeps only those
         with a stored outcome, so the result may hold fewer than *k* neighbors.
         """
+        # Auto-escalated sessions ARE kept as neighbours — the escalated (bigger) model's
+        # verified pass/fail on that task is real capability signal the selection rule needs to
+        # converge. They are withheld only from the policy-attributable aggregates (`model_priors`
+        # + the nulled propensity), never from the neighbour set.
         results: list[NeighborResult] = []
         for session_id, distance in self._store.query_index(embedding, k):
             session = self._store.get_session(session_id)

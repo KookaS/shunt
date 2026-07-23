@@ -12,6 +12,7 @@ from typing import Final
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from shunt.models.config import strict_yaml_load
+from shunt.router.escalation import EscalationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,36 @@ class ExplorationPolicy(BaseModel):
     prior_strength_cap: float = Field(default=20.0, ge=0.0)
 
 
+class EscalationPolicy(BaseModel):
+    """Auto-escalation knobs. Shipped OFF — enabling is a config change."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    escalate_after_n: int = Field(default=2, gt=0)
+    stale_window: int = Field(default=10, gt=0)
+    blocking_exit_code: int = Field(default=2, ge=0)
+    ladder: str = Field(default="effort_then_tier")
+
+    @model_validator(mode="after")
+    def _check_ladder(self) -> EscalationPolicy:
+        allowed = ("effort_then_tier", "tier_only")
+        if self.ladder not in allowed:
+            joined = ", ".join(allowed)
+            raise ValueError(f"unknown escalation.ladder {self.ladder!r}; allowed: {joined}")
+        return self
+
+    def to_config(self) -> EscalationConfig:
+        """Bridge the config-file schema to the pure-logic ``EscalationConfig`` the engine reads."""
+        return EscalationConfig(
+            enabled=self.enabled,
+            escalate_after_n=self.escalate_after_n,
+            stale_window=self.stale_window,
+            blocking_exit_code=self.blocking_exit_code,
+            ladder=self.ladder,
+        )
+
+
 class CapturePolicy(BaseModel):
     """Off-wire capture config: where the router re-runs the repo's tests.
 
@@ -92,6 +123,7 @@ class RouterPolicy(BaseModel):
     strategy: str = "knn"
     policy: KnnPolicy = Field(default_factory=KnnPolicy)
     exploration: ExplorationPolicy = Field(default_factory=ExplorationPolicy)
+    escalation: EscalationPolicy = Field(default_factory=EscalationPolicy)
     capture: CapturePolicy = Field(default_factory=CapturePolicy)
     refit: RefitPolicy = Field(default_factory=RefitPolicy)
     # Which registry models are live-routable. Empty = every model in models.yaml

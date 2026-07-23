@@ -7,9 +7,19 @@ from shunt.router.embedding_config import (
     load_embedding_config,
 )
 from shunt.router.engine import OutcomeIndex, RouterEngine
+from shunt.router.escalation import (
+    EscalationAction,
+    EscalationConfig,
+    EscalationContext,
+    EscalationDirective,
+    FailureEvent,
+    counts_as_failure,
+    decide_escalation,
+)
 from shunt.router.exploration import CandidateStats, ExplorationDecision, ThompsonSampler
 from shunt.router.pending import PendingDecision, PendingOutcomes
 from shunt.router.policy import (
+    EscalationPolicy,
     ExplorationPolicy,
     KnnPolicy,
     RouterPolicy,
@@ -35,7 +45,15 @@ __all__ = [
     "PendingDecision",
     "PendingOutcomes",
     "ExplorationPolicy",
+    "EscalationPolicy",
     "KnnPolicy",
     "RouterPolicy",
     "load_router_policy",
+    "EscalationAction",
+    "EscalationConfig",
+    "EscalationContext",
+    "EscalationDirective",
+    "FailureEvent",
+    "counts_as_failure",
+    "decide_escalation",
 ]

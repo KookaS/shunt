@@ -35,13 +35,22 @@ class OffWireVerifier(Protocol):
 
 
 class RecordOutcomeCallback(Protocol):
-    """The engine's ``record_outcome`` seam — fed only verified Tier-2 outcomes.
-
-    Injected (not a hard engine dependency) so the coordinator stays unit-testable and a
-    no-engine deployment simply passes ``None`` and records nothing into the gate.
+    """The engine's ``record_outcome`` seam — fed only verified Tier-2 outcomes; the
+    ``task_key``/``dedup_key``/``blocking``/``confirmed`` args feed the auto-escalation log.
     """
 
-    def __call__(self, *, downshift: bool, success: bool) -> None: ...
+    def __call__(  # noqa: PLR0913 (mirrors engine.record_outcome's verified-outcome fields)
+        self,
+        *,
+        downshift: bool,
+        success: bool,
+        task_key: str | None = None,
+        dedup_key: str | None = None,
+        exit_code: int | None = None,
+        blocking: bool = False,
+        confirmed: bool = False,
+        decision_index: int | None = None,
+    ) -> None: ...
 
 
 class WorkDirResolver:
@@ -164,21 +173,39 @@ class CaptureCoordinator:
             # Only a fresh insert reaches here: a duplicate capture (worker retry, double
             # sweep) dedups on the idempotency_key → inserted=False → no double-record.
             self._store.persist_index()
-            self._record_outcome(row, result)
+            self._record_outcome(session, work_dir, row, result)
             if self._refit_scheduler is not None:
                 self._refit_scheduler.note_capture()
             logger.info(
                 "capture: session %s labelled %s (auto_tier2)", session.session_id, result.outcome
             )
 
-    def _record_outcome(self, row: dict[str, Any] | None, result: VerifierResult) -> None:
-        """Feed the verified Tier-2 outcome to the engine's gate, attributed to this
-        session's own routed decision (durable on the session row)."""
+    def _record_outcome(
+        self, session: Session, work_dir: str, row: dict[str, Any] | None, result: VerifierResult
+    ) -> None:
+        """Feed the verified Tier-2 outcome to the engine's gate + auto-escalation log."""
+        # The task key is the resolved `work_dir` (the repo), NOT `tool_identity` (the client):
+        # identically-named tests in two repos must not aggregate, and escalation must apply to
+        # the repo that failed. `blocking` is set from the verified outcome — a confirmed,
+        # non-infra failure IS a capability failure — not from the subprocess exit code.
         if self._record_outcome_callback is None:
             return
+        success = result.outcome in _SUCCESS_LABELS
+        # Env-cause vs capability-cause: an ImportError / collection / missing-module red is
+        # environmental — no larger model fixes it — so the verifier flags it `is_infra_failure`
+        # and it is non-blocking here, exactly like a runner-not-found. Only a genuine capability
+        # failure stays blocking and can escalate.
         self._record_outcome_callback(
             downshift=_downshift_of(row),
-            success=result.outcome in _SUCCESS_LABELS,
+            success=success,
+            task_key=work_dir,
+            dedup_key=result.failing_check_id,
+            exit_code=result.exit_code,
+            blocking=(not success and not result.is_infra_failure),
+            confirmed=result.confirmed,
+            # The decision index stamped when THIS session was routed — so the failure's
+            # staleness window measures decisions-since-routed, not decisions-since-capture.
+            decision_index=_decision_index_of(row),
         )
 
     def _session_fingerprint(self, session_id: str) -> str | None:
@@ -193,15 +220,26 @@ def _fingerprint_of(row: dict[str, Any] | None) -> str | None:
     return fingerprint if isinstance(fingerprint, str) else None
 
 
-def _downshift_of(row: dict[str, Any] | None) -> bool:
-    """Whether the session's routed decision was an exploratory downshift (from provenance)."""
+def _provenance_of(row: dict[str, Any] | None) -> dict[str, Any]:
+    """Parse the session row's decision provenance JSON, or ``{}`` when absent/malformed."""
     if row is None:
-        return False
+        return {}
     raw = row.get("decision_provenance")
     if not isinstance(raw, str):
-        return False
+        return {}
     try:
         provenance = json.loads(raw)
     except json.JSONDecodeError:
-        return False
-    return bool(provenance.get("downshift", False))
+        return {}
+    return provenance if isinstance(provenance, dict) else {}
+
+
+def _downshift_of(row: dict[str, Any] | None) -> bool:
+    """Whether the session's routed decision was an exploratory downshift (from provenance)."""
+    return bool(_provenance_of(row).get("downshift", False))
+
+
+def _decision_index_of(row: dict[str, Any] | None) -> int | None:
+    """The per-task decision index stamped on the row at routing time, or None."""
+    value = _provenance_of(row).get("decision_index")
+    return value if isinstance(value, int) else None

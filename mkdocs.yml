@@ -37,6 +37,7 @@ nav:
   - Architecture: architecture.md
   - Configuration: configuration.md
   - Feedback: feedback.md
+  - Error detection & auto-escalation: escalation.md
   - Benchmark: benchmark.md
   - Benchmark design: benchmark-design.md
   - Decision records: decisions/index.md

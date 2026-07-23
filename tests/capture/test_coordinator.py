@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import numpy as np
 import pytest
@@ -166,13 +167,35 @@ def test_ac6_capture_event_inherits_session_fingerprint(store: OutcomeStore) -> 
 
 
 class _RecordingCallback:
-    """Stands in for engine.record_outcome — captures the (downshift, success) it receives."""
+    """Stands in for engine.record_outcome — captures every kwarg it receives."""
 
     def __init__(self) -> None:
-        self.calls: list[dict[str, bool]] = []
+        self.calls: list[dict[str, Any]] = []
 
-    def __call__(self, *, downshift: bool, success: bool) -> None:
-        self.calls.append({"downshift": downshift, "success": success})
+    def __call__(  # noqa: PLR0913 (mirrors the RecordOutcomeCallback protocol under test)
+        self,
+        *,
+        downshift: bool,
+        success: bool,
+        task_key: str | None = None,
+        dedup_key: str | None = None,
+        exit_code: int | None = None,
+        blocking: bool = False,
+        confirmed: bool = False,
+        decision_index: int | None = None,
+    ) -> None:
+        self.calls.append(
+            {
+                "downshift": downshift,
+                "success": success,
+                "task_key": task_key,
+                "dedup_key": dedup_key,
+                "exit_code": exit_code,
+                "blocking": blocking,
+                "confirmed": confirmed,
+                "decision_index": decision_index,
+            }
+        )
 
 
 def _coord(
@@ -190,9 +213,30 @@ def test_ac1_verified_failure_records_outcome(store: OutcomeStore) -> None:
     sid = "s-rec-fail"
     _store_embedded_session(store, sid, _emb())
     cb = _RecordingCallback()
-    coord = _coord(store, VerifierResult(outcome="failure", confidence=0.7), cb)
+    # A verified failure threads its dedup identity + the blocking/confirmed flags through. The
+    # subprocess exit code is a real pytest red (1), and task_key is the REPO (work_dir), not
+    # the client tool_identity (B3).
+    result = VerifierResult(
+        outcome="failure",
+        confidence=0.7,
+        failing_check_id="tests/test_x.py::test_y",
+        exit_code=1,
+        confirmed=True,
+    )
+    coord = _coord(store, result, cb)
     coord.capture(_closed_session(sid))
-    assert cb.calls == [{"downshift": False, "success": False}]
+    assert cb.calls == [
+        {
+            "downshift": False,
+            "success": False,
+            "task_key": "/repo",  # == resolved work_dir (the repo), NOT session.tool_identity
+            "dedup_key": "tests/test_x.py::test_y",
+            "exit_code": 1,
+            "blocking": True,  # confirmed non-infra failure IS a blocking capability failure
+            "confirmed": True,  # carried from the verifier result, not hardcoded
+            "decision_index": None,  # no index stamped on this session's provenance
+        }
+    ]
 
 
 def test_ac1_verified_success_records_outcome(store: OutcomeStore) -> None:
@@ -201,7 +245,19 @@ def test_ac1_verified_success_records_outcome(store: OutcomeStore) -> None:
     cb = _RecordingCallback()
     coord = _coord(store, VerifierResult(outcome="success", confidence=0.9), cb)
     coord.capture(_closed_session(sid))
-    assert cb.calls == [{"downshift": False, "success": True}]
+    # Success has no failing check ⇒ dedup_key/exit_code None, not blocking; task_key is the repo.
+    assert cb.calls == [
+        {
+            "downshift": False,
+            "success": True,
+            "task_key": "/repo",
+            "dedup_key": None,
+            "exit_code": None,
+            "blocking": False,
+            "confirmed": False,
+            "decision_index": None,
+        }
+    ]
 
 
 def test_records_downshift_from_stored_provenance(store: OutcomeStore) -> None:
@@ -221,7 +277,18 @@ def test_records_downshift_from_stored_provenance(store: OutcomeStore) -> None:
     cb = _RecordingCallback()
     coord = _coord(store, VerifierResult(outcome="success", confidence=1.0), cb)
     coord.capture(_closed_session(sid))
-    assert cb.calls == [{"downshift": True, "success": True}]
+    assert cb.calls == [
+        {
+            "downshift": True,
+            "success": True,
+            "task_key": "/repo",
+            "dedup_key": None,
+            "exit_code": None,
+            "blocking": False,
+            "confirmed": False,
+            "decision_index": None,
+        }
+    ]
 
 
 def test_tier1_only_capture_does_not_record(store: OutcomeStore) -> None:

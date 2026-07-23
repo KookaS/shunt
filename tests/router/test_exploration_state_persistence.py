@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from shunt.capture.worker import CaptureWorker
 from shunt.db.store import OutcomeStore
-from shunt.proxy.server import _persist_exploration_state
+from shunt.proxy.server import _persist_router_state
 from shunt.router.budget import ConservativeGate, ExplorationBudget
 from shunt.router.engine import RouterEngine
 from shunt.router.exploration import ExplorationDecision
@@ -72,7 +72,7 @@ def test_full_restart_cycle_through_store(tmp_path: Path) -> None:
     engine = _exploring_engine(budget=ExplorationBudget(0.4), gate=gate)
     engine.record_outcome(downshift=True, success=True)  # slack -> 1.0
 
-    _persist_exploration_state(engine, store)  # clean-shutdown persist
+    _persist_router_state(engine, store)  # clean-shutdown persist
     store.close()
 
     # New process: fresh store + engine, restore from disk.
@@ -93,7 +93,7 @@ def test_periodic_sweep_persists_without_clean_shutdown(tmp_path: Path) -> None:
         coordinator=MagicMock(),
         session_manager=MagicMock(),
         sweep_interval=0.05,
-        on_sweep=lambda: _persist_exploration_state(engine, store),
+        on_sweep=lambda: _persist_router_state(engine, store),
     )
     worker.start()
     try:

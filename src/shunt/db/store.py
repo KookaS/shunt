@@ -27,6 +27,10 @@ _ROUTER_STATE_KEY: Final[str] = "exploration_state"
 # consumer of the generic router_state KV, under its own key — never clobbers the above.
 _EMBEDDING_FINGERPRINT_KEY: Final[str] = "embedding_fingerprint"
 
+# The auto-escalation failure log + per-task decision counters — a third KV consumer under its
+# own key, so a restart does not wipe accrued same-failure counts.
+_ESCALATION_STATE_KEY: Final[str] = "escalation_state"
+
 
 @dataclass(frozen=True)
 class SessionProvenance:
@@ -480,7 +484,7 @@ class OutcomeStore:
         clause = " AND o.tier2_outcome IS NOT NULL" if tier2_only else ""
         with self._lock:
             cursor = self._conn.execute(
-                "SELECT o.*, s.model_chosen FROM outcomes o "
+                "SELECT o.*, s.model_chosen, s.decision_provenance FROM outcomes o "
                 "JOIN sessions s ON s.session_id = o.session_id "
                 "WHERE s.embedding_blob IS NOT NULL" + clause
             )
@@ -625,6 +629,14 @@ class OutcomeStore:
     def load_router_state(self) -> dict[str, Any] | None:
         """Read the persisted exploration state; missing or corrupt → None."""
         return self._load_state(_ROUTER_STATE_KEY)
+
+    def save_escalation_state(self, state: dict[str, Any]) -> None:
+        """Durably persist the auto-escalation failure log + per-task decision counters."""
+        self._save_state(_ESCALATION_STATE_KEY, state)
+
+    def load_escalation_state(self) -> dict[str, Any] | None:
+        """Read the persisted escalation state; missing or corrupt → None."""
+        return self._load_state(_ESCALATION_STATE_KEY)
 
     def save_embedding_fingerprint(self, fingerprint: dict[str, Any]) -> None:
         """Persist the corpus embedding-space fingerprint (its own key, distinct from state)."""

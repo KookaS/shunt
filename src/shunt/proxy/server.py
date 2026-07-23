@@ -11,13 +11,14 @@ import threading
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from types import FrameType
-from typing import Any
+from typing import Any, cast
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from shunt.capture import CaptureCoordinator, CaptureWorker, RefitScheduler, WorkDirResolver
+from shunt.db.loop_health import LoopHealth
 from shunt.db.outcome_index import OutcomeIndexAdapter
 from shunt.db.store import OutcomeStore, SessionProvenance
 from shunt.log_config import configure_logging
@@ -37,6 +38,7 @@ from shunt.router.selection import SelectionRule
 from shunt.router.strategies import EXPLORATORY_STRATEGIES, build_strategy
 from shunt.session import Session, SessionManager
 from shunt.verifiers import AutoDetectVerifier
+from shunt.verifiers.rerun import RerunConfirmingVerifier
 
 logger = logging.getLogger(__name__)
 
@@ -168,18 +170,21 @@ def _log_exploration_disclosure(policy: RouterPolicy, *, cold_start_active: bool
             )
 
 
-def _build_engine(
+def _build_engine(  # noqa: PLR0913 (engine-composition wiring from the resolved policy)
     model_pool: ModelPool,
     session_manager: SessionManager,
     outcome_store: OutcomeStore,
     policy: RouterPolicy,
     embedder: Embedder | None = None,
     trust_neighbors: bool = True,
+    resolver: WorkDirResolver | None = None,
 ) -> RouterEngine:
     """Compose the live RouterEngine from the resolved router policy."""
     # KnnPolicy is the single source of the knn knobs: threshold + min_samples feed the
     # SelectionRule (used by both the knn strategy and the exploration threshold); k feeds
     # the neighbor query. The registry maps router.strategy → the active strategy.
+    # No resolver ⇒ an empty one (no work_dir): escalation stays inert, its precondition unmet.
+    resolver = resolver or WorkDirResolver()
     selection_rule = SelectionRule(
         min_success_rate=policy.policy.success_rate_threshold,
         min_samples=policy.policy.min_samples,
@@ -195,7 +200,25 @@ def _build_engine(
         neighbor_k=policy.policy.k,
         exploration=_effective_exploration(policy),
         trust_neighbors=trust_neighbors,
+        escalation=policy.escalation.to_config(),
+        # The escalation task key is the REPO (resolved work_dir), same seam the capture
+        # side keys against — so decide() and capture agree on the task, never the client. The
+        # cast bridges the engine's `object` session (SessionManagerProtocol.get_session) to
+        # WorkDirResolver.resolve's Session — at runtime get_session always returns a Session.
+        task_key_resolver=cast("Callable[[object], str | None]", resolver.resolve),
+        # The routing-collapse guard, read live at escalation time. Only invoked when
+        # escalation is enabled and a recurrence is otherwise due.
+        loop_health_alarm=_build_collapse_alarm(outcome_store, model_pool),
     )
+
+
+def _build_collapse_alarm(outcome_store: OutcomeStore, model_pool: ModelPool) -> Callable[[], bool]:
+    """A live routing-collapse alarm probe: True when the choice distribution has collapsed."""
+
+    def _alarm() -> bool:
+        return _loop_health(outcome_store, model_pool).routing_collapse.alarm
+
+    return _alarm
 
 
 def _resolve_embedding_trust(embedder: Embedder, outcome_store: OutcomeStore) -> bool:
@@ -322,6 +345,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             _index.effective_labeled(), _index.effective_tier2()
         ),
     )
+    # One resolver, shared by the engine (decide-side task key) and the capture worker
+    # (capture-side task key) so both key escalation on the SAME repo.
+    resolver = WorkDirResolver.from_config(
+        work_dir=policy.capture.work_dir, work_dirs=policy.capture.work_dirs
+    )
     engine = _build_engine(
         model_pool,
         session_manager,
@@ -329,12 +357,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         policy,
         embedder=embedder,
         trust_neighbors=trust_neighbors,
+        resolver=resolver,
     )
     # Reload the exploration budget cap + gate slack persisted by the prior run, so a
-    # restart does not silently reset the cost cap and downshift evidence to zero.
+    # restart does not silently reset the cost cap and downshift evidence to zero. Same for
+    # the escalation failure log + decision counters — a restart must not wipe them.
     engine.restore_exploration_state(outcome_store.load_router_state())
+    engine.restore_escalation_state(outcome_store.load_escalation_state())
     _warm_embedder_in_background(engine)
-    worker = _wire_capture(session_manager, outcome_store, policy, engine)
+    worker = _wire_capture(session_manager, outcome_store, policy, engine, resolver)
     router = ProxyRouter(
         model_pool=model_pool,
         session_manager=session_manager,
@@ -347,15 +378,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.outcome_store = outcome_store
     yield
     worker.stop()
-    _persist_exploration_state(engine, outcome_store)  # exact state on a clean shutdown
+    _persist_router_state(engine, outcome_store)  # exact state on a clean shutdown
     outcome_store.close()
 
 
-def _persist_exploration_state(engine: RouterEngine, outcome_store: OutcomeStore) -> None:
-    """Flush the router's mutable exploration state to disk (no-op when nothing to persist)."""
-    state = engine.snapshot_exploration_state()
-    if state:
-        outcome_store.save_router_state(state)
+def _persist_router_state(engine: RouterEngine, outcome_store: OutcomeStore) -> None:
+    """Flush the router's mutable exploration AND escalation state to disk (both no-op if empty)."""
+    exploration = engine.snapshot_exploration_state()
+    if exploration:
+        outcome_store.save_router_state(exploration)
+    escalation = engine.snapshot_escalation_state()
+    if escalation:
+        outcome_store.save_escalation_state(escalation)
+
+
+def _build_verifier(policy: RouterPolicy) -> AutoDetectVerifier | RerunConfirmingVerifier:
+    """Off-wire verifier, rerun-confirmed when escalation is on so a flake never trips it.
+
+    Rerun-confirm re-runs a failing suite on unchanged state (fail-then-pass = flake, abstained);
+    default capture behaviour is unchanged while escalation ships OFF.
+    """
+    base = AutoDetectVerifier()
+    if policy.escalation.enabled:
+        return RerunConfirmingVerifier(base)
+    return base
 
 
 def _wire_capture(
@@ -363,15 +409,13 @@ def _wire_capture(
     outcome_store: OutcomeStore,
     policy: RouterPolicy,
     engine: RouterEngine,
+    resolver: WorkDirResolver,
 ) -> CaptureWorker:
     """Build the capture worker+coordinator and wire close→enqueue."""
-    resolver = WorkDirResolver.from_config(
-        work_dir=policy.capture.work_dir, work_dirs=policy.capture.work_dirs
-    )
     _log_capture_disclosure(policy)
     coordinator = CaptureCoordinator(
         resolver=resolver,
-        verifier=AutoDetectVerifier(),
+        verifier=_build_verifier(policy),
         store=outcome_store,
         # The live caller: a verified Tier-2 outcome escalates/downshifts the NEXT session
         # by moving the in-process ConservativeGate — never mid-session (cache-safety).
@@ -382,10 +426,10 @@ def _wire_capture(
     worker = CaptureWorker(
         coordinator=coordinator,
         session_manager=session_manager,
-        # Crash-tolerant cadence: flush the exploration budget cap + gate slack on the
-        # existing periodic sweep (no extra timer thread). The budget advances on every
-        # decision, so this bounds loss to one sweep interval; clean shutdown is exact.
-        on_sweep=functools.partial(_persist_exploration_state, engine, outcome_store),
+        # Crash-tolerant cadence: flush the exploration budget/gate slack AND the escalation
+        # failure log on the existing periodic sweep (no extra timer thread). Both advance on
+        # decisions/outcomes, so this bounds loss to one sweep interval; clean shutdown is exact.
+        on_sweep=functools.partial(_persist_router_state, engine, outcome_store),
     )
     # Always wire: a per-session resolve returning None just means manual-only for that
     # session, and the sweeper must run so untrafficked sessions still close.
@@ -492,23 +536,27 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-def _loop_health_payload(outcome_store: OutcomeStore, model_pool: ModelPool) -> dict[str, Any]:
-    """Aggregate loop-health metrics as a JSON-able dict — no prompt_text, no PII."""
-    from dataclasses import asdict
-
+def _loop_health(outcome_store: OutcomeStore, model_pool: ModelPool) -> LoopHealth:
+    """Compute the full loop-health object from the store — shared by the endpoint + the alarm."""
     from shunt.db.loop_health import LoopHealthThresholds, compute_loop_health
 
     thresholds = LoopHealthThresholds()
     snapshot = outcome_store.loop_health_snapshot(recent_window=thresholds.recent_window)
     names = set(model_pool.model_names())
     frontier = {name for name in names if model_pool.get_tier(name) == "frontier"}
-    health = compute_loop_health(
+    return compute_loop_health(
         snapshot,
         frontier_models=frontier,
         candidate_models=names,
         thresholds=thresholds,
     )
-    return asdict(health)
+
+
+def _loop_health_payload(outcome_store: OutcomeStore, model_pool: ModelPool) -> dict[str, Any]:
+    """Aggregate loop-health metrics as a JSON-able dict — no prompt_text, no PII."""
+    from dataclasses import asdict
+
+    return asdict(_loop_health(outcome_store, model_pool))
 
 
 @app.get("/admin/loop-health")

@@ -105,3 +105,24 @@ class TestAutoDetectVerifier:
             )
             lang = self.v.detect(tmpdir)
             assert lang == "typescript"
+
+
+# ── A: failing-check dedup key + exit code parsing ─────────────────────────────
+from shunt.verifiers.tier2 import _failing_check_id  # noqa: E402
+
+
+def test_failing_check_id_parses_pytest_node_id() -> None:
+    detail = "tests/test_x.py::test_widget FAILED\nsome traceback"
+    assert _failing_check_id(detail) == "tests/test_x.py::test_widget"
+
+
+def test_failing_check_id_parses_failed_prefix_form() -> None:
+    detail = "=== FAILURES ===\nFAILED tests/a.py::TestC::test_m - AssertionError"
+    assert _failing_check_id(detail) == "tests/a.py::TestC::test_m"
+
+
+def test_failing_check_id_falls_back_to_hash_when_no_node_id() -> None:
+    a = _failing_check_id("cargo test error: E0308 mismatched types in foo")
+    b = _failing_check_id("cargo test error: E0308 mismatched types in bar")
+    assert a.startswith("hash:") and b.startswith("hash:")
+    assert a != b  # distinct failures get distinct keys

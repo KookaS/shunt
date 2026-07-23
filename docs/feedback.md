@@ -77,7 +77,9 @@ ground truth:
   closed. A pre-existing, unrelated failure will label a good session bad.
 - It needs the repo **and its test toolchain** wherever Shunt runs. A slim container
   that has neither cannot run your tests — see [by deployment](#giving-feedback-by-deployment).
-- A flaky test flips the label.
+- A flaky test (fail → pass on unchanged state) is re-run once to confirm it is real;
+  a failure that does not reproduce is treated as a flake and abstained from (does not
+  feed the router or escalation). A confirmed failure is passed through.
 - If there is no test framework, or no `work_dir`, Shunt writes **nothing**. It never
   fabricates a label from a session it could not verify.
 
@@ -146,7 +148,8 @@ curl -s localhost:8080/admin/loop-health
 
 A verified outcome updates three things for the **next** session, never mid-session:
 the kNN index (so a similar prompt routes to what worked), the exploration priors,
-and the escalation gate (a model that proves not capable is escalated next time).
+and the escalation gate (a model that proves not capable is escalated next time — see
+[Error detection & auto-escalation](escalation.md)).
 Learning is batch — the index rebuilds from an append-only outcome log on a cadence,
 not on every request — which keeps the cache-safe, one-decision-per-session guarantee
 intact.

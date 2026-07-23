@@ -27,6 +27,25 @@ router:
     propensity_mc_samples: 100    # logged TS propensity, for off-policy evaluation
     prior_strength_cap: 20.0      # max pseudo-counts an offline per-model estimate can seed
 
+  # Auto-escalation on repeated verified failure. Shipped OFF: it needs the verified
+  # outcome-capture loop (below) writing Tier-2 failures, and enabling it adds exploration
+  # cost. When enabled, a SAME verified failure (same normalized failing-check id) seen
+  # escalate_after_n times within stale_window decisions raises one rung at the NEXT session
+  # boundary — effort first (cache-safe), then a model tier. Never mid-cached-turn.
+  escalation:
+    enabled: false
+    escalate_after_n: 2           # same-key verified failures before a step (1 = failure-biased)
+    stale_window: 10              # a failure not recurring within N decisions is retired
+    blocking_exit_code: 2         # FUTURE hook-stream path only; the off-wire test gate counts a
+                                  # real failure by verifier outcome (a pytest/jest/go red is exit
+                                  # 1, cargo 101), not this code — a collection/import error (exit 2)
+                                  # is treated as infra, not a capability failure.
+    # Under effort_then_tier the router first raises the current model's reasoning EFFORT arm
+    # (same model → cache namespace unchanged, cache-safe); the arm's params are applied to the
+    # outbound request. It steps a model TIER only once the model's reasoning ladder is exhausted
+    # (or the model declares no reasoning arms). tier_only skips the effort rung entirely.
+    ladder: effort_then_tier      # effort_then_tier | tier_only (one rung per step, never to frontier)
+
   # Off-wire automatic outcome capture. With a work_dir set, at each session's close shunt
   # re-runs THAT repo's test suite (pytest/jest/go/cargo, auto-detected) off the wire and
   # records the verified pass/fail as a Tier-2 outcome — no human `shunt flag` needed. Unset

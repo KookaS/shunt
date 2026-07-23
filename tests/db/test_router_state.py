@@ -94,6 +94,43 @@ def test_store_save_and_load_round_trip(tmp_path: Path) -> None:
     reopened.close()
 
 
+def test_escalation_state_round_trips_under_own_key(tmp_path: Path) -> None:
+    # B4: escalation state persists under its own KV key, independent of exploration state —
+    # neither write clobbers the other, and a fresh process reloads it intact.
+    db = str(tmp_path / "outcomes.db")
+    store = OutcomeStore(db_path=db)
+    exploration = {"budget": {"exploit_cost": 9.0, "decisions": 4}}
+    escalation = {
+        "failure_log": {
+            "/repo": [
+                {
+                    "decision_index": 0,
+                    "dedup_key": "t::a",
+                    "exit_code": 1,
+                    "success": False,
+                    "confirmed": True,
+                    "blocking": True,
+                }
+            ]
+        },
+        "decision_index": {"/repo": 2},
+    }
+    store.save_router_state(exploration)
+    store.save_escalation_state(escalation)
+    store.close()
+
+    reopened = OutcomeStore(db_path=db)
+    assert reopened.load_escalation_state() == escalation
+    assert reopened.load_router_state() == exploration  # not clobbered
+    reopened.close()
+
+
+def test_missing_escalation_state_is_none(tmp_path: Path) -> None:
+    store = OutcomeStore(db_path=str(tmp_path / "esc.db"))
+    assert store.load_escalation_state() is None
+    store.close()
+
+
 def test_store_load_missing_returns_none(tmp_path: Path) -> None:
     store = OutcomeStore(db_path=str(tmp_path / "outcomes.db"))
     assert store.load_router_state() is None

@@ -140,6 +140,7 @@ trust rules: [Feedback](feedback.md).
 - [Architecture](architecture.md) — what runs live vs what's waiting for the learning loop
 - [Configuration](configuration.md) — add provider keys and register models
 - [Feedback](feedback.md) — how outcomes are captured (auto + manual) and learned from
+- [Error detection & auto-escalation](escalation.md) — how a verified failure is detected and, on repeat, escalates a rung (opt-in)
 - [Benchmark](benchmark.md) — run the offline model-capability and routing evals
 - [Benchmark design](benchmark-design.md) — two-tree structure, strategy interface
 

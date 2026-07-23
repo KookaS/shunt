@@ -80,13 +80,14 @@ Adding a model to the registry makes it *known*, not *live*. To have the running
 router actually pick it, also add its name to `router.yaml`'s `models:` list — see
 [Choose which models are live-routable](#choose-which-models-are-live-routable).
 
-**Order matters.** Models are read in file order, and that order is load-bearing
-for the routing being built: when the router escalates, it is designed to try the
-first model it hasn't tested yet, starting from the cheapest tier, and to fall
-back to the *last* model of the highest tier once everything has been tried.
-(Escalation is not on the live path yet — it exists as an offline benchmark
-strategy.) Reordering rows changes that intended behavior, so add new rows
-deliberately rather than sorting the file.
+**Order matters.** Models are read in file order, and that order is load-bearing.
+The benchmark's *cascade* strategy walks models in this order — trying the first
+model it hasn't tested yet, cheapest tier first, and falling back to the *last*
+model of the highest tier once everything has been tried. The live router's
+[auto-escalation ladder](#auto-escalate-on-repeated-verified-failure) is a
+different mechanism (it raises the current model's reasoning effort first, then
+steps a tier), but it too reads tiers in registry order. Reordering rows changes
+both behaviors, so add new rows deliberately rather than sorting the file.
 
 ### With a benchmark run
 
@@ -346,6 +347,52 @@ shunt start --no-explore
 ```
 
 or `exploration.enabled: false` in your `router.yaml` for a permanent setting.
+
+### Auto-escalate on repeated verified failure
+
+Shunt can automatically move up to a higher-effort or higher-tier model when the cheap
+default fails the *same* verified check repeatedly — no human command needed. This is
+the knob reference; how detection, triggering, the ladder, and the safety rails work is
+covered in full on the [Error detection & auto-escalation](escalation.md) page.
+
+It ships **OFF**. The block and its defaults:
+
+```yaml
+router:
+  escalation:
+    enabled: false              # shipped OFF — opt-in
+    escalate_after_n: 2         # same verified failure seen this many times
+    stale_window: 10            # failures not recurring within N decisions retire
+    blocking_exit_code: 2       # FUTURE: hook-stream path only; off-wire gate gates on outcome/is_infra_failure
+    ladder: effort_then_tier    # effort_then_tier | tier_only (one rung per step, never to frontier)
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Master switch. Off ships nothing; on wires escalation into the live decision path. |
+| `escalate_after_n` | `2` | Same-key verified failures required before a step. `1` would escalate on the first red (failure-biased). |
+| `stale_window` | `10` | A failure not recurring within this many decisions is retired from the counter. |
+| `ladder` | `effort_then_tier` | `effort_then_tier` raises reasoning effort first (cache-safe), then tier. `tier_only` skips the effort rung. |
+| `blocking_exit_code` | `2` | Reserved for a future hook-stream path — **not read by the current off-wire gate** (see below). |
+
+Escalation triggers only on **confirmed, verified capability failures** — a test suite
+re-run via `work_dir`, or a manual `shunt flag <session_id> bad`. Non-blocking results
+(lint-only or infrastructure failures) and unconfirmed flakes never count. Enable it
+with a flag override:
+
+```bash
+shunt start --config-override 'router.escalation.enabled=true'
+```
+
+or `escalation.enabled: true` in your `router.yaml`.
+
+> **Note on `blocking_exit_code`:** reserved for a future hook-stream path (where a Stop
+> hook reports exit 2 for a blocking gate and exit 1 for lint). The **current off-wire
+> gate** (test suite re-run via `work_dir`) distinguishes capability failures from
+> lint/infra failures using the verifier's `outcome` field and `is_infra_failure` flag,
+> not raw exit codes, so test-runner-specific codes (pytest/jest=1, cargo=101) are
+> normalized correctly. The off-wire gate works with your test suite as-is, regardless
+> of its exit-code vocabulary.
 
 ### Prior seeding from offline model estimates
 

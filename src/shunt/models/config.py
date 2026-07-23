@@ -134,6 +134,18 @@ class ReasoningConfig(BaseModel):
             )
         return self
 
+    def next_arm_above(self, arm_id: str) -> str | None:
+        """The id of the next reasoning arm strictly above *arm_id* by rank, else None.
+
+        The effort-escalation primitive: a same-model, cache-safe step up in reasoning before
+        paying a model-tier switch. Returns None when *arm_id* is already the top arm.
+        """
+        ranked = sorted(self.arms, key=lambda a: a.rank)
+        for i, arm in enumerate(ranked):
+            if arm.id == arm_id:
+                return ranked[i + 1].id if i + 1 < len(ranked) else None
+        return None
+
 
 class ModelEntry(BaseModel):
     """A model row as written in the registry file (`provider` is an FK)."""

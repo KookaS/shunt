@@ -20,6 +20,7 @@ from openai import AsyncOpenAI
 from starlette.concurrency import run_in_threadpool
 
 from shunt.models import ModelConfig, ModelPool
+from shunt.models.config import arm_api_params
 from shunt.models.config import model_fingerprint as _resolve_fingerprint
 from shunt.proxy.wire_signals import WireSignalCollector
 from shunt.session import Session, SessionManager
@@ -724,8 +725,15 @@ class ProxyRouter:
             if not self._pool.is_healthy(candidate):
                 continue
 
+            # Rebuild per candidate so an escalated reasoning arm never leaks across a fallback:
+            # the arm was resolved for the locked HEAD model, so it is injected only when
+            # the candidate IS that model — every fallback sibling gets its own defaults.
+            attempt_kwargs = dict(openai_kwargs)
+            if candidate == model_name:
+                self._apply_reasoning_arm(attempt_kwargs, session, candidate)
+
             try:
-                return await self._try_model(candidate, openai_kwargs), candidate
+                return await self._try_model(candidate, attempt_kwargs), candidate
             except UpstreamError as exc:
                 if exc.status_code in (400, 401, 403):
                     raise  # fail fast — auth / bad request
@@ -745,6 +753,26 @@ class ProxyRouter:
             f"All models exhausted. Last error: {last_error}",
             status_code=getattr(last_error, "status_code", 502) if last_error else 502,
         )
+
+    def _apply_reasoning_arm(
+        self, openai_kwargs: dict[str, Any], session: Session, model_name: str
+    ) -> None:
+        """Inject the session's escalated reasoning arm into the outbound request."""
+        # Set by an effort escalation on the locked model. The arm's raw API params (a reasoning
+        # object / effort label / thinking flag) OVERRIDE any client-supplied reasoning, and are
+        # request-level — the served model is unchanged, so the cache namespace is unchanged. Only
+        # applies when the served model is the one the arm belongs to (a fallback to another model
+        # skips it — its arm ids differ).
+        arm = session.metadata.get("reasoning_arm")
+        if not isinstance(arm, str) or not arm:
+            return
+        config = self._pool.get_model(model_name)
+        if config is None or config.reasoning is None:
+            return
+        if arm not in {a.id for a in config.reasoning.arms}:
+            return
+        openai_kwargs.pop("reasoning_effort", None)  # client-supplied reasoning is overridden
+        openai_kwargs.update(arm_api_params(config, arm))
 
     async def _try_model(self, model_name: str, openai_kwargs: dict[str, Any]) -> Any:
         """Attempt routing through *model_name* with retries."""
@@ -839,6 +867,12 @@ class ProxyRouter:
         session.metadata["model"] = model_name
         session.metadata["model_source"] = reason
         session.metadata["last_prompt"] = prompt_text
+        # A cache-safe effort escalation raises the reasoning arm on the SAME locked model; carry
+        # it on the session so every later turn re-applies it outbound. Decided once, like
+        # the model itself — never re-derived per turn.
+        arm = provenance.get("escalated_reasoning_arm")
+        if isinstance(arm, str) and arm:
+            session.metadata["reasoning_arm"] = arm
         session.decision_provenance = provenance
         return model_name
 
