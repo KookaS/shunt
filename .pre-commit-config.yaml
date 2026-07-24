@@ -69,10 +69,11 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-      # SH006 enforces the dependency direction the architecture depends on:
-      # benchmark -> shunt only. Same always_run rationale as SH004/SH005. BLOCKING.
+      # SH006 enforces the dependency directions the architecture depends on (rule table):
+      # src/shunt -> benchmark forbidden; routing/calibration -> benchmark.escalation forbidden
+      # (escalation is a leaf consumer). Same always_run rationale as SH004/SH005. BLOCKING.
       - id: sh006-import-direction
-        name: SH006 src/shunt must not import benchmark
+        name: SH006 import-direction rule table
         entry: python tools/lint/check_import_direction.py
         language: system
         pass_filenames: false

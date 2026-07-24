@@ -13,8 +13,10 @@ import os
 from typing import Any, Protocol
 
 from shunt.capture.refit import RefitScheduler
+from shunt.capture.trajectory import StepRecord, TrajectoryRecorder
 from shunt.db.store import OutcomeEvent, OutcomeStore
 from shunt.proxy.wire_signals import derive_wire_tier1_outcome
+from shunt.router.escalation import derive_blocking
 from shunt.session import Session
 from shunt.verifiers.base import VerifierResult
 
@@ -47,7 +49,7 @@ class RecordOutcomeCallback(Protocol):
         task_key: str | None = None,
         dedup_key: str | None = None,
         exit_code: int | None = None,
-        blocking: bool = False,
+        is_infra_failure: bool = False,
         confirmed: bool = False,
         decision_index: int | None = None,
     ) -> None: ...
@@ -97,12 +99,16 @@ class CaptureCoordinator:
         store: OutcomeStore,
         record_outcome_callback: RecordOutcomeCallback | None = None,
         refit_scheduler: RefitScheduler | None = None,
+        trajectory_recorder: TrajectoryRecorder | None = None,
     ) -> None:
         self._resolver = resolver
         self._verifier = verifier
         self._store = store
         self._record_outcome_callback = record_outcome_callback
         self._refit_scheduler = refit_scheduler
+        # Opt-in full-content capture (default None/off). Observe-only, at this off-wire
+        # outcome boundary — never on the wire, never mid-cached-turn, never alters routing.
+        self._trajectory_recorder = trajectory_recorder
 
     def capture(self, session: Session) -> None:
         """Capture a **closed** session's verified outcome, or write nothing."""
@@ -174,6 +180,7 @@ class CaptureCoordinator:
             # sweep) dedups on the idempotency_key → inserted=False → no double-record.
             self._store.persist_index()
             self._record_outcome(session, work_dir, row, result)
+            self._record_trajectory(row, result)
             if self._refit_scheduler is not None:
                 self._refit_scheduler.note_capture()
             logger.info(
@@ -186,27 +193,53 @@ class CaptureCoordinator:
         """Feed the verified Tier-2 outcome to the engine's gate + auto-escalation log."""
         # The task key is the resolved `work_dir` (the repo), NOT `tool_identity` (the client):
         # identically-named tests in two repos must not aggregate, and escalation must apply to
-        # the repo that failed. `blocking` is set from the verified outcome — a confirmed,
-        # non-infra failure IS a capability failure — not from the subprocess exit code.
+        # the repo that failed. The `blocking` derivation is NOT computed here — the shared
+        # failure-event constructor owns it, from `success` + `is_infra_failure`, so the live
+        # and offline-replay paths cannot drift.
         if self._record_outcome_callback is None:
             return
         success = result.outcome in _SUCCESS_LABELS
         # Env-cause vs capability-cause: an ImportError / collection / missing-module red is
         # environmental — no larger model fixes it — so the verifier flags it `is_infra_failure`
-        # and it is non-blocking here, exactly like a runner-not-found. Only a genuine capability
-        # failure stays blocking and can escalate.
+        # and it is non-blocking, exactly like a runner-not-found. Only a genuine capability
+        # failure counts and can escalate; the constructor derives that from these two flags.
         self._record_outcome_callback(
             downshift=_downshift_of(row),
             success=success,
             task_key=work_dir,
             dedup_key=result.failing_check_id,
             exit_code=result.exit_code,
-            blocking=(not success and not result.is_infra_failure),
+            is_infra_failure=result.is_infra_failure,
             confirmed=result.confirmed,
             # The decision index stamped when THIS session was routed — so the failure's
             # staleness window measures decisions-since-routed, not decisions-since-capture.
             decision_index=_decision_index_of(row),
         )
+
+    def _record_trajectory(self, row: dict[str, Any] | None, result: VerifierResult) -> None:
+        """Hand the finalized outcome to the opt-in full-content recorder (inert when off)."""
+        # Observe-only at this off-wire boundary: no upstream call, no routing effect. Free-text
+        # bodies are not threaded here yet, so the recorded step carries behaviour-only fields;
+        # the recorder redacts + encrypts to the local plane. Inert unless explicitly enabled.
+        if self._trajectory_recorder is None or not self._trajectory_recorder.enabled:
+            return
+        success = result.outcome in _SUCCESS_LABELS
+        record = StepRecord(
+            step_index=0,
+            decision_index=_decision_index_of(row) or 0,
+            metadata={},
+            observation="",
+            action="",
+            args=None,
+            result="",
+            failing_check_id=result.failing_check_id,
+            exit_code=result.exit_code,
+            blocking=derive_blocking(success, result.is_infra_failure),
+            is_infra_failure=result.is_infra_failure,
+            confirmed=result.confirmed,
+            success=success,
+        )
+        self._trajectory_recorder.record([record])
 
     def _session_fingerprint(self, session_id: str) -> str | None:
         return _fingerprint_of(self._store.get_session(session_id))

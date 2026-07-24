@@ -102,6 +102,14 @@ class CapturePolicy(BaseModel):
 
     work_dir: str | None = None
     work_dirs: dict[str, str] = Field(default_factory=dict)
+    # Opt-in full-content per-step trajectory capture. Shipped OFF (kill-gate posture): unset
+    # ⇒ only the behaviour-only verified-outcome fields are recorded. When true, the recorder
+    # redacts every free-text field then encrypts it to a LOCAL, gitignored dir at rest —
+    # never on the wire, never mid-cached-turn, and it never alters a routing decision.
+    full_content: bool = False
+    # Where the encrypted local plane is written. Unset ⇒ the recorder resolves a default
+    # OUTSIDE the repo ($SHUNT_HOME/trajectories); never inside the tree, never committed.
+    trajectory_dir: str | None = None
 
 
 class RefitPolicy(BaseModel):

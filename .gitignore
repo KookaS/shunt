@@ -30,7 +30,15 @@ data/
 # (the generic data/ rule above would otherwise silently ignore new inputs).
 !benchmark/routing/data/
 !benchmark/routing/data/**
+# The escalation detector's curated input dir is tracked too (same rationale as routing/data/).
+!benchmark/escalation/data/
+!benchmark/escalation/data/**
 index/
+
+# Live full-content trajectory capture — encrypted, LOCAL only, NEVER committed. Belt-and-
+# suspenders: the recorder defaults to a dir outside the repo, but guard a misconfigured path.
+trajectories/
+*.traj.enc
 
 # Documentation build artifacts
 site/
@@ -50,6 +58,9 @@ docs/backlog/
 # else (per-strategy summary, param sweeps, per-run eval outputs) is derived.
 # Parameterized eval outputs (results_k*_sr*_ms*.csv) and other per-run files.
 benchmark/routing/artifacts/
+# Per-step code snapshots for offline verified-outcome replay — ephemeral session scratch,
+# regenerable from a live run, NEVER committed.
+benchmark/runner/artifacts/
 results_k*_sr*_ms*.csv
 # Derived per-strategy summary — regenerated into reports/ (below); never the
 # legacy committed path.
@@ -70,3 +81,8 @@ reports/
 !benchmark/routing/reports/
 benchmark/routing/reports/*
 !benchmark/routing/reports/*.png
+
+# Same rule for the escalation detector's plots: ship the PNGs, ignore the intermediates.
+!benchmark/escalation/reports/
+benchmark/escalation/reports/*
+!benchmark/escalation/reports/*.png

@@ -48,15 +48,21 @@ routing:
 # p(arm|model) exploration sampling. A model's default_arm always
 # runs; each other bracket arm of rank `r` (0 = cheapest) runs on the fraction of
 # challenges below weights[r] (deterministic, cost-skewed toward cheaper arms).
-# Ranks beyond the list reuse the last weight. Keeps exploration within ~1.3-1.6x
-# of today's cost instead of running the full bracket on every cell.
+# Each weight is an INDEPENDENT per-arm inclusion probability in [0, 1] (a Bernoulli
+# threshold), NOT a categorical distribution — they need not sum to 1. Lower weights
+# on higher-rank (pricier) arms = fewer expensive runs = cheaper exploration.
+# Ranks beyond the list reuse the last weight. Keeps exploration within ~1.5-1.9x
+# of today's cost instead of running the full bracket on every cell — the flatter
+# tail (rank-2 at 0.25, not 0.1) is deliberate: the higher-effort arms ARE the arms
+# the escalation effort-rung escalates into, so starving them at 0.1 left that rung
+# unevaluable. 0.25 lifts them from ~unusable to bare-minimum coverage.
 # `enabled` gates the sweep: the live executor now overlays each arm's registry API
 # params onto the request (infer._scaffold_model_kwargs), so distinct arms bill
 # distinct requests — the wiring this gate previously waited on. Set false to
 # reproduce default-arm-only runs.
 arm_sampling:
   enabled: true
-  weights: [0.5, 0.35, 0.25]
+  weights: [0.6, 0.4, 0.25]   # cheaper-skewed; each is an independent p, not a distribution
   # Models pinned to their DEFAULT arm even while the sweep is on — the expensive
   # tiers (high/frontier), where extra reasoning arms aren't worth the per-cell cost.
   # Their default arm is already the high-reasoning one; other models still explore.

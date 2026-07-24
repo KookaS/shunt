@@ -116,10 +116,14 @@ def default_arm_ids(models: list[str] | None = None) -> dict[str, str]:
 
 
 def arm_sampling_weights() -> list[float]:
-    """Cost-weighted p(arm|model) fractions, indexed by within-model rank."""
+    """Per-arm inclusion probabilities by within-model rank — each an independent
+    p in [0, 1] (Bernoulli threshold), not a distribution that must sum to 1."""
     cfg = get()
-    weights = cfg.get("arm_sampling", {}).get("weights")
-    return [float(w) for w in weights] if weights else list(DEFAULT_ARM_SAMPLING_WEIGHTS)
+    raw = cfg.get("arm_sampling", {}).get("weights")
+    weights = [float(w) for w in raw] if raw else list(DEFAULT_ARM_SAMPLING_WEIGHTS)
+    if any(not 0.0 <= w <= 1.0 for w in weights):
+        raise ValueError(f"arm_sampling.weights must each be in [0, 1]; got {weights}")
+    return weights
 
 
 def arm_sampling_default_only_models() -> set[str]:

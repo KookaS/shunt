@@ -277,8 +277,10 @@ def _group_by_challenge(
 ) -> list[tuple[str, list[tuple[str, str, str]]]]:
     """Group cells by challenge, preserving each challenge's first-appearance order."""
     # Challenge-major batching: a challenge split across the (missing + stale)
-    # concatenation is reunited at its first appearance, so its whole model×arm set runs
-    # together and a ceiling cut leaves a prefix of FULLY-covered challenges.
+    # concatenation is reunited at its first appearance so its whole model×arm set is
+    # grouped together — the parallel path runs each challenge atomically (a ceiling cut
+    # leaves a prefix of FULLY-covered challenges), while the serial path enforces a hard
+    # per-cell ceiling and may stop mid-challenge.
     groups: dict[str, list[tuple[str, str, str]]] = {}
     order: list[str] = []
     for cell in cells:
@@ -296,20 +298,24 @@ def _run_cells_serial(
     max_cost: float | None,
     checkpoint: Callable[[dict], None] | None = None,
 ) -> list[dict]:
-    """Serial (workers=1), challenge-major: a ceiling cuts cleanly at a challenge boundary."""
-    # The ceiling is checked BEFORE each challenge, never mid-challenge: once a challenge
-    # starts its full model×arm set runs, so no started challenge is left partial. The
-    # kept challenges are a prefix of the input challenge order.
+    """Serial (workers=1), challenge-major order: a HARD per-cell cost ceiling stops the
+    run the instant cumulative spend crosses ``max_cost`` — checked before EVERY cell, so
+    at most one in-progress cell overruns (the final challenge may be left partial).
+    """
+    # Sequential execution can enforce a true per-cell stop (unlike the parallel path,
+    # whose intra-challenge cells are already in flight). Checking only at challenge
+    # boundaries let a whole started challenge overrun the cap ($0.40 → $0.59 once); the
+    # check now fires before every cell, so no further cell starts once ``spent`` crosses.
     rows: list[dict] = []
     spent = 0.0
     for _cid, batch in _group_by_challenge(cells):
-        if _over_budget(spent, max_cost):
-            print(
-                f"  cost ceiling ${max_cost:g} reached — stopping ({len(rows)} cells done)",
-                file=sys.stderr,
-            )
-            break
         for cell in batch:
+            if _over_budget(spent, max_cost):
+                print(
+                    f"  cost ceiling ${max_cost:g} reached — stopping ({len(rows)} cells done)",
+                    file=sys.stderr,
+                )
+                return rows
             row = _run_one_cell(cell, ctx)
             if row is not None:
                 rows.append(row)

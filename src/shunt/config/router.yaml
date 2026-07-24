@@ -54,6 +54,14 @@ router:
   capture:
     work_dir: null
     # work_dirs: { "<tool_identity_hash>": "/path/to/repo" }   # per-tool override map
+    # Opt-in full-content per-step trajectory capture. Shipped OFF (secure-by-default): only
+    # behaviour-only verified-outcome fields are recorded until set true. When on, every
+    # free-text field is redacted then encrypted to a LOCAL, gitignored dir (never on the
+    # wire, never mid-cached-turn); needs the 'capture' extra + SHUNT_ESCALATION_KEY.
+    full_content: false
+    # Where the encrypted local plane is written. null ⇒ outside the repo
+    # ($SHUNT_HOME/trajectories); never inside the tree, never committed.
+    trajectory_dir: null
 
   # Batch offline re-fit: rebuild the kNN index from the append-only outcome log every
   # N captured outcomes (0 disables; the boot-time rebuild still runs). Learning is

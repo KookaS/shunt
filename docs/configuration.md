@@ -122,7 +122,9 @@ without a date is a number you can't audit.
 Watch for models with no cache-read discount. They resend the full context at
 full price every turn, which shows up as a benchmark bill rather than an error.
 
-Once a model is registered, score it with `python -m benchmark.runner.run_matrix`. The
+Once a model is registered, score it with `make benchmark-live` (i.e. `uv run --extra
+benchmark python -m benchmark.runner.run_matrix`; the extra is required — a bare `uv run`
+strips the eval deps). The
 default `--strategy cost_optimal` runs the cheap adaptive collection (frontier only where
 tiers disagree, plus a random audit); `--strategy full` runs the exhaustive matrix. Both
 are simulated unless you pass `--live`. See [benchmark.md](benchmark.md) for the details.
@@ -305,7 +307,13 @@ router:
     work_dir: /path/to/your/repo        # single repo — the dogfooding default
     # work_dirs:                        # or several repos, keyed by tool identity:
     #   <tool_identity>: /path/to/repo-a
+    # full_content: false               # opt-in encrypted full-content trajectory capture
+    # trajectory_dir: null              # null ⇒ a local dir OUTSIDE the repo
 ```
+
+`full_content` (default off) additionally records redacted, encrypted per-step trajectories
+for offline detector evaluation — see
+[Error detection & auto-escalation → Capturing your own trajectories](escalation.md#capturing-your-own-trajectories-opt-in-encrypted-local-only).
 
 or set `SHUNT_WORK_DIR=/path/to/your/repo` (it overrides the file's single `work_dir`).
 At session close Shunt re-runs the repo's test suite off the request path — pytest /

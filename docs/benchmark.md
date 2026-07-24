@@ -11,6 +11,29 @@ challenges against each model and records verified pass/fail outcomes. A routing
 evaluator then scores strategies offline against that outcome cache — no extra API
 spend.
 
+## Configuration — which knob tunes what
+
+The two stages have separate controls. The word "strategy" appears in **both** with
+different meanings, so keep them apart (see the note below the table).
+
+| Knob | Stage | Tunes |
+|------|-------|-------|
+| `models:` | collect | **Which models** are enabled for live runs. |
+| `--strategy full` \| `cost_optimal` (CLI flag) | collect | **How** the live matrix is sampled — exhaustive vs adaptive frontier collection. A *collection mode*, unrelated to the `strategies:` block. |
+| `arm_sampling.weights` | collect | **Reasoning-effort exploration within each model** (`nothink`/`high`/`max` …) — *not* model selection. Per-arm inclusion probabilities by cost rank; the default arm always runs. |
+| `arm_sampling.default_only_models` | collect | Models pinned to their default reasoning arm (no effort sweep). |
+| `collect.*` (`audit_fraction`, `noninferiority_margin`, `phase_a_mode` …) | collect | Knobs for the `cost_optimal` sampler only. |
+| `sample_size`, `seed`, `n_default` | collect | **Which tasks** run and how many (nested order). |
+| `strategies.enabled` | evaluate | **Which routing policies are scored offline** over the cache — `oracle`, `always_cheap`, `always_frontier`, `knn`, `knn_cascade`, `external_prior`. |
+| `strategies.knn.*`, `knn_cascade.*` … | evaluate | Per-policy hyperparameters (`k`, `success_rate_threshold`, `max_tries`). |
+| `routing.control_model` | evaluate | The fixed-frontier baseline the kill-gate is measured against. |
+
+**The two "strategy" words.** `--strategy` (a CLI flag) chooses *how live data is
+collected*; `strategies:` (a config block) lists *the routing policies scored on that
+data*. A cheap-first cascade is a **policy you evaluate** (`knn_cascade`), never the
+way data is collected — a cascade collector would never observe the frontier on easy
+tasks and would bias the baseline (see [Deciding the kill-gate on partial frontier coverage](#deciding-the-kill-gate-on-partial-frontier-coverage)).
+
 ## Challenge source
 
 The sole challenge source is **SWE-bench Verified** — real GitHub bug-fix tasks
@@ -50,6 +73,15 @@ snapshot of it. (claude-opus-4-6 is priced in the registry for provenance but is
 
 ## Benchmark execution
 
+**Always run the harness through the `benchmark` extra.** Use the Make targets
+(`make benchmark-live ARGS="--live --max-cost 2"`, `make offline-replay`, `make
+escalation-eval`, `make routing-report`) or `uv run --extra benchmark python -m
+benchmark.runner.run_matrix …`. A bare `uv run` auto-syncs the venv to the default
+locked deps and **strips** the extra (`mini-swe-agent`, `swebench`, `matplotlib`),
+and the live scaffold imports `minisweagent` lazily per cell — so a stripped venv
+fails every cell with `No module named 'minisweagent'`, burning time and budget for
+zero data.
+
 The live harness runs each `(challenge, model, reasoning-arm)` cell as an isolated,
 reproducible Docker job:
 
@@ -63,10 +95,14 @@ reproducible Docker job:
 5. Record the verified pass/fail, real cost (from the API response), estimated
    cost (from the registry's prices × token counts), and token usage.
 
-Which arms run is `p(arm|model)` exploration sampling: a model's default arm
-always runs, and each extra arm runs on a deterministic, cost-skewed fraction of
-challenges (hash-thresholded on the challenge id, so a re-run selects the identical
-arms). Set `arm_sampling.enabled: false` in `benchmark/benchmark.yaml` to run
+Which arms run is `p(arm|model)` exploration sampling — this tunes **reasoning
+effort within a model**, not which model runs. A model's default arm always runs,
+and each extra arm runs on a deterministic, cost-skewed fraction of challenges
+(hash-thresholded on the challenge id, so a re-run selects the identical arms).
+`weights` are per-arm inclusion probabilities by cost rank (`[0.6, 0.4, 0.25]` =
+cheapest extra arm on 60% of challenges, next on 40%, priciest on 25%); the flatter
+tail keeps the higher-effort arms — the ones the escalation effort-rung targets —
+sampled often enough to evaluate. Set `arm_sampling.enabled: false` in `benchmark/benchmark.yaml` to run
 default-arm-only, or list models under `arm_sampling.default_only_models` to pin
 just those (e.g. the expensive high/frontier tiers) to their default arm while the
 rest keep exploring.
@@ -76,17 +112,21 @@ run concurrently with `--workers N` (each worker runs one SWE-bench container, s
 raise it with an eye on host memory). Cells complete challenge-at-a-time — every
 model (and sampled reasoning arm) for one challenge finishes before the next
 challenge starts. `--max-cost USD` stops the run once cumulative real cost crosses
-a ceiling, checked at challenge boundaries, so the run keeps a prefix of
-**fully-covered** (comparable) challenges rather than many partially-covered ones.
+a ceiling. Serial runs (`--workers 1`, the default) enforce it as a **hard per-cell
+stop** — no further cell starts once the cap is crossed, so overrun is bounded to at
+most one in-progress cell (its final challenge may be left partial). Parallel runs
+check at challenge boundaries — a challenge's cells are already in flight together —
+so they keep a prefix of **fully-covered** (comparable) challenges.
 Only model API costs enter routing metrics; judging costs are excluded.
 
 Outcomes are appended to `benchmark/routing/results.csv`. **This file
-is populated by live runs** (`python -m benchmark.runner.run_matrix --live`), which need
+is populated by live runs** (`make benchmark-live ARGS="--live"`, i.e. `uv run
+--extra benchmark python -m benchmark.runner.run_matrix --live`), which need
 Docker and API keys.
 Each cell is written to `results.csv` the moment it completes (an atomic
 temp-file-then-`os.replace`), so a kill or crash only loses the handful of cells
-still in flight — never the whole batch; a `--max-cost` stop cuts at a challenge
-boundary, leaving no challenge partial.
+still in flight — never the whole batch. A `--max-cost` stop is per-cell in serial
+runs (the final challenge may be partial) and per-challenge in parallel runs.
 The evaluator can backtest strategies against cached outcomes; if the cache is empty, it reports
 coverage gaps rather than fabricating numbers.
 

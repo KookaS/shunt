@@ -18,10 +18,10 @@ from shunt.router.embedder import Embedder
 from shunt.router.escalation import (
     EscalationAction,
     EscalationConfig,
-    EscalationContext,
     EscalationDirective,
+    EscalationRunner,
     FailureEvent,
-    decide_escalation,
+    failure_event_from_outcome,
 )
 from shunt.router.exploration import CandidateStats, ExplorationDecision, ThompsonSampler
 from shunt.router.policy import ExplorationPolicy
@@ -546,18 +546,20 @@ class RouterEngine:
             return (model_name, reason, provenance)
         cur_arm_index, max_arm_index, cur_arm, reasoning = self._effort_ladder(task_key, model_name)
         tier_index = self._tier_index_of(model_name)
-        ctx = EscalationContext(
-            current_tier_index=tier_index if tier_index is not None else 0,
-            max_tier_index=len(TIER_ORDER) - 1,
-            current_effort_index=cur_arm_index,
+        # Build this decision's directive through the SHARED lifecycle helper the offline replay
+        # also drives, seeded with the engine's concrete ladder position (effort arm + model tier).
+        # The concrete application (arm/model + the model-health tier edge) stays engine-only below.
+        runner = EscalationRunner(
             max_effort_index=max_arm_index,
-            loop_health_alarm=bool(self._loop_health_alarm and self._loop_health_alarm()),
+            max_tier_index=len(TIER_ORDER) - 1,
+            log=self._failure_log.get(task_key, []),
+            effort_index=cur_arm_index,
+            tier_index=tier_index if tier_index is not None else 0,
         )
-        directive = decide_escalation(
-            self._failure_log.get(task_key, []),
+        directive = runner.decide(
             self._task_decision_index.get(task_key, 0),
-            ctx,
             config,
+            loop_health_alarm=bool(self._loop_health_alarm and self._loop_health_alarm()),
         )
         if directive.action is EscalationAction.RAISE_EFFORT:
             return self._apply_effort(task_key, model_name, reason, provenance, directive, cur_arm)
@@ -689,17 +691,17 @@ class RouterEngine:
         task_key: str | None = None,
         dedup_key: str | None = None,
         exit_code: int | None = None,
-        blocking: bool = False,
+        is_infra_failure: bool = False,
         confirmed: bool = False,
         decision_index: int | None = None,
     ) -> None:
         """Feed a verified outcome to the safety gate AND the auto-escalation failure log."""
-        # `blocking` (a confirmed, non-infra capability failure) and `confirmed` (the flake
-        # guard) are set by the CaptureCoordinator from the verifier result — the escalation log
-        # trusts these explicit flags, not the raw exit code or a hardcoded convention.
-        # `downshift` = the routed decision picked a cheaper/weaker model than the greedy
-        # exploit pick. Only these outcomes move the gate — see ConservativeGate. Under the
-        # same lock as routing: the gate's slack is a read-modify-write.
+        # `is_infra_failure` (an env/collection red, never a capability failure) and `confirmed`
+        # (the flake guard) are set by the CaptureCoordinator from the verifier result. The
+        # `blocking` derivation lives in the shared failure-event constructor, so the live and
+        # offline-replay paths cannot drift. `downshift` = the routed decision picked a
+        # cheaper/weaker model than the greedy exploit pick. Only these outcomes move the gate —
+        # see ConservativeGate. Under the same lock as routing: the gate's slack is a RMW.
         if self._conservative_gate is not None:
             with self._lock:
                 self._conservative_gate.record_outcome(downshift=downshift, success=success)
@@ -708,7 +710,7 @@ class RouterEngine:
             task_key=task_key,
             dedup_key=dedup_key,
             exit_code=exit_code,
-            blocking=blocking,
+            is_infra_failure=is_infra_failure,
             confirmed=confirmed,
             decision_index=decision_index,
         )
@@ -720,7 +722,7 @@ class RouterEngine:
         task_key: str | None,
         dedup_key: str | None,
         exit_code: int | None,
-        blocking: bool,
+        is_infra_failure: bool,
         confirmed: bool,
         decision_index: int | None,
     ) -> None:
@@ -739,19 +741,19 @@ class RouterEngine:
             # Use the index stamped onto the routing decision's provenance (decisions-since-
             # routed), not the capture-time counter — which has advanced past interleaved
             # sessions by session close. Falls back to the counter when a caller omits it.
-            event = FailureEvent(
+            event = failure_event_from_outcome(
                 decision_index=(
                     decision_index
                     if decision_index is not None
                     else self._task_decision_index.get(task_key, 0)
                 ),
-                dedup_key=dedup_key,
-                exit_code=exit_code
-                if exit_code is not None
-                else self._escalation.blocking_exit_code,
+                failing_check_id=dedup_key,
+                # None-preserving: the shared constructor owns the missing-exit_code default, so the
+                # live and offline paths inherit the SAME fallback (parity by construction).
+                exit_code=exit_code,
                 success=False,
+                is_infra_failure=is_infra_failure,
                 confirmed=confirmed,  # from the verifier result, not a hardcoded assumption
-                blocking=blocking,
             )
             log = self._failure_log.setdefault(task_key, [])
             log.append(event)

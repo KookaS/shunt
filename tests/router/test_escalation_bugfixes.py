@@ -177,7 +177,7 @@ def _fail(eng: RouterEngine, key: str = "t::a", task_key: str = "repoA") -> None
         task_key=task_key,
         dedup_key=key,
         exit_code=1,
-        blocking=True,
+        is_infra_failure=False,
         confirmed=True,
     )
 
@@ -304,7 +304,7 @@ def test_unconfirmed_failure_does_not_escalate() -> None:
             task_key="repoA",
             dedup_key="t::a",
             exit_code=1,
-            blocking=True,
+            is_infra_failure=False,
             confirmed=False,  # a bare AutoDetectVerifier never sets this
         )
     m3, r3, _ = eng.decide("s3", "task")

@@ -114,7 +114,7 @@ def _fail(eng: RouterEngine, key: str = "t::a") -> None:
         task_key="repoA",
         dedup_key=key,
         exit_code=1,
-        blocking=True,
+        is_infra_failure=False,
         confirmed=True,
     )
 

@@ -78,7 +78,7 @@ def _fail(eng: RouterEngine, *, decision_index: int, key: str = "t::a") -> None:
         task_key="repoA",
         dedup_key=key,
         exit_code=1,
-        blocking=True,
+        is_infra_failure=False,
         confirmed=True,
         decision_index=decision_index,
     )

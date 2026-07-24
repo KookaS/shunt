@@ -43,6 +43,11 @@ dev = [
   "deptry>=0.20",
 ]
 docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
+# Opt-in, default-off live full-content trajectory capture: real authenticated
+# encryption at rest (Fernet/AES). Kept OUT of the core wheel — a deployment that
+# never sets `capture.full_content: true` never installs it; the sink imports it
+# lazily and errors clearly if the feature is enabled without this extra.
+capture = ["cryptography>=43"]
 # Extra runtime deps the eval harness (benchmark/) needs beyond the core.
 # swebench: the official SWE-bench evaluation harness (invoked via `python -m
 # swebench.harness.run_evaluation`); datasets: pulls Verified instances + gold

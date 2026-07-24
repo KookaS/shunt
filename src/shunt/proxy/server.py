@@ -18,6 +18,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from shunt.capture import CaptureCoordinator, CaptureWorker, RefitScheduler, WorkDirResolver
+from shunt.capture.trajectory import TrajectoryRecorder
+from shunt.capture.trajectory_store import LiveTrajectorySink, load_key, resolve_live_dir
 from shunt.db.loop_health import LoopHealth
 from shunt.db.outcome_index import OutcomeIndexAdapter
 from shunt.db.store import OutcomeStore, SessionProvenance
@@ -29,6 +31,7 @@ from shunt.router.cold_start import ColdStartStrategy
 from shunt.router.embedder import Embedder, embedding_cache_dir
 from shunt.router.engine import RouterEngine
 from shunt.router.policy import (
+    CapturePolicy,
     ExplorationPolicy,
     RouterPolicy,
     apply_env_overrides,
@@ -404,6 +407,19 @@ def _build_verifier(policy: RouterPolicy) -> AutoDetectVerifier | RerunConfirmin
     return base
 
 
+def _build_trajectory_recorder(capture: CapturePolicy) -> TrajectoryRecorder | None:
+    """Build the opt-in full-content recorder only when enabled; None (inert) otherwise.
+
+    Enabling it requires the encryption key + the 'capture' extra — resolved here, at boot,
+    never on the wire. Off by default keeps every unconfigured deployment behaviour-only.
+    """
+    if not capture.full_content:
+        return None
+    live_dir = resolve_live_dir(capture.trajectory_dir)
+    sink = LiveTrajectorySink(live_dir, load_key())
+    return TrajectoryRecorder(sink, enabled=True)
+
+
 def _wire_capture(
     session_manager: SessionManager,
     outcome_store: OutcomeStore,
@@ -422,6 +438,8 @@ def _wire_capture(
         record_outcome_callback=engine.record_outcome,
         # Batch-first learning: re-fit the kNN index from the log every N captured outcomes.
         refit_scheduler=RefitScheduler(outcome_store, policy.refit.every_n_outcomes),
+        # Opt-in full-content capture — built only when explicitly enabled; inert otherwise.
+        trajectory_recorder=_build_trajectory_recorder(policy.capture),
     )
     worker = CaptureWorker(
         coordinator=coordinator,

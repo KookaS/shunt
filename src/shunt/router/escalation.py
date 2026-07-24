@@ -78,6 +78,36 @@ class EscalationDirective:
     new_label_window: bool = False  # escalation opens a fresh, non-policy label window
 
 
+def derive_blocking(success: bool, is_infra_failure: bool) -> bool:
+    """A confirmed, non-infra capability failure — the ONE derivation, shared by every site."""
+    # The single predicate for `blocking`. The event constructor, the live trajectory record, and
+    # the offline authenticity recompute all call this, so the rule cannot drift across copies.
+    return not success and not is_infra_failure
+
+
+def failure_event_from_outcome(
+    *,
+    decision_index: int,
+    failing_check_id: str,
+    exit_code: int | None = None,
+    success: bool,
+    is_infra_failure: bool,
+    confirmed: bool,
+) -> FailureEvent:
+    """Build the FailureEvent live capture and offline replay must agree on (single builder)."""
+    # The `blocking` rule is derived via the shared predicate so the two paths cannot drift and the
+    # offline sweep optimizes the policy production actually runs. `exit_code` is decision-inert
+    # (carried, never read); its default lives HERE so live and offline inherit the same fallback.
+    return FailureEvent(
+        decision_index=decision_index,
+        dedup_key=failing_check_id,
+        exit_code=exit_code if exit_code is not None else EscalationConfig().blocking_exit_code,
+        success=success,
+        confirmed=confirmed,
+        blocking=derive_blocking(success, is_infra_failure),
+    )
+
+
 def counts_as_failure(event: FailureEvent, config: EscalationConfig) -> bool:
     """A verified failure counts only if blocking (a capability failure) AND rerun-confirmed."""
     # `blocking` — not the raw exit code — is the gate: the off-wire verifier reports the
@@ -157,12 +187,108 @@ def decide_escalation(
     return _ladder_action(ctx, config)
 
 
+@dataclass(frozen=True)
+class _LadderState:
+    """Abstract ladder position: which effort rung, which tier. Advanced by the runner."""
+
+    effort_index: int = 0
+    tier_index: int = 0
+
+
+class EscalationRunner:
+    """Pure, engine-state-free driver of the escalation lifecycle over a stream of outcomes."""
+
+    # Owns the failure log AND an abstract ladder position. The log lifecycle and the EFFORT rung
+    # evolve exactly as the live router does: append confirmed failures, and on a verified success
+    # clear the log AND reset effort to the default rung (mirroring the engine's effort-arm pop);
+    # on any non-HOLD directive retire the acted-on window and step effort up to its ceiling. The
+    # live engine builds each per-decision directive through `decide` (seeding its own
+    # concrete effort/tier position) and applies it concretely; the offline replay drives a whole
+    # trajectory through `step`, letting `commit` advance the ladder. The TIER advance in `commit`
+    # (effort-ceiling -> raise tier, reset effort) is a persistent monotone counter used ONLY by the
+    # trajectory replay's isolation model — the engine has no persistent tier ladder (its tier is
+    # re-seeded from the base routing pick each decision), so this is a self-contained upper bound,
+    # not a live-engine reproduction. Log-lifecycle and effort parity are the guaranteed part.
+
+    def __init__(
+        self,
+        *,
+        max_effort_index: int,
+        max_tier_index: int,
+        log: list[FailureEvent] | None = None,
+        effort_index: int = 0,
+        tier_index: int = 0,
+    ) -> None:
+        self._max_effort_index = max_effort_index
+        self._max_tier_index = max_tier_index
+        self._log: list[FailureEvent] = list(log) if log else []
+        self._state = _LadderState(effort_index, tier_index)
+
+    @property
+    def log(self) -> list[FailureEvent]:
+        """The current windowed failure log (retired to empty on each escalation)."""
+        return self._log
+
+    def observe(self, *, success: bool, event: FailureEvent | None) -> None:
+        """Clear the window AND reset effort on a verified success; else append the failure."""
+        if success:
+            # Mirror the live engine's success reset precisely: it pops the task's effort arm
+            # (effort → the model's default rung) but does NOT persist a tier ladder (it re-seeds
+            # tier from the base routing pick each decision), so a verified pass resets effort to 0
+            # and leaves the abstract tier counter untouched. Without the effort reset a later
+            # same-key failure run would jump straight to a tier while the engine climbs effort.
+            self._log = []
+            self._state = _LadderState(0, self._state.tier_index)
+        elif event is not None:
+            self._log.append(event)
+
+    def decide(
+        self, current_index: int, config: EscalationConfig, *, loop_health_alarm: bool = False
+    ) -> EscalationDirective:
+        """The directive for the next boundary at the current ladder position (pure)."""
+        ctx = EscalationContext(
+            current_tier_index=self._state.tier_index,
+            max_tier_index=self._max_tier_index,
+            current_effort_index=self._state.effort_index,
+            max_effort_index=self._max_effort_index,
+            loop_health_alarm=loop_health_alarm,
+        )
+        return decide_escalation(self._log, current_index, ctx, config)
+
+    def commit(self, action: EscalationAction) -> None:
+        """Retire the window the escalation acted on and advance one rung (effort then tier)."""
+        self._log = []
+        if action is EscalationAction.RAISE_EFFORT:
+            self._state = _LadderState(self._state.effort_index + 1, self._state.tier_index)
+        elif action is EscalationAction.RAISE_TIER:
+            self._state = _LadderState(0, self._state.tier_index + 1)
+
+    def step(
+        self,
+        *,
+        success: bool,
+        event: FailureEvent | None,
+        current_index: int,
+        config: EscalationConfig,
+        loop_health_alarm: bool = False,
+    ) -> EscalationDirective:
+        """One outcome → directive via the full lifecycle (observe, decide, retire+advance)."""
+        self.observe(success=success, event=event)
+        directive = self.decide(current_index, config, loop_health_alarm=loop_health_alarm)
+        if directive.action is not EscalationAction.HOLD:
+            self.commit(directive.action)
+        return directive
+
+
 __all__ = [
     "EscalationAction",
     "EscalationConfig",
     "EscalationContext",
     "EscalationDirective",
+    "EscalationRunner",
     "FailureEvent",
     "counts_as_failure",
     "decide_escalation",
+    "derive_blocking",
+    "failure_event_from_outcome",
 ]

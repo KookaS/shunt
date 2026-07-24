@@ -8,14 +8,17 @@ from __future__ import annotations
 
 import functools
 import json
+import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
 from benchmark import config
 from benchmark.routing import integrity
 from benchmark.runner import image_version, swebench_harness, swebench_specs
+
+_LOG = logging.getLogger(__name__)
 
 # Wall-clock backstop for one live agent run (mini-swe-agent's own step_limit is the
 # primary bound; this catches a runaway when per-call cost can't be priced, so the
@@ -102,13 +105,20 @@ def build_gold_predictions(instance_ids: list[str]) -> list[dict[str, str]]:
 
 @dataclass(frozen=True)
 class AgentPatch:
-    """A patch produced by the live agent scaffold, with measured usage."""
+    """A patch produced by the live agent scaffold, with measured usage + per-turn messages."""
 
     patch: str
     in_tok: int
     out_tok: int
     calls: int
     cost: float
+    # The full per-turn trajectory the scaffold held after run() — carried (never consumed by
+    # routing) so a live run can also persist a real escalation-detector trajectory. Empty on any
+    # non-real path, which the capture gate treats as "write nothing".
+    messages: list[dict[str, Any]] = field(default_factory=list)
+    # Per-step code snapshots (git diff of the checkout keyed by assistant-turn index), captured
+    # observe-only during the run for offline verified-outcome replay. Empty when unavailable.
+    snapshots: dict[int, str] = field(default_factory=dict)
 
 
 def generate_patch_live(
@@ -251,6 +261,7 @@ def _invoke_scaffold(
         merged.get("agent", {}),
         default_type="default",
     )
+    recorder = _attach_snapshot_recorder(agent, env)
     info = agent.run(instance["problem_statement"])
     messages: list[dict[str, Any]] = getattr(agent, "messages", [])
     in_tok, out_tok, calls, cost = _sum_usage(messages)
@@ -260,7 +271,70 @@ def _invoke_scaffold(
         out_tok=out_tok,
         calls=calls,
         cost=cost,
+        messages=messages,
+        snapshots=recorder.snapshots if recorder is not None else {},
     )
+
+
+def _attach_snapshot_recorder(agent: Any, env: Any) -> Any:
+    """Wrap the agent's per-step method to capture a git diff after each turn (observe-only)."""
+    # Returns the recorder, or None if the installed scaffold exposes no overridable step / no
+    # ``env.execute`` (the snapshot-mechanism build-time surface check). Any failure to attach is
+    # swallowed — snapshot capture must never alter the paid run's outcome, cost, or agent tree.
+    from benchmark.runner.step_snapshots import StepSnapshotRecorder  # noqa: PLC0415
+
+    execute = getattr(env, "execute", None)
+    original = getattr(agent, "step", None)
+    if not callable(execute) or not callable(original):
+        return None
+
+    def exec_fn(command: str) -> str:
+        # mini-swe-agent v2 env.execute takes an ACTION DICT ({"command": ...}) and returns
+        # {"output": stdout, "returncode": ...}; passing a bare string raises inside execute.
+        result = execute({"command": command})
+        return str(result.get("output", "")) if isinstance(result, dict) else str(result)
+
+    recorder = StepSnapshotRecorder(exec_fn)
+
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        out = original(*args, **kwargs)
+        messages = getattr(agent, "messages", [])
+        index = sum(1 for m in messages if isinstance(m, dict) and m.get("role") == "assistant") - 1
+        if index >= 0:
+            recorder.capture(index)
+        return out
+
+    try:
+        agent.step = wrapped
+    except Exception:  # noqa: BLE001 (observe-only: never break a paid run to attach capture)
+        _LOG.exception("could not attach snapshot recorder; continuing without per-step snapshots")
+        return None
+    return recorder
+
+
+def _capture_escalation_trajectory(
+    patch: AgentPatch, instance_id: str, model: str, arm: str, resolved: bool
+) -> None:
+    """Additively persist the real agent trajectory for the escalation plane (observe-only)."""
+    # Off the routing decision path and post-hoc, so it is cache-safe and never alters the paid
+    # outcome. The gate lives in `capture_live_trajectory` (empty messages ⇒ nothing written); any
+    # failure here is swallowed so a capture bug can never poison a paid routing row.
+    try:
+        from benchmark.escalation.live_capture import (  # noqa: PLC0415
+            capture_live_trajectory,
+            make_trajectory_id,
+        )
+        from benchmark.runner.step_snapshots import write_snapshots  # noqa: PLC0415
+
+        capture_live_trajectory(
+            patch.messages, instance_id=instance_id, model=model, arm=arm, resolved=resolved
+        )
+        if patch.snapshots:
+            # Persist per-step diffs to the gitignored scratch keyed the SAME way as the trajectory
+            # jsonl, so the offline replay pass can pair them by trajectory id.
+            write_snapshots(make_trajectory_id(instance_id, model, arm), patch.snapshots)
+    except Exception:  # noqa: BLE001 (observe-only: capture must never break a paid outcome)
+        _LOG.exception("escalation trajectory capture failed for %s/%s", instance_id, model)
 
 
 def run_live_cell(
@@ -297,10 +371,12 @@ def run_live_cell(
             f"harness produced no valid report for {instance_id}/{model} "
             f"(report={result.report_path}, rc={result.returncode}); leaving cell MISSING"
         )
+    resolved = bool(result.resolved.get(instance_id, False))
+    _capture_escalation_trajectory(patch, instance_id, model, arm, resolved)
     return {
         "task_id": instance_id,
         "model": model,
-        "pass": bool(result.resolved.get(instance_id, False)),
+        "pass": resolved,
         "in_tok": patch.in_tok,
         "out_tok": patch.out_tok,
         "calls": patch.calls,

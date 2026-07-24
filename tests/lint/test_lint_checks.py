@@ -154,3 +154,25 @@ def test_sh006_allows_benchmark_importing_src(tmp_path: Path) -> None:
 def test_sh006_passes_a_clean_src_module(tmp_path: Path) -> None:
     f = _src_shunt_file(tmp_path, "router/clean2.py", "import logging\n")
     assert _run("check_import_direction.py", str(f)) == 0
+
+
+def _bench_file(tmp_path: Path, rel: str, body: str) -> Path:
+    f = tmp_path / "benchmark" / rel
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(body)
+    return f
+
+
+def test_sh006_catches_routing_importing_escalation(tmp_path: Path) -> None:
+    f = _bench_file(tmp_path, "routing/leak.py", "from benchmark.escalation import schema\n")
+    assert _run("check_import_direction.py", str(f)) == 1
+
+
+def test_sh006_catches_calibration_importing_escalation(tmp_path: Path) -> None:
+    f = _bench_file(tmp_path, "calibration/leak.py", "import benchmark.escalation.metrics\n")
+    assert _run("check_import_direction.py", str(f)) == 1
+
+
+def test_sh006_allows_escalation_importing_routing(tmp_path: Path) -> None:
+    f = _bench_file(tmp_path, "escalation/uses_spine.py", "from benchmark.routing import metrics\n")
+    assert _run("check_import_direction.py", str(f)) == 0

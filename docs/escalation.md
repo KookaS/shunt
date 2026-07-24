@@ -156,3 +156,78 @@ router:
 
 The knob reference, including the reserved `blocking_exit_code` field, is in
 [Configuration](configuration.md#auto-escalate-on-repeated-verified-failure).
+
+## Evaluating the detector offline
+
+Before you trust the trigger on live traffic, you can measure it — offline, at no API
+cost — against stored agent trajectories. The `benchmark/escalation/` harness replays the
+exact same decision the live router uses over per-decision trajectories and sweeps its
+knobs, so you can see where it fires, how early, and at what precision.
+
+Run it end-to-end:
+
+```bash
+make escalation-eval ARGS="--plots-dir benchmark/escalation/reports"
+# equivalently: uv run --extra benchmark python -m benchmark.escalation.run_eval \
+#   --plots-dir benchmark/escalation/reports
+```
+
+The `--extra benchmark` flag (baked into the Make target) is required — it pulls the
+eval deps (`matplotlib`, `swebench`, …); a bare `uv run` strips them.
+
+It prints a JSON report, a per-cell metric table and the chosen config to stdout, and
+renders the figures. What the numbers mean:
+
+- **`status` gates the whole report.** When the data cannot exercise the recurrence trigger
+  (no escalation ever fires, no positive labels, or a constant detector score) the report
+  is `INSUFFICIENT_DATA` with a `reason`, and every figure carries a red "insufficient data"
+  annotation, so a null result is never mistaken for signal. A second gate catches the
+  subtler failure: when the data **was** sufficient but the detector still fails to beat the
+  no-skill baseline (`AUPRC ≤ prevalence`), the status is **`NO_SKILL`** and the PR/ROC
+  figures carry an orange "no usable signal" box — a legible-but-worse-than-random detector
+  is never allowed to present as `OK` with clean plots.
+- **AUPRC vs prevalence is the headline.** Escalation is a rare-event problem — most steps
+  are not failures — so the precision-recall curve, compared against the **prevalence
+  baseline** (the no-skill rate), is the honest measure. AUROC is reported too but only as
+  an **auxiliary** — ROC hides the imbalance; every PR figure draws the prevalence line.
+- **Full detection suite.** The report includes the confusion matrix plus precision,
+  recall, F1, FPR and Cohen's κ at the operating threshold — recall/F1 make "the detector
+  never fires" legible at a glance.
+- **Per-hyperparameter sweep + `best_config`.** The full metric suite is computed for
+  **every** grid cell (`escalate_after_n × stale_window × ladder`), and an explicit
+  objective (default: **max F1, tie-broken by earlier detection**) selects the winning
+  cell. When no cell discriminates on the available data, `best_config` is `null` with a
+  reason rather than an arbitrary pick.
+- **Figures.** PR curve, ROC (auxiliary), steps-to-detection histogram, the sweep heatmap
+  (F1 over `escalate_after_n × stale_window`), the confusion matrix, and the cost-quality
+  frontier (escalation count as the cost proxy vs F1) — each degrades gracefully with the
+  annotation above when the data is insufficient.
+
+**The bundled bootstrap is deliberately coarse.** Out of the box the harness runs on the
+committed terminal benchmark results, which are single-decision (length-1) trajectories.
+The recurrence trigger **cannot fire** on a length-1 stream, so the report comes back
+`INSUFFICIENT_DATA` and every plot says so — the bootstrap validates the labelling,
+metrics, and plots on real data, not the trigger itself. Exercising the trigger needs real
+multi-step trajectories; drop them under `benchmark/escalation/data/` (tracked via Git LFS,
+with a content-hash `manifest.json` that fails CI if a label is tampered with) and point
+the datasets registry at them.
+
+### Capturing your own trajectories (opt-in, encrypted, local-only)
+
+To evaluate the detector on *your* traffic, Shunt can record full-content per-step
+trajectories from live sessions. This is **off by default** and secure by construction:
+
+```yaml
+router:
+  capture:
+    work_dir: /path/to/repo    # the off-wire verifier's repo (see Feedback)
+    full_content: true         # opt in to full-content capture
+    trajectory_dir: null       # null ⇒ a local dir OUTSIDE the repo ($SHUNT_HOME/trajectories)
+```
+
+When enabled it needs the `capture` extra (`pip install 'shunt-router[capture]'`) and an
+encryption key in `SHUNT_ESCALATION_KEY` (never commit it). Every free-text field is
+**redacted** of secrets and then **encrypted at rest** before anything is written; capture
+happens off the wire at the session boundary, never mid-turn, and never changes a routing
+decision. The captured files stay **local and git-ignored** — only behaviour-only,
+prose-free fields are ever eligible to be shared into a committable dataset.

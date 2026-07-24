@@ -99,7 +99,7 @@ def _fail(engine: RouterEngine, key: str = "t::a") -> None:
         task_key="repoA",
         dedup_key=key,
         exit_code=1,
-        blocking=True,
+        is_infra_failure=False,
         confirmed=True,
     )
 
@@ -115,6 +115,26 @@ def test_two_same_key_failures_escalate_the_next_decision() -> None:
     assert m3 == "glm"  # escalated one tier: cheap → mid
     assert r3 == "auto_escalation"
     assert prov["tier_escalation_reason"] == "same_verified_failure_x2"
+
+
+def test_infra_reds_do_not_escalate_via_the_shared_constructor() -> None:
+    # An env/collection red (is_infra_failure=True) is not a capability failure: the shared
+    # failure-event constructor derives blocking=False, so two of them never escalate.
+    eng = _engine(enabled=True)
+    for sid in ("s1", "s2"):
+        eng.decide(sid, "same task")
+        eng.record_outcome(
+            downshift=False,
+            success=False,
+            task_key="repoA",
+            dedup_key="t::a",
+            exit_code=1,
+            is_infra_failure=True,
+            confirmed=True,
+        )
+    m3, r3, _ = eng.decide("s3", "same task")
+    assert m3 == "qwen"  # infra reds never count → base pick held
+    assert r3 != "auto_escalation"
 
 
 def test_distinct_failures_do_not_escalate() -> None:
