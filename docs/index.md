@@ -59,8 +59,8 @@ coding-task routing we cannot yet back with evidence.
 
 - **Cache-boundary-aware routing** — decisions at task/session boundaries only,
   never mid-cached-turn.
-- **Pluggable, inspectable policy** — kNN over verified outcomes, no brittle rule
-  tier; every decision surfaced in a header.
+- **Pluggable, inspectable policy** — kNN over verified outcomes, no brittle
+  hand-tuned rules; every decision surfaced in a header.
 - **OpenAI ↔ Anthropic translation** — these two first, not 100+ providers.
 - **Verifier + memory loop** — log `(task → model → verified outcome)` and learn
   from it; verification stays async/backfill, never on the hot path.

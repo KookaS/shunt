@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 from pathlib import Path
 
 import matplotlib
@@ -20,10 +21,62 @@ from matplotlib.axes import Axes
 from matplotlib.patches import Rectangle
 from sklearn.metrics.pairwise import cosine_similarity
 
-from benchmark import config
+from benchmark import config, plot_frame
+from benchmark.plot_frame import Annotations, FigureSpec
 from benchmark.routing.strategies.knn import _embed_texts
 
 matplotlib.use("Agg")
+
+SPEC = FigureSpec(
+    reading=(
+        "Each cell is the routing reward of one kNN hyperparameter combination. x is k, the "
+        "number of nearest neighbours the router consults; y is whichever of "
+        "success_rate_thresh / min_samples explains more reward variance (it is named on the "
+        "axis), and the third swept parameter is held at its best value, stated in the title. "
+        "Brighter = higher reward. The optimum is bold and ringed in red; a white cell scored "
+        "nothing. Expect a broad bright band rather than one standout cell."
+    ),
+    goal=(
+        "Settle inside the brightest BAND, not on a single cell — read which axis the band "
+        "runs along, then pick the parameter the NOTE names as the passenger for stability "
+        "rather than for reward."
+    ),
+    definitions=(
+        ("reward", "tasks passed minus gamma x total cost, gamma from the benchmark config"),
+        ("k", "how many nearest tasks the router consults before choosing a model"),
+        (
+            "success_rate_thresh",
+            "neighbour pass-rate below which the router escalates off the cheap model",
+        ),
+        ("min_samples", "min neighbours with a recorded outcome before the router trusts them"),
+        ("eta^2", "share of reward variance one parameter explains, 0 to 1"),
+    ),
+    notes=(
+        "Neighbourhoods use the real shipped jina embedder — the same Embedder the router "
+        "runs, never a TF-IDF proxy.",
+    ),
+    limitations=(
+        "Hyperparameters are selected IN-SAMPLE: every combination is scored on the same "
+        "tasks it is tuned on, with no held-out split, so the winning reward is optimistic "
+        "and will not survive unchanged on new tasks.",
+        "Reward is cost-model dependent — the optimum moves when model prices move.",
+    ),
+)
+
+
+# η² below this reads as "this knob does not move reward" (Cohen's small/medium
+# boundary). Above it the figure must not call the effect negligible.
+_NEGLIGIBLE_ETA_SQ = 0.06
+
+
+def _eta_phrase(eta: float) -> str:
+    """How much reward variance one parameter explains, worded to match the number."""
+    if eta < _NEGLIGIBLE_ETA_SQ:
+        return f"η²={eta:.2f} — negligible effect"
+    return (
+        f"η²={eta:.2f} — explains {eta * 100:.0f}% of reward variance, "
+        "so this slice hides real variation"
+    )
 
 
 def load_matrix(path: Path) -> dict:
@@ -305,7 +358,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     else:
         fixed_name, fixed_val = "success_rate_thresh", best["success_rate_thresh"]
         y_name = "min_samples"
-    filtered = [r for r in all_results if abs(r[fixed_name] - fixed_val) < 0.1]
+    filtered = _slice_at(all_results, fixed_name, fixed_val)
 
     sensitivity = dict(zip(param_names, eta_sq, strict=True))
     excluded_max = max((int(r["n_excluded"]) for r in all_results), default=0)
@@ -319,6 +372,14 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         excluded_max=excluded_max,
     )
     print(f"\nHeatmap saved to {args.plot}")
+
+
+def _slice_at(rows: list[dict], param: str, value: float) -> list[dict]:
+    """Rows sitting exactly on one swept grid value of ``param``."""
+    # Exact, not within a tolerance: these values come from the same grid the rows were
+    # built from, and a 0.1 epsilon admitted the neighbouring 0.1-spaced level
+    # (abs(0.6 - 0.5) is 0.0999...), so the heatmap drew a slice its own title disclaimed.
+    return [r for r in rows if r[param] == value]
 
 
 def _variance_explained(results_arr: np.ndarray, param_values: list[list]) -> list[float]:
@@ -339,6 +400,25 @@ def _variance_explained(results_arr: np.ndarray, param_values: list[list]) -> li
                 between_ss += n_g * (float(np.mean(rewards[mask])) - float(rewards.mean())) ** 2
         out.append(between_ss / total_ss if total_ss > 0 else 0.0)
     return out
+
+
+def _heat_grid(filtered: list[dict], y_name: str) -> tuple[list, list, np.ndarray]:
+    """``(x_vals, y_vals, rewards)`` over (k x y_name), one row per (y, x) cell."""
+    # Two rows on one cell mean the caller's slice still mixes levels of the third
+    # parameter: that would render the last writer's rewards under a title promising
+    # the other level, so it raises rather than drawing the wrong data.
+    x_vals = sorted({r["k"] for r in filtered})
+    y_vals = sorted({r[y_name] for r in filtered})
+    heat_data = np.full((len(y_vals), len(x_vals)), np.nan)
+    for r in filtered:
+        yi, xi = y_vals.index(r[y_name]), x_vals.index(r["k"])
+        if not np.isnan(heat_data[yi, xi]):
+            raise ValueError(
+                f"two rows at (k={r['k']}, {y_name}={r[y_name]}): the slice mixes levels "
+                "of the fixed parameter, so the heatmap would not match its title"
+            )
+        heat_data[yi, xi] = r["Reward"]
+    return x_vals, y_vals, heat_data
 
 
 def _annotate_cells(
@@ -364,6 +444,10 @@ def _annotate_cells(
             is_best = yi == best_yi and xi == best_xi
             if xi % label_step != 0 and not is_best:
                 continue
+            # The optimum is always labelled, in a larger bold face; a periodic label in
+            # the adjacent cell of the same row would print on top of it.
+            if not is_best and yi == best_yi and abs(xi - best_xi) <= 1:
+                continue
             ax.text(
                 xi,
                 yi,
@@ -374,6 +458,56 @@ def _annotate_cells(
                 fontweight="bold" if is_best else "normal",
                 color="black" if val > cmid else "white",
             )
+
+
+def _driver_sentence(a: tuple[str, float], b: tuple[str, float]) -> str:
+    """Which of two plotted parameters drives reward — read off their η², not assumed.
+
+    The previous wording hardcoded the axis parameter as the driver and k as the
+    passenger, so whenever k dominated the sentence contradicted the η² it printed.
+    """
+    (driver, driver_eta), (other, other_eta) = sorted((a, b), key=lambda t: t[1], reverse=True)
+    if other_eta < _NEGLIGIBLE_ETA_SQ:
+        tail = f"{other} barely moves it (η²={other_eta:.2f}) — pick {other} for stability"
+    else:
+        tail = f"{other} also matters (η²={other_eta:.2f}) — neither can be picked freely"
+    return f"Reward is driven by {driver} (η²={driver_eta:.2f}); {tail}"
+
+
+def _heatmap_annotations(
+    best_row: dict,
+    *,
+    y_name: str,
+    sensitivity: dict[str, float],
+    swept_ks: list[int],
+    excluded_max: int,
+) -> Annotations:
+    """Footer content the sweep computes: which knob matters, and whether k is bracketed."""
+    notes: list[str] = []
+    limits: list[str] = []
+    y_eta, k_eta = sensitivity.get(y_name), sensitivity.get("k")
+    if y_eta is not None and k_eta is not None:
+        notes.append(_driver_sentence((y_name, y_eta), ("k", k_eta)))
+    lo, hi = (min(swept_ks), max(swept_ks)) if swept_ks else (0, 0)
+    if swept_ks and best_row["k"] in (lo, hi):
+        # An optimum on the first/last swept k is not located: the true peak may lie
+        # outside the window, so this is a limitation, not a reassurance.
+        limits.append(
+            f"⚠ max reward ({best_row['Reward']:.1f}) sits at k={best_row['k']}, the EDGE of "
+            f"the swept range k∈[{lo}, {hi}] — the optimum is NOT bracketed and the true peak "
+            "may lie beyond it"
+        )
+    elif swept_ks:
+        notes.append(
+            f"✓ optimum k={best_row['k']} lies inside the swept range k∈[{lo}, {hi}] — the "
+            "maximum is bracketed"
+        )
+    if excluded_max > 0:
+        limits.append(
+            "Coverage-gap escalations (chosen model unmeasured on a task) are excluded per "
+            f"combination — up to {excluded_max} task(s) dropped; never imputed fail@$0"
+        )
+    return Annotations(notes=tuple(notes), limitations=tuple(limits))
 
 
 def _plot_sweep_heatmap(
@@ -388,11 +522,7 @@ def _plot_sweep_heatmap(
 ) -> None:
     """Reward heatmap over (k, y_name) at a fixed third parameter."""
     x_name = "k"
-    x_vals = sorted({r[x_name] for r in filtered})
-    y_vals = sorted({r[y_name] for r in filtered})
-    heat_data = np.full((len(y_vals), len(x_vals)), np.nan)
-    for r in filtered:
-        heat_data[y_vals.index(r[y_name]), x_vals.index(r[x_name])] = r["Reward"]
+    x_vals, y_vals, heat_data = _heat_grid(filtered, y_name)
 
     best_row = max(filtered, key=lambda r: r["Reward"])
     best_yx = (y_vals.index(best_row[y_name]), x_vals.index(best_row[x_name]))
@@ -404,14 +534,17 @@ def _plot_sweep_heatmap(
     cmap = plt.cm.viridis.copy()
     cmap.set_bad("white")
     im = ax.imshow(heat_data, aspect="auto", cmap=cmap, interpolation="nearest")
-    ax.set_xticks(range(len(x_vals)))
-    ax.set_xticklabels(x_vals)
+    # Thin ticks and in-cell labels to what actually fits: the k sweep reaches ~100
+    # columns on a full matrix, where a tick or a value per column overprints into an
+    # unreadable smear. The colourbar carries the gradient and the CSV the exact values,
+    # so thinning costs nothing a reader could otherwise use.
+    tick_step = max(1, math.ceil(len(x_vals) / 20))
+    ax.set_xticks(range(0, len(x_vals), tick_step))
+    ax.set_xticklabels(x_vals[::tick_step])
     ax.set_yticks(range(len(y_vals)))
     ax.set_yticklabels(y_vals)
 
-    # Many columns → label every 2nd one (plus the optimum) so text never collides;
-    # the colourbar carries the full gradient, the CSV the exact values.
-    label_step = 1 if len(x_vals) <= 12 else 2
+    label_step = 1 if len(x_vals) <= 12 else max(2, math.ceil(len(x_vals) / 12))
     _annotate_cells(ax, heat_data, best_yx=best_yx, label_step=label_step, fontsize=7.5)
 
     # Ring the optimum so the brightest cell is unmistakable, not just "somewhere yellow".
@@ -440,7 +573,7 @@ def _plot_sweep_heatmap(
     }
     fixed_name, fixed_val = fixed
     fixed_eta = sensitivity.get(fixed_name)
-    fixed_note = f", η²={fixed_eta:.2f} — negligible effect" if fixed_eta is not None else ""
+    fixed_note = f", {_eta_phrase(fixed_eta)}" if fixed_eta is not None else ""
     ax.set_xlabel(axis_labels.get(x_name, x_name))
     ax.set_ylabel(axis_labels.get(y_name, y_name), fontsize=9)
     ax.set_title(
@@ -450,71 +583,23 @@ def _plot_sweep_heatmap(
         fontsize=12,
     )
 
-    # "What good looks like" + bracketing honesty, stacked below the x-axis so
-    # neither overlaps the labels. Data-driven from the sensitivity (η²) analysis.
-    y_eta, k_eta = sensitivity.get(y_name), sensitivity.get(x_name)
-    if y_eta is not None and k_eta is not None:
-        ax.text(
-            0.5,
-            -0.19,
-            f"What good looks like: settle in the brightest band. Reward is driven by "
-            f"{y_name} (η²={y_eta:.2f}); k barely moves it (η²={k_eta:.2f}) — "
-            f"pick k for stability, not reward.",
-            transform=ax.transAxes,
-            ha="center",
-            va="top",
-            fontsize=9,
-            color="#333333",
-        )
-
-    lo, hi = min(swept_ks), max(swept_ks)
-    if swept_ks and best_row["k"] in (lo, hi):
-        # An optimum on the first/last swept k is not located — the true peak may
-        # lie outside the window.
-        note, colour = (
-            f"⚠ max reward ({best_row['Reward']:.1f}) sits at k={best_row['k']}, the EDGE of the "
-            f"swept range k∈[{lo}, {hi}] — the optimum is NOT bracketed (may lie beyond)",
-            "#d03b3b",
-        )
-    else:
-        note, colour = (
-            f"✓ optimum k={best_row['k']} lies inside the swept range k∈[{lo}, {hi}] "
-            f"— the maximum is bracketed",
-            "#0ca30c",
-        )
-    ax.text(
-        0.5,
-        -0.26,
-        note,
-        transform=ax.transAxes,
-        ha="center",
-        va="top",
-        fontsize=9,
-        color=colour,
-    )
-
-    if excluded_max > 0:
-        ax.text(
-            0.5,
-            -0.33,
-            f"Sweep EXCLUDES coverage-gap escalations (chosen model unmeasured on a task) "
-            f"per combo — up to {excluded_max} task(s) dropped; never imputed fail@$0.",
-            transform=ax.transAxes,
-            ha="center",
-            va="top",
-            fontsize=8,
-            color="#B71C1C",
-            style="italic",
-        )
-
     cb = fig.colorbar(
         im, ax=ax, label="Routing reward  =  tasks passed − γ·cost  (higher = better)"
     )
     cb.ax.tick_params(labelsize=9)
     fig.tight_layout()
-    plot_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(plot_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    plot_frame.save(
+        fig,
+        plot_path,
+        SPEC,
+        extra=_heatmap_annotations(
+            best_row,
+            y_name=y_name,
+            sensitivity=sensitivity,
+            swept_ks=swept_ks,
+            excluded_max=excluded_max,
+        ),
+    )
 
 
 if __name__ == "__main__":

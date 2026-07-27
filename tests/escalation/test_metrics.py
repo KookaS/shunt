@@ -91,7 +91,7 @@ def _cell(f1: float, *, n_escalated: int = 5, steps: float | None = 3.0) -> metr
     return metrics.CellReport(
         escalate_after_n=2,
         stale_window=5,
-        ladder="effort_then_tier",
+        ladder="effort_then_rank",
         confusion=ConfusionMatrix(tp=1, fp=0, fn=0, tn=1),
         precision=1.0,
         recall=1.0,

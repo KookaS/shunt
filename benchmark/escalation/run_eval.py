@@ -11,12 +11,14 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import matplotlib
 
+from benchmark import plot_frame
 from benchmark.escalation import datasets, metrics, plots, replay
 from benchmark.escalation.authenticity import errors, verify_trajectory
 from benchmark.escalation.metrics import CellReport
@@ -25,13 +27,19 @@ from benchmark.escalation.normalize.openhands import OpenHandsParser
 from benchmark.escalation.normalize.swe_agent import SweAgentParser
 from benchmark.escalation.normalize.swe_smith import SweSmithParser
 from benchmark.escalation.schema import Trajectory, load_jsonl
+from benchmark.plot_frame import Annotations, FigureSpec
 from shunt.router.escalation import EscalationAction
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
 
 logger = logging.getLogger(__name__)
 
+# The footer needs room: at matplotlib's 6.4x4.8 / dpi=80 default it renders unreadable.
+_FIGSIZE: Final[tuple[float, float]] = (9.0, 5.5)
+_DPI: Final[int] = 150
 _HORIZON = 3
 _STATUS_OK = "OK"
 _STATUS_INSUFFICIENT = "INSUFFICIENT_DATA"
@@ -244,62 +252,115 @@ def _load_fixtures(fixtures_dir: Path) -> list[Trajectory]:
     return out
 
 
+def _run_annotations(report: EvalReport) -> Annotations:
+    """Status caveats every figure must carry, whatever it plots (audit P0/F2)."""
+    limitations: list[str] = []
+    if report.insufficient_note:
+        limitations.append(f"INSUFFICIENT DATA — {report.insufficient_note}.")
+    if report.no_skill_note:
+        limitations.append(f"NO USABLE SIGNAL — {report.no_skill_note}.")
+    if report.n_degenerate:
+        limitations.append(
+            f"{report.n_degenerate}/{report.n_trajectories} trajectories are length-1, on which "
+            "the recurrence trigger cannot fire at all."
+        )
+    return Annotations(
+        notes=(f"{report.n_trajectories} trajectories, status={report.status}",),
+        limitations=tuple(limitations),
+    )
+
+
+def _merge(*parts: Annotations) -> Annotations:
+    """Concatenate annotation blocks; FigureSpec.merged dedups and drops blanks."""
+    return Annotations(
+        definitions=tuple(d for part in parts for d in part.definitions),
+        notes=tuple(n for part in parts for n in part.notes),
+        limitations=tuple(lim for part in parts for lim in part.limitations),
+    )
+
+
+def _headline_annotations(report: EvalReport) -> Annotations:
+    """Which configuration the single-config figures are actually showing."""
+    h = report.headline
+    note = (
+        f"config: escalate_after_n={h.escalate_after_n}, stale_window={h.stale_window}, "
+        f"ladder={h.ladder}"
+    )
+    unchosen = (
+        "No cell was selected as best, so this shows the first grid point rather than a chosen "
+        "configuration."
+    )
+    return Annotations(
+        # Scoped here, not to every figure: only the label-bearing figures (PR, ROC, confusion)
+        # actually use the words "positive"/"risky" on the canvas.
+        definitions=(
+            (
+                "positive / risky",
+                f"a prefix within {_HORIZON} decisions of the end of a terminally failed run",
+            ),
+        ),
+        notes=(note,),
+        limitations=() if report.best_config is not None else (unchosen,),
+    )
+
+
 def _save_plots(
     trajectories: list[Trajectory], grid: list[replay.GridPoint], report: EvalReport, out_dir: Path
 ) -> None:
     """Render every detector figure on the real data to `out_dir`, each degrading gracefully."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    note = report.insufficient_note
-    no_skill = report.no_skill_note
+    run = _run_annotations(report)
+    headline = _merge(run, _headline_annotations(report))
     labels = _all_labels(trajectories)
     scores = _prefix_scores_flat(trajectories, report.headline)
     sweep = replay.sweep(trajectories, grid)
+    ladder = report.headline.ladder
 
     _render(
         out_dir / "pr_curve.png",
-        lambda ax: plots.pr_curve(scores, labels, ax, note=note, no_skill_note=no_skill),
+        plots.PR_CURVE_SPEC,
+        lambda ax: _merge(plots.pr_curve(scores, labels, ax), headline),
     )
     _render(
         out_dir / "roc_curve.png",
-        lambda ax: plots.roc_curve(scores, labels, ax, note=note, no_skill_note=no_skill),
+        plots.ROC_CURVE_SPEC,
+        lambda ax: _merge(plots.roc_curve(scores, labels, ax), headline),
     )
     _render(
         out_dir / "steps_to_detection.png",
-        lambda ax: plots.steps_to_detection_hist(sweep, ax, note=note),
+        plots.STEPS_TO_DETECTION_SPEC,
+        lambda ax: _merge(plots.steps_to_detection_hist(sweep, ax), run),
     )
     _render(
         out_dir / "confusion_matrix.png",
-        lambda ax: plots.confusion_matrix_plot(report.headline.confusion, ax, note=note),
+        plots.CONFUSION_MATRIX_SPEC,
+        lambda ax: _merge(plots.confusion_matrix_plot(report.headline.confusion, ax), headline),
     )
-    ladder = report.headline.ladder
     _render(
         out_dir / "sweep_heatmap.png",
-        lambda ax: plots.sweep_heatmap(report.cells, ax, ladder=ladder, note=note),
+        plots.SWEEP_HEATMAP_SPEC,
+        lambda ax: _merge(plots.sweep_heatmap(report.cells, ax, ladder=ladder), run),
     )
-    _render(out_dir / "cost_quality.png", lambda ax: _cost_quality(report.cells, ax, note))
+    _render(
+        out_dir / "cost_quality.png",
+        plots.COST_QUALITY_SPEC,
+        lambda ax: _merge(_cost_quality(report.cells, ax), run),
+    )
 
 
-def _cost_quality(cells: list[CellReport], ax: object, note: str | None) -> None:
+def _cost_quality(cells: list[CellReport], ax: Axes) -> Annotations:
     """Cost-quality frontier: escalation count (cost proxy) vs F1 quality, per grid cell."""
-    from matplotlib.axes import Axes
-
-    assert isinstance(ax, Axes)
     perf = {f"n{c.escalate_after_n}_w{c.stale_window}_{c.ladder[:6]}": c.f1 * 100 for c in cells}
     cost = {
         f"n{c.escalate_after_n}_w{c.stale_window}_{c.ladder[:6]}": float(c.n_escalated)
         for c in cells
     }
-    plots.cost_quality_frontier(perf, cost, ax)
-    if note:
-        plots.annotate_insufficient(ax, note)
+    return plots.cost_quality_frontier(perf, cost, ax)
 
 
-def _render(path: Path, draw: object) -> None:
-    """Make a fresh figure, run the draw callback, save, and close (no leaked figures)."""
-    fig, ax = plt.subplots()
-    draw(ax)  # type: ignore[operator]
-    fig.savefig(path, dpi=80, bbox_inches="tight")
-    plt.close(fig)
+def _render(path: Path, spec: FigureSpec, draw: Callable[[Axes], Annotations]) -> None:
+    """Every figure goes through the annotated frame — the one legal savefig site (SH007)."""
+    plot_frame.render(path, spec, draw, figsize=_FIGSIZE, dpi=_DPI)
 
 
 def _print_summary(report: EvalReport) -> None:
@@ -338,7 +399,9 @@ def main(argv: list[str] | None = None) -> int:
         default=here.parent / "data/live",
         help="Real captured live trajectories (schema JSONL) to include, if present.",
     )
-    parser.add_argument("--plots-dir", type=Path, default=None)
+    # Defaults to the committed reports dir: `make escalation-eval` must actually refresh the
+    # figures, or they silently rot while the JSON report says everything is current.
+    parser.add_argument("--plots-dir", type=Path, default=here.parent / "reports")
     args = parser.parse_args(argv)
 
     trajectories = _load_fixtures(args.fixtures)

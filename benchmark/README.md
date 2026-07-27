@@ -48,7 +48,7 @@ benchmark/
     report.py                  # Comparison tables and plots (derived from results.csv)
     scripts/                   # Analysis + figure producers (read results.csv, write reports/)
       compute_costs.py         # Per-model cost/pass rollup
-      embedding_compare.py     # TF-IDF vs embedding neighbourhoods
+      embedding_compare.py     # Arctic vs Jina-code neighbourhoods
       plot_exploration.py      # Exploit-only vs exploit+exploration cost/quality
       plot_external.py         # External-signal plots (difficulty, ours-vs-external, held-out)
       plot_strategies.py       # Strategy Pareto scatter (same rows as report.py)

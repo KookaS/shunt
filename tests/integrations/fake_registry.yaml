@@ -1,10 +1,12 @@
 # Hermetic handshake registry — every model routes to the FAKE upstream, never a
 # real provider. No key, no cost, no network beyond the stub.
 #
-# One model per tier. The cheap row is keyed `qwen3.7-plus` on purpose: the
-# router's cold-start default (`_DEFAULT_MODEL` in src/shunt/proxy/router.py) locks
-# a fresh session to that name, so a handshake always exercises it. The mid and
-# frontier rows exist so the pool spans every tier (fallback-chain coverage).
+# Three models spanning the capability rank (cheapest -> priciest). The cheap row is
+# keyed `qwen3.7-plus` on purpose: the router's cold-start default (`_DEFAULT_MODEL`
+# in src/shunt/proxy/router.py) locks a fresh session to that name, so a handshake
+# always exercises it. The mid and top rows exist so the pool spans the rank
+# (fallback-chain coverage). Prices are placeholder routing metadata (hermetic), not
+# real cost claims — they only order the rank.
 #
 # The Docker harness reaches the stub at host `fake-upstream:9099` (the compose
 # service name). The in-process test (tests/integrations/test_handshake.py)
@@ -18,19 +20,37 @@ providers:
 models:
   qwen3.7-plus:
     model_id: fake/cheap
-    tier: cheap
     provider: fake
+    version: fake-cheap
     supports_streaming: true
     supports_cache_control: false
+    pricing:
+      input_cost_per_1m: 0.1
+      output_cost_per_1m: 0.2
+      price_provider: fake
+      price_source: hermetic
+      price_as_of: "2026-07-26"
   fake-mid:
     model_id: fake/mid
-    tier: mid
     provider: fake
+    version: fake-mid
     supports_streaming: true
     supports_cache_control: false
+    pricing:
+      input_cost_per_1m: 1.0
+      output_cost_per_1m: 2.0
+      price_provider: fake
+      price_source: hermetic
+      price_as_of: "2026-07-26"
   fake-frontier:
     model_id: fake/frontier
-    tier: frontier
     provider: fake
+    version: fake-frontier
     supports_streaming: true
     supports_cache_control: false
+    pricing:
+      input_cost_per_1m: 5.0
+      output_cost_per_1m: 10.0
+      price_provider: fake
+      price_source: hermetic
+      price_as_of: "2026-07-26"

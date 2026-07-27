@@ -78,6 +78,14 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      # SH007 keeps every benchmark figure self-sufficient: savefig lives only in
+      # benchmark/plot_frame.py, which attaches the READ/GOAL/TERMS/NOTE/LIMITS
+      # footer. A new plot that skips the frame fails the commit. BLOCKING.
+      - id: sh007-plot-frame
+        name: SH007 figures saved through the annotated plot frame
+        entry: python tools/lint/check_plot_frame.py
+        language: system
+        types: [python]
       - id: validate-benchmark-config
         name: validate benchmark benchmark.yaml
         # Run as a module from the repo root (pre-commit's cwd) so `from benchmark

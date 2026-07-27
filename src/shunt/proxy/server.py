@@ -52,12 +52,8 @@ _MODEL_CONFIG_PATH = os.environ.get("SHUNT_MODEL_CONFIG_PATH")
 
 
 def _model_inventory(model_pool: ModelPool) -> str:
-    """`tier:name` for every routable model, cheapest tier first."""
-    from shunt.models import TIER_ORDER
-
-    listed = [
-        f"{tier}:{model.name}" for tier in TIER_ORDER for model in model_pool.get_tier_models(tier)
-    ]
+    """`rank:name` for every routable model, cheapest (lowest rank) first."""
+    listed = [f"{rank}:{model.name}" for rank, model in enumerate(model_pool.ranked_models())]
     return ", ".join(listed) or "(none)"
 
 
@@ -554,6 +550,17 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _top_capability_cluster(model_pool: ModelPool) -> set[str]:
+    """The expensive-tail ('frontier') set: models above the pool's median capability rank."""
+    # Replaces the hand-assigned ``tier == 'frontier'`` set with the rank's top cluster. Strictly
+    # above the median (the top half of the price-ranked live pool) is the expensive tail the
+    # loop-health collapse alarm keys on.
+    ranked = model_pool.ranked_models()
+    n = len(ranked)
+    start = (n + 1) // 2
+    return {m.name for m in ranked[start:]}
+
+
 def _loop_health(outcome_store: OutcomeStore, model_pool: ModelPool) -> LoopHealth:
     """Compute the full loop-health object from the store — shared by the endpoint + the alarm."""
     from shunt.db.loop_health import LoopHealthThresholds, compute_loop_health
@@ -561,7 +568,7 @@ def _loop_health(outcome_store: OutcomeStore, model_pool: ModelPool) -> LoopHeal
     thresholds = LoopHealthThresholds()
     snapshot = outcome_store.loop_health_snapshot(recent_window=thresholds.recent_window)
     names = set(model_pool.model_names())
-    frontier = {name for name in names if model_pool.get_tier(name) == "frontier"}
+    frontier = _top_capability_cluster(model_pool)
     return compute_loop_health(
         snapshot,
         frontier_models=frontier,

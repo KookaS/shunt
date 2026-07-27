@@ -15,10 +15,9 @@ from shunt.router.engine import RouterEngine
 from shunt.router.escalation import EscalationConfig
 
 
-def _cfg(name: str, tier: str, reasoning: ReasoningConfig | None = None) -> ModelConfig:
+def _cfg(name: str, reasoning: ReasoningConfig | None = None) -> ModelConfig:
     return ModelConfig(
         name=name,
-        tier=tier,  # type: ignore[arg-type]
         provider="p",
         base_url="http://x",
         api_key_env_var="K",
@@ -38,25 +37,29 @@ def _ladder() -> ReasoningConfig:
 
 
 class _ReasoningPool:
-    """cheap=qwen with a 3-arm reasoning ladder; mid=glm with no arms."""
+    """qwen with a 3-arm reasoning ladder < glm with no arms (weakest -> strongest)."""
 
     def __init__(self) -> None:
         self._models = {
-            "qwen": _cfg("qwen", "cheap", _ladder()),
-            "glm": _cfg("glm", "mid"),
+            "qwen": _cfg("qwen", _ladder()),
+            "glm": _cfg("glm"),
         }
-        self._tiers = {
-            "cheap": [self._models["qwen"]],
-            "mid": [self._models["glm"]],
-            "high": [],
-            "frontier": [],
-        }
+        self._ranked = [self._models["qwen"], self._models["glm"]]
 
     def get_model(self, name: str) -> ModelConfig | None:
         return self._models.get(name)
 
-    def get_tier_models(self, tier: str) -> list[ModelConfig]:
-        return self._tiers.get(tier, [])
+    def ranked_models(self) -> list[ModelConfig]:
+        return list(self._ranked)
+
+    def rank_of(self, name: str) -> int | None:
+        for i, m in enumerate(self._ranked):
+            if m.name == name:
+                return i
+        return None
+
+    def models_from_rank(self, i: int) -> list[ModelConfig]:
+        return self._ranked[max(i, 0) :]
 
     def is_healthy(self, name: str) -> bool:
         return True
@@ -103,7 +106,7 @@ def _engine() -> RouterEngine:
         session_manager=_SessionManager(),
         outcome_index=_Index(),
         embedder=_Embedder(),
-        escalation=EscalationConfig(enabled=True, escalate_after_n=2, ladder="effort_then_tier"),
+        escalation=EscalationConfig(enabled=True, escalate_after_n=2, ladder="effort_then_rank"),
         task_key_resolver=lambda _s: "repoA",
     )
 

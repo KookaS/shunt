@@ -62,7 +62,7 @@ def make_step(
         dedup_key=None,
         model=None,
         reasoning_effort=None,
-        tier_index=None,
+        rank_index=None,
         effort_index=None,
         real_cost=None,
     )

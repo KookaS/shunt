@@ -23,7 +23,7 @@ DEFAULT_GRID: Final[list[GridPoint]] = [
     GridPoint(escalate_after_n=n, stale_window=w, ladder=ladder)
     for n in (2, 3)
     for w in (5, 10, 20)
-    for ladder in ("effort_then_tier", "tier_only")
+    for ladder in ("effort_then_rank", "rank_only")
 ]
 
 _TRUE = "True"

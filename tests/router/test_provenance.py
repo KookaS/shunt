@@ -32,7 +32,7 @@ class TestBuildProvenance:
         assert prov["model_chosen"] == "model-a"
         assert prov["selection_rule_used"] == "cold_start"
         assert prov["fallback_chain_triggered"] is False
-        assert prov["tier_escalation_reason"] is None
+        assert prov["rank_escalation_reason"] is None
         assert prov["top_k_neighbor_ids"] == []
         assert prov["neighbor_confidence_scores"] == []
         assert prov["candidate_model_scores"] == {}
@@ -73,12 +73,12 @@ class TestBuildProvenance:
             model_chosen="frontier-model",
             selection_rule_used="safe_fallback",
             fallback_chain_triggered=True,
-            tier_escalation_reason="safe_fallback",
+            rank_escalation_reason="safe_fallback",
             router_propensity=0.5,
             candidate_model_scores={"cheap": 0.3, "mid": 0.5},
         )
         assert prov["fallback_chain_triggered"] is True
-        assert prov["tier_escalation_reason"] == "safe_fallback"
+        assert prov["rank_escalation_reason"] == "safe_fallback"
         assert prov["router_propensity"] == 0.5
 
     def test_empty_neighbors(self):
@@ -87,7 +87,7 @@ class TestBuildProvenance:
             selection_rule_used="exploration_untested",
             neighbors=[],
             fallback_chain_triggered=True,
-            tier_escalation_reason="exploration_untested",
+            rank_escalation_reason="exploration_untested",
         )
         assert prov["top_k_neighbor_ids"] == []
         assert prov["neighbor_confidence_scores"] == []

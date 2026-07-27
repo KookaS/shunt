@@ -83,11 +83,14 @@ class TestResultsSchema:
         assert ",".join(integrity.RESULTS_FIELDS) == (
             "challenge_id,model,reasoning,pass,cost,in_tok,out_tok,calls,"
             "version_hash,model_version,arm_hash,real_cost,estimated_cost,timeout_flag,"
-            "image_digest,computed_at"
+            "image_digest,computed_at,stop_reason"
         )
 
     def test_build_row_defaults_reasoning(self):
-        row = run_matrix._build_row("c1", "m1", {}, {"c1": "h"}, {"m1": "v"}, {})
+        # A minimally valid outcome (solved, ran): the reasoning default comes from the
+        # arm arg, not the outcome, but the row must still clear the write-time invariants.
+        outcome = {"pass": True, "calls": 1}
+        row = run_matrix._build_row("c1", "m1", outcome, {"c1": "h"}, {"m1": "v"}, {})
         assert row["reasoning"] == integrity.DEFAULT_REASONING
 
     def test_cost_falls_back_to_estimate_when_real_cost_unpriceable(self):
@@ -299,7 +302,6 @@ class TestCacheKeyIsolation:
             "models": {
                 "m1": {
                     "model_id": "p/m1",
-                    "tier": "cheap",
                     "provider": "p",
                     "version": "m1",
                     "pricing": {

@@ -81,8 +81,8 @@ What the platform is built to support today:
   Continue, Cline, Cursor, and Zed all connect with one line — plus agent
   frameworks (LangChain, Pydantic AI, LiteLLM) and no-code builders (n8n,
   Flowise).
-- 🗂️ **A configurable model pool.** A provider registry with `cheap` → `mid` →
-  `high` → `frontier` tiers, per-model enable/disable, and a fallback chain — you
+- 🗂️ **A configurable model pool.** A provider registry ranked by price
+  (cheapest → priciest), per-model enable/disable, and a fallback chain — you
   own the pool and the prices.
 - 🧠 **A decision core.** Task embedding → nearest-neighbour lookup → a
   cheapest-that-succeeds selection rule, plus pluggable strategies (fixed, kNN,
@@ -116,7 +116,7 @@ equal quality.
 
 - **Live proxy**: localhost-bound server speaking both the OpenAI and Anthropic wire formats.
 - **Decision transparency**: every response carries an `X-Shunt-Decision` header (model + reason).
-- **Model registry**: multi-provider, tiered, with enable/disable and a fallback chain.
+- **Model registry**: multi-provider, price-ranked, with enable/disable and a fallback chain.
 - **Offline benchmark**: routing strategies scored on SWE-bench-Verified tasks judged by their own tests.
 - **~18 tool integrations**: copy-paste config plus a dry-run handshake that proves the wiring for free.
 - **Published distribution**: `shunt-router` on PyPI and `ghcr.io/kookas/shunt-router` on Docker.
@@ -183,13 +183,37 @@ and inform the *next* decision. Escalation, when it comes, decides at task and
 session boundaries — never mid-cached-turn — and quotes the recompute cost
 upfront. See [docs/feedback.md](docs/feedback.md) for the full loop.
 
+## Project hypothesis
+
+Two bets, both testable on your own workflow:
+
+1. **Most coding work is routine.** On real coding tasks, an estimated 70–80% are
+   solvable by a cheap or open-weight model; only a hard tail needs a frontier
+   model. On our 188-task SWE-bench Verified subset a cheap/mid model already
+   solves ~74% of tasks.
+2. **Capability and price decorrelate.** A cheaper model can beat a pricier one —
+   we measured `deepseek-v4-flash`, the cheapest model, outperform a pricier
+   one on this suite. So a model is only worth its price if it earns it on *your*
+   tasks; we validate the capability ladder on our own benchmark and never assume
+   it from the price list.
+
+Put together: if most tasks are cheap-solvable and price doesn't track capability,
+then routing routine work to the cheapest model that can do it — and escalating
+only the hard tail — captures the saving without losing quality.
+
+**The make-or-break bar.** This only matters if it beats the obvious alternative.
+The bar is blunt: the router must beat **fixed-frontier-with-caching** on cost at
+equal quality, measured on your own Claude Code / opencode workflow. If it can't,
+it isn't worth running — and we say so rather than ship it. How we measure it:
+[Benchmark](#benchmark).
+
 ## Measured, not marketed
 
 Prior work is mixed, routing can cut cost at matched quality on some workloads, and the one study on *agentic* Claude Code found no benefit — so we don't quote anyone else's number. We measure our own workflow on our own [benchmark](#benchmark), and there is no "beats Opus" claim here because we haven't earned one on our own data.
 
 Running a frontier model on every task to set that bar is expensive, so Shunt
 collects outcomes adaptively — cheap and mid models on every task, the frontier
-model only where cheaper tiers disagree plus a random audit — and estimates the
+model only where cheaper models disagree plus a random audit — and estimates the
 baseline with a doubly-robust estimator whose validity rests on that audit. The
 benchmark can *reject* a bad strategy; it can't *prove* a good one works in
 production, which is exactly why the kill gate is measured on a live workflow.
@@ -217,10 +241,15 @@ cost; the oracle is the ceiling.
 
 ![Strategy comparison](benchmark/routing/reports/strategy_comparison.png)
 
-**Cumulative regret** — reward lost against the oracle's choices, accumulated over
-the run. *Look for:* a **low, flat line** hugging the bottom — that means the
-strategy tracks the oracle's picks. A steadily climbing line means costly mis-routes;
-the steeper the slope, the worse.
+**Cumulative regret** — *regret* is how much worse off you are for not having made the
+best possible choice: per task, the oracle's reward minus the strategy's reward
+(reward = passed − γ×cost). Match the oracle's pick and it is 0; you pay **quality
+regret** for failing a task the oracle solved, and **cost regret** for passing on a
+bigger model than the task needed. The plot sums that gap over the run.
+*Look for:* a **low, flat line** hugging the bottom — that means the strategy tracks
+the oracle's picks. The slope is average regret per task, so a steadily climbing line
+means costly mis-routes; the steeper, the worse. Full definition:
+[`docs/benchmark.md`](docs/benchmark.md#regret-and-how-to-read-the-regret-plot).
 
 ![Cumulative regret](benchmark/routing/reports/cumulative_regret.png)
 
@@ -262,7 +291,7 @@ tool-agnostic, self-hosted, and Apache-2.0 all at once.
 │   ├── verifiers/         Async outcome verification (auto-detected tests, typecheck runner)
 │   ├── db/                SQLite persistence for sessions, outcomes, index
 │   ├── session/           Session lifecycle, inactivity timeout, model lock
-│   ├── models/            Provider config, capability tiers, fallback chain
+│   ├── models/            Provider config, price-derived capability rank, fallback chain
 │   └── config/            Shipped defaults: models.yaml registry, router.yaml policy
 ├── benchmark/             Offline model-capability and routing evaluation
 ├── docs/                  User documentation (MkDocs)

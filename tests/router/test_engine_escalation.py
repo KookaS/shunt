@@ -19,19 +19,23 @@ class _M:
     name: str
 
 
-class _TieredPool:
-    """Models across real tiers: cheap=qwen, mid=glm, high=opus (all healthy)."""
+class _RankedPool:
+    """Models across ranks: qwen < glm < opus (weakest -> strongest, all healthy)."""
 
     def __init__(self) -> None:
-        self._tiers = {
-            "cheap": [_M("qwen")],
-            "mid": [_M("glm")],
-            "high": [_M("opus")],
-            "frontier": [],
-        }
+        self._ranked = [_M("qwen"), _M("glm"), _M("opus")]
 
-    def get_tier_models(self, tier: str) -> list[_M]:
-        return self._tiers.get(tier, [])
+    def ranked_models(self) -> list[_M]:
+        return list(self._ranked)
+
+    def rank_of(self, name: str) -> int | None:
+        for i, m in enumerate(self._ranked):
+            if m.name == name:
+                return i
+        return None
+
+    def models_from_rank(self, i: int) -> list[_M]:
+        return self._ranked[max(i, 0) :]
 
     def is_healthy(self, name: str) -> bool:
         return True
@@ -79,7 +83,7 @@ class _Embedder:
 
 def _engine(*, enabled: bool) -> RouterEngine:
     return RouterEngine(
-        model_pool=_TieredPool(),
+        model_pool=_RankedPool(),
         session_manager=_SessionManager(),
         outcome_index=_Index(),
         embedder=_Embedder(),
@@ -114,7 +118,7 @@ def test_two_same_key_failures_escalate_the_next_decision() -> None:
     m3, r3, prov = eng.decide("s3", "same task")
     assert m3 == "glm"  # escalated one tier: cheap → mid
     assert r3 == "auto_escalation"
-    assert prov["tier_escalation_reason"] == "same_verified_failure_x2"
+    assert prov["rank_escalation_reason"] == "same_verified_failure_x2"
 
 
 def test_infra_reds_do_not_escalate_via_the_shared_constructor() -> None:

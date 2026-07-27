@@ -15,9 +15,43 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from benchmark import config  # noqa: E402
-from benchmark.routing import report  # noqa: E402
+from benchmark import config, plot_frame  # noqa: E402
+from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
+from benchmark.routing import report, summary  # noqa: E402
 from benchmark.routing.metrics import compute_pareto  # noqa: E402
+from benchmark.routing.strategies.fixed import AlwaysFrontier  # noqa: E402
+
+SPEC = FigureSpec(
+    reading=(
+        "x is what the whole task suite costs to run under that routing strategy, in USD on "
+        "a log axis (one gridline = 10x). y is the share of those tasks whose patch passed "
+        "the repo's own tests/typecheck. One mark is one strategy — colour and marker both "
+        "identify it, and each point carries its own pass rate and cost. The dark step line "
+        "is the Pareto frontier; the dotted guides mark the best pass rate any strategy "
+        "reached (horizontal) and what always calling the frontier model costs (vertical)."
+    ),
+    goal=(
+        "Aim top-left: a strategy at or above the pass-rate guide and well left of the "
+        "frontier-cost line. That corner is the cost-at-equal-quality claim."
+    ),
+    definitions=(
+        ("pass rate", "share of tasks whose patch passed the repo's tests/typecheck"),
+        ("Pareto frontier", "strategies nothing else beats on BOTH cost and pass rate"),
+        ("Always-Frontier", "baseline sending every task to the most expensive enabled model"),
+    ),
+    notes=(
+        "Rows come from the same derive_tasks/derive_rows path report.py uses, so both "
+        "producers print identical numbers off one denominator.",
+        "This frontier is a best-so-far staircase over measured strategies; pareto_scatter.png "
+        "draws a convex hull instead, which rides above this line wherever blending two "
+        "strategies beats both.",
+    ),
+    limitations=(
+        "A backtest over the recorded outcome matrix, not live runs; cost is the recorded "
+        "per-cell cost, so cache effects are approximated rather than replayed.",
+        "No confidence intervals on any point — a few tasks either way moves a mark.",
+    ),
+)
 
 # Documented data-viz palette (light mode), the 6 best-separated categorical slots.
 # Every strategy also carries a UNIQUE marker and a direct label, so identity never
@@ -50,24 +84,69 @@ def load_matrix(path: Path) -> dict:
 
 
 def _coverage_note(matrix: dict, tasks: list[str], results: list[dict]) -> str | None:
-    """Honest coverage caption: how many tasks the frontier model actually ran on."""
-    # Plotted pass rates EXCLUDE unmeasured cells (summary.py drops them), so the
-    # frontier number is real — but on a smaller denominator than its peers, and the
-    # figure must say so.
-    pricing = config.enabled_pricing()
-    if not pricing:
-        return None
-    frontier_model = max(pricing, key=lambda m: config.cost_per_1m(m, pricing))
-    covered = sum(1 for tid in tasks if frontier_model in matrix["results"].get(tid, {}))
-    if covered >= len(tasks):
-        return None
+    """Footer limitation: how much of the Always-Frontier row is measured vs imputed."""
+    # The row is scored on the COMPLETED matrix summary.py builds, so "measured" and
+    # "scored" are different denominators: raw cells the frontier model really ran,
+    # plus monotone-imputed cells, minus whatever stayed uncovered. Naming only the
+    # raw count while quoting the completed one denies the imputation that produced it.
     row = next((r for r in results if r["strategy"] == "Always-Frontier"), None)
-    scored = int(row["n_tasks"]) if row else covered
-    return (
-        f"Coverage caveat — Always-Frontier ({frontier_model}) ran on "
-        f"{covered}/{len(tasks)} tasks; its pass rate is scored on the "
-        f"{scored} measured tasks only (unmeasured cells excluded, not auto-failed)"
+    if row is None:
+        return None
+    completed, _imputed = summary.complete_scored_matrix(matrix)
+    # Derive the model the SAME way the strategy does (from the evaluated models on the
+    # matrix it is scored against), not from the configured price list — the two
+    # disagree whenever the priciest enabled model was never evaluated.
+    strategy = AlwaysFrontier()
+    picks = {tid: strategy.select(tid, completed["tasks"].get(tid, {}), completed) for tid in tasks}
+    names = sorted(set(picks.values()))
+    label = names[0] if len(names) == 1 else ", ".join(names)
+
+    n = len(tasks)
+    measured = sum(1 for tid in tasks if picks[tid] in matrix["results"].get(tid, {}))
+    cells = [completed["results"].get(tid, {}).get(picks[tid]) for tid in tasks]
+    imputed = sum(1 for cell in cells if cell and cell.get("imputed"))
+    covered = sum(1 for cell in cells if cell)
+    if measured >= n:
+        return None
+    scored = int(row["n_tasks"])
+    head = (
+        f"Coverage caveat — Always-Frontier routes to {label} (derived from the evaluated "
+        f"models, as the strategy does), really measured on {measured}/{n} tasks"
     )
+    if imputed:
+        return (
+            f"{head}; monotone imputation completes {imputed} more, for {covered}/{n} "
+            f"completed cells. Its plotted pass rate rests on the {scored} task(s) that row "
+            f"scored — completed cells, measured OR imputed, not measurements alone; cells "
+            f"left uncovered are excluded, not auto-failed"
+        )
+    return (
+        f"{head}; its plotted pass rate rests on the {scored} measured task(s) only "
+        f"(uncovered cells excluded, not auto-failed)"
+    )
+
+
+def _annotations(results: list[dict], coverage_note: str | None) -> Annotations:
+    """Footer content that depends on the data: denominators and zero-evidence rows."""
+    counts = [int(float(r.get("n_tasks", 0) or 0)) for r in results]
+    scored = [c for c in counts if c > 0]
+    notes: list[str] = []
+    limits: list[str] = []
+    if coverage_note:
+        limits.append(coverage_note)
+    if scored and min(scored) != max(scored):
+        limits.append(
+            f"Strategies are scored on different denominators ({min(scored)}-{max(scored)} "
+            "tasks): a strategy whose chosen model was never measured on a task has that "
+            "task excluded, not auto-failed"
+        )
+    n_zero = len(counts) - len(scored)
+    if n_zero:
+        notes.append(
+            f"{n_zero} strategy row(s) measured 0 tasks and are excluded from the Pareto "
+            "frontier — a $0 / 0% point is un-dominated by construction"
+        )
+    return Annotations(notes=tuple(notes), limitations=tuple(limits))
 
 
 def _declutter(fig, anns: list, step: float = 3.0, passes: int = 40) -> None:
@@ -113,7 +192,7 @@ def _label_offset(cost: float, perf: float, cost_mid: float, perf_hi: float) -> 
 def plot_pareto(
     results: list[dict],
     out_path: Path,
-    warning: str | None = None,
+    coverage_note: str | None = None,
     frontier_cost: float | None = None,
 ) -> None:
     names = [r["strategy"] for r in results]
@@ -239,14 +318,10 @@ def plot_pareto(
         spine.set_edgecolor(_GRID)
     ax.set_axisbelow(True)
 
-    if warning:
-        # Sparse-frontier honesty as a recessive footnote (not a loud banner): the
-        # fixed-frontier strategy is scored on the subset its model actually ran on.
-        fig.text(0.5, -0.02, warning, ha="center", va="top", fontsize=8.5, color=_INK2, wrap=True)
-
     _declutter(fig, point_labels)
-    fig.savefig(out_path, dpi=150, bbox_inches="tight", facecolor=_SURFACE)
-    plt.close(fig)
+    # The surface colour rides on the figure itself, so the frame's savefig picks it
+    # up (savefig.facecolor defaults to the figure's own).
+    plot_frame.save(fig, out_path, SPEC, extra=_annotations(results, coverage_note))
 
 
 def main(config_path: str = "benchmark/benchmark.yaml") -> None:
@@ -312,7 +387,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     plot_pareto(
         results,
         out_path,
-        warning=_coverage_note(matrix, tasks, results),
+        coverage_note=_coverage_note(matrix, tasks, results),
         frontier_cost=frontier_cost,
     )
     print(f"\nPlot saved to {out_path}")

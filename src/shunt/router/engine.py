@@ -10,7 +10,6 @@ if TYPE_CHECKING:
     import numpy as np
     import numpy.typing as npt
 
-from shunt.models import TIER_ORDER
 from shunt.models.config import ModelConfig, ReasoningConfig
 from shunt.router.budget import ConservativeGate, ExplorationBudget
 from shunt.router.cold_start import ColdStartStrategy
@@ -319,7 +318,7 @@ class RouterEngine:
             selection_rule_used=reason,
             neighbors=neighbors,
             fallback_chain_triggered=fallback,
-            tier_escalation_reason=reason if fallback else None,
+            rank_escalation_reason=reason if fallback else None,
             router_propensity=candidate_scores.get(model_name, 1.0),
             candidate_model_scores=candidate_scores,
         )
@@ -536,25 +535,28 @@ class RouterEngine:
     def _maybe_escalate(
         self, task_key: str, model_name: str, reason: str, provenance: dict[str, Any]
     ) -> tuple[str, str, dict[str, Any]]:
-        """Raise the effort rung, then a model tier, on due failures. Caller holds _lock."""
-        # Effort first (cache-safe: same model, higher reasoning arm), tier only once the model's
+        """Raise the effort rung, then a model rank, on due failures. Caller holds _lock."""
+        # Effort first (cache-safe: same model, higher reasoning arm), rank only once the model's
         # reasoning ladder is exhausted. Real effort headroom is read from the base model's
-        # ReasoningConfig; a model with no arms has none, so the ladder steps tier as before. The
+        # ReasoningConfig; a model with no arms has none, so the ladder steps rank as before. The
         # routing-collapse guard is read live from `_loop_health_alarm`.
         config = self._escalation
         if config is None:
             return (model_name, reason, provenance)
         cur_arm_index, max_arm_index, cur_arm, reasoning = self._effort_ladder(task_key, model_name)
-        tier_index = self._tier_index_of(model_name)
+        # Phase 1: rank is read LIVE from the pool (cache-safe only because price order is
+        # process-constant). Phase 2 (learned overlay) MUST read a per-session pinned snapshot
+        # from CapabilityRankResolver here instead — see router/capability_rank.py NOT-YET-WIRED.
+        rank_index = self._rank_of(model_name)
         # Build this decision's directive through the SHARED lifecycle helper the offline replay
-        # also drives, seeded with the engine's concrete ladder position (effort arm + model tier).
-        # The concrete application (arm/model + the model-health tier edge) stays engine-only below.
+        # also drives, seeded with the engine's concrete ladder position (effort arm + model rank).
+        # The concrete application (arm/model + the model-health rank edge) stays engine-only below.
         runner = EscalationRunner(
             max_effort_index=max_arm_index,
-            max_tier_index=len(TIER_ORDER) - 1,
+            max_rank_index=self._max_rank_index(),
             log=self._failure_log.get(task_key, []),
             effort_index=cur_arm_index,
-            tier_index=tier_index if tier_index is not None else 0,
+            rank_index=rank_index if rank_index is not None else 0,
         )
         directive = runner.decide(
             self._task_decision_index.get(task_key, 0),
@@ -563,9 +565,13 @@ class RouterEngine:
         )
         if directive.action is EscalationAction.RAISE_EFFORT:
             return self._apply_effort(task_key, model_name, reason, provenance, directive, cur_arm)
-        if directive.action is EscalationAction.RAISE_TIER:
-            return self._apply_tier(task_key, model_name, reason, provenance, directive)
+        if directive.action is EscalationAction.RAISE_RANK:
+            return self._apply_rank(task_key, model_name, reason, provenance, directive)
         return (model_name, reason, provenance)
+
+    def _max_rank_index(self) -> int:
+        """The top capability-rank index (number of ranked models - 1; -1 when empty)."""
+        return len(self._model_pool.ranked_models()) - 1
 
     def _reasoning_of(self, model_name: str) -> ReasoningConfig | None:
         """The model's reasoning bracket, or None when the pool can't resolve arms for it."""
@@ -622,7 +628,7 @@ class RouterEngine:
             },
         )
 
-    def _apply_tier(
+    def _apply_rank(
         self,
         task_key: str,
         model_name: str,
@@ -630,12 +636,12 @@ class RouterEngine:
         provenance: dict[str, Any],
         directive: EscalationDirective,
     ) -> tuple[str, str, dict[str, Any]]:
-        """Step to the first healthy model in a strictly-higher tier."""
-        higher = self._escalate_one_tier(model_name)
+        """Step to the first healthy model at a strictly-higher capability rank."""
+        higher = self._escalate_one_rank(model_name)
         if higher is None:
             return (model_name, reason, provenance)
         self._retire_after_escalation(task_key)
-        # Drop the old model's effort position: the new tier's model starts at its OWN default
+        # Drop the old model's effort position: the new-rank model starts at its OWN default
         # arm, never mid-ladder on a stale/foreign arm id (which would silently block its own
         # effort steps — a foreign id has no next_arm_above).
         self._task_effort_arm.pop(task_key, None)
@@ -651,7 +657,7 @@ class RouterEngine:
         # flag so the learner never trains the escalated arm/model as a free policy choice.
         return {
             **provenance,
-            "tier_escalation_reason": directive.reason,
+            "rank_escalation_reason": directive.reason,
             "auto_escalated": True,
             "new_label_window": directive.new_label_window,
             "router_propensity": None,
@@ -665,22 +671,18 @@ class RouterEngine:
         # recurrence — two more verified same-check reds — is required before the next rung.
         self._failure_log.pop(task_key, None)
 
-    def _tier_index_of(self, model_name: str) -> int | None:
-        """Index of *model_name*'s tier in TIER_ORDER (cheap→expensive), or None if absent."""
-        for i, tier in enumerate(TIER_ORDER):
-            if any(m.name == model_name for m in self._model_pool.get_tier_models(tier)):
-                return i
-        return None
+    def _rank_of(self, model_name: str) -> int | None:
+        """Capability-rank index of *model_name* (0 = cheapest), or None if absent."""
+        return self._model_pool.rank_of(model_name)
 
-    def _escalate_one_tier(self, current_model: str) -> str | None:
-        """The first healthy model in a strictly-higher tier than *current_model*, else None."""
-        idx = self._tier_index_of(current_model)
+    def _escalate_one_rank(self, current_model: str) -> str | None:
+        """The first healthy model at a strictly-higher rank than *current_model*, else None."""
+        idx = self._model_pool.rank_of(current_model)
         if idx is None:
             return None
-        for tier in TIER_ORDER[idx + 1 :]:
-            for m in self._model_pool.get_tier_models(tier):
-                if self._model_pool.is_healthy(m.name):
-                    return m.name
+        for m in self._model_pool.models_from_rank(idx + 1):
+            if self._model_pool.is_healthy(m.name):
+                return m.name
         return None
 
     def record_outcome(  # noqa: PLR0913 (verified-outcome fields threaded to gate + escalation)

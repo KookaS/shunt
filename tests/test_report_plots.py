@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from benchmark import config
 from benchmark.routing import report, run_eval
+from benchmark.routing.impute import ImputedMatrix
 
 
 class TestStrategyFactoriesMatchEnabledSet:
@@ -111,91 +112,25 @@ def _matrix(results: dict) -> dict:
     }
 
 
-class TestFrontierCoverage:
-    def test_flags_partial_frontier(self):
-        # opus present on 1 of 3 tasks -> phantom baseline.
-        m = _matrix(
-            {
-                "t1": {"cheap": {"pass": True, "cost": 0.01}, "opus": {"pass": True, "cost": 0.2}},
-                "t2": {"cheap": {"pass": True, "cost": 0.01}},
-                "t3": {"cheap": {"pass": False, "cost": 0.01}},
-            }
-        )
-        assert report._frontier_coverage(m) == ("opus", 1, 3)
+class TestHullParetoIndices:
+    """K1 (plot_pareto): the hull takes exactly the Pareto-flagged rows. Equal-coverage
+    imputation retired the partial-coverage sparse-frontier exclusion (design S6)."""
 
-    def test_full_coverage_is_not_phantom(self):
-        m = _matrix(
-            {
-                "t1": {"cheap": {"pass": True, "cost": 0.01}, "opus": {"pass": True, "cost": 0.2}},
-                "t2": {"cheap": {"pass": True, "cost": 0.01}, "opus": {"pass": True, "cost": 0.2}},
-            }
-        )
-        frontier, covered, total = report._frontier_coverage(m)
-        assert (frontier, covered, total) == ("opus", 2, 2)
-
-    def test_none_matrix_returns_none(self):
-        assert report._frontier_coverage(None) is None
-        assert report._frontier_coverage({"models": {}, "results": {}}) is None
-
-
-class TestParetoPhantomGuard:
-    """K1 (plot_pareto) must exclude a phantom Always-Frontier from the hull/AIQ
-    computation, mirroring the guard N1 and cost_savings already apply."""
-
-    def test_phantom_frontier_excluded_from_hull_indices(self):
+    def test_pareto_flagged_rows_enter_hull(self):
         names = ["Always-Cheap", "Always-Frontier"]
         pareto_map = {"Always-Cheap": True, "Always-Frontier": True}
-        assert report._hull_pareto_indices(names, pareto_map, phantom=True) == [0]
+        assert report._hull_pareto_indices(names, pareto_map) == [0, 1]
 
-    def test_non_phantom_frontier_kept_in_hull_indices(self):
-        names = ["Always-Cheap", "Always-Frontier"]
-        pareto_map = {"Always-Cheap": True, "Always-Frontier": True}
-        assert report._hull_pareto_indices(names, pareto_map, phantom=False) == [0, 1]
-
-    def test_non_pareto_strategy_excluded_regardless_of_phantom(self):
+    def test_non_pareto_strategy_excluded(self):
         names = ["Always-Cheap", "Random", "Always-Frontier"]
         pareto_map = {"Always-Cheap": True, "Random": False, "Always-Frontier": True}
-        assert report._hull_pareto_indices(names, pareto_map, phantom=False) == [0, 2]
+        assert report._hull_pareto_indices(names, pareto_map) == [0, 2]
 
-    def test_plot_pareto_renders_and_warns_on_phantom(self, tmp_path):
-        rows = [
-            {
-                "strategy": "Always-Cheap",
-                "TotalCost": "0.03",
-                "AvgPerf%": "80",
-                "Pareto": True,
-                "n_tasks": "2",
-                "n_pass": "2",
-            },
-            {
-                "strategy": "Always-Frontier",
-                "TotalCost": "0.0",
-                "AvgPerf%": "0.0",
-                "Pareto": True,
-                "n_tasks": "0",
-                "n_pass": "0",
-            },
-        ]
-        m = _matrix(
-            {
-                "t1": {"cheap": {"pass": True, "cost": 0.01}},
-                "t2": {"cheap": {"pass": True, "cost": 0.01}},
-            }
-        )
-        # opus (the frontier) has zero coverage here -> a textbook phantom baseline.
-        orig_close = report.plt.close
-        report.plt.close = lambda *a, **k: None  # type: ignore[assignment]
-        try:
-            out = report.plot_pareto(rows, tmp_path, matrix=m)
-            fig = report.plt.gcf()
-            texts = " ".join(t.get_text() for t in fig.axes[0].texts)
-        finally:
-            report.plt.close = orig_close  # type: ignore[assignment]
-            report.plt.close("all")
-        assert out.exists() and out.stat().st_size > 0
-        assert "phantom baseline" in texts
 
-    def test_plot_pareto_no_warning_on_full_coverage(self, tmp_path):
+class TestDisclosureBanner:
+    """The equal-coverage disclosure rides in the plot frame's footer NOTE section."""
+
+    def test_plot_pareto_draws_banner(self, tmp_path):
         rows = [
             {
                 "strategy": "Always-Cheap",
@@ -214,38 +149,170 @@ class TestParetoPhantomGuard:
                 "n_pass": "2",
             },
         ]
-        m = _matrix(
-            {
-                "t1": {"cheap": {"pass": True, "cost": 0.01}, "opus": {"pass": True, "cost": 0.2}},
-                "t2": {"cheap": {"pass": True, "cost": 0.01}, "opus": {"pass": True, "cost": 0.2}},
-            }
-        )
+        banner = "equal-coverage via monotone imputation — 40% of frontier cells imputed"
         orig_close = report.plt.close
         report.plt.close = lambda *a, **k: None  # type: ignore[assignment]
         try:
-            out = report.plot_pareto(rows, tmp_path, matrix=m)
+            out = report.plot_pareto(rows, tmp_path, banner=banner)
             fig = report.plt.gcf()
-            texts = " ".join(t.get_text() for t in fig.axes[0].texts)
+            # The footer is word-wrapped across fig.text lines, so compare on
+            # whitespace-normalized text rather than the raw rendered strings.
+            texts = " ".join(" ".join(t.get_text().split()) for t in fig.texts)
         finally:
             report.plt.close = orig_close  # type: ignore[assignment]
             report.plt.close("all")
         assert out.exists() and out.stat().st_size > 0
-        assert "phantom baseline" not in texts
+        assert "equal-coverage via monotone imputation" in texts
+
+    def test_no_banner_when_none(self, tmp_path):
+        rows = [
+            {
+                "strategy": "Always-Cheap",
+                "TotalCost": "0.03",
+                "AvgPerf%": "80",
+                "Pareto": True,
+                "n_tasks": "2",
+                "n_pass": "2",
+            },
+        ]
+        out = report.plot_pareto(rows, tmp_path, banner=None)
+        assert out.exists() and out.stat().st_size > 0
+
+
+def _imputed(n_multi_observed: int, violations: list | None = None) -> ImputedMatrix:
+    return ImputedMatrix(
+        matrix={},
+        violations=list(violations or []),
+        n_real=0,
+        n_imputed=0,
+        n_unknown=0,
+        tau={},
+        n_multi_observed=n_multi_observed,
+    )
+
+
+class TestNoEvidenceRowsDoNotBecomeClaims:
+    """A strategy parked at $0 / n_tasks=0 is metrics.py's explicit no-scorable-task
+    signal (see _is_pareto) — no footer sentence may count it as evidence."""
+
+    def test_coverage_note_excludes_zero_n_rows_from_its_subject(self):
+        ann = report._row_coverage_annotations([10, 10, 0])
+        note = " ".join(ann.notes)
+        assert "Every plotted strategy" not in note
+        assert note == "Every scored strategy (2 of 3 plotted) is scored on the same 10 task(s)."
+
+    def test_coverage_note_keeps_the_strong_claim_when_every_row_is_scored(self):
+        ann = report._row_coverage_annotations([10, 10])
+        assert ann.notes == ("Every plotted strategy is scored on the same 10 task(s).",)
+
+    def test_cheapest_claim_ignores_the_no_evidence_row(self):
+        ann = report._cost_savings_annotations(
+            names=["Always-Cheap", "Broken", "Always-Frontier"],
+            ns=[10, 0, 10],
+            costs=[3.0, 0.0, 9.0],
+            ref=9.0,
+            banner=None,
+        )
+        cheapest = next(n for n in ann.notes if "Cheapest" in n)
+        assert "$3.0000" in cheapest
+        assert "$0.0000" not in cheapest
+
+    def test_coverage_and_cheapest_notes_do_not_contradict_each_other(self):
+        ann = report._cost_savings_annotations(
+            names=["Always-Cheap", "Broken"],
+            ns=[10, 0],
+            costs=[3.0, 0.0],
+            ref=9.0,
+            banner=None,
+        )
+        footer = " ".join((*ann.notes, *ann.limitations))
+        assert "no scorable task" in footer
+        assert "Every plotted strategy" not in footer
+
+
+class TestSyntheticArmCacheMakesNoArmClaim:
+    """_synthesize_raw collapses every model to one 'default' arm when no per-arm
+    cache exists — that is missing data, not a measured single-arm sweep."""
+
+    _single = {"t1": {"m1": {"default": {"pass": True, "cost": 0.01}}}}
+
+    def test_synthesized_cache_suppresses_the_single_arm_claim(self):
+        assert report._single_arm_limits(self._single, synthesized=True) == ()
+
+    def test_loaded_single_arm_cache_still_makes_the_claim(self):
+        limits = report._single_arm_limits(self._single, synthesized=False)
+        assert len(limits) == 1
+        assert "exactly one sampled arm" in limits[0]
+
+    def test_heatmap_footer_on_synthesized_data_claims_no_arm_sweep(self):
+        import numpy as np
+
+        ann = report._heatmap_annotations(
+            grid=np.array([[1.0, 0.0]]),
+            coverage=np.array([1, 1]),
+            glyphs=True,
+            raw=self._single,
+            synthesized=True,
+        )
+        footer = " ".join(ann.limitations)
+        assert "synthesized" in footer
+        assert "exactly one sampled arm" not in footer
+
+
+class TestMonotonicityUnmeasuredIsNotMeasured:
+    """violation_ci returns (0, 0, 0) at n=0 — a vacuous denominator, not a perfect run."""
+
+    def test_zero_multi_observed_makes_no_measured_claim(self):
+        line = report._violation_line(_imputed(0))
+        assert "UNMEASURED" in line
+        assert "measured, not assumed" not in line
+        assert "v̂=0.000" not in line
+
+    def test_real_denominator_still_reports_the_measured_rate(self):
+        line = report._violation_line(_imputed(8))
+        assert "v̂=0.000" in line
+        assert "8 multi-observed tasks" in line
+        assert "measured, not assumed" in line
+
+    def test_capability_footer_does_not_assert_100_percent_on_zero_observations(self):
+        rank = config.CapabilityRank(ordered=[], evidence={})
+        ann = report._capability_annotations(_imputed(0), rank, n_bands=2, total=4, unsolvable=1)
+        footer = " ".join(ann.notes)
+        assert "UNMEASURED" in footer
+        assert "measured, not assumed" not in footer
+
+    def test_disclosure_banner_does_not_assert_100_percent_on_zero_observations(self):
+        banner = report._disclosure_banner(_imputed(0), [{"n_tasks": 3}])
+        assert banner is not None
+        assert "UNVERIFIED" in banner
+        assert "measured, not assumed" not in banner
+
+
+class TestCapabilityFooterCounts:
+    def test_zero_tasks_reports_zero_not_the_clamped_denominator(self):
+        rank = config.CapabilityRank(ordered=[], evidence={})
+        ann = report._capability_annotations(_imputed(2), rank, n_bands=2, total=0, unsolvable=0)
+        assert "0 task(s) across 2 capability band(s)" in ann.notes[0]
+        assert "1 task(s)" not in ann.notes[0]
+
+    def test_single_band_axis_is_disclosed(self):
+        rank = config.CapabilityRank(ordered=[], evidence={})
+        ann = report._capability_annotations(_imputed(2), rank, n_bands=1, total=4, unsolvable=0)
+        assert any("COLLAPSED to a single capability band" in n for n in ann.notes)
+
+    def test_multi_band_axis_carries_no_collapse_note(self):
+        rank = config.CapabilityRank(ordered=[], evidence={})
+        ann = report._capability_annotations(_imputed(2), rank, n_bands=3, total=4, unsolvable=0)
+        assert not any("COLLAPSED" in n for n in ann.notes)
 
 
 class TestPlotsRender:
-    def test_cost_savings_renders_with_phantom(self, tmp_path):
+    def test_cost_savings_renders(self, tmp_path):
         rows = [
             {"strategy": "Always-Cheap", "TotalCost": "0.03", "AvgPerf%": "80"},
             {"strategy": "Always-Frontier", "TotalCost": "0.20", "AvgPerf%": "10"},
         ]
-        m = _matrix(
-            {
-                "t1": {"cheap": {"pass": True, "cost": 0.01}, "opus": {"pass": True, "cost": 0.2}},
-                "t2": {"cheap": {"pass": True, "cost": 0.01}},
-            }
-        )
-        out = report.plot_cost_savings(rows, tmp_path, m)
+        out = report.plot_cost_savings(rows, tmp_path)
         assert out.exists() and out.stat().st_size > 0
 
     def test_heatmap_renders_task_by_model(self, tmp_path):

@@ -10,7 +10,6 @@ providers:
 models:
   kimi-k3-openrouter:
     model_id: moonshotai/kimi-k3
-    tier: frontier
     provider: openrouter
     supports_streaming: true
     supports_cache_control: false

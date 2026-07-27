@@ -72,7 +72,6 @@ async def test_escalated_arm_not_leaked_to_fallback_sibling() -> None:
     # coincidentally shares the arm id — the sibling gets its own defaults, no injection.
     head = ModelConfig(
         name="head",
-        tier="cheap",
         provider="p",
         base_url="http://x",
         api_key_env_var="K",
@@ -86,7 +85,6 @@ async def test_escalated_arm_not_leaked_to_fallback_sibling() -> None:
     )
     sib = ModelConfig(
         name="sib",
-        tier="cheap",
         provider="p",
         base_url="http://x",
         api_key_env_var="K",
@@ -129,7 +127,6 @@ def test_apply_reasoning_arm_skips_arm_foreign_to_the_served_model() -> None:
     pool = MagicMock(spec=ModelPool)
     pool.get_model.return_value = ModelConfig(
         name="other",
-        tier="mid",
         provider="p",
         base_url="http://x",
         api_key_env_var="K",

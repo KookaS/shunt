@@ -36,8 +36,8 @@ def _events(traj: Trajectory) -> list[FailureEvent]:
 
 
 _CTX = EscalationContext(
-    current_tier_index=0,
-    max_tier_index=3,
+    current_rank_index=0,
+    max_rank_index=3,
     current_effort_index=0,
     max_effort_index=3,
 )
@@ -118,7 +118,7 @@ def test_infra_reds_never_escalate() -> None:
 
 def test_sweep_emits_one_point_per_grid_point() -> None:
     trajs = [_two_same_key_failures(), _two_same_key_failures()]
-    grid = [GridPoint(2, 10), GridPoint(3, 5), GridPoint(2, 20, ladder="tier_only")]
+    grid = [GridPoint(2, 10), GridPoint(3, 5), GridPoint(2, 20, ladder="rank_only")]
     result = replay.sweep(trajs, grid)
     assert len(result.points) == len(grid)
     for point in result.points:

@@ -1,7 +1,7 @@
 """Peeking-safe online kill-gate adjudication over the verified-outcome stream.
 
 Paired non-inferiority (not-worse quality within a margin AND cheaper on cache-aware cost)
-via the anytime-valid confidence sequence in ``frontier_estimate``; see the design doc.
+via the anytime-valid confidence sequence in ``frontier_estimate``.
 """
 
 # Decision logic only — this module is not yet wired to a live/served endpoint (it is

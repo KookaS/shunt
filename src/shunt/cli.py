@@ -94,7 +94,7 @@ def _explain(args: argparse.Namespace) -> None:
     print(f"Model chosen:   {prov.get('model_chosen', '?')}")
     print(f"Selection rule: {prov.get('selection_rule_used', '?')}")
     print(f"Fallback:       {'yes' if prov.get('fallback_chain_triggered') else 'no'}")
-    es_reason = prov.get("tier_escalation_reason")
+    es_reason = prov.get("rank_escalation_reason")
     if es_reason:
         print(f"Escalation:     {es_reason}")
     print(f"Router propensity: {prov.get('router_propensity', '?')}")

@@ -17,7 +17,9 @@ from shunt.models.config import ModelConfig, arm_api_params
 # produced with) is a staleness anchor; ``arm_hash`` (sha256 of the reasoning
 # arm's resolved API params) is too — re-mapping an arm's native
 # params recomputes rather than serving a stale outcome. ``computed_at`` (ISO
-# timestamp) is AUDIT-ONLY and is NEVER a staleness key.
+# timestamp) is AUDIT-ONLY and is NEVER a staleness key. ``stop_reason`` (why a cell
+# stopped — see benchmark.routing.censoring) is AUDIT-ONLY and never a staleness key;
+# it is appended LAST so legacy rows lacking it still parse (derived on read).
 CACHE_COLUMNS: Final[tuple[str, ...]] = (
     "version_hash",
     "model_version",
@@ -27,6 +29,7 @@ CACHE_COLUMNS: Final[tuple[str, ...]] = (
     "timeout_flag",
     "image_digest",
     "computed_at",
+    "stop_reason",
 )
 # Full results.csv header, original outcome columns first for backward-compat.
 # ``reasoning`` follows ``model`` and, together with them, forms the cache key:

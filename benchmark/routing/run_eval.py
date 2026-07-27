@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import random
 from collections.abc import Callable
 from pathlib import Path
+from typing import Final
 
 from benchmark import config
-from benchmark.routing import frontier_estimate, summary
+from benchmark.routing import frontier_estimate, impute, summary
 from benchmark.routing.metrics import discriminating_stats
 from benchmark.routing.strategies.external_prior import ExternalPriorCascade
 from benchmark.routing.strategies.fixed import AlwaysCheap, AlwaysFrontier, Random
@@ -15,6 +17,7 @@ from benchmark.routing.strategies.knn import kNNStrategy
 from benchmark.routing.strategies.knn_blended import kNNBlended
 from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
 from benchmark.routing.strategies.oracle import Oracle, OracleRewardAware
+from benchmark.routing.strategies.tier_classifier import TierClassifier
 
 
 def _results_file(base_dir: Path, k: int, success_rate: float, min_samples: int) -> Path:
@@ -52,10 +55,13 @@ def get_strategies(
     cascade_p.update(strat_cfg.get("knn_cascade", {}))
     ext_p = dict(strat_cfg.get("external_prior", {}))
     blend_p = dict(strat_cfg.get("knn_blended", {}))
+    tier_p = dict(strat_cfg.get("knn", {}))
+    tier_p.update(strat_cfg.get("tier_classifier", {}))
 
     if k is not None:
         knn_p.setdefault("k", k)
         cascade_p.setdefault("k", k)
+        tier_p.setdefault("k", k)
     if success_rate is not None:
         knn_p.setdefault("success_rate_threshold", success_rate)
         cascade_p.setdefault("success_rate_threshold", success_rate)
@@ -75,6 +81,7 @@ def get_strategies(
         "knn_cascade": lambda: kNNCascadeStrategy(**cascade_p),
         "external_prior": lambda: ExternalPriorCascade(**ext_p),
         "knn_blended": lambda: kNNBlended(**blend_p),
+        "tier_classifier": lambda: TierClassifier(**tier_p),
     }
 
     return [registry[name]() for name in enabled if name in registry]
@@ -274,6 +281,105 @@ def _print_frontier_gate(gate: dict) -> None:
         print(f"  confidence sequence: {verdict}  e={s.e_value:.2f} CI {sci}")
 
 
+# Below this many shared scorable tasks a paired router-vs-frontier delta is too
+# thin to trust — refuse the headline rather than print a bogus number (design R1).
+_MIN_PAIRED: Final[int] = 10
+
+
+def _pick_router(rows: list[dict]) -> str | None:
+    """Best deployable router by Reward (oracles + the frontier baseline excluded)."""
+    deployable = [
+        r
+        for r in rows
+        if r["strategy"] not in ("Oracle", "Oracle-reward", "Always-Frontier")
+        and int(r.get("n_tasks", 0) or 0) > 0
+    ]
+    if not deployable:
+        return None
+    return str(max(deployable, key=lambda r: float(r.get("Reward", 0)))["strategy"])
+
+
+def _strategy_named(strategies: list, name: str) -> object | None:
+    return next((s for s in strategies if getattr(s, "name", None) == name), None)
+
+
+def _paired_bootstrap_ci(diffs: list[int], seed: int, n_boot: int = 1000) -> tuple[float, float]:
+    """95% percentile CI (percentage points) for the mean paired pass-rate difference."""
+    n = len(diffs)
+    rng = random.Random(seed)
+    means = sorted(
+        100.0 * sum(diffs[rng.randrange(n)] for _ in range(n)) / n for _ in range(n_boot)
+    )
+    a = int(0.025 * n_boot)
+    return (means[a], means[n_boot - 1 - a])
+
+
+def _paired_delta(
+    completed: dict, tasks: list[str], router: object, frontier: object, seed: int
+) -> dict | None:
+    """Router-minus-frontier pass rate (pp) on the INTERSECTION of their scorable
+    tasks, with a paired bootstrap CI. None when the two share no scorable task."""
+    r_dec, r_uns = summary.evaluate(router, completed, tasks)
+    f_dec, f_uns = summary.evaluate(frontier, completed, tasks)
+    r_pass = {d[0]: bool(d[2]) for d in r_dec}
+    f_pass = {d[0]: bool(d[2]) for d in f_dec}
+    shared = [t for t in tasks if t not in r_uns and t not in f_uns]
+    if not shared:
+        return None
+    diffs = [int(r_pass[t]) - int(f_pass[t]) for t in shared]
+    delta = 100.0 * sum(diffs) / len(diffs)
+    lo, hi = _paired_bootstrap_ci(diffs, seed)
+    return {"n": len(shared), "delta": delta, "ci": (lo, hi)}
+
+
+def _print_paired(router: str, label: str, res: dict, flip: bool = False) -> None:
+    lo, hi = res["ci"]
+    tag = "  (CI crosses zero — not significant)" if lo <= 0 <= hi else ""
+    if flip:
+        tag += "  ⚠ SIGN FLIPS vs all-tasks"
+    print(
+        f"  Paired contrast ({router} vs Always-Frontier, pass% on {res['n']} shared tasks) "
+        f"[{label}]: {res['delta']:+.1f}pp 95% CI [{lo:+.1f}, {hi:+.1f}]{tag}"
+    )
+
+
+def _print_imputation_gate(
+    matrix: dict, tasks: list[str], strategies: list, rows: list[dict], gamma: float, seed: int
+) -> None:
+    """Print the monotonicity violation rate (Wilson CI) and the PAIRED router-vs-frontier
+    contrast (with a CI) on the shared scorable set, plus the violators-excluded sensitivity."""
+    completed, im = summary.complete_scored_matrix(matrix)
+    if im is None:
+        return
+    v, lo, hi = impute.violation_ci(len(im.violations), im.n_multi_observed)
+    print(
+        f"\nCoverage-completed imputation: monotonicity violation rate "
+        f"v̂={v:.3f} 95% CI [{lo:.3f}, {hi:.3f}] "
+        f"({len(im.violations)} of {im.n_multi_observed} multi-observed tasks)"
+    )
+    router_name = _pick_router(rows)
+    router = _strategy_named(strategies, router_name) if router_name else None
+    frontier = _strategy_named(strategies, "Always-Frontier")
+    if router is None or frontier is None or router_name is None:
+        return
+    full = _paired_delta(completed, tasks, router, frontier, seed)
+    if full is None or full["n"] < _MIN_PAIRED:
+        got = full["n"] if full else 0
+        print(
+            f"  Paired contrast refused — {router_name} and Always-Frontier share only "
+            f"{got} scorable task(s) (< {_MIN_PAIRED}); too few to pair honestly."
+        )
+        return
+    _print_paired(router_name, "all tasks", full)
+    violator_ids = {viol.task_id for viol in im.violations}
+    kept = [t for t in tasks if t not in violator_ids]
+    excl = _paired_delta(completed, kept, router, frontier, seed)
+    if excl is not None and excl["n"] >= _MIN_PAIRED:
+        _print_paired(
+            router_name, "violators-excluded", excl, (full["delta"] >= 0) != (excl["delta"] >= 0)
+        )
+
+
 def _print_rows(rows: list[dict]) -> None:
     for r in rows:
         ci_ap = f"[{r['AvgPerf_ci_lower']:>5.2f},{r['AvgPerf_ci_upper']:>5.2f}]"
@@ -332,6 +438,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         matrix, tasks, strategies, gamma=args.gamma, bootstrap=args.bootstrap, seed=args.seed
     )
     _print_rows(rows)
+    _print_imputation_gate(matrix, tasks, strategies, rows, args.gamma, args.seed)
 
     if config.collect_enabled():
         gate = compute_frontier_gate(**_frontier_gate_inputs(matrix, tasks))

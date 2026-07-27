@@ -1,7 +1,7 @@
 """Integration-example dirs stay well-formed — the marker convention can't rot.
 
 A tool is CI-eligible iff it ships a handshake.yaml; these guards keep each such dir
-consistent (verdict service exists, tier is real, docs-only dirs document).
+consistent (verdict service exists, expected_model is real, docs-only dirs document).
 """
 
 from pathlib import Path
@@ -14,7 +14,7 @@ _INTEGRATIONS = _ROOT / "examples" / "integrations"
 _FAKE_REGISTRY = _ROOT / "tests" / "integrations" / "fake_registry.yaml"
 
 _WIRES = frozenset({"openai", "anthropic", "both"})
-_REQUIRED_KEYS = ("tool", "wire", "service", "expected_tier", "best_effort")
+_REQUIRED_KEYS = ("tool", "wire", "service", "expected_model", "best_effort")
 
 
 def _handshake_dirs() -> list[Path]:
@@ -27,9 +27,9 @@ def _docs_only_dirs() -> list[Path]:
     )
 
 
-def _fake_registry_tiers() -> set[str]:
+def _fake_registry_models() -> set[str]:
     models = yaml.safe_load(_FAKE_REGISTRY.read_text())["models"]
-    return {row["tier"] for row in models.values()}
+    return set(models)
 
 
 def test_ci_tools_exist() -> None:
@@ -49,8 +49,8 @@ def test_ci_tool_dir_is_well_formed(tool_dir: Path) -> None:
     assert spec["tool"] == tool_dir.name, "handshake.yaml 'tool' must match the directory name"
     assert spec["wire"] in _WIRES, f"'wire' must be one of {_WIRES}, got {spec['wire']!r}"
     assert isinstance(spec["best_effort"], bool), "'best_effort' must be a boolean"
-    assert spec["expected_tier"] in _fake_registry_tiers(), (
-        f"{tool_dir.name}: expected_tier {spec['expected_tier']!r} is not a tier in "
+    assert spec["expected_model"] in _fake_registry_models(), (
+        f"{tool_dir.name}: expected_model {spec['expected_model']!r} is not a model in "
         f"tests/integrations/fake_registry.yaml"
     )
 

@@ -6,7 +6,7 @@ description: How Shunt detects a real, verified failure — never a model's self
 # Error detection & auto-escalation
 
 When the cheap model keeps failing the *same* verified check, Shunt can move up on
-its own — raising the model's reasoning effort first, then its tier — without waiting
+its own — raising the model's reasoning effort first, then its rank — without waiting
 for you to intervene. This page explains how a failure is detected, what makes one
 worth escalating, how the ladder climbs, the safety rails around it, and where it
 does nothing.
@@ -73,25 +73,25 @@ recurs:
 Escalation is keyed per **task** (the repo / `work_dir`), so a repeated failure in one
 project never escalates routing for another.
 
-## The ladder — effort first, then tier
+## The ladder — effort first, then rank
 
-The default ladder is `effort_then_tier`, and it climbs **one rung per step, never
-straight to frontier**:
+The default ladder is `effort_then_rank`, and it climbs **one rung per step, never
+straight to the top**:
 
 1. **Raise reasoning effort first.** The router bumps the *current model* up one
    reasoning arm (e.g. `medium` → `high`). It is the **same model**, so the provider's
    prompt-cache namespace is unchanged — this rung is cache-safe. The higher arm's
    request params are applied to the outbound call, overriding any the client sent.
-2. **Then step a tier.** Only once the model's reasoning arms are exhausted — or if the
+2. **Then step a rank.** Only once the model's reasoning arms are exhausted — or if the
    model declares no reasoning arms at all — does the router step to the next model
-   tier (cheap → mid → high → frontier). The new model starts at its *own* default
+   rank (the next-higher-price model). The new model starts at its *own* default
    arm, not mid-ladder.
-3. **Hold at the top.** At the ceiling (top tier, top arm) escalation holds rather than
+3. **Hold at the top.** At the ceiling (top rank, top arm) escalation holds rather than
    thrashing.
 
-Set `ladder: tier_only` to skip the effort rung and step tiers directly. The effort
+Set `ladder: rank_only` to skip the effort rung and step ranks directly. The effort
 rung needs a model that declares [reasoning arms](configuration.md#reasoning-effort-optional);
-a model without them has no effort headroom and steps tier immediately.
+a model without them has no effort headroom and steps rank immediately.
 
 ## Safety — the rails
 
@@ -100,7 +100,7 @@ a model without them has no effort headroom and steps tier immediately.
   which would force a full-price re-read of the context. Cache-safety is preserved by
   construction.
 - **Routing-collapse guard.** If the recent model-choice distribution is degenerate —
-  the expensive tier dominates, or choice-entropy collapses — a routing-collapse alarm
+  the expensive tail dominates, or choice-entropy collapses — a routing-collapse alarm
   **suppresses further escalation** so the router cannot ossify onto costly models.
   The same signal is exposed at `GET /admin/loop-health`.
 - **Escalated turns don't train the policy.** An escalation is imposed by the failure
@@ -126,7 +126,7 @@ Be honest with yourself about where this does nothing:
   verified outcome, so auto-escalation does nothing there. It cannot escalate on a
   signal that does not exist.
 - **The effort rung needs reasoning arms.** A model that declares none skips straight
-  to a tier step; there is no effort headroom to climb.
+  to a rank step; there is no effort headroom to climb.
 - **Runs where Shunt sits beside your code.** The off-wire re-run needs the repo *and*
   its test toolchain on the same machine — a plain `shunt start` on your dev box. A
   slim container has neither unless you mount them; there, use `shunt flag` via
@@ -151,7 +151,7 @@ router:
     enabled: true
     escalate_after_n: 2         # same-key verified failures before a step
     stale_window: 10            # a failure not recurring within N decisions retires
-    ladder: effort_then_tier    # or tier_only
+    ladder: effort_then_rank    # or rank_only
 ```
 
 The knob reference, including the reserved `blocking_exit_code` field, is in
@@ -167,9 +167,9 @@ knobs, so you can see where it fires, how early, and at what precision.
 Run it end-to-end:
 
 ```bash
-make escalation-eval ARGS="--plots-dir benchmark/escalation/reports"
-# equivalently: uv run --extra benchmark python -m benchmark.escalation.run_eval \
-#   --plots-dir benchmark/escalation/reports
+make escalation-eval
+# equivalently: uv run --extra benchmark python -m benchmark.escalation.run_eval
+# figures land in benchmark/escalation/reports/; pass --plots-dir to write them elsewhere
 ```
 
 The `--extra benchmark` flag (baked into the Make target) is required — it pulls the
@@ -180,12 +180,12 @@ renders the figures. What the numbers mean:
 
 - **`status` gates the whole report.** When the data cannot exercise the recurrence trigger
   (no escalation ever fires, no positive labels, or a constant detector score) the report
-  is `INSUFFICIENT_DATA` with a `reason`, and every figure carries a red "insufficient data"
-  annotation, so a null result is never mistaken for signal. A second gate catches the
-  subtler failure: when the data **was** sufficient but the detector still fails to beat the
-  no-skill baseline (`AUPRC ≤ prevalence`), the status is **`NO_SKILL`** and the PR/ROC
-  figures carry an orange "no usable signal" box — a legible-but-worse-than-random detector
-  is never allowed to present as `OK` with clean plots.
+  is `INSUFFICIENT_DATA` with a `reason`, and every figure states it in red under the plot,
+  so a null result is never mistaken for signal. A second gate catches the subtler failure:
+  when the data **was** sufficient but the detector still fails to beat the no-skill baseline
+  (`AUPRC ≤ prevalence`), the status is **`NO_SKILL`** and every figure says "no usable
+  signal" the same way — a legible-but-worse-than-random detector is never allowed to
+  present as `OK` with clean plots.
 - **AUPRC vs prevalence is the headline.** Escalation is a rare-event problem — most steps
   are not failures — so the precision-recall curve, compared against the **prevalence
   baseline** (the no-skill rate), is the honest measure. AUROC is reported too but only as
@@ -200,8 +200,9 @@ renders the figures. What the numbers mean:
   reason rather than an arbitrary pick.
 - **Figures.** PR curve, ROC (auxiliary), steps-to-detection histogram, the sweep heatmap
   (F1 over `escalate_after_n × stale_window`), the confusion matrix, and the cost-quality
-  frontier (escalation count as the cost proxy vs F1) — each degrades gracefully with the
-  annotation above when the data is insufficient.
+  frontier (escalation count as the cost proxy vs F1). Each carries a footer — what the axes
+  are, what to look for, what the jargon means, and the honest limits including the status
+  above — so a figure pasted somewhere else is still readable on its own.
 
 **The bundled bootstrap is deliberately coarse.** Out of the box the harness runs on the
 committed terminal benchmark results, which are single-decision (length-1) trajectories.

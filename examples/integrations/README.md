@@ -64,7 +64,7 @@ The tools above are the representative, CI-verified set.
 ## How the handshake works
 
 The test is a **dry run**: no real model is ever called, no key is needed, nothing
-is billed. A per-tier fake upstream stands in for the providers, so a green
+is billed. A hermetic fake upstream stands in for the providers, so a green
 handshake proves the *wiring* — the tool reaches Shunt, Shunt routes and returns,
 and the decision header rides back — not model quality.
 
@@ -97,7 +97,7 @@ Create `examples/integrations/<tool>/` with:
 - **`compose.yaml`** — `include: [../compose.base.yaml]` plus one service that drives
   Shunt at `http://shunt:8080`, exiting 0 on a routed completion.
 - **`handshake.yaml`** — `tool`, `wire`, `service` (the verdict service), and
-  `expected_tier` (a tier in [`fake_registry.yaml`](../../tests/integrations/fake_registry.yaml)).
+  `expected_model` (a model in [`fake_registry.yaml`](../../tests/integrations/fake_registry.yaml)).
 
 Shipping a `handshake.yaml` is the **marker** that makes the tool CI-eligible — the
 matrix globs `examples/integrations/*/handshake.yaml`, no central list to edit.

@@ -32,7 +32,7 @@ COMMITTABLE_FIELDS: Final[frozenset[str]] = frozenset(
         "success",
         "step_index",
         "is_infra_failure",
-        "tier_index",
+        "rank_index",
         "effort_index",
         "is_revert",
         "retry_count",
@@ -63,7 +63,7 @@ class StepRecord:
     is_revert: bool = False
     retry_count: int = 0
     loop_signal: bool = False
-    tier_index: int | None = None
+    rank_index: int | None = None
     effort_index: int | None = None
 
     def committable(self) -> dict[str, object]:

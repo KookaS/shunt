@@ -77,7 +77,7 @@ The knobs are live; exploration behaviour adapts as verified outcomes accumulate
 |---|---|---|
 | **proxy/** | HTTP server: `/health`, `/v1/chat/completions`, `/v1/messages`, `/v1/models` (stub), `/admin/loop-health` (read-only loop-health metrics, localhost-only, aggregates only — no prompts), streaming passthrough; calls router to decide model on first turn | **Yes** |
 | **session/** | Session lifecycle: ID generation, inactivity timeout, model lock (keeps the session on one model — cache-safety) | **Yes** |
-| **models/** | Provider config: model pool, capability tiers, fallback chain | **Yes** (read at startup) |
+| **models/** | Provider config: model pool, price-derived capability rank, fallback chain | **Yes** (read at startup) |
 | **router/** | Decision core: embed prompt via fastembed, kNN retrieval via hnswlib, selection rule → model chosen via outcome feedback or cold-start | **Yes** — called on first turn; learns from verified outcomes |
 | **capture/** | Off-wire outcome capture: session-close triggers, work-dir resolver, coordinator, background worker | **Yes** — wired at session-close to run verifiers async |
 | **verifiers/** | Async outcome verification: auto-detect and run pytest / jest / go test / cargo test per project | **Yes** — called at session close by capture worker |

@@ -22,9 +22,130 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from benchmark import config
+from benchmark import config, plot_frame
+from benchmark.plot_frame import Annotations, FigureSpec
 
 _EXT_CSV = Path(__file__).resolve().parents[1] / "data" / "external_swebench.csv"
+
+_DIFFICULTY_SPEC = FigureSpec(
+    reading=(
+        "Four histograms over SWE-bench Verified leaderboard instances; each bar counts "
+        "instances, the x axis is a resolve rate in 0-1. p_solve (blue) is the share of ALL "
+        "leaderboard submissions that solved the instance and is the only usable difficulty "
+        "signal. p_cheap (grey) and p_frontier (orange) are the same rate within the "
+        "open-weight and the proprietary cohort. The fourth panel is routing headroom, "
+        "p_frontier minus p_solve: above 0 means the frontier cohort out-resolves the field "
+        "on that instance."
+    ),
+    goal=(
+        "Look for a fat left tail in p_solve (genuinely hard instances) and mass above 0 in "
+        "the headroom panel — headroom piled at 0 means there is nothing worth routing."
+    ),
+    definitions=(
+        ("instance", "one SWE-bench Verified task"),
+        ("resolve rate", "share of leaderboard submissions whose patch resolved the instance"),
+        ("headroom", "p_frontier minus p_solve: how far the frontier cohort beats the field"),
+    ),
+    notes=(
+        "This is a PRIOR from other people's leaderboard submissions, not our own measured runs.",
+        "The older gap = p_frontier minus p_cheap was signal-free (it reduced to p_frontier "
+        "minus 1) and was replaced by headroom.",
+    ),
+    limitations=(
+        "Leaderboard submissions are a self-selected, biased population: nobody publishes "
+        "their worst run.",
+        "The cheap/frontier cohort split is a heuristic tiering applied upstream, not a "
+        "property of the benchmark.",
+        "Blank cells are dropped rather than imputed, so the four panels do not share an n.",
+    ),
+)
+
+_OURS_BARS_SPEC = FigureSpec(
+    reading=(
+        "One pair of bars per task, one task per x tick. Blue is the SWE-bench leaderboard "
+        "resolve rate p_solve for that instance (0-1); green is our own cheapest enabled "
+        "model's outcome on it, drawn as 1.0 for a pass and 0 for a fail. The dotted grey "
+        "line at 0.5 is the cut a router keying on the prior alone would use to decide "
+        "whether to escalate. A tall blue bar beside a zero green bar is the dangerous case: "
+        "the field finds it easy, we fail."
+    ),
+    goal=(
+        "Look at the red callouts — each marks a task the leaderboard calls easy where our "
+        "cheap model actually fails, which a prior-only router would silently ship."
+    ),
+    definitions=(
+        ("p_solve", "share of SWE-bench leaderboard submissions that solved the instance"),
+        ("escalate threshold", "the 0.5 cut on the prior above which a router would stay cheap"),
+    ),
+    limitations=(
+        "PRIOR LEAKAGE: our tasks are drawn from the same SWE-bench Verified set the prior is "
+        "computed over, so this is not independent evidence.",
+        "A pass/fail bit is being compared against a continuous rate at an arbitrary 0.5 cut.",
+        "Failure callouts are capped so the figure stays readable — not every failure is "
+        "annotated.",
+    ),
+)
+
+_OURS_AGREEMENT_SPEC = FigureSpec(
+    reading=(
+        "A 2x2 count of our own tasks. Rows split them by the leaderboard prior — EASY is "
+        "p_solve >= 0.5, HARD is below it. Columns split them by whether our cheapest enabled "
+        "model passed. The number in each cell is a task count; the fill shade and the "
+        "colourbar encode the same count. The red-ringed (EASY, FAILS) cell is the point of "
+        "the figure: tasks the leaderboard calls easy where our cheap model fails, so a router "
+        "keying only on the prior would not escalate and would silently ship a failure."
+    ),
+    goal=(
+        "Look at the red-ringed top-right cell and hope it is near empty; mass on the diagonal "
+        "means the prior agrees with our own outcomes."
+    ),
+    definitions=(
+        ("p_solve", "share of SWE-bench leaderboard submissions that solved the instance"),
+        ("EASY / HARD", "the prior's own 0.5 cut on p_solve, not a label the benchmark ships"),
+    ),
+    limitations=(
+        "PRIOR LEAKAGE: our tasks are drawn from the same SWE-bench Verified set the prior is "
+        "computed over, so this is not independent evidence.",
+        "A pass/fail bit is being compared against a continuous rate at an arbitrary 0.5 cut.",
+        "Cell shading is auto-scaled to the largest cell, so shade compares cells within this "
+        "figure only.",
+    ),
+)
+
+_HELDOUT_SPEC = FigureSpec(
+    reading=(
+        "Three panels over the held-out SWE-bench Verified instances, leave-one-out. Panel 0 "
+        "is the headline and is threshold-free: each dot is one instance at (mean p_solve of "
+        "its 20 embedding neighbours, its own p_solve), with a dashed y = x. Dots along that "
+        "line would mean neighbours predict difficulty; a flat cloud squeezed toward the mean "
+        "means they do not. Panel 1 is each router's tier accuracy against the oracle. Panel 2 "
+        "is each router's average reward, resolve rate minus 0.1 times cost."
+    ),
+    goal=(
+        "Read panel 0 first for spread along y = x, then panel 2 for the gap between the "
+        "Reward-Oracle bound and Always-Cheap — that gap is the most any router could win here."
+    ),
+    definitions=(
+        ("leave-one-out", "an instance's neighbours never include the instance itself"),
+        ("tier accuracy", "share of instances routed to the tier the oracle would have picked"),
+        ("reward", "resolve rate minus 0.1 x cost, so higher is better"),
+        ("Reward-Oracle", "hindsight-perfect router: an upper bound, not something achievable"),
+    ),
+    notes=(
+        "corr(k=1) is the honest nearest-neighbour test; corr(k=20) is INFLATED by regression "
+        "toward the global mean, because averaging 20 neighbours pulls every prediction to the "
+        "middle. Read k=1 first.",
+        "Panel 1 does not show Neighbour tying Always-Cheap on merit: a k=20 mean cannot cross "
+        "the 0.5 threshold, so Neighbour escalates nothing and IS Always-Cheap — a non-test.",
+    ),
+    limitations=(
+        "A correlation interval that excludes zero means the signal is DETECTABLE, not that it "
+        "is USEFUL — the decision that matters is the reward gap in panel 2.",
+        "Everything here is scored on external leaderboard resolve rates, not on our own "
+        "verified pass/fail outcomes.",
+        "Rewards depend on the two-tier cost model, so the panel-2 ranking moves when prices move.",
+    ),
+)
 
 
 def _floats(rows: list[dict], col: str) -> np.ndarray:
@@ -71,7 +192,9 @@ def plot_external_difficulty(ext_csv: Path, out_dir: Path) -> Path:
         "p_frontier − p_solve  ( >0 ⇒ frontier beats the field ⇒ routable )",
     )
     fig, axes = plt.subplots(2, 2, figsize=(11, 7))
+    panel_ns = []
     for ax, (title, vals, color), xlabel in zip(axes.ravel(), series, xlabels, strict=True):
+        panel_ns.append(len(vals))
         vmin = float(vals.min()) if vals.size else 0.0  # guard: empty/all-blank column
         median = float(np.median(vals)) if vals.size else float("nan")
         ax.hist(
@@ -103,23 +226,41 @@ def plot_external_difficulty(ext_csv: Path, out_dir: Path) -> Path:
         f"(n={len(rows)}) · a prior from others' submissions, NOT our own runs"
     )
     fig.tight_layout()
-    path = out_dir / "external_difficulty.png"
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return path
+    routable = int((headroom > 0).sum())
+    notes = [
+        f"{len(rows)} leaderboard instances read; {routable} of {len(headroom)} scored ones "
+        f"have headroom above 0, so that is the routable share.",
+    ]
+    limits = [f"Panel n differs across the four columns: {', '.join(str(v) for v in panel_ns)}."]
+    if degenerate:
+        limits.append(
+            "p_cheap is degenerate at exactly 1.0 — the open-weight cohort reports only "
+            "RESOLVED instances — so it carries no signal and is drawn grey; everything "
+            "downstream keys on p_solve."
+        )
+    return plot_frame.save(
+        fig,
+        out_dir / "external_difficulty.png",
+        _DIFFICULTY_SPEC,
+        extra=Annotations(notes=tuple(notes), limitations=tuple(limits)),
+    )
 
 
-def _our_cheap_pass(results_csv: Path) -> dict[str, bool]:
-    """{instance_id: did our cheapest model pass} from results.csv."""
+def _cheapest_cheap_model() -> str:
+    """Name of the cheapest model on the `cheap` tier — the one 'our cheap model' means."""
     pricing = config.load_pricing()
     cheap = [m for m, i in pricing.items() if isinstance(i, dict) and i.get("tier") == "cheap"]
-    cheapest = min(
+    return min(
         cheap,
         key=lambda m: (
             pricing[m].get("input_cost_per_1m", 0) + pricing[m].get("output_cost_per_1m", 0)
         ),
         default="deepseek-v4-flash",
     )
+
+
+def _our_cheap_pass(results_csv: Path, cheapest: str) -> dict[str, bool]:
+    """{instance_id: did our cheapest model pass} from results.csv."""
     out: dict[str, bool] = {}
     for r in csv.DictReader(results_csv.open()):
         if r["model"] == cheapest:
@@ -138,7 +279,8 @@ def plot_ours_vs_external(results_csv: Path, ext_csv: Path, out_dir: Path) -> Pa
     tasks to draw one bar each — so the figure stays readable at 500+ tasks.
     """
     ext = {r["instance_id"]: r for r in csv.DictReader(ext_csv.open())}
-    ours = _our_cheap_pass(results_csv)
+    cheapest = _cheapest_cheap_model()
+    ours = _our_cheap_pass(results_csv, cheapest)
     ids = sorted(ours)
     # p_solve (field-wide difficulty) — p_cheap is degenerate (see load_external_priors).
     ext_rate = np.array(
@@ -148,13 +290,13 @@ def plot_ours_vs_external(results_csv: Path, ext_csv: Path, out_dir: Path) -> Pa
 
     path = out_dir / "ours_vs_external.png"
     if len(ids) <= _BARS_MAX_TASKS:
-        _draw_ours_bars(ids, ext_rate, our_pass, path)
-    else:
-        _draw_ours_agreement(ext_rate, our_pass, path)
-    return path
+        return _draw_ours_bars(ids, ext_rate, our_pass, path, cheapest)
+    return _draw_ours_agreement(ext_rate, our_pass, path, cheapest)
 
 
-def _draw_ours_bars(ids: list[str], ext_rate: np.ndarray, our_pass: np.ndarray, path: Path) -> None:
+def _draw_ours_bars(
+    ids: list[str], ext_rate: np.ndarray, our_pass: np.ndarray, path: Path, cheapest: str
+) -> Path:
     """Per-task grouped bars (small N): external p_solve vs our cheap-model outcome."""
     n = len(ids)
     x = np.arange(n)
@@ -211,11 +353,30 @@ def _draw_ours_bars(ids: list[str], ext_rate: np.ndarray, our_pass: np.ndarray, 
     ax.legend(fontsize=8, loc="lower left")
     ax.grid(True, axis="y", alpha=0.3)
     fig.tight_layout()
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    n_missing = int(np.isnan(ext_rate).sum())
+    notes = [
+        f"'Our cheap model' is exactly one model, {cheapest} — the cheapest on the `cheap` "
+        f"tier — not a cohort.",
+        f"{n_fail} of {n} tasks fail it; {n_mis} of those look EASY to the leaderboard.",
+    ]
+    limits = [f"Drawn one bar per task because there are {n} tasks (at most {_BARS_MAX_TASKS})."]
+    if len(fails) > _FAIL_ANNOT_CAP:
+        limits.append(
+            f"{len(fails)} tasks fail but only {_FAIL_ANNOT_CAP} carry a callout, worst-case first."
+        )
+    if n_missing:
+        limits.append(
+            f"{n_missing} of {n} tasks have no leaderboard row, so their blue bar is "
+            f"absent rather than zero."
+        )
+    return plot_frame.save(
+        fig, path, _OURS_BARS_SPEC, extra=Annotations(notes=tuple(notes), limitations=tuple(limits))
+    )
 
 
-def _draw_ours_agreement(ext_rate: np.ndarray, our_pass: np.ndarray, path: Path) -> None:
+def _draw_ours_agreement(
+    ext_rate: np.ndarray, our_pass: np.ndarray, path: Path, cheapest: str
+) -> Path:
     """2x2 agreement matrix (large N): field EASY/HARD × our cheap PASS/FAIL counts."""
     from matplotlib.patches import Rectangle
 
@@ -273,8 +434,37 @@ def _draw_ours_agreement(ext_rate: np.ndarray, our_pass: np.ndarray, path: Path)
         fontsize=8.5,
     )
     fig.tight_layout()
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    dropped = int((~valid).sum())
+    notes = [
+        f"'Our cheap model' is exactly one model, {cheapest} — the cheapest on the `cheap` "
+        f"tier — not a cohort.",
+        f"Drawn as an agreement matrix rather than per-task bars because there are more than "
+        f"{_BARS_MAX_TASKS} tasks; the four cells sum to {n}.",
+    ]
+    limits = []
+    if n:
+        notes.append(
+            f"The red cell holds {mis} of {n} tasks ({mis / n * 100:.0f}%) — where a prior-only "
+            f"router would wrongly stay cheap."
+        )
+    else:
+        # Every cell is 0: no task carries a prior, so there is no agreement to read.
+        # The figure still renders (empty) rather than crashing, and says why.
+        limits.append(
+            f"NO TASK MATCHED THE LEADERBOARD PRIOR: all {dropped} task(s) are missing a "
+            "leaderboard row, so every cell is 0 and this figure shows no agreement — read "
+            "nothing from it until the external CSV covers these instances."
+        )
+    if dropped and n:
+        limits.append(
+            f"{dropped} task(s) had no leaderboard row and are excluded from all four cells."
+        )
+    return plot_frame.save(
+        fig,
+        path,
+        _OURS_AGREEMENT_SPEC,
+        extra=Annotations(notes=tuple(notes), limitations=tuple(limits)),
+    )
 
 
 def plot_heldout(out_dir: Path, *, strict: bool = False) -> Path | None:
@@ -299,11 +489,10 @@ def plot_heldout(out_dir: Path, *, strict: bool = False) -> Path | None:
         path.unlink(missing_ok=True)
         print(f"  heldout   : skipped + removed stale PNG ({type(exc).__name__}: {exc})")
         return None
-    _draw_heldout(rep, path)
-    return path
+    return _draw_heldout(rep, path)
 
 
-def _draw_heldout(rep, path: Path) -> None:  # noqa: ANN001 (HeldoutReport, local import)
+def _draw_heldout(rep, path: Path) -> Path:  # noqa: ANN001 (HeldoutReport, local import)
     """Three panels: the headline corr-scatter, plus the two-trap bar charts."""
     by = {r.strategy: r for r in rep.rows}
     fig, (a0, a1, a2) = plt.subplots(1, 3, figsize=(17, 5))
@@ -363,14 +552,35 @@ def _draw_heldout(rep, path: Path) -> None:  # noqa: ANN001 (HeldoutReport, loca
     for ax in (a1, a2):
         ax.grid(True, axis="y", alpha=0.3)
         ax.tick_params(axis="x", rotation=20, labelsize=7)
+    headroom = by["Reward-Oracle"].avg_reward - by["Always-Cheap"].avg_reward
     fig.suptitle(
-        "Out-of-sample generalization (~490 held-out SWE-bench Verified, leave-one-out): "
-        "embedding neighbours carry a detectable but routing-useless difficulty signal "
-        "(reward headroom ~0.01)"
+        f"Out-of-sample generalization ({rep.n} held-out SWE-bench Verified, leave-one-out): "
+        f"embedding neighbours carry a detectable but routing-useless difficulty signal "
+        f"(reward headroom {headroom:.3f})"
     )
     fig.tight_layout()
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    return plot_frame.save(fig, path, _HELDOUT_SPEC, extra=_heldout_annotations(rep, headroom))
+
+
+def _heldout_annotations(rep, headroom: float) -> Annotations:  # noqa: ANN001 (HeldoutReport)
+    """Runtime notes/limits: the measured headroom, the k=1 corr, the degenerate row."""
+    return Annotations(
+        notes=(
+            f"{rep.n} held-out instances, {rep.n_hard} of them hard (own p_solve below 0.5).",
+            f"Rank-AUC of the neighbour signal flagging an own-hard instance is {rep.auc:.2f}, "
+            f"where 0.50 is no signal at all.",
+        ),
+        limitations=(
+            f"The measured reward headroom is {headroom:.3f} — the whole prize a perfect "
+            f"router could win over Always-Cheap on this data, far below any threshold worth "
+            f"acting on.",
+            f"corr(k=1) is {rep.corr_k1:.2f}, so the honest nearest-neighbour test is near "
+            f"zero even though corr(k=20)={rep.corr:.2f} with 95%CI "
+            f"[{rep.corr_ci[0]:.2f},{rep.corr_ci[1]:.2f}] excludes 0.",
+            f"The Neighbour router escalated {rep.neighbour_escalations} of {rep.n} instances, "
+            f"so its bars are Always-Cheap's bars — a degenerate non-test, not a tie.",
+        ),
+    )
 
 
 def main() -> int:

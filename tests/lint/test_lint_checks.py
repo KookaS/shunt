@@ -111,7 +111,7 @@ def test_sh005_ignores_modules_outside_src_shunt(tmp_path: Path) -> None:
 
 
 def test_sh005_passes_a_clean_router_module(tmp_path: Path) -> None:
-    f = _src_shunt_file(tmp_path, "router/clean.py", "def f(cfg):\n    return cfg.tier\n")
+    f = _src_shunt_file(tmp_path, "router/clean.py", "def f(cfg):\n    return cfg.provider\n")
     assert _run("check_pricing_isolation.py", str(f)) == 0
 
 

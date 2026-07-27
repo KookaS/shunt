@@ -275,7 +275,9 @@ class TestInfraFailure:
     def test_run_live_cell_raises_when_report_missing(self, tmp_path, monkeypatch):
         # Docker/image unavailable ⇒ run_harness returns report_path=None.
         monkeypatch.setattr(
-            infer, "generate_patch_live", lambda spec, model, arm="default": self._patch()
+            infer,
+            "generate_patch_live",
+            lambda spec, model, arm="default", timeout=None, step_limit=None: self._patch(),
         )
         monkeypatch.setattr(
             infer.swebench_harness,
@@ -285,11 +287,19 @@ class TestInfraFailure:
         with pytest.raises(infer.HarnessInfraError):
             infer.run_live_cell("psf__requests-1142", "m", work_dir=tmp_path, run_id="t")
 
-    def test_run_live_cell_raises_on_nonzero_returncode(self, tmp_path, monkeypatch):
-        # Harness exited non-zero (timeout/error) ⇒ not a real pass=False result.
+    def test_run_live_cell_records_fail_on_nonzero_returncode_with_report(
+        self, tmp_path, monkeypatch
+    ):
+        # A WRITTEN report with a nonzero harness returncode is a legitimate pass=False, NOT an
+        # infra failure: some graded test suites (e.g. matplotlib) exit nonzero when the
+        # FAIL_TO_PASS tests fail. The report's verdict is authoritative — record it so the cell
+        # resolves instead of being left MISSING and re-run forever. (Real infra failure = no
+        # report, covered by test_run_live_cell_raises_when_report_missing.)
         report = tmp_path / "r.json"
         monkeypatch.setattr(
-            infer, "generate_patch_live", lambda spec, model, arm="default": self._patch()
+            infer,
+            "generate_patch_live",
+            lambda spec, model, arm="default", timeout=None, step_limit=None: self._patch(),
         )
         monkeypatch.setattr(
             infer.swebench_harness,
@@ -298,8 +308,13 @@ class TestInfraFailure:
                 {"psf__requests-1142": False}, report, {}, 137
             ),
         )
-        with pytest.raises(infer.HarnessInfraError):
-            infer.run_live_cell("psf__requests-1142", "m", work_dir=tmp_path, run_id="t")
+        monkeypatch.setattr(infer, "_capture_escalation_trajectory", lambda *a, **k: None)
+        monkeypatch.setattr(infer.image_version, "used_image_digest", lambda *a, **k: "")
+        row = infer.run_live_cell("psf__requests-1142", "m", work_dir=tmp_path, run_id="t")
+        assert row["pass"] is False
+        assert row["timeout_flag"] is False
+        # Agent finished (no limit hit) but the harness did not resolve → uncensored unsolved.
+        assert row["stop_reason"] == "unsolved"
 
     def test_run_live_cells_skips_infra_failure_no_row(self, monkeypatch):
         # An infra-failing cell writes NO row; the good cell still computes.
@@ -326,7 +341,9 @@ class TestInfraFailure:
         def fake(cid, model, **kw):
             if cid == "bad__cell-1":
                 raise ImportError("scaffold missing")
-            return {"pass": False, "in_tok": 0, "out_tok": 0, "calls": 0, "real_cost": 0.0}
+            # A valid ran-but-failed outcome (calls>0): a genuine unsolved fail must
+            # have actually run, else the write-time data-integrity wall aborts it.
+            return {"pass": False, "in_tok": 0, "out_tok": 0, "calls": 1, "real_cost": 0.0}
 
         monkeypatch.setattr(infer, "run_live_cell", fake)
         monkeypatch.setattr(run_matrix.config, "models_missing_cache", lambda *a, **k: [])

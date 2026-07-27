@@ -28,6 +28,16 @@ class TestUnscorableCellsExcluded:
         assert present[7] is True
         assert missing[7] is False
 
+    def test_make_decision_marks_censored_cell_unscorable(self):
+        # A censored control cell (resource-limit stop) must NOT count as a clean pass=False in
+        # the quality denominator — scoring it would understate the frontier baseline's quality.
+        censored = kill_gate._make_decision("t1", "m", {"pass": False, "stop_reason": "step_limit"})
+        legacy_timeout = kill_gate._make_decision("t2", "m", {"pass": False, "timeout_flag": True})
+        real_fail = kill_gate._make_decision("t3", "m", {"pass": False, "stop_reason": "unsolved"})
+        assert censored[7] is False  # excluded
+        assert legacy_timeout[7] is False  # legacy censored row excluded too
+        assert real_fail[7] is True  # a genuine uncensored fail stays scorable
+
     def test_evaluate_control_marks_missing_frontier_unscorable(self):
         matrix = {
             "results": {

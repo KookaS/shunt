@@ -10,7 +10,6 @@ providers:
 models:
   grok-4.5:
     model_id: grok-4.5
-    tier: frontier
     provider: xai
     supports_streaming: true
     supports_cache_control: false

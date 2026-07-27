@@ -7,6 +7,9 @@ import random
 from pathlib import Path
 from typing import Final
 
+from benchmark import config
+from benchmark.routing import censoring
+from benchmark.routing.impute import ImputedMatrix, complete_matrix
 from benchmark.routing.metrics import (
     bootstrap_ci,
     compare_to_oracle,
@@ -47,6 +50,37 @@ DETERMINISTIC_FIELDS: Final[tuple[str, ...]] = (
 Decision = tuple[str, str, bool, float]
 
 
+def complete_scored_matrix(matrix: dict) -> tuple[dict, ImputedMatrix | None]:
+    """Complete ``matrix['results']`` to equal coverage under the monotone-ladder axiom.
+
+    Returns ``(matrix, ImputedMatrix)``, or raw + ``None`` when imputation is off / no ladder.
+    Only COMPLETE challenges survive; an open-UNKNOWN-band challenge is excluded entirely.
+    """
+    # Off, or a non-registry matrix (a synthetic test slice whose models aren't the
+    # enabled ladder — nothing to complete from), reproduces raw-coverage scoring
+    # exactly. The completed matrix drops disabled/foreign models and fills every
+    # enabled model on every task, so all strategies score one equal-coverage set.
+    if not config.impute_config().get("enabled", False):
+        return matrix, None
+    rank = config.capability_rank()
+    ranked = {r.model for r in rank.ordered}
+    results = matrix.get("results", {})
+    if not any(m in ranked for cells in results.values() for m in cells):
+        return matrix, None
+    im = complete_matrix(results, rank)
+    # Complete-only sampling: exclude every incomplete challenge (unknown band still open).
+    completed = {tid: cells for tid, cells in im.matrix.items() if tid in im.complete}
+    excluded = len(im.matrix) - len(completed)
+    if excluded:
+        print(
+            f"  complete-only: {len(completed)} complete challenge(s) kept, "
+            f"{excluded} incomplete excluded from analysis."
+        )
+    if config.impute_config().get("drop_unsolvable", False):
+        completed = {tid: cells for tid, cells in completed.items() if im.tau.get(tid) is not None}
+    return {**matrix, "results": completed}, im
+
+
 def evaluate(strategy: object, matrix: dict, tasks: list[str]) -> tuple[list[Decision], set[str]]:
     """Run one strategy, returning ``(decisions, unscorable)``: ``(task, model,
     passed, cost)`` tuples plus the set of task ids whose chosen cell was never
@@ -57,7 +91,10 @@ def evaluate(strategy: object, matrix: dict, tasks: list[str]) -> tuple[list[Dec
         task_meta = matrix["tasks"].get(tid, {})
         model = strategy.select(tid, task_meta, matrix)  # type: ignore[attr-defined]
         outcome = matrix["results"].get(tid, {}).get(model, {})
-        if not outcome:
+        # An unmeasured cell (coverage gap) OR a CENSORED cell (resource-limit stop, unknown
+        # true outcome) is unscorable: counting a censored cell as a clean pass=False would
+        # understate the chosen model's quality. Callers exclude the unscorable set from metrics.
+        if not outcome or censoring.is_censored(outcome):
             unscorable.add(tid)
         passed = outcome.get("pass", False)
         cascade_cost = getattr(strategy, "cascade_total_cost", None)
@@ -74,9 +111,14 @@ def compute_strategy_rows(
     bootstrap: int = 1000,
     seed: int = 42,
 ) -> list[dict]:
-    """Evaluate every strategy against the matrix and return summary rows (Reward-sorted)."""
+    """Evaluate every strategy against the matrix and return summary rows (Reward-sorted).
+
+    When ``impute.enabled``, the matrix is first completed to equal coverage so every
+    strategy scores the SAME task set; with it off, behaviour is unchanged.
+    """
     if not tasks:
         return []
+    matrix, _imputed = complete_scored_matrix(matrix)
     oracle_decisions, oracle_unscorable = evaluate(OracleRewardAware(gamma=gamma), matrix, tasks)
     random.seed(seed)
     rows: list[dict] = []

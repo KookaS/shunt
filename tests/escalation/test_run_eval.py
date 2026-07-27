@@ -4,6 +4,7 @@ plots + an authenticity count, and reports the length-1 degeneracy explicitly.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -111,7 +112,7 @@ def _cell_at(auprc: float, prevalence: float) -> metrics.CellReport:
     return metrics.CellReport(
         escalate_after_n=2,
         stale_window=5,
-        ladder="effort_then_tier",
+        ladder="effort_then_rank",
         confusion=ConfusionMatrix(tp=1, fp=9, fn=0, tn=90),
         precision=0.1,
         recall=1.0,
@@ -184,3 +185,59 @@ def test_main_includes_live_dir_trajectories(tmp_path, capsys) -> None:
     )
     assert rc == 0
     assert '"n_trajectories": 1' in capsys.readouterr().out
+
+
+def _report_with(status: str, reason: str) -> run_eval.EvalReport:
+    cell = _cell_at(auprc=0.099, prevalence=0.111)
+    return run_eval.EvalReport(
+        status=status,
+        reason=reason,
+        n_trajectories=3,
+        n_degenerate=0,
+        n_multistep=3,
+        n_escalated=1,
+        authenticity_errors=0,
+        headline=cell,
+        best_config=cell,
+        cells=[cell],
+        degeneracy_note="",
+    )
+
+
+def test_status_caveats_reach_the_footer_for_both_gates() -> None:
+    # Both gates used to be drawn in-axes and no_skill reached only PR/ROC; the footer channel is
+    # shared by all six figures, so proving the annotation exists proves every figure carries it.
+    thin = _report_with("INSUFFICIENT_DATA", "trigger never fired")
+    insufficient = run_eval._run_annotations(thin)
+    assert any("INSUFFICIENT DATA" in lim for lim in insufficient.limitations)
+    no_skill = run_eval._run_annotations(_report_with("NO_SKILL", "AUPRC ≤ prevalence"))
+    assert any("NO USABLE SIGNAL" in lim for lim in no_skill.limitations)
+    ok = run_eval._run_annotations(_report_with("OK", "sufficient"))
+    assert ok.limitations == ()
+
+
+def test_unchosen_best_config_is_stated_on_the_single_config_figures() -> None:
+    report = _report_with("OK", "sufficient")
+    chosen = run_eval._headline_annotations(report)
+    assert chosen.limitations == ()
+    assert any("escalate_after_n=2" in n for n in chosen.notes)
+    unchosen = run_eval._headline_annotations(replace(report, best_config=None))
+    assert any("first grid point" in lim for lim in unchosen.limitations)
+
+
+def test_all_six_figures_are_written_through_the_frame(tmp_path) -> None:
+    rc = run_eval.main(
+        ["--fixtures", str(_FIXTURES), "--results-csv", str(_RESULTS), "--plots-dir", str(tmp_path)]
+    )
+    assert rc == 0
+    expected = {
+        "pr_curve.png",
+        "roc_curve.png",
+        "steps_to_detection.png",
+        "confusion_matrix.png",
+        "sweep_heatmap.png",
+        "cost_quality.png",
+    }
+    assert {p.name for p in tmp_path.glob("*.png")} == expected
+    # dpi 150 at (9, 5.5) plus the footer: a bare dpi=80 figure never reaches this size.
+    assert all(p.stat().st_size > 20_000 for p in tmp_path.glob("*.png"))

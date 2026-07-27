@@ -20,7 +20,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from sklearn.decomposition import PCA  # noqa: E402
 
-from benchmark import config  # noqa: E402
+from benchmark import config, plot_frame  # noqa: E402
+from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
 from benchmark.routing import plot_style  # noqa: E402
 from benchmark.routing.strategies.knn import _embed_texts  # noqa: E402
 
@@ -29,11 +30,146 @@ from benchmark.routing.strategies.knn import _embed_texts  # noqa: E402
 # allocation reflects what the router would do, not a best-quality diagnostic.
 _DEFAULT_SUCCESS_RATE_THRESHOLD = 0.6
 
-# One-line imputation disclosure, restated verbatim on every figure whose selection
-# reads neighbourhood pass-rates (an unmeasured cell counts as a non-pass there).
-_IMPUTE_CAVEAT = (
-    "Selection reads measured pass-rates; an unmeasured (model, task) cell counts as a "
-    "non-pass for that model's neighbourhood rate."
+_DESCRIPTIVE_SPEC = FigureSpec(
+    reading=(
+        "Left: pass rate (0-1) for every enabled model, two bars each — the faded bar is "
+        "the full set of tasks that model actually ran (its own denominator, printed above "
+        "as n=), the solid bar restricts to the common-coverage subset every model ran. "
+        "Right: mean real cost per task in dollars on a log10 axis, so one gridline is a "
+        "factor of ten. Bar colour is the model's canonical colour, the same in every "
+        "figure here."
+    ),
+    goal=(
+        "Look for a small pass-rate gap between the cheap and the frontier bars while the "
+        "cost bars span decades — that gap is what a router has to buy back."
+    ),
+    definitions=(
+        ("pass rate", "fraction of tasks where the model's patch passed the graded tests"),
+        ("common-coverage subset", "the tasks every enabled model ran, so bars share a base"),
+        ("real cost", "the provider's own billed cost, cache discounts included"),
+    ),
+    notes=(
+        "Computed straight from results.csv with no routing or exploration strategy in the loop.",
+    ),
+    limitations=(
+        "Full-set bars each use their own denominator and are NOT cross-comparable: coverage "
+        "is adaptive, so frontier models ran on a smaller, differently-selected slice (MNAR "
+        "missingness). Rank models on the solid common-subset bars only.",
+        "No confidence interval on any bar.",
+    ),
+)
+
+_PCA_SPEC = FigureSpec(
+    reading=(
+        "Each dot is one task, placed by the two leading principal components of its REAL "
+        "768-d jina prompt embedding; the axis labels carry the share of variance each "
+        "component explains. Colour AND marker shape both encode the model the proxy kNN "
+        "router selects for that task, so two adjacent hues never have to be told apart by "
+        "colour alone."
+    ),
+    goal=(
+        "Look for tight single-colour clusters rather than interleaved confetti — clustered "
+        "means a near-neighbour vote is decisive."
+    ),
+    definitions=(
+        ("PC1 / PC2", "the two directions of largest spread in the embedding space"),
+        ("kNN router", "picks the cheapest model whose neighbourhood pass-rate clears the cut"),
+    ),
+    limitations=(
+        "This is a 2-D shadow of a 768-d space: dots that overlap here may be far apart in "
+        "the full space, so visible clustering is necessary but not sufficient.",
+        "The labels are the PROXY router's picks over the recorded matrix, not the live "
+        "engine's decisions.",
+        "Colours come from neighbourhood pass-rates in which an unmeasured (model, task) cell "
+        "counts as a non-pass, so a thinly-measured model is under-represented here.",
+    ),
+)
+
+_PURITY_SPEC = FigureSpec(
+    reading=(
+        "Left: the task-by-task cosine-similarity matrix over the real 768-d jina prompt "
+        "embeddings, rows and columns sorted into blocks by selected model with white dashed "
+        "lines at the block edges; brighter is more similar (0-1). Right: mean neighbourhood "
+        "purity per enabled model, with a grey dashed reference at 0.5. A bar at exactly 0 is "
+        "a real result — the router never selected that model, so it owns no neighbourhoods — "
+        "not missing data."
+    ),
+    goal=(
+        "Look for bright square blocks on the diagonal of the left panel and purity bars near "
+        "1.0 on the right."
+    ),
+    definitions=(
+        (
+            "purity",
+            "share of a task's nearest neighbours — up to k, itself excluded — routed to "
+            "the same model as the task",
+        ),
+        ("cosine similarity", "1.0 = same direction in embedding space, 0 = unrelated"),
+    ),
+    limitations=(
+        "Purity is measured against the router's OWN selection labels, so it scores "
+        "self-consistency, not correctness: a router that always picks one model scores 1.0.",
+        "The 0.5 line is a hand-set reference, not a computed chance level for more than two "
+        "models.",
+        "The left matrix is O(n^2) and becomes unreadable as the task count grows.",
+        "Purity inherits the selection's imputation: an unmeasured (model, task) cell counts "
+        "as a non-pass for that model's neighbourhood rate.",
+    ),
+)
+
+_ALLOCATION_SPEC = FigureSpec(
+    reading=(
+        "One bar per enabled model; the height is the number of tasks the proxy kNN router "
+        "sends to it. The router applies the shipped product rule — cheapest model whose "
+        "real-jina-neighbourhood pass-rate clears the threshold, escalating only when none "
+        "qualifies. A bar at 0 means the router never selected that model: an outcome of the "
+        "rule, not a data gap."
+    ),
+    goal=(
+        "Look for most of the mass on the cheap models with only a short tail on the frontier ones."
+    ),
+    definitions=(
+        ("k", "how many nearest past tasks the router votes over — the k= in the title"),
+        ("enabled model", "a model switched on in the benchmark config, selected or not"),
+    ),
+    limitations=(
+        "This is the proxy router's allocation over the recorded matrix, not the live engine's "
+        "per-arm allocation.",
+        "Allocation alone says nothing about quality or cost — read it beside "
+        "neighborhood_purity.png, since a lopsided allocation inflates purity.",
+        "An unmeasured (model, task) cell counts as a non-pass for that model's neighbourhood "
+        "rate, so a thinly-measured model is allocated fewer tasks than full coverage might "
+        "give it.",
+    ),
+)
+
+_COST_SPEC = FigureSpec(
+    reading=(
+        "Three totals in dollars, each summed across tasks: always the cheapest enabled model, "
+        "the proxy kNN router, and always the frontier model. The middle bar is neutral grey "
+        "on purpose — it is a mixture of models, not one model. The title carries the router's "
+        "pass fraction, so a middle bar far below the frontier bar at a pass fraction near "
+        "frontier quality is the cost-at-equal-quality claim."
+    ),
+    goal=(
+        "Look for the middle bar sitting close to the cheapest bar and far below the frontier "
+        "bar, with the title's pass fraction holding near frontier quality."
+    ),
+    definitions=(
+        ("frontier model", "the most expensive enabled model, priced per million tokens"),
+        ("coverage gap", "a (model, task) cell that was never measured"),
+    ),
+    notes=(
+        "The middle bar sums each selected model's default-arm cost; strategy_comparison.png "
+        "runs the live per-arm engine, so exact totals differ — compare shapes, not cents.",
+    ),
+    limitations=(
+        "The three totals do not rest on the same denominator.",
+        "No confidence interval on the title's pass fraction.",
+        "Selection reads neighbourhood pass-rates in which an unmeasured cell counts as a "
+        "non-pass, so a thinly-measured model is picked less often than full coverage might "
+        "warrant.",
+    ),
 )
 
 
@@ -75,6 +211,18 @@ def compute_task_similarity(vecs):
     return normalized @ normalized.T
 
 
+def _nearest_neighbors(sims, query_idx, k):
+    """Indices of the k most similar OTHER tasks, nearest first."""
+    # The query is always excluded and the count clamped to the neighbours that exist,
+    # so a k at or above the task count cannot fold the query into its own
+    # neighbourhood — which would make every neighbourhood look self-consistent.
+    k_eff = min(int(k), len(sims) - 1)
+    if k_eff <= 0:
+        return np.empty(0, dtype=int)
+    ranked = np.argsort(sims)[::-1]
+    return ranked[ranked != query_idx][:k_eff]
+
+
 def knn_select(vecs, emb, query_idx, models_order, k=10, success_rate_threshold=None):
     """Cost-aware selection over REAL-embedding neighbours: cheapest model whose
     neighbourhood pass-rate clears the threshold, else best-available (mirrors
@@ -85,14 +233,13 @@ def knn_select(vecs, emb, query_idx, models_order, k=10, success_rate_threshold=
         else success_rate_threshold
     )
     similarities = emb @ emb[query_idx]
-    similarities[query_idx] = -np.inf
-    nearest = np.argsort(similarities)[-k:][::-1]
+    nearest = _nearest_neighbors(similarities, query_idx, k)
 
     model_scores = {}
     for model_idx, model in enumerate(models_order):
         model_pass_col = model_idx * 4
         pass_rates = [vecs[n, model_pass_col] for n in nearest]
-        model_scores[model] = float(np.mean(pass_rates))
+        model_scores[model] = float(np.mean(pass_rates)) if pass_rates else 0.0
 
     price_order = sorted(
         models_order, key=lambda m: config.cost_per_1m(m, config.enabled_pricing())
@@ -124,12 +271,14 @@ def compute_neighborhood_purity(
 
     purity = np.zeros(n)
     for i in range(n):
-        sims = similarity_matrix[i].copy()
-        sims[i] = -np.inf
-        nearest = np.argsort(sims)[-k:][::-1]
+        nearest = _nearest_neighbors(similarity_matrix[i], i, k)
+        if len(nearest) == 0:
+            continue
         selected = selections[task_ids[i]]
         match_count = sum(1 for n_idx in nearest if selections[task_ids[n_idx]] == selected)
-        purity[i] = match_count / k
+        # Normalise by the neighbours actually available, not the configured k: with
+        # fewer than k other tasks the denominator is the neighbourhood, not the request.
+        purity[i] = match_count / len(nearest)
 
     return purity, selections
 
@@ -207,7 +356,9 @@ def plot_descriptive_model_performance(results, models_order, output_dir):
     ax_p.set_ylabel("Pass rate")
     ax_p.set_ylim(0, 1.12)
     ax_p.set_title("Per-model pass rate — full measured set vs common-coverage subset")
-    ax_p.legend(fontsize=8, loc="lower right")
+    # Above the axes: every in-axes corner sits on a bar (they run 0.5-1.0 tall against
+    # a 1.12 ceiling), so an inside legend always covers data.
+    ax_p.legend(fontsize=8, loc="lower center", bbox_to_anchor=(0.5, 1.06), ncol=2, frameon=False)
 
     costs = [max(stats[m]["common_cost"], 1e-9) for m in models_order]
     cbars = ax_c.bar(x, costs, color=bar_colors, edgecolor="black")
@@ -231,26 +382,26 @@ def plot_descriptive_model_performance(results, models_order, output_dir):
         "(NO routing/exploration strategy in the loop)",
         fontsize=12,
     )
-    fig.text(
-        0.5,
-        0.01,
-        "Coverage is ADAPTIVE (frontier models run on fewer tasks): each full-set bar is "
-        "computed on the n tasks\nTHAT model ran, so full-set bars are NOT strictly "
-        "cross-comparable (a selection / MNAR bias). The darker bars\n"
-        f"restrict to the {n_common} of {n_total} tasks EVERY model ran — that subset IS "
-        "cross-comparable. Here full-set vs\n"
-        f"common-subset pass rates differ by at most {max_gap_pp:.1f}pp, so the pooling bias "
-        "is small in this matrix;\ntrust the common-subset bars for ranking.",
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        color="#444444",
-        style="italic",
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
+    n_unmeasured = sum(1 for m in models_order if np.isnan(stats[m]["full_pass"]))
+    notes = [
+        f"{n_common} of {n_total} tasks were run by every enabled model; the solid bars use "
+        f"that subset.",
+        f"Full-set and common-subset pass rates differ by at most {max_gap_pp:.1f}pp here, so "
+        f"the pooling bias is small in this matrix.",
+    ]
+    limits = (
+        (f"{n_unmeasured} enabled model(s) ran no task at all, so their pass bars are absent.",)
+        if n_unmeasured
+        else ()
     )
-    fig.tight_layout(rect=(0, 0.10, 1, 0.95))
-    fig.savefig(str(output_dir / "model_performance_descriptive.png"), dpi=150)
+    plot_frame.save(
+        fig,
+        output_dir / "model_performance_descriptive.png",
+        _DESCRIPTIVE_SPEC,
+        extra=Annotations(notes=tuple(notes), limitations=limits),
+    )
     print("Saved model_performance_descriptive.png")
-    plt.close(fig)
 
 
 # Secondary (non-colour) identity channel for the all-pairs scatter form. The
@@ -386,30 +537,25 @@ def main(config_path: str = "benchmark/benchmark.yaml"):
     ax.set_axisbelow(True)
 
     never = [m for m in models_order if m not in set(unique)]
-    never_txt = (
-        f"Enabled models the router never selected (absent by result, not missing data): "
-        f"{', '.join(never)}.\n"
-        if never
-        else ""
+    fig.tight_layout()
+    pca_notes = [
+        f"{n} tasks; the router used k={k_neighbors} neighbours and a "
+        f"{threshold:.2f} neighbourhood pass-rate threshold.",
+        f"The two components shown carry {(explained[0] + explained[1]) * 100:.1f}% of the "
+        f"embedding variance between them.",
+    ]
+    if never:
+        pca_notes.append(
+            "Enabled models the router never selected are absent from the legend by result, "
+            f"not by missing data: {', '.join(never)}."
+        )
+    plot_frame.save(
+        fig,
+        output_dir / "knn_pca_scatter.png",
+        _PCA_SPEC,
+        extra=Annotations(notes=tuple(pca_notes)),
     )
-    fig.text(
-        0.5,
-        0.015,
-        "Each dot = one task, placed by the 2 leading principal components of its REAL "
-        "768-d jina prompt embedding.\n"
-        + never_txt
-        + "GOOD = each colour/shape forms a tight cluster (tasks needing the same model "
-        "sit together, so a near-neighbour vote is decisive).\n" + _IMPUTE_CAVEAT,
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        color="#444444",
-        style="italic",
-    )
-    fig.tight_layout(rect=(0, 0.11, 1, 1))
-    fig.savefig(str(output_dir / "knn_pca_scatter.png"), dpi=150)
     print("Saved knn_pca_scatter.png")
-    plt.close(fig)
 
     # 2. Neighborhood Purity Heatmap
     fig, axes = plt.subplots(1, 2, figsize=(16, 7))
@@ -484,32 +630,29 @@ def main(config_path: str = "benchmark/benchmark.yaml"):
             fontsize=8,
         )
 
-    # Explain both panels + the 0 bars: a model the proxy (almost) never selects has
-    # no neighbourhoods of its own, so its purity is 0 — a real consequence of the
-    # allocation, not missing data. "Good" = bars near 1.0 (tight, self-similar clusters).
     fig.suptitle(
         "kNN router (real jina embeddings) — do the router's model choices form clean clusters? "
         "(purity → 1.0 = clean; each x-axis bar is one enabled model, 0 = (almost) never selected)",
         fontsize=10,
     )
-    fig.text(
-        0.5,
-        0.02,
-        "GOOD = purity bars near 1.0 (a selected model's neighbours pick the same model). "
-        "A model at exactly 0 is a real result — the router never selected it, so it owns no "
-        "neighbourhoods — not missing data.\n"
-        "Task similarity is cosine over the REAL 768-d jina prompt embeddings (left panel).\n"
-        + _IMPUTE_CAVEAT,
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        color="#444444",
-        style="italic",
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    zero_purity = [m for m, v in zip(models_order, mean_purities, strict=True) if not v]
+    purity_notes = [
+        f"Mean purity across all {n} tasks is {float(np.mean(purity)):.2f}, over "
+        f"k={k_neighbors} neighbours.",
+    ]
+    if zero_purity:
+        purity_notes.append(
+            "Models sitting at exactly 0 own no neighbourhoods because the router never "
+            f"selected them: {', '.join(zero_purity)}."
+        )
+    plot_frame.save(
+        fig,
+        output_dir / "neighborhood_purity.png",
+        _PURITY_SPEC,
+        extra=Annotations(notes=tuple(purity_notes)),
     )
-    fig.tight_layout(rect=(0, 0.07, 1, 0.96))
-    fig.savefig(str(output_dir / "neighborhood_purity.png"), dpi=150)
     print("Saved neighborhood_purity.png")
-    plt.close(fig)
 
     # 3. Model Allocation Bar
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -538,32 +681,26 @@ def main(config_path: str = "benchmark/benchmark.yaml"):
         )
 
     ax.set_ylim(0, max(model_counts) * 1.15)
-    # Every enabled model is on the axis. A model at 0 is a REAL result — the proxy
-    # never picked it — not missing data. Say so, or a 0 bar reads as a data gap.
+    fig.tight_layout()
     zero_models = [m for m, c in zip(models_order, model_counts, strict=True) if c == 0]
-    zero_note = (
-        "Each bar is one enabled model; a bar at 0 means the router never selected it "
-        "(real result, not missing data).\n"
-        "The router applies the product rule (cheapest model whose real-jina-neighbourhood "
-        "pass-rate clears the threshold),\nso routine work lands on the cheap models and only "
-        "the hard tail escalates to the frontier.\n"
-        if zero_models
-        else ""
+    top_model = models_order[int(np.argmax(model_counts))]
+    alloc_notes = [
+        f"{n} tasks routed at k={k_neighbors} with a {threshold:.2f} neighbourhood pass-rate "
+        f"threshold; the busiest model, {top_model}, takes "
+        f"{max(model_counts) / n * 100:.0f}% of them.",
+    ]
+    if zero_models:
+        alloc_notes.append(
+            "Enabled models the router never selected, shown at 0 by result rather than by "
+            f"missing data: {', '.join(zero_models)}."
+        )
+    plot_frame.save(
+        fig,
+        output_dir / "model_allocation.png",
+        _ALLOCATION_SPEC,
+        extra=Annotations(notes=tuple(alloc_notes)),
     )
-    fig.text(
-        0.5,
-        0.01,
-        zero_note + _IMPUTE_CAVEAT,
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        color="#444444",
-        style="italic",
-    )
-    fig.subplots_adjust(bottom=0.30 if zero_models else 0.20)
-    fig.savefig(str(output_dir / "model_allocation.png"), dpi=150)
     print("Saved model_allocation.png")
-    plt.close(fig)
 
     # 3b. Descriptive all-model view (strategy-agnostic, straight from results.csv).
     # Answers "how does EVERY model do", not "which model does the router pick".
@@ -592,14 +729,16 @@ def main(config_path: str = "benchmark/benchmark.yaml"):
     n_knn = len(knn_scored)
     knn_total = sum(results[tid][selections[tid]].get("cost", 0) for tid in knn_scored)
     knn_pass = sum(1 for tid in knn_scored if results[tid][selections[tid]].get("pass", False))
-    # Phantom-baseline guard (matches report.py::_frontier_coverage): the frontier
-    # bar sums cost over only the tasks the frontier model actually ran. If that is
-    # a subset of n, "saves X% vs frontier" compares kNN-over-n against
-    # frontier-over-few — apples to oranges. Suppress the claim and flag it.
+    # Like-for-like guard: each bar sums cost over only the tasks ITS model was
+    # measured on. "Saves X% vs frontier" is a ratio of two such sums, so it is
+    # comparable only when BOTH denominators are the full n — a short frontier bar
+    # (sparse coverage) and a short kNN bar (coverage-gap exclusions) each break it
+    # on their own. (This script reads the RAW matrix, not the imputed one.)
     frontier_covered = (
         sum(1 for tid in task_ids if frontier_model in results[tid]) if frontier_model else 0
     )
     phantom_frontier = bool(frontier_model) and frontier_covered < n
+    comparable = not phantom_frontier and not knn_excluded
     savings_pct = (1 - knn_total / frontier_cost) * 100 if frontier_cost else 0.0
 
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -630,57 +769,55 @@ def main(config_path: str = "benchmark/benchmark.yaml"):
         )
     ax.set_ylabel("Total cost across tasks ($)")
     knn_pass_pct = (knn_pass / n_knn * 100) if n_knn else 0.0
-    if phantom_frontier:
-        title_tail = f"pass {knn_pass}/{n_knn} ({knn_pass_pct:.0f}%) — frontier savings N/A"
-    else:
+    if comparable:
         title_tail = (
             f"pass {knn_pass}/{n_knn} ({knn_pass_pct:.0f}%), saves {savings_pct:.0f}% vs frontier"
         )
+    else:
+        title_tail = f"pass {knn_pass}/{n_knn} ({knn_pass_pct:.0f}%) — frontier savings N/A"
     ax.set_title(f"kNN Router (real jina) — Cost Across {n} Tasks (k={k_neighbors})\n{title_tail}")
     ax.grid(True, axis="y", alpha=0.3)
     ax.set_axisbelow(True)
     fig.tight_layout()
-    # Figure-level captions BELOW the axes: drawn inside the bars, they collided
-    # with the value labels.
-    fig.subplots_adjust(bottom=0.34 if phantom_frontier else 0.22)
-    knn_excluded_note = (
-        f"\nkNN bar EXCLUDES {knn_excluded} coverage-gap task(s) (selected model unmeasured) "
-        f"— its cost/pass sum over {n_knn} of {n}, never imputed $0."
-        if knn_excluded
-        else ""
-    )
-    fig.text(
-        0.5,
-        0.02,
-        "Note: the middle bar sums each selected model's default-arm cost per task; "
-        "strategy_comparison.png\nruns the live kNN engine (per-arm), so exact totals "
-        "differ — compare shapes, not cents." + knn_excluded_note,
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        color="#444444",
-        style="italic",
-    )
-    if phantom_frontier:
-        fig.text(
-            0.5,
-            0.13,
-            f"⚠ PHANTOM BASELINE — {frontier_model} evaluated on {frontier_covered}/{n} "
-            f"tasks;\nits bar sums only those, so a 'vs frontier' saving is not comparable",
-            ha="center",
-            va="bottom",
-            fontsize=9,
-            color="#B00020",
-            fontweight="bold",
+    cost_notes = [
+        f"The cheapest and frontier bars are {cheapest_model} and {frontier_model}, priced "
+        f"per million tokens; the router's bar mixes whatever it selected across {n} tasks.",
+    ]
+    cost_limits = []
+    if knn_excluded:
+        cost_limits.append(
+            f"The kNN bar EXCLUDES {knn_excluded} coverage-gap task(s) whose selected model "
+            f"was never measured — its cost and pass sum over {n_knn} of {n} tasks, never "
+            f"imputed as $0 or as a failure."
         )
-    fig.savefig(str(output_dir / "knn_cost_comparison.png"), dpi=150)
+    if phantom_frontier:
+        cost_limits.append(
+            f"Sparse frontier: {frontier_model} ran on only {frontier_covered}/{n} tasks and "
+            f"its bar sums only those."
+        )
+    if comparable:
+        cost_notes.append(
+            f"Both the kNN bar and the frontier bar cover all {n} tasks, so the "
+            f"{savings_pct:.0f}% saving in the title compares like with like."
+        )
+    else:
+        cost_limits.append(
+            f"The two bars rest on different denominators (kNN {n_knn}/{n}, frontier "
+            f"{frontier_covered}/{n}), so the 'saves x% vs frontier' claim is suppressed "
+            f"as not comparable."
+        )
+    plot_frame.save(
+        fig,
+        output_dir / "knn_cost_comparison.png",
+        _COST_SPEC,
+        extra=Annotations(notes=tuple(cost_notes), limitations=tuple(cost_limits)),
+    )
     print("Saved knn_cost_comparison.png")
-    plt.close(fig)
 
     savings_str = (
-        "frontier savings N/A (phantom baseline)"
-        if phantom_frontier
-        else f"saves {savings_pct:.1f}% vs frontier"
+        f"saves {savings_pct:.1f}% vs frontier"
+        if comparable
+        else "frontier savings N/A (bars rest on different denominators)"
     )
     print(
         f"Cost across {n} tasks: cheapest ${cheap_cost:.4f}, "

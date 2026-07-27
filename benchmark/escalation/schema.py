@@ -42,7 +42,7 @@ COMMITTABLE_FIELDS: Final[frozenset[str]] = frozenset(
         # numeric behaviour signals
         "step_index",
         "is_infra_failure",
-        "tier_index",
+        "rank_index",
         "effort_index",
         "is_revert",
         "retry_count",
@@ -85,7 +85,7 @@ class StepView:
     # cost / routing
     model: str | None
     reasoning_effort: str | None
-    tier_index: int | None
+    rank_index: int | None
     effort_index: int | None
     real_cost: float | None
 

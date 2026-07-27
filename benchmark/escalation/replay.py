@@ -24,19 +24,19 @@ if TYPE_CHECKING:
 # A permissive ladder position: neither ceiling reached, no collapse alarm — so a same-key
 # recurrence is free to fire. The sweep varies the policy knobs, not the ladder geometry.
 #
-# SCOPE OF PARITY (read before trusting the tier rung). This replay measures the escalation policy
+# SCOPE OF PARITY (read before trusting the rank rung). This replay measures the escalation policy
 # IN ISOLATION, holding routing constant at this fixed context. Parity with the live engine is
 # guaranteed for (i) the failure-log lifecycle (append / clear-on-success / retire-on-escalation)
 # and (ii) the EFFORT rung, which the engine persists per task AND resets to the default on a
-# verified success (mirrored here), so effort parity holds even across a success boundary. The TIER
-# rung is NOT engine-faithful: here the runner climbs a persistent monotone tier counter that
+# verified success (mirrored here), so effort parity holds even across a success boundary. The RANK
+# rung is NOT engine-faithful: here the runner climbs a persistent monotone rank counter that
 # saturates at a ceiling,
-# whereas the engine re-seeds tier from the base routing pick each decision (no persistent tier
-# ladder) and re-escalates indefinitely. Treat the tier stream as an abstract isolation upper
+# whereas the engine re-seeds rank from the base routing pick each decision (no persistent rank
+# ladder) and re-escalates indefinitely. Treat the rank stream as an abstract isolation upper
 # bound. The detector metric (run_eval) reads only the FIRST-flag prefix, so it stays faithful.
 _PERMISSIVE_CONTEXT = EscalationContext(
-    current_tier_index=0,
-    max_tier_index=3,
+    current_rank_index=0,
+    max_rank_index=3,
     current_effort_index=0,
     max_effort_index=3,
     loop_health_alarm=False,
@@ -49,7 +49,7 @@ class GridPoint:
 
     escalate_after_n: int
     stale_window: int
-    ladder: str = "effort_then_tier"
+    ladder: str = "effort_then_rank"
 
     def to_config(self) -> EscalationConfig:
         """The EscalationConfig this cell drives `decide_escalation` with (enabled)."""
@@ -117,14 +117,14 @@ def replay_config(
     # Drives the SHARED `EscalationRunner` the live engine also uses, so the log lifecycle (append /
     # clear-on-success / retire-on-escalation) and the EFFORT rung match the engine by construction
     # — not a hand-rolled copy. `context` sets the starting ladder position and the ceilings the
-    # abstract ladder climbs against. The TIER advance here is a persistent monotone counter with no
-    # engine counterpart (the engine re-seeds tier from routing each decision) — an isolation upper
+    # abstract ladder climbs against. The RANK advance here is a persistent monotone counter with no
+    # engine counterpart (the engine re-seeds rank from routing each decision) — an isolation upper
     # bound, not an engine reproduction. See the SCOPE OF PARITY note above.
     runner = EscalationRunner(
         max_effort_index=context.max_effort_index,
-        max_tier_index=context.max_tier_index,
+        max_rank_index=context.max_rank_index,
         effort_index=context.current_effort_index,
-        tier_index=context.current_tier_index,
+        rank_index=context.current_rank_index,
     )
     directives: list[EscalationAction] = []
     first_escalation: int | None = None

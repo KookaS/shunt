@@ -5,8 +5,6 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from benchmark import config
-
 from . import Strategy
 from .fixed import _model_pricing
 
@@ -51,16 +49,6 @@ class ExternalPriorCascade(Strategy):
         if difficulty is None or difficulty >= self._threshold:
             return cheapest
 
-        # The field struggles on this instance → escalate to the cheapest model
-        # whose tier is NOT "cheap" (mid before frontier, by cost).
-        tiers = {m: _tier_of(m) for m in by_cost}
-        for model in by_cost:
-            if tiers.get(model) != "cheap":
-                return model
-        return cheapest
-
-
-def _tier_of(model: str) -> str:
-    """Tier for *model* from the model registry, 'cheap' if unknown."""
-    info = config.load_pricing().get(model)
-    return info.get("tier", "cheap") if isinstance(info, dict) else "cheap"
+        # The field struggles on this instance → escalate one price step above the
+        # cheapest (the next-priciest model, mid before frontier by cost).
+        return by_cost[1] if len(by_cost) > 1 else cheapest

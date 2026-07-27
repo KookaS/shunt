@@ -5,10 +5,10 @@ distinct paths (the RouterEngine and `replay.replay_config`).
 # Parity is real and asserted for the failure-log lifecycle (append / clear-on-success /
 # retire-on-escalation) AND the EFFORT rung (the engine persists effort via its per-task effort
 # arm and resets it to the default on a verified success, mirrored by the runner — so effort
-# parity holds even across a success boundary). It is NOT real for the TIER rung: the replay
-# climbs a persistent monotone abstract tier
-# counter that saturates at a ceiling, while the engine re-seeds tier from the base routing pick
-# each decision (no persistent tier ladder) and re-escalates indefinitely. The tier stream is an
+# parity holds even across a success boundary). It is NOT real for the RANK rung: the replay
+# climbs a persistent monotone abstract rank
+# counter that saturates at a ceiling, while the engine re-seeds rank from the base routing pick
+# each decision (no persistent rank ladder) and re-escalates indefinitely. The rank stream is an
 # isolation-model upper bound, not an engine reproduction; the tests below assert both the real
 # parity AND that documented divergence boundary.
 
@@ -21,7 +21,6 @@ import numpy as np
 
 from benchmark.escalation import replay, run_eval
 from benchmark.escalation.replay import GridPoint
-from shunt.models import TIER_ORDER
 from shunt.models.config import ModelConfig, ReasoningArm, ReasoningConfig
 from shunt.router.engine import RouterEngine
 from shunt.router.escalation import EscalationAction, EscalationConfig, EscalationContext
@@ -33,10 +32,9 @@ _KEY = "tests/x.py::a"
 # --- a real engine over fakes, with a 3-arm reasoning ladder so escalations stay on EFFORT ---
 
 
-def _cfg(name: str, tier: str, reasoning: ReasoningConfig | None = None) -> ModelConfig:
+def _cfg(name: str, reasoning: ReasoningConfig | None = None) -> ModelConfig:
     return ModelConfig(
         name=name,
-        tier=tier,  # type: ignore[arg-type]
         provider="p",
         base_url="http://x",
         api_key_env_var="K",
@@ -57,14 +55,23 @@ def _ladder() -> ReasoningConfig:
 
 class _Pool:
     def __init__(self) -> None:
-        self._models = {"qwen": _cfg("qwen", "cheap", _ladder()), "glm": _cfg("glm", "mid")}
-        self._tiers = {"cheap": [self._models["qwen"]], "mid": [self._models["glm"]]}
+        self._models = {"qwen": _cfg("qwen", _ladder()), "glm": _cfg("glm")}
+        self._ranked = [self._models["qwen"], self._models["glm"]]  # weakest -> strongest
 
     def get_model(self, name: str) -> ModelConfig | None:
         return self._models.get(name)
 
-    def get_tier_models(self, tier: str) -> list[ModelConfig]:
-        return self._tiers.get(tier, [])
+    def ranked_models(self) -> list[ModelConfig]:
+        return list(self._ranked)
+
+    def rank_of(self, name: str) -> int | None:
+        for i, m in enumerate(self._ranked):
+            if m.name == name:
+                return i
+        return None
+
+    def models_from_rank(self, i: int) -> list[ModelConfig]:
+        return self._ranked[max(i, 0) :]
 
     def is_healthy(self, name: str) -> bool:
         return True
@@ -111,7 +118,7 @@ def _engine() -> RouterEngine:
         session_manager=_SessionManager(),
         outcome_index=_Index(),
         embedder=_Embedder(),
-        escalation=EscalationConfig(enabled=True, escalate_after_n=2, ladder="effort_then_tier"),
+        escalation=EscalationConfig(enabled=True, escalate_after_n=2, ladder="effort_then_rank"),
         task_key_resolver=lambda _s: "repoA",
     )
 
@@ -123,7 +130,7 @@ def _engine_action(reason: str, prov: dict[str, Any]) -> EscalationAction:
     return (
         EscalationAction.RAISE_EFFORT
         if "escalated_reasoning_arm" in prov
-        else EscalationAction.RAISE_TIER
+        else EscalationAction.RAISE_RANK
     )
 
 
@@ -165,8 +172,8 @@ def _offline_stream_outcomes(successes: list[bool]) -> list[EscalationAction]:
     ]
     traj = make_trajectory(steps)
     ctx = EscalationContext(
-        current_tier_index=0,
-        max_tier_index=len(TIER_ORDER) - 1,
+        current_rank_index=0,
+        max_rank_index=3,  # abstract isolation ceiling (was len(TIER_ORDER) - 1)
         current_effort_index=0,
         max_effort_index=2,  # qwen's 3-arm ladder → effort ceiling index 2
     )
@@ -211,11 +218,11 @@ def test_offline_stream_reflects_retire_not_the_naive_over_fire() -> None:
     assert offline != naive_over_fire
 
 
-# --- effort->tier boundary: parity holds through effort, then the abstract tier ladder parts ---
+# --- effort->rank boundary: parity holds through effort, then the abstract rank ladder parts ---
 
 
 def test_effort_rung_and_lifecycle_parity_holds_before_the_tier_ceiling() -> None:
-    # Parity is REAL through the first tier crossing and several effort<->effort<->tier cycles: the
+    # Parity is REAL through the first rank crossing and several effort<->effort<->rank cycles: the
     # log lifecycle and the effort rung match by construction. 24 same-key failures line up 0..22.
     live = _live_stream(24)
     offline = _offline_stream(24)
@@ -223,22 +230,22 @@ def test_effort_rung_and_lifecycle_parity_holds_before_the_tier_ceiling() -> Non
 
 
 def test_tier_stream_diverges_at_the_abstract_ceiling_not_engine_faithful() -> None:
-    # The documented boundary: the replay's persistent monotone tier counter saturates
-    # (tier at ceiling AND effort at ceiling -> HOLD), so it emits HOLD at index 23; the engine has
-    # no persistent tier ladder and re-escalates (RAISE_TIER). The replay's tier is an abstract
+    # The documented boundary: the replay's persistent monotone rank counter saturates
+    # (rank at ceiling AND effort at ceiling -> HOLD), so it emits HOLD at index 23; the engine has
+    # no persistent rank ladder and re-escalates (RAISE_RANK). The replay's rank is an abstract
     # isolation upper bound, NOT an engine reproduction — assert the divergence rather than a false
     # full-stream match.
     live = _live_stream(24)
     offline = _offline_stream(24)
     assert live != offline
-    assert live[23] is EscalationAction.RAISE_TIER
+    assert live[23] is EscalationAction.RAISE_RANK
     assert offline[23] is EscalationAction.HOLD
 
 
 def test_effort_parity_holds_across_a_verified_success() -> None:
     # C1 regression: a verified success resets the engine's effort ladder (it pops the task's
     # effort arm), so a later same-key failure run must climb effort from the default again — not
-    # jump to a tier because the effort rung was left pinned at its ceiling. Pre-fix the replay
+    # jump to a rank because the effort rung was left pinned at its ceiling. Pre-fix the replay
     # cleared only the log on success and left effort at the ceiling, so the streams diverged at
     # the first post-success escalation (offline raise_tier vs the engine's raise_effort). Drive
     # F F F F S F F F F through the REAL engine and the REAL replay and assert they still agree.
@@ -254,7 +261,7 @@ def test_cumulative_detection_metric_is_parity_faithful_past_the_tier_ceiling() 
     # Even where the raw directive streams diverge (index 23), the detector metric run_eval scores
     # — "has the policy flagged this failing task by prefix t" — is identical for both paths,
     # because both flag at the SAME first-escalation step. This is why the metric is robust to the
-    # tier-ladder abstraction: it does not read the post-flag rungs.
+    # rank-ladder abstraction: it does not read the post-flag rungs.
     live = _live_stream(24)
     offline = _offline_stream(24)
     assert live != offline  # raw streams part at the ceiling

@@ -3,7 +3,7 @@
 # Pure decision logic, no I/O. The engine wires it only when router.yaml enables it (off by
 # default). Boundary-only by construction: a directive applies to the NEXT decision, never
 # mid-cached-turn (cache-safety spine). A "verified same failure seen N times" signal — same
-# normalized failing-check id — steps effort first (cache-safe), then a model tier.
+# normalized failing-check id — steps effort first (cache-safe), then a model rank.
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ class EscalationAction(StrEnum):
 
     HOLD = "hold"
     RAISE_EFFORT = "raise_effort"  # same model → cache-safe cheaper rung
-    RAISE_TIER = "raise_tier"
+    RAISE_RANK = "raise_rank"
 
 
 @dataclass(frozen=True)
@@ -35,9 +35,9 @@ class EscalationConfig:
     # reports the SUBPROCESS code (pytest/jest/go=1, cargo=101) and sets FailureEvent.blocking
     # from result.outcome/is_infra_failure, so counts_as_failure keys on `blocking`, not this.
     blocking_exit_code: int = 2
-    # effort_then_tier: raise the current model's reasoning effort first (cache-safe), step a
-    # model tier only on recurrence at the higher effort. "tier_only" skips the effort rung.
-    ladder: str = "effort_then_tier"
+    # effort_then_rank: raise the current model's reasoning effort first (cache-safe), step a
+    # model rank only on recurrence at the higher effort. "rank_only" skips the effort rung.
+    ladder: str = "effort_then_rank"
 
 
 @dataclass(frozen=True)
@@ -60,10 +60,10 @@ class FailureEvent:
 
 @dataclass(frozen=True)
 class EscalationContext:
-    """The tier/effort ladder position + loop-health guard, read at the boundary."""
+    """The rank/effort ladder position + loop-health guard, read at the boundary."""
 
-    current_tier_index: int
-    max_tier_index: int
+    current_rank_index: int
+    max_rank_index: int
     current_effort_index: int
     max_effort_index: int
     loop_health_alarm: bool = False  # routing collapse → suppress escalation
@@ -154,16 +154,16 @@ def _recurring_key(windowed: list[FailureEvent], config: EscalationConfig) -> st
 
 
 def _ladder_action(ctx: EscalationContext, config: EscalationConfig) -> EscalationDirective:
-    """Pick the next rung: effort first (cache-safe) then tier, honoring the ceiling."""
-    at_tier_ceiling = ctx.current_tier_index >= ctx.max_tier_index
+    """Pick the next rung: effort first (cache-safe) then rank, honoring the ceiling."""
+    at_rank_ceiling = ctx.current_rank_index >= ctx.max_rank_index
     at_effort_ceiling = ctx.current_effort_index >= ctx.max_effort_index
-    if config.ladder == "effort_then_tier" and not at_effort_ceiling:
+    if config.ladder == "effort_then_rank" and not at_effort_ceiling:
         return EscalationDirective(
             EscalationAction.RAISE_EFFORT, "same_verified_failure_x2", new_label_window=True
         )
-    if not at_tier_ceiling:
+    if not at_rank_ceiling:
         return EscalationDirective(
-            EscalationAction.RAISE_TIER, "same_verified_failure_x2", new_label_window=True
+            EscalationAction.RAISE_RANK, "same_verified_failure_x2", new_label_window=True
         )
     # Nothing higher on either axis — hold, don't thrash.
     return EscalationDirective(EscalationAction.HOLD, "escalation_ceiling")
@@ -189,10 +189,10 @@ def decide_escalation(
 
 @dataclass(frozen=True)
 class _LadderState:
-    """Abstract ladder position: which effort rung, which tier. Advanced by the runner."""
+    """Abstract ladder position: which effort rung, which rank. Advanced by the runner."""
 
     effort_index: int = 0
-    tier_index: int = 0
+    rank_index: int = 0
 
 
 class EscalationRunner:
@@ -203,10 +203,10 @@ class EscalationRunner:
     # clear the log AND reset effort to the default rung (mirroring the engine's effort-arm pop);
     # on any non-HOLD directive retire the acted-on window and step effort up to its ceiling. The
     # live engine builds each per-decision directive through `decide` (seeding its own
-    # concrete effort/tier position) and applies it concretely; the offline replay drives a whole
-    # trajectory through `step`, letting `commit` advance the ladder. The TIER advance in `commit`
-    # (effort-ceiling -> raise tier, reset effort) is a persistent monotone counter used ONLY by the
-    # trajectory replay's isolation model — the engine has no persistent tier ladder (its tier is
+    # concrete effort/rank position) and applies it concretely; the offline replay drives a whole
+    # trajectory through `step`, letting `commit` advance the ladder. The RANK advance in `commit`
+    # (effort-ceiling -> raise rank, reset effort) is a persistent monotone counter used ONLY by the
+    # trajectory replay's isolation model — the engine has no persistent rank ladder (its rank is
     # re-seeded from the base routing pick each decision), so this is a self-contained upper bound,
     # not a live-engine reproduction. Log-lifecycle and effort parity are the guaranteed part.
 
@@ -214,15 +214,15 @@ class EscalationRunner:
         self,
         *,
         max_effort_index: int,
-        max_tier_index: int,
+        max_rank_index: int,
         log: list[FailureEvent] | None = None,
         effort_index: int = 0,
-        tier_index: int = 0,
+        rank_index: int = 0,
     ) -> None:
         self._max_effort_index = max_effort_index
-        self._max_tier_index = max_tier_index
+        self._max_rank_index = max_rank_index
         self._log: list[FailureEvent] = list(log) if log else []
-        self._state = _LadderState(effort_index, tier_index)
+        self._state = _LadderState(effort_index, rank_index)
 
     @property
     def log(self) -> list[FailureEvent]:
@@ -236,9 +236,9 @@ class EscalationRunner:
             # (effort → the model's default rung) but does NOT persist a tier ladder (it re-seeds
             # tier from the base routing pick each decision), so a verified pass resets effort to 0
             # and leaves the abstract tier counter untouched. Without the effort reset a later
-            # same-key failure run would jump straight to a tier while the engine climbs effort.
+            # same-key failure run would jump straight to a rank while the engine climbs effort.
             self._log = []
-            self._state = _LadderState(0, self._state.tier_index)
+            self._state = _LadderState(0, self._state.rank_index)
         elif event is not None:
             self._log.append(event)
 
@@ -247,8 +247,8 @@ class EscalationRunner:
     ) -> EscalationDirective:
         """The directive for the next boundary at the current ladder position (pure)."""
         ctx = EscalationContext(
-            current_tier_index=self._state.tier_index,
-            max_tier_index=self._max_tier_index,
+            current_rank_index=self._state.rank_index,
+            max_rank_index=self._max_rank_index,
             current_effort_index=self._state.effort_index,
             max_effort_index=self._max_effort_index,
             loop_health_alarm=loop_health_alarm,
@@ -256,12 +256,12 @@ class EscalationRunner:
         return decide_escalation(self._log, current_index, ctx, config)
 
     def commit(self, action: EscalationAction) -> None:
-        """Retire the window the escalation acted on and advance one rung (effort then tier)."""
+        """Retire the window the escalation acted on and advance one rung (effort then rank)."""
         self._log = []
         if action is EscalationAction.RAISE_EFFORT:
-            self._state = _LadderState(self._state.effort_index + 1, self._state.tier_index)
-        elif action is EscalationAction.RAISE_TIER:
-            self._state = _LadderState(0, self._state.tier_index + 1)
+            self._state = _LadderState(self._state.effort_index + 1, self._state.rank_index)
+        elif action is EscalationAction.RAISE_RANK:
+            self._state = _LadderState(0, self._state.rank_index + 1)
 
     def step(
         self,

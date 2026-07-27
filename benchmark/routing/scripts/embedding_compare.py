@@ -16,9 +16,40 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from sklearn.metrics.pairwise import cosine_similarity  # noqa: E402
 
-from benchmark import config  # noqa: E402
+from benchmark import config, plot_frame  # noqa: E402
+from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
 from benchmark.routing.strategies.knn import _embed_texts  # noqa: E402
 from shunt.router.embedder import Embedder  # noqa: E402
+
+SPEC = FigureSpec(
+    reading=(
+        "Left: how far the two embedding spaces agree on WHICH tasks are neighbours — the "
+        "mean Jaccard overlap of their k-NN sets at each k, whiskers = ±1 std across tasks "
+        "(1.0 = identical neighbour sets, 0 = disjoint). Right: how often a task's own "
+        "optimal model already appears somewhere in its neighbourhood, as a % of tasks, per "
+        "space; 'Both agree' is the intersection and so can never exceed either single bar."
+    ),
+    goal=(
+        "Left near 1.0 means the embedder choice barely matters; near 0 makes it a real "
+        "design decision. On the right, higher is better — it is the CEILING on kNN routing, "
+        "since no neighbour-vote rule can pick a model that is never in the neighbourhood."
+    ),
+    definitions=(
+        ("Jaccard overlap", "shared neighbours divided by all neighbours either space found"),
+        ("optimal model", "the cheapest model that actually passed that task"),
+        ("Arctic", "Snowflake arctic-embed-m-long, a general-purpose text embedder"),
+        ("Jina-code", "jina-embeddings-v2-base-code, the shipped router default"),
+    ),
+    notes=(
+        "Both spaces are real 768-d fastembed vectors from the shipped Embedder — no TF-IDF "
+        "or hash proxy stands in for either.",
+    ),
+    limitations=(
+        "The right panel measures reachability, not routing accuracy: a model sitting in the "
+        "neighbourhood does not mean any threshold rule would actually pick it.",
+        "No confidence intervals on the agreement percentages.",
+    ),
+)
 
 # The general-purpose comparison model. Jina-code (the shipped router default) is the
 # code-specific space; Arctic is a general-text embedder run through the SAME Embedder.
@@ -194,7 +225,12 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         print(f"  k={k}: Both agree on optimal: {both_agreement}/{n_tasks} ({bpct}%)")
 
     plot_path = _plot_comparison(
-        Path(args.plot), matrix_path, len(task_ids), overlap_stats, agreement_stats
+        Path(args.plot),
+        matrix_path,
+        len(task_ids),
+        overlap_stats,
+        agreement_stats,
+        len(task_ids) - len(optimal_map),
     )
     print(f"\nPlot written to {plot_path}")
 
@@ -214,9 +250,10 @@ def _plot_comparison(
     n_tasks: int,
     overlap_stats: dict[int, dict[str, float]],
     agreement_stats: dict[int, dict[str, int]],
+    n_no_optimal: int,
 ) -> Path:
     """Two-panel figure: neighbor-set Jaccard overlap (left) and optimal-model
-    agreement among neighbors (right), each split by k. Replaces the text report.
+    agreement among neighbors (right), each split by k.
     """
     ks = sorted(overlap_stats.keys())
     x = np.arange(len(ks))
@@ -292,25 +329,14 @@ def _plot_comparison(
         fontsize=13,
         fontweight="bold",
     )
-    # These ARE the real shipped fastembed models, not proxies.
-    fig.text(
-        0.5,
-        0.005,
-        "Real fastembed vectors: Arctic (Snowflake arctic-embed-m-long, general) vs Jina-code "
-        "(jina-embeddings-v2-base-code, the shipped router default) — actual 768-d embeddings, "
-        "no TF-IDF proxy.",
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        style="italic",
-        color="#52514e",
-        wrap=True,
-    )
-    fig.tight_layout(rect=(0, 0.05, 1, 1))
-    plot_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(str(plot_path), dpi=150)
-    plt.close(fig)
-    return plot_path
+    fig.tight_layout()
+    limits = [f"Only {len(ks)} neighbourhood size(s) swept (k = {', '.join(str(k) for k in ks)})"]
+    if n_no_optimal:
+        limits.append(
+            f"{n_no_optimal} of {n_tasks} tasks have no passing model at all, yet stay in the "
+            "denominator — the right panel's percentages are conservative"
+        )
+    return plot_frame.save(fig, plot_path, SPEC, extra=Annotations(limitations=tuple(limits)))
 
 
 if __name__ == "__main__":

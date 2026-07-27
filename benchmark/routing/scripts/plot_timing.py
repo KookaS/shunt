@@ -19,10 +19,40 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from benchmark import config  # noqa: E402
+from benchmark import config, plot_frame  # noqa: E402
+from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
 from benchmark.routing import plot_style, report  # noqa: E402
 
 _STRATEGY_BAR = "#607D8B"  # a single neutral slate — strategies are not model-hued
+
+SPEC = FigureSpec(
+    reading=(
+        "Each bar is the mean number of agent<->model API round-trips needed to finish one "
+        "task. Left: one bar per model, over every measured run on any arm. Right: one bar "
+        "per routed strategy, counting only the cell that strategy actually picked. Error "
+        "bars are the standard error of that mean; each bar is labelled with its mean and "
+        "the number of tasks behind it. Expect models to differ several-fold and each routed "
+        "strategy to land somewhere between the models it mixes."
+    ),
+    goal=(
+        "For a router, look for FEWER calls at equal quality: a low right-hand bar sitting "
+        "beside the taller model bars it routes to."
+    ),
+    definitions=(
+        ("call", "one agent<->model round-trip, recorded as `calls` in results.csv"),
+        ("SEM", "standard error of the mean — how precisely this bar's average is known"),
+    ),
+    notes=(
+        "We do not record wall-clock latency; calls stand in as a coarse ordinal proxy.",
+        "A strategy's coverage-gap picks (chosen model unmeasured on that task) are skipped, "
+        "never counted as zero calls.",
+    ),
+    limitations=(
+        "Calls are not seconds: a call's duration also depends on its token size, and real "
+        "wall-clock time depends on host load and container startup as much as on the model. "
+        "Read the bars as ordinal, never as measured latency.",
+    ),
+)
 
 
 def _model_calls(results_csv: Path) -> dict[str, list[int]]:
@@ -102,11 +132,35 @@ def _draw_bars(
     ax.set_axisbelow(True)
 
 
+def _annotations(
+    models: list[str],
+    model_calls: dict[str, list[int]],
+    strat_calls: dict[str, list[int]],
+    dropped: list[str],
+) -> Annotations:
+    """Footer content derived from the data: per-bar sample sizes and absent models."""
+    sizes = [len(model_calls[m]) for m in models] + [len(v) for v in strat_calls.values()]
+    notes: list[str] = []
+    limits: list[str] = []
+    if sizes:
+        limits.append(
+            f"Sample sizes per bar range {min(sizes)}-{max(sizes)} tasks; the smallest bars "
+            "move a lot on one unusually chatty task"
+        )
+    if dropped:
+        notes.append(
+            f"{len(dropped)} enabled model(s) have no recorded call counts and are absent "
+            f"from the left panel: {', '.join(dropped)}"
+        )
+    return Annotations(notes=tuple(notes), limitations=tuple(limits))
+
+
 def plot_timing(results_csv: Path, matrix: dict, tasks: list[str], out_path: Path) -> Path:
     """Two panels: avg calls/task per model (left) and per routed strategy (right)."""
-    models = config.enabled_models() or sorted(_model_calls(results_csv))
     model_calls = _model_calls(results_csv)
-    models = [m for m in models if m in model_calls]
+    candidates = config.enabled_models() or sorted(model_calls)
+    models = [m for m in candidates if m in model_calls]
+    dropped = [m for m in candidates if m not in model_calls]
     color_map = plot_style.model_color_map(config.enabled_models() or models)
 
     strat_calls = _strategy_calls(matrix, tasks, config.gamma())
@@ -135,24 +189,10 @@ def plot_timing(results_csv: Path, matrix: dict, tasks: list[str], out_path: Pat
         fontsize=13,
         fontweight="bold",
     )
-    fig.text(
-        0.5,
-        0.01,
-        "Calls = agent<->model round-trips (results.csv `calls`); more calls means, roughly, "
-        "more turns and more latency,\nbut a call's duration also depends on its token size — "
-        "read this as ordinal, not seconds. For a router, FEWER calls at\nequal quality is better "
-        "(lower latency). Error bars = standard error of the mean; n = measured tasks per bar.",
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        color="#555555",
-        style="italic",
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
+    return plot_frame.save(
+        fig, out_path, SPEC, extra=_annotations(models, model_calls, strat_calls, dropped)
     )
-    fig.tight_layout(rect=(0, 0.08, 1, 0.95))
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
-    return out_path
 
 
 def main(config_path: str = "benchmark/benchmark.yaml") -> None:

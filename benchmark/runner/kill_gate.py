@@ -13,7 +13,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from benchmark import config
+from benchmark import config, validate_results
+from benchmark.routing import censoring, summary
 from benchmark.routing.metrics import compute_cost_decomposition as _compute_cost_decomposition
 from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
 
@@ -72,6 +73,8 @@ def _get_outcome(matrix: dict[str, Any], tid: str, model: str) -> dict[str, Any]
 def _make_decision(tid: str, model: str, outcome: dict[str, Any]) -> Decision:
     # An empty outcome dict means the cell has no measured row (sparse coverage,
     # not a bug — the matrix is intentionally sparse), so the decision is unscorable.
+    # A CENSORED cell (resource-limit stop, unknown true outcome) is likewise unscorable:
+    # scoring it as a clean pass=False would understate the frontier baseline's quality.
     return (
         tid,
         model,
@@ -80,7 +83,7 @@ def _make_decision(tid: str, model: str, outcome: dict[str, Any]) -> Decision:
         outcome.get("in_tok", 0),
         outcome.get("out_tok", 0),
         outcome.get("calls", 0),
-        bool(outcome),
+        bool(outcome) and not censoring.is_censored(outcome),
     )
 
 
@@ -147,7 +150,7 @@ def evaluate_knn_cascade(
                 outcome.get("in_tok", 0) if outcome else 0,
                 outcome.get("out_tok", 0) if outcome else 0,
                 outcome.get("calls", 0) if outcome else 0,
-                strategy.cascade_scorable,
+                strategy.cascade_scorable and not censoring.is_censored(outcome),
             )
         )
     return decisions
@@ -670,7 +673,25 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         print(f"Error: matrix not found: {matrix_path}", file=sys.stderr)
         sys.exit(2)
 
+    # Pre-analysis data-integrity gate (fail closed): refuse to gate on poison data —
+    # ERROR-severity rows (e.g. a paid model that ran but recorded real_cost==0) would
+    # silently skew the cost verdict. Analysis does not run until the data is clean.
+    _report, _blocking = validate_results.gate(
+        config.results_csv_path(), dict(config.load_pricing())
+    )
+    if _blocking:
+        print(validate_results.format_report(_report, config.results_csv_path()), file=sys.stderr)
+        print(
+            "Refusing to run the kill gate on data with ERROR-severity integrity violations.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     matrix = config.load_matrix(matrix_path)
+    # Complete-only + equal-coverage: with imputation enabled, drop every INCOMPLETE challenge
+    # (unknown band still open) and fill every enabled tier on the survivors, so the gate is
+    # decided over challenges whose crossover is actually established (no-op when impute is off).
+    matrix, _im = summary.complete_scored_matrix(matrix)
 
     # Pricing from config, not the model registry
     pricing = config.enabled_pricing()

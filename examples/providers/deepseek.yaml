@@ -10,7 +10,6 @@ providers:
 models:
   deepseek-v4-flash:
     model_id: deepseek-v4-flash
-    tier: cheap
     provider: deepseek
     supports_streaming: true
     supports_cache_control: false

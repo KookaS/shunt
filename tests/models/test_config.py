@@ -10,7 +10,6 @@ import pytest
 import yaml
 
 from shunt.models.config import (
-    TIER_ORDER,
     ModelConfig,
     ModelEntry,
     ModelPool,
@@ -40,11 +39,6 @@ DEFAULT_MODEL_NAMES: Final = [
     "claude-fable-5",
     "claude-opus-4-8",
     "claude-opus-4-6",
-    # Frontier escalation tail added 2026-07-18 (router-only; benchmark-disabled).
-    "gemini-3.1-pro",
-    "gpt-5.6-sol",
-    "claude-fable-5",
-    "claude-opus-4-8",
 ]
 
 
@@ -56,12 +50,12 @@ class TestStrictYamlLoad:
             strict_yaml_load("providers:\n  requesty: {base_url: a}\n  requesty: {base_url: b}\n")
 
     def test_duplicate_nested_key_is_rejected(self) -> None:
-        with pytest.raises(ValueError, match="duplicate key 'tier'"):
-            strict_yaml_load("models:\n  m:\n    tier: cheap\n    tier: mid\n")
+        with pytest.raises(ValueError, match="duplicate key 'provider'"):
+            strict_yaml_load("models:\n  m:\n    provider: a\n    provider: b\n")
 
     def test_valid_yaml_still_loads(self) -> None:
-        assert strict_yaml_load("models:\n  m: {tier: cheap}\n") == {
-            "models": {"m": {"tier": "cheap"}}
+        assert strict_yaml_load("models:\n  m: {provider: p}\n") == {
+            "models": {"m": {"provider": "p"}}
         }
 
 
@@ -69,20 +63,17 @@ class TestModelConfig:
     def test_minimal_config(self) -> None:
         cfg = ModelConfig(
             name="test-model",
-            tier="cheap",
             provider="test",
             base_url="https://test.ai/v1",
             api_key_env_var="TEST_KEY",
         )
         assert cfg.name == "test-model"
-        assert cfg.tier == "cheap"
         assert cfg.supports_streaming is True
         assert cfg.supports_cache_control is False
 
     def test_full_config(self) -> None:
         cfg = ModelConfig(
             name="test-model",
-            tier="frontier",
             provider="test",
             base_url="https://test.ai/v1",
             api_key_env_var="TEST_KEY",
@@ -91,7 +82,6 @@ class TestModelConfig:
         )
         assert cfg.supports_streaming is False
         assert cfg.supports_cache_control is True
-        assert cfg.tier == "frontier"
 
 
 class TestModelPoolLoad:
@@ -114,7 +104,6 @@ class TestModelPoolLoad:
             "models": {
                 "test-model": {
                     "model_id": "test-model",
-                    "tier": "cheap",
                     "provider": "test",
                 }
             },
@@ -142,7 +131,6 @@ class TestModelPoolLoad:
             "models": {
                 "env-model": {
                     "model_id": "env-model",
-                    "tier": "mid",
                     "provider": "env",
                 }
             },
@@ -157,7 +145,7 @@ class TestModelPoolLoad:
                 pool = ModelPool()
                 model = pool.get_model("env-model")
                 assert model is not None
-                assert model.tier == "mid"
+                assert model.provider == "env"
             finally:
                 if old_env is not None:
                     os.environ["SHUNT_CONFIG_DIR"] = old_env
@@ -176,43 +164,66 @@ class TestModelPoolLoad:
         assert pool.get_model("deepseek-v4-flash") is not None
 
 
-class TestTierLookup:
-    def test_get_tier(self) -> None:
-        pool = ModelPool()
-        assert pool.get_tier("qwen3.7-plus") == "cheap"
-        assert pool.get_tier("gpt-5-mini") == "mid"
-        assert pool.get_tier("claude-opus-4-6") == "frontier"
+class TestCapabilityRank:
+    """Price-implied capability rank (replaces the hand-assigned tiers)."""
 
-    def test_get_tier_unknown_model(self) -> None:
+    def test_ranked_models_ascending_by_total_price(self) -> None:
+        # live models weakest -> strongest by input+output price, name tie-break.
         pool = ModelPool()
-        assert pool.get_tier("nonexistent") is None
+        pool.restrict_to_live(["kimi-k3", "qwen3.7-plus", "gpt-5-mini", "deepseek-v4-flash"])
+        assert [m.name for m in pool.ranked_models()] == [
+            "deepseek-v4-flash",  # 0.42
+            "qwen3.7-plus",  # 1.60
+            "gpt-5-mini",  # 2.25
+            "kimi-k3",  # 18.0
+        ]
 
-    def test_get_tier_models(self) -> None:
+    def test_rank_of_is_the_index(self) -> None:
         pool = ModelPool()
-        for tier in TIER_ORDER:
-            models = pool.get_tier_models(tier)
-            assert models, f"tier {tier} has no models"
-            assert all(m.tier == tier for m in models)
+        pool.restrict_to_live(["kimi-k3", "deepseek-v4-flash"])
+        assert pool.rank_of("deepseek-v4-flash") == 0
+        assert pool.rank_of("kimi-k3") == 1
+        assert pool.rank_of("nonexistent") is None
+
+    def test_models_from_rank_is_the_tail(self) -> None:
+        pool = ModelPool()
+        pool.restrict_to_live(["kimi-k3", "deepseek-v4-flash", "qwen3.7-plus"])
+        assert [m.name for m in pool.models_from_rank(1)] == ["qwen3.7-plus", "kimi-k3"]
+        assert pool.models_from_rank(99) == []
+
+    def test_name_tiebreak_on_equal_price(self) -> None:
+        # claude-opus-4-6 and claude-opus-4-8 both total 30.0 → name tie-break.
+        pool = ModelPool()
+        pool.restrict_to_live(["claude-opus-4-8", "claude-opus-4-6"])
+        assert [m.name for m in pool.ranked_models()] == [
+            "claude-opus-4-6",
+            "claude-opus-4-8",
+        ]
+
+    def test_unpriced_live_model_fails_loud(self) -> None:
+        # a routable model without pricing is a config error, named (fail loud).
+        data = {
+            "providers": {
+                "p": {
+                    "base_url": "https://x/v1",
+                    "api_key_env_var": "X",
+                    "litellm_prefix": "openai",
+                }
+            },
+            "models": {"unpriced": {"model_id": "u", "provider": "p"}},
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            path = _write_yaml(f.name, data)
+        try:
+            pool = ModelPool(path)
+            with pytest.raises(ValueError, match="unpriced"):
+                pool.ranked_models()
+        finally:
+            os.unlink(path)
 
     def test_pool_roster_is_exactly_the_declared_default(self) -> None:
-        # DEFAULT_MODEL_NAMES pins the roster in BOTH directions: the per-name
-        # checks catch a model that vanished, this catches one that appeared.
-        # Deriving both sides from the pool would be self-referential.
         pool = ModelPool()
-        assert _all_model_names(pool) == set(DEFAULT_MODEL_NAMES)
-
-    def test_tiers_partition_the_pool(self) -> None:
-        # Every model belongs to exactly one tier — no model is stranded in an
-        # unknown tier, none is double-counted.
-        pool = ModelPool()
-        by_tier = [{m.name for m in pool.get_tier_models(t)} for t in TIER_ORDER]
-        for i, left in enumerate(by_tier):
-            for right in by_tier[i + 1 :]:
-                assert not (left & right)
-
-
-def _all_model_names(pool: ModelPool) -> set[str]:
-    return {m.name for tier in TIER_ORDER for m in pool.get_tier_models(tier)}
+        assert set(pool.model_names()) == set(DEFAULT_MODEL_NAMES)
 
 
 class TestRestrictToLive:
@@ -230,12 +241,10 @@ class TestRestrictToLive:
         pool.restrict_to_live(["kimi-k3", "qwen3.7-plus", "gpt-5-mini"])
         assert pool.model_names() == ["qwen3.7-plus", "gpt-5-mini", "kimi-k3"]
 
-    def test_get_tier_models_reflects_the_subset(self) -> None:
+    def test_ranked_models_reflects_the_subset(self) -> None:
         pool = ModelPool()
-        pool.restrict_to_live(["qwen3.7-plus", "kimi-k3"])
-        assert [m.name for m in pool.get_tier_models("cheap")] == ["qwen3.7-plus"]
-        assert pool.get_tier_models("mid") == []
-        assert [m.name for m in pool.get_tier_models("frontier")] == ["kimi-k3"]
+        pool.restrict_to_live(["kimi-k3", "qwen3.7-plus"])
+        assert [m.name for m in pool.ranked_models()] == ["qwen3.7-plus", "kimi-k3"]
 
     def test_fallback_chain_only_contains_live_models(self) -> None:
         pool = ModelPool()
@@ -247,8 +256,6 @@ class TestRestrictToLive:
         pool = ModelPool()
         pool.restrict_to_live(["qwen3.7-plus"])
         assert pool.is_healthy("qwen3.7-plus") is True
-        # An unhealthy lookup on a removed model has no health entry to auto-recover,
-        # so it reads as unhealthy (False), not "recovered".
         assert pool.is_healthy("kimi-k3") is False
 
     def test_unknown_model_name_raises_naming_the_offender(self) -> None:
@@ -265,30 +272,23 @@ class TestRestrictToLive:
 
 
 class TestFallbackChain:
-    def test_same_tier_fallback(self) -> None:
+    def test_self_first_then_rank_neighbours(self) -> None:
         pool = ModelPool()
-        # cheap models: qwen3.7-plus, deepseek-v4-flash
+        # qwen3.7-plus (1.60) sits at rank 1; nearest neighbours are gpt-5-mini (2.25)
+        # then deepseek-v4-flash (0.42).
         chain = pool.fallback_chain("qwen3.7-plus")
         assert chain[0] == "qwen3.7-plus"
-        # deepseek-v4-flash is the other cheap model
-        assert "deepseek-v4-flash" in chain[:3]
-        # Exhaustive and duplicate-free, whatever the pool holds
+        assert set(chain[:3]) == {"qwen3.7-plus", "gpt-5-mini", "deepseek-v4-flash"}
+        # Exhaustive and duplicate-free, whatever the pool holds.
         assert chain == list(dict.fromkeys(chain))
-        assert set(chain) == _all_model_names(pool)
-
-    def test_fallback_chain_same_tier_first(self) -> None:
-        pool = ModelPool()
-        chain = pool.fallback_chain("qwen3.7-plus")
-        # Same tier models: qwen3.7-plus (first), deepseek-v4-flash
-        cheap_models_in_chain = chain[:2]
-        assert set(cheap_models_in_chain) == {"qwen3.7-plus", "deepseek-v4-flash"}
+        assert set(chain) == set(pool.model_names())
 
     def test_frontier_fallback(self) -> None:
         pool = ModelPool()
         chain = pool.fallback_chain("claude-opus-4-6")
         assert chain[0] == "claude-opus-4-6"
         assert chain == list(dict.fromkeys(chain))
-        assert set(chain) == _all_model_names(pool)
+        assert set(chain) == set(pool.model_names())
 
     def test_unknown_model_returns_empty(self) -> None:
         pool = ModelPool()
@@ -360,12 +360,12 @@ class TestReasoningConfigSchema:
             )
 
     def test_absent_reasoning_is_none_on_model_entry(self) -> None:
-        entry = ModelEntry(model_id="m", tier="cheap", provider="p")
+        entry = ModelEntry(model_id="m", provider="p")
         assert entry.reasoning is None
 
     def test_model_entry_accepts_reasoning_block(self) -> None:
         cfg = ReasoningConfig(default_arm="high", arms=[_arm("none", 0), _arm("high", 1)])
-        entry = ModelEntry(model_id="m", tier="cheap", provider="p", reasoning=cfg)
+        entry = ModelEntry(model_id="m", provider="p", reasoning=cfg)
         assert entry.reasoning is not None
         assert entry.reasoning.default_arm == "high"
 
@@ -373,7 +373,6 @@ class TestReasoningConfigSchema:
         cfg = ReasoningConfig(default_arm="high", arms=[_arm("none", 0), _arm("high", 1)])
         mc = ModelConfig(
             name="m",
-            tier="cheap",
             provider="p",
             base_url="https://x/v1",
             api_key_env_var="X",
@@ -382,16 +381,12 @@ class TestReasoningConfigSchema:
         assert mc.reasoning is not None and mc.reasoning.default_arm == "high"
 
     def test_absent_reasoning_is_none_on_model_config(self) -> None:
-        mc = ModelConfig(
-            name="m", tier="cheap", provider="p", base_url="https://x/v1", api_key_env_var="X"
-        )
+        mc = ModelConfig(name="m", provider="p", base_url="https://x/v1", api_key_env_var="X")
         assert mc.reasoning is None
 
 
 class TestDefaultRegistryHasReasoning:
     def test_every_default_model_declares_a_reasoning_block(self) -> None:
-        # D2: all 11 registry models (6 benchmark-enabled + opus-4-6 + the 4
-        # benchmark-disabled frontier escalation targets) get a bracket.
         pool = ModelPool()
         for name in DEFAULT_MODEL_NAMES:
             model = pool.get_model(name)
@@ -416,7 +411,6 @@ class TestArmApiParams:
         )
         return ModelConfig(
             name="m",
-            tier="cheap",
             provider="p",
             base_url="https://x/v1",
             api_key_env_var="X",
@@ -434,14 +428,10 @@ class TestArmApiParams:
             arm_api_params(model, "max")
 
     def test_none_reasoning_returns_empty_for_default(self) -> None:
-        mc = ModelConfig(
-            name="m", tier="cheap", provider="p", base_url="https://x/v1", api_key_env_var="X"
-        )
+        mc = ModelConfig(name="m", provider="p", base_url="https://x/v1", api_key_env_var="X")
         assert arm_api_params(mc, "default") == {}
 
     def test_none_reasoning_raises_for_non_default_arm(self) -> None:
-        mc = ModelConfig(
-            name="m", tier="cheap", provider="p", base_url="https://x/v1", api_key_env_var="X"
-        )
+        mc = ModelConfig(name="m", provider="p", base_url="https://x/v1", api_key_env_var="X")
         with pytest.raises(ValueError, match="unknown reasoning arm"):
             arm_api_params(mc, "high")

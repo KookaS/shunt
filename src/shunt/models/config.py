@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Final, Literal
+from typing import Any, ClassVar, Final
 
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -40,10 +41,6 @@ def strict_yaml_load(text: str) -> dict[str, Any]:
     data: dict[str, Any] = yaml.load(text, Loader=_NoDuplicateKeyLoader)  # noqa: S506 - SafeLoader subclass
     return data
 
-
-Tier = Literal["cheap", "mid", "high", "frontier"]
-
-TIER_ORDER: Final[list[Tier]] = ["cheap", "mid", "high", "frontier"]
 
 DEFAULT_PROBE_ENDPOINT: Final[str] = "/v1/chat/completions"
 # The authenticated (200) check GETs this — a model listing, billed to no one.
@@ -153,7 +150,6 @@ class ModelEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_id: str
-    tier: Tier
     provider: str
     # Model identity: a genuine provider model change (new weights) is a NEW
     # registry id, not a version bump. Optional so unpriced example fragments stay
@@ -191,7 +187,6 @@ class ModelConfig(BaseModel):
 
     name: str
     model_id: str | None = None
-    tier: Tier
     provider: str
     version: str | None = None
     base_url: str
@@ -228,7 +223,6 @@ def resolve_models(registry: Registry) -> dict[str, ModelConfig]:
         resolved[name] = ModelConfig(
             name=name,
             model_id=entry.model_id,
-            tier=entry.tier,
             provider=entry.provider,
             version=entry.version,
             base_url=provider.base_url,
@@ -260,10 +254,34 @@ def arm_api_params(model: ModelConfig, arm_id: str) -> dict[str, Any]:
 def model_fingerprint(model: ModelConfig) -> str:
     """Resolved model-version fingerprint for the outcome log."""
     # ``version`` is the registry's opt-in model-identity / staleness key (a sibling of
-    # tier/provider, not a pricing field); joined to the resolved provider ``model_id`` it is
+    # provider, not a pricing field); joined to the resolved provider ``model_id`` it is
     # the strongest version tag the registry carries. A genuine weight change is a new id.
     resolved_id = model.model_id or model.name
     return f"{resolved_id}@{model.version}" if model.version else resolved_id
+
+
+@dataclass(frozen=True)
+class RankedModel:
+    """A model's capability slot derived from list price (0 = cheapest / weakest prior)."""
+
+    model: str
+    rank: int
+    price: float
+
+
+def _total_price(model: ModelConfig) -> float:
+    """Total list price (input + output per 1M) — the capability-rank sort key.
+
+    A live (routable) model without a ``pricing`` block cannot be ranked; fail loud and
+    name it (strict-by-default) rather than sort it to a silent sentinel slot.
+    """
+    pricing = model.pricing
+    if pricing is None:
+        raise ValueError(
+            f"model {model.name!r} has no pricing block; a routable model must be priced "
+            "to receive a capability rank (add a `pricing` block or drop it from the live set)"
+        )
+    return pricing.input_cost_per_1m + pricing.output_cost_per_1m
 
 
 def default_registry_path() -> Path:
@@ -347,16 +365,26 @@ class ModelPool:
         """Look up a model by name, returning None if unknown."""
         return self._config.get(name)
 
-    def get_tier(self, name: str) -> str | None:
-        """Return the capability tier for a model, or None if unknown."""
-        model = self.get_model(name)
-        if model is None:
-            return None
-        return model.tier
+    def ranked_models(self) -> list[ModelConfig]:
+        """Live models weakest -> strongest by total list price (name tie-break).
 
-    def get_tier_models(self, tier: str) -> list[ModelConfig]:
-        """Return all models in a given tier, in config order."""
-        return [m for m in self._config.values() if m.tier == tier]
+        The price-implied capability prior — pure config, process-constant. Replaces the
+        hand-assigned tier buckets + semantic row order with a derived ordinal.
+        """
+        return sorted(self._config.values(), key=lambda m: (_total_price(m), m.name))
+
+    def rank_of(self, name: str) -> int | None:
+        """The model's index in ``ranked_models`` (0 = cheapest), or None if unknown."""
+        if name not in self._config:
+            return None
+        for i, model in enumerate(self.ranked_models()):
+            if model.name == name:
+                return i
+        return None
+
+    def models_from_rank(self, i: int) -> list[ModelConfig]:
+        """Models at rank >= ``i`` (weakest -> strongest); empty past the top rank."""
+        return self.ranked_models()[max(i, 0) :]
 
     def is_healthy(self, name: str) -> bool:
         """Check if a model is healthy (auto-recovers after cooldown)."""
@@ -386,34 +414,21 @@ class ModelPool:
         return self._health_check_interval
 
     def fallback_chain(self, name: str) -> list[str]:
-        """Return ordered fallback chain: same-tier first, then cross-tier."""
-        model = self.get_model(name)
-        if model is None:
+        """Ordered availability fallback: self, then rank neighbours outward, nearer-cheaper
+        first (availability != escalation, so the cheaper neighbour is tried before the pricier)."""
+        if self.get_model(name) is None:
             return []
-
-        tier: Tier = model.tier
-        tier_idx = TIER_ORDER.index(tier)
-
-        chain: list[str] = []
-        seen: set[str] = set()
-
-        chain.append(name)
-        seen.add(name)
-
-        same_tier_models = self.get_tier_models(tier)
-        for m in same_tier_models:
-            if m.name not in seen:
-                chain.append(m.name)
-                seen.add(m.name)
-
-        higher_tiers = TIER_ORDER[tier_idx + 1 :]
-        lower_tiers = TIER_ORDER[:tier_idx]
-        cross_tier_order = higher_tiers + lower_tiers
-
-        for other_tier in cross_tier_order:
-            for m in self.get_tier_models(other_tier):
-                if m.name not in seen:
-                    chain.append(m.name)
-                    seen.add(m.name)
-
+        ranked = [m.name for m in self.ranked_models()]
+        if name not in ranked:
+            return [name]
+        idx = ranked.index(name)
+        chain = [name]
+        lo, hi = idx - 1, idx + 1
+        while lo >= 0 or hi < len(ranked):
+            if lo >= 0:  # prefer the nearer, cheaper neighbour first (availability != escalation)
+                chain.append(ranked[lo])
+                lo -= 1
+            if hi < len(ranked):
+                chain.append(ranked[hi])
+                hi += 1
         return chain

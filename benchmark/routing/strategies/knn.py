@@ -40,6 +40,20 @@ def _embed_texts(texts: list[str]) -> np.ndarray:
     return np.array(_get_embedder().embed_batch(texts), dtype=np.float32)
 
 
+def _build_index(embeddings: np.ndarray) -> hnswlib.Index:
+    """A cosine HNSW index over ``embeddings`` (ef_construction=100, M=16, ef=50).
+
+    ``num_threads=1`` pins the neighbour graph so regenerated metrics/plots are
+    bit-reproducible (multi-threaded add_items wobbles at ~1e-4).
+    """
+    n = len(embeddings)
+    index = hnswlib.Index(space="cosine", dim=int(embeddings.shape[1]))
+    index.init_index(max_elements=n, ef_construction=100, M=16)
+    index.add_items(embeddings, np.arange(n), num_threads=1)
+    index.set_ef(50)
+    return index
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -215,14 +229,7 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
 
         # Build HNSW index over ALL embeddings (index holds everything;
         # self-exclusion is handled at query time)
-        dim = self._embeddings.shape[1]
-        index = hnswlib.Index(space="cosine", dim=dim)
-        index.init_index(max_elements=len(task_ids), ef_construction=100, M=16)
-        # num_threads=1: pin the neighbour graph so regenerated metrics/plots are
-        # bit-reproducible (multi-threaded add_items wobbles at ~1e-4), matching
-        # knn_blended._build_hnsw.
-        index.add_items(self._embeddings, np.arange(len(task_ids)), num_threads=1)
-        index.set_ef(50)
+        index = _build_index(self._embeddings)
         self._index = index
 
         # Build the live-router abstractions

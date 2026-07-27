@@ -25,7 +25,7 @@ routing/
   report.py                   # Comparison tables and plots (derived from results.csv)
   scripts/                    # Analysis + figure producers (all read results.csv, write reports/)
     compute_costs.py          # Per-model cost/pass rollup from the outcome cache
-    embedding_compare.py      # TF-IDF vs embedding neighbourhoods (retrieval quality)
+    embedding_compare.py      # Arctic vs Jina-code neighbourhoods (retrieval quality)
     plot_exploration.py       # Exploit-only vs exploit+exploration cost/quality + explore share
     plot_external.py          # External-signal plots (difficulty, ours-vs-external, held-out)
     plot_strategies.py        # Strategy Pareto scatter (same rows as report.py)
@@ -54,14 +54,14 @@ channels) and one `models` table. It is the cost source of truth. Prices are the
 **Requesty router listing** (the rate actually paid for requesty-routed models;
 direct providers list the same published rate).
 
-A model's **required core** — `model_id`, `tier`, `provider`, `supports_streaming`,
+A model's **required core** — `model_id`, `provider`, `supports_streaming`,
 `supports_cache_control` — makes it routable. The **optional `pricing` block** makes it
 benchmarkable: a model with no `pricing` is routable but invisible here, so it can never
 be scored against a fabricated price.
 
 | Field | Meaning |
 |-------|---------|
-| `model_id` / `tier` / `provider` | Model identity, routing tier (cheap/mid/high/frontier), and the `providers` row used to reach it |
+| `model_id` / `provider` | Model identity and the `providers` row used to reach it |
 | `pricing.input_cost_per_1m` / `.output_cost_per_1m` | Price, USD per 1M tokens (Requesty router listing) |
 | `pricing.cache_read_cost_per_1m` / `.cache_write_cost_per_1m` | Optional — cache-read/write rate where the provider lists one |
 | `pricing.price_provider` | Where the price is quoted from (`requesty` — the router listing) |
@@ -74,8 +74,7 @@ The **litellm route is derived**, not stored: `<litellm_prefix>/<model_id>`, e.g
 `deepseek/deepseek-v4-flash`, `openai/alibaba/qwen3.7-plus`. `base_url` and
 `api_key_env_var` come from the model's `providers` row.
 
-**Model row order is semantic** — `SelectionRule._escalate` returns the last row of a
-tier in file order. Never re-serialize the registry with a key-sorting dumper.
+**Model row order is NOT semantic** — the router ranks models by price for capability ranking. Never re-serialize the registry with a key-sorting dumper.
 
 **Cost model.** `config._pricing_dict` / `config.models_matrix` /
 `integrity.estimated_cost` read `input_cost_per_1m` / `output_cost_per_1m` × token

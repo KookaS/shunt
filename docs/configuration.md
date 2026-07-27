@@ -43,9 +43,11 @@ your own, start from a copy of the packaged file.
 
 ### Without a benchmark run
 
-Three fields make a model registerable — `model_id`, `tier`, and `provider`. A
-model row is picked up the moment it exists; `tier` is the prior the routing is
-designed to start from before real outcomes accumulate. (Pre-alpha note: the live
+Two fields make a model registerable — `model_id` and `provider`. A model row is
+picked up the moment it exists. Its **capability rank** — the prior the routing
+starts from before real outcomes accumulate — is derived from the model's total
+list price (`input_cost_per_1m + output_cost_per_1m`, cheapest = weakest prior), so
+a live-routable model also needs a `pricing` block. (Pre-alpha note: the live
 proxy now calls `engine.decide()` to choose a model on the first turn. Outcomes can be
 recorded manually via `shunt flag`, or captured automatically at session close once you
 configure a capture work_dir (see [Tune the router](#tune-the-router)); with neither, the
@@ -64,7 +66,6 @@ providers:
 models:
   gpt-oss-120b-groq:
     model_id: openai/gpt-oss-120b   # the id the provider knows it by
-    tier: cheap                     # cheap | mid | high | frontier
     provider: groq                  # must name a row in `providers:`
     supports_streaming: true
     supports_cache_control: false   # true only if you've confirmed it
@@ -80,14 +81,12 @@ Adding a model to the registry makes it *known*, not *live*. To have the running
 router actually pick it, also add its name to `router.yaml`'s `models:` list — see
 [Choose which models are live-routable](#choose-which-models-are-live-routable).
 
-**Order matters.** Models are read in file order, and that order is load-bearing.
-The benchmark's *cascade* strategy walks models in this order — trying the first
-model it hasn't tested yet, cheapest tier first, and falling back to the *last*
-model of the highest tier once everything has been tried. The live router's
-[auto-escalation ladder](#auto-escalate-on-repeated-verified-failure) is a
-different mechanism (it raises the current model's reasoning effort first, then
-steps a tier), but it too reads tiers in registry order. Reordering rows changes
-both behaviors, so add new rows deliberately rather than sorting the file.
+**Order does not matter.** The router ranks models by capability, derived from
+total list price (input + output per 1M) ascending, so row order is for readability
+only. The live router's [auto-escalation ladder](#auto-escalate-on-repeated-verified-failure)
+raises the current model's reasoning effort first, then steps to the next-higher-rank
+model; adding or removing a `pricing` block (not reordering rows) is what changes
+routing.
 
 ### With a benchmark run
 
@@ -98,7 +97,6 @@ The benchmark scores models on cost, so it needs prices. Add an optional
 models:
   gpt-oss-120b-groq:
     model_id: openai/gpt-oss-120b
-    tier: cheap
     provider: groq
     version: gpt-oss-120b            # model identity — see "A model id is immutable"
     supports_streaming: true
@@ -126,12 +124,13 @@ Once a model is registered, score it with `make benchmark-live` (i.e. `uv run --
 benchmark python -m benchmark.runner.run_matrix`; the extra is required — a bare `uv run`
 strips the eval deps). The
 default `--strategy cost_optimal` runs the cheap adaptive collection (frontier only where
-tiers disagree, plus a random audit); `--strategy full` runs the exhaustive matrix. Both
+cheaper models disagree, plus a random audit); `--strategy full` runs the exhaustive matrix; and
+`--strategy ladder` runs cheap-first, escalating each task only until a model passes. All
 are simulated unless you pass `--live`. See [benchmark.md](benchmark.md) for the details.
 
 ### A model id is immutable — new version, new id
 
-`version` sits on the model row, next to `tier` and `provider` — not inside
+`version` sits on the model row, next to `provider` — not inside
 `pricing:`. It records model *identity*, and that distinction is a rule worth
 following:
 
@@ -166,7 +165,6 @@ comparable across models — one model's `high` is not another's.
 models:
   gpt-oss-120b-groq:
     model_id: openai/gpt-oss-120b
-    tier: cheap
     provider: groq
     reasoning:
       default_arm: medium          # must match one arm id below; used when nothing else decides
@@ -251,7 +249,7 @@ last edited. Shunt prints it at startup, so you never have to guess:
 Shunt config | strategy=knn
 Shunt config | knn: k=20 success_rate_threshold=0.60 min_samples=3
 Shunt config | exploration: enabled=True budget_frac=0.15 conservative_alpha=0.10 ...
-Shunt config | models: cheap:qwen3.7-plus, mid:gpt-5-mini, frontier:kimi-k3
+Shunt config | models: 0:qwen3.7-plus, 1:gpt-5-mini, 2:kimi-k3
 Shunt config | session: inactivity_timeout=900s grace_period=120s retry_count=3
 ```
 
@@ -358,7 +356,7 @@ or `exploration.enabled: false` in your `router.yaml` for a permanent setting.
 
 ### Auto-escalate on repeated verified failure
 
-Shunt can automatically move up to a higher-effort or higher-tier model when the cheap
+Shunt can automatically move up to a higher-effort or higher-rank model when the cheap
 default fails the *same* verified check repeatedly — no human command needed. This is
 the knob reference; how detection, triggering, the ladder, and the safety rails work is
 covered in full on the [Error detection & auto-escalation](escalation.md) page.
@@ -372,7 +370,7 @@ router:
     escalate_after_n: 2         # same verified failure seen this many times
     stale_window: 10            # failures not recurring within N decisions retire
     blocking_exit_code: 2       # FUTURE: hook-stream path only; off-wire gate gates on outcome/is_infra_failure
-    ladder: effort_then_tier    # effort_then_tier | tier_only (one rung per step, never to frontier)
+    ladder: effort_then_rank    # effort_then_rank | rank_only (one rank per step, never straight to the top)
 ```
 
 | Field | Default | Meaning |
@@ -380,7 +378,7 @@ router:
 | `enabled` | `false` | Master switch. Off ships nothing; on wires escalation into the live decision path. |
 | `escalate_after_n` | `2` | Same-key verified failures required before a step. `1` would escalate on the first red (failure-biased). |
 | `stale_window` | `10` | A failure not recurring within this many decisions is retired from the counter. |
-| `ladder` | `effort_then_tier` | `effort_then_tier` raises reasoning effort first (cache-safe), then tier. `tier_only` skips the effort rung. |
+| `ladder` | `effort_then_rank` | `effort_then_rank` raises reasoning effort first (cache-safe), then steps to the next-higher-rank model. `rank_only` skips the effort rung. |
 | `blocking_exit_code` | `2` | Reserved for a future hook-stream path — **not read by the current off-wire gate** (see below). |
 
 Escalation triggers only on **confirmed, verified capability failures** — a test suite
@@ -571,8 +569,8 @@ The list decides enablement three ways:
   offender. A model you run must exist, so a typo fails loudly instead of silently
   routing to nothing.
 
-Enabled models are always scored cheapest-tier-first (cheap → mid → high →
-frontier), so list order is for readability only — it does not affect results.
+Enabled models are always scored cheapest-first by total list price, so list
+order is for readability only — it does not affect results.
 
 ```bash
 shunt start

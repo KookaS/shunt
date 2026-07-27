@@ -18,9 +18,44 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from benchmark import config  # noqa: E402
+from benchmark import config, plot_frame  # noqa: E402
+from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
 from benchmark.routing.exploration_replay import ReplayReport, evaluate  # noqa: E402
 from shunt.router.policy import load_router_policy  # noqa: E402
+
+SPEC = FigureSpec(
+    reading=(
+        "Left: mean cost per task with exploration OFF (blue) and ON (orange), whiskers = "
+        "95% bootstrap CI; each bar is labelled with its pass rate and that rate's CI, and "
+        "the boxed line states the PAIRED difference between the two arms. Right: the share "
+        "of decisions that were exploratory as the replay proceeds (orange), against the "
+        "configured budget cap (grey dashed) and the realized explore/exploit spend ratio "
+        "(blue dotted). Expect exploration to cost more and to move pass rate very little."
+    ),
+    goal=(
+        "Read the boxed paired difference, not the two overlapping marginal CIs: look for a "
+        "small cost delta and a pass delta whose CI clears zero."
+    ),
+    definitions=(
+        ("exploration", "occasionally routing to a non-preferred model to learn its outcome"),
+        ("exploit-only", "the same shipped policy with exploration switched off"),
+        ("paired difference", "per-task gap between the arms, so shared task noise cancels"),
+        ("explore_budget_frac", "cap on the router's own confidence-weighted explore counter"),
+    ),
+    notes=(
+        "The replay is EXACT, not simulated: on a fully dense sub-grid the recorded outcome "
+        "is looked up and no request is sent.",
+        "The realized spend ratio exceeding the cap is expected, not a bug — the cap counts "
+        "the router's confidence-weighted neighbourhood costs, not realized spend.",
+        "Unscorable cells are skipped and counted, never guessed.",
+    ),
+    limitations=(
+        "The outcome matrix is static, so an exploratory pull can never improve a later "
+        "decision: this measures exploration's COST with its learning benefit set to zero, "
+        "the pessimistic half of the ledger — not a verdict on whether exploration pays.",
+        "The dense slice is found greedily, not optimally, and comes from a single workload.",
+    ),
+)
 
 # Documented data-viz palette (light mode): slot-1 blue vs slot-2 orange for the two
 # arms (worst-adjacent CVD clears the target), plus muted ink for the cap reference.
@@ -148,6 +183,30 @@ def _panel_explore_share(ax, report: ReplayReport, budget_frac: float) -> None:
     leg.get_frame().set_edgecolor(_GRID)
 
 
+def _annotations(report: ReplayReport) -> Annotations:
+    """Footer content derived from the replay: slice size, seeds, skipped cells."""
+    slice_ = report.slice_
+    base, expl = report.baseline_pass_rate, report.exploration_pass_rate
+    limits: list[str] = []
+    if base.lo <= expl.hi and expl.lo <= base.hi:
+        limits.append(
+            f"The two marginal pass-rate CIs overlap ([{base.lo:.0%}, {base.hi:.0%}] vs "
+            f"[{expl.lo:.0%}, {expl.hi:.0%}]) — at {len(slice_.tasks)} tasks only the paired "
+            "difference separates the arms"
+        )
+    return Annotations(
+        notes=(
+            f"Direct-Method replay on the fully-dense slice: {len(slice_.tasks)} tasks x "
+            f"{len(slice_.models)} models = {slice_.n_cells} measured cells (full matrix "
+            f"{slice_.matrix_density:.1%} dense); {report.n_seeds} seeds; 95% "
+            "percentile-bootstrap CIs over tasks",
+            f"Cells skipped as unscorable: {report.baseline_missing} baseline, "
+            f"{report.exploration_missing_per_seed:.1f}/seed exploration",
+        ),
+        limitations=tuple(limits),
+    )
+
+
 def plot(report: ReplayReport, out_path: Path, budget_frac: float) -> None:
     fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(12.5, 5.0))
     fig.patch.set_facecolor(_SURFACE)
@@ -158,33 +217,14 @@ def plot(report: ReplayReport, out_path: Path, budget_frac: float) -> None:
             spine.set_edgecolor(_GRID)
     _panel_cost_quality(ax_left, report)
     _panel_explore_share(ax_right, report, budget_frac)
-    slice_ = report.slice_
     fig.suptitle(
         "Offline matrix replay of the production exploration policy "
         "(measured outcomes, no live calls)",
         fontsize=13,
         color=_INK,
     )
-    fig.text(
-        0.5,
-        0.012,
-        f"Direct-Method replay on the fully-dense slice: {len(slice_.tasks)} tasks x "
-        f"{len(slice_.models)} models = {slice_.n_cells} measured cells "
-        f"(full matrix {slice_.matrix_density:.1%} dense); {report.n_seeds} seeds;\n"
-        f"95% percentile-bootstrap CIs over tasks; unscorable cells skipped: "
-        f"{report.baseline_missing} baseline, "
-        f"{report.exploration_missing_per_seed:.1f}/seed exploration.\n"
-        "The outcome matrix is static, so an exploratory pull can never improve a later decision:\n"
-        "this is exploration's COST with its learning benefit set to zero, "
-        "not a verdict on whether exploration pays.",
-        ha="center",
-        fontsize=8,
-        color=_INK2,
-    )
-    fig.tight_layout(rect=(0, 0.155, 1, 0.94))
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=150, facecolor=_SURFACE)
-    plt.close(fig)
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    plot_frame.save(fig, out_path, SPEC, extra=_annotations(report))
 
 
 def main(config_path: str = "benchmark/benchmark.yaml") -> None:

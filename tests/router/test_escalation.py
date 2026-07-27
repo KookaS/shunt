@@ -33,11 +33,11 @@ def _fail(
 
 
 def _ctx(
-    *, tier: int = 0, max_tier: int = 3, effort: int = 2, max_effort: int = 2, alarm: bool = False
+    *, rank: int = 0, max_rank: int = 3, effort: int = 2, max_effort: int = 2, alarm: bool = False
 ) -> EscalationContext:
     return EscalationContext(
-        current_tier_index=tier,
-        max_tier_index=max_tier,
+        current_rank_index=rank,
+        max_rank_index=max_rank,
         current_effort_index=effort,
         max_effort_index=max_effort,
         loop_health_alarm=alarm,
@@ -50,9 +50,9 @@ _ON = EscalationConfig(enabled=True)
 # ── AC-A1: two same-key verified failures → escalate, reason recorded ──────────
 def test_same_key_twice_escalates() -> None:
     events = [_fail(0), _fail(1)]
-    # effort already at ceiling → the ladder steps tier
+    # effort already at ceiling → the ladder steps rank
     d = decide_escalation(events, current_index=2, ctx=_ctx(effort=2, max_effort=2), config=_ON)
-    assert d.action is EscalationAction.RAISE_TIER
+    assert d.action is EscalationAction.RAISE_RANK
     assert d.reason == "same_verified_failure_x2"
 
 
@@ -84,7 +84,7 @@ def test_blocking_failure_counts_regardless_of_exit_code() -> None:
     for code in (1, 101):
         events = [_fail(0, exit_code=code), _fail(1, exit_code=code)]
         d = decide_escalation(events, current_index=2, ctx=_ctx(effort=2, max_effort=2), config=_ON)
-        assert d.action is EscalationAction.RAISE_TIER, f"exit {code} should escalate"
+        assert d.action is EscalationAction.RAISE_RANK, f"exit {code} should escalate"
         assert counts_as_failure(events[0], _ON)
 
 
@@ -110,8 +110,8 @@ def test_escalation_opens_new_label_window() -> None:
     assert d.new_label_window is True
 
 
-# ── effort-then-tier ladder: effort first (cache-safe), then tier ─────────
-def test_ladder_raises_effort_before_tier() -> None:
+# ── effort-then-rank ladder: effort first (cache-safe), then rank ─────────
+def test_ladder_raises_effort_before_rank() -> None:
     # effort below ceiling → the cache-safe effort rung is taken first
     d = decide_escalation(
         [_fail(0), _fail(1)], current_index=2, ctx=_ctx(effort=0, max_effort=2), config=_ON
@@ -119,17 +119,17 @@ def test_ladder_raises_effort_before_tier() -> None:
     assert d.action is EscalationAction.RAISE_EFFORT
 
 
-def test_tier_only_ladder_skips_effort() -> None:
-    cfg = EscalationConfig(enabled=True, ladder="tier_only")
+def test_rank_only_ladder_skips_effort() -> None:
+    cfg = EscalationConfig(enabled=True, ladder="rank_only")
     d = decide_escalation(
         [_fail(0), _fail(1)], current_index=2, ctx=_ctx(effort=0, max_effort=2), config=cfg
     )
-    assert d.action is EscalationAction.RAISE_TIER
+    assert d.action is EscalationAction.RAISE_RANK
 
 
 # ── at the ceiling → hold, don't thrash ────────────────────────────────
 def test_at_ceiling_holds() -> None:
-    ctx = _ctx(tier=3, max_tier=3, effort=2, max_effort=2)
+    ctx = _ctx(rank=3, max_rank=3, effort=2, max_effort=2)
     d = decide_escalation([_fail(0), _fail(1)], current_index=2, ctx=ctx, config=_ON)
     assert d.action is EscalationAction.HOLD
     assert d.reason == "escalation_ceiling"
@@ -156,7 +156,7 @@ def test_recurrence_within_window_escalates() -> None:
     events = [_fail(7), _fail(15)]  # gaps 9 and 1 from index 16, both < stale_window=10
     cfg = EscalationConfig(enabled=True, stale_window=10)
     d = decide_escalation(events, current_index=16, ctx=_ctx(effort=2, max_effort=2), config=cfg)
-    assert d.action is EscalationAction.RAISE_TIER
+    assert d.action is EscalationAction.RAISE_RANK
 
 
 # ── AC-A "default OFF": disabled config always holds (kill-gate discipline) ────
@@ -186,5 +186,5 @@ def test_no_events_holds() -> None:
 def test_policy_to_config_bridge() -> None:
     from shunt.router.policy import EscalationPolicy
 
-    cfg = EscalationPolicy(enabled=True, escalate_after_n=3, ladder="tier_only").to_config()
-    assert cfg == EscalationConfig(enabled=True, escalate_after_n=3, ladder="tier_only")
+    cfg = EscalationPolicy(enabled=True, escalate_after_n=3, ladder="rank_only").to_config()
+    assert cfg == EscalationConfig(enabled=True, escalate_after_n=3, ladder="rank_only")

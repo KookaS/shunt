@@ -10,7 +10,6 @@ providers:
 models:
   gpt-5-mini:
     model_id: gpt-5-mini
-    tier: mid
     provider: openai
     supports_streaming: true
     supports_cache_control: false

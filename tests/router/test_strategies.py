@@ -18,16 +18,20 @@ class _Model:
 
 
 class FakePool:
-    """Minimal ModelPoolProtocol: tier→names plus an unhealthy set."""
+    """Minimal ModelPoolProtocol: models weakest→strongest (rank order) + an unhealthy set."""
 
-    def __init__(
-        self, tiers: dict[str, list[str]], unhealthy: frozenset[str] = frozenset()
-    ) -> None:
-        self._tiers = tiers
+    def __init__(self, ranked: list[str], unhealthy: frozenset[str] = frozenset()) -> None:
+        self._ranked = ranked
         self._unhealthy = unhealthy
 
-    def get_tier_models(self, tier: str) -> list[_Model]:
-        return [_Model(n) for n in self._tiers.get(tier, [])]
+    def ranked_models(self) -> list[_Model]:
+        return [_Model(n) for n in self._ranked]
+
+    def rank_of(self, name: str) -> int | None:
+        return self._ranked.index(name) if name in self._ranked else None
+
+    def models_from_rank(self, i: int) -> list[_Model]:
+        return [_Model(n) for n in self._ranked[max(i, 0) :]]
 
     def is_healthy(self, name: str) -> bool:
         return name not in self._unhealthy
@@ -45,44 +49,44 @@ def _neighbor(model: str, outcome: bool = True, cost: float = 1.0) -> NeighborRe
 
 
 class TestAlwaysCheap:
-    def test_picks_lowest_tier_healthy_model(self) -> None:
-        pool = FakePool({"cheap": ["c1", "c2"], "frontier": ["f1"]})
+    def test_picks_lowest_rank_healthy_model(self) -> None:
+        pool = FakePool(["c1", "c2", "f1"])
         model, reason = AlwaysCheapStrategy().select([], pool)
         assert model == "c1"
         assert reason == "always_cheap"
 
-    def test_skips_unhealthy_and_escalates_tier(self) -> None:
-        pool = FakePool({"cheap": ["c1"], "mid": ["m1"]}, unhealthy=frozenset({"c1"}))
+    def test_skips_unhealthy_and_escalates_rank(self) -> None:
+        pool = FakePool(["c1", "m1"], unhealthy=frozenset({"c1"}))
         model, _ = AlwaysCheapStrategy().select([], pool)
         assert model == "m1"
 
     def test_ignores_neighbors(self) -> None:
-        pool = FakePool({"cheap": ["c1"], "frontier": ["f1"]})
+        pool = FakePool(["c1", "f1"])
         model, _ = AlwaysCheapStrategy().select([_neighbor("f1")], pool)
         assert model == "c1"
 
     def test_falls_back_to_any_when_none_healthy(self) -> None:
-        pool = FakePool({"cheap": ["c1"]}, unhealthy=frozenset({"c1"}))
+        pool = FakePool(["c1"], unhealthy=frozenset({"c1"}))
         model, _ = AlwaysCheapStrategy().select([], pool)
         assert model == "c1"
 
 
 class TestAlwaysFrontier:
-    def test_picks_highest_tier_healthy_model(self) -> None:
-        pool = FakePool({"cheap": ["c1"], "frontier": ["f1", "f2"]})
+    def test_picks_highest_rank_healthy_model(self) -> None:
+        pool = FakePool(["c1", "f1", "f2"])
         model, reason = AlwaysFrontierStrategy().select([], pool)
-        assert model == "f1"
+        assert model == "f2"
         assert reason == "always_frontier"
 
-    def test_skips_unhealthy_and_steps_down_tier(self) -> None:
-        pool = FakePool({"high": ["h1"], "frontier": ["f1"]}, unhealthy=frozenset({"f1"}))
+    def test_skips_unhealthy_and_steps_down_rank(self) -> None:
+        pool = FakePool(["h1", "f1"], unhealthy=frozenset({"f1"}))
         model, _ = AlwaysFrontierStrategy().select([], pool)
         assert model == "h1"
 
 
 class TestKnn:
     def test_delegates_to_selection_rule(self) -> None:
-        pool = FakePool({"cheap": ["model-a"]})
+        pool = FakePool(["model-a"])
         neighbors = [_neighbor("model-a") for _ in range(3)]
         rule = SelectionRule(min_success_rate=0.6, min_samples=3)
         model, reason = KnnStrategy(rule).select(neighbors, pool)
@@ -106,7 +110,7 @@ class TestRegistry:
 
     def test_returns_routing_strategy(self) -> None:
         strategy: RoutingStrategy = build_strategy("always_cheap", SelectionRule())
-        pool = FakePool({"cheap": ["c1"]})
+        pool = FakePool(["c1"])
         assert strategy.select([], pool)[0] == "c1"
 
     def test_unknown_strategy_raises(self) -> None:

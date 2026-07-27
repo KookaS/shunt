@@ -20,6 +20,7 @@ strategies:
     - always_cheap        # baseline: always the cheapest model
     - knn                 # shipped algorithm: predict by nearest neighbors
     - knn_cascade         # best quality: kNN-informed try-verify-escalate
+    - tier_classifier     # single-shot: predict crossover tier, route there directly
     - external_prior      # SWE-bench leaderboard per-tier difficulty prior
     # - oracle_reward      # same as oracle with different cost weight
     # - random             # not useful for comparison
@@ -30,6 +31,8 @@ strategies:
   knn_cascade:
     max_tries: 3
     success_rate_threshold: 0.6
+  tier_classifier:
+    success_rate_threshold: 0.6   # neighbour pass-rate at a tier's rung to route there
   external_prior:
     threshold: 0.5   # escalate when external cheap-tier resolve rate < this
   # knn_blended is NOT in `enabled` above: it embeds ~490 external statements, too
@@ -44,6 +47,25 @@ strategies:
 routing:
   control_model: kimi-k3    # strongest ENABLED frontier = kill-gate baseline (opus-4-6 priced but disabled)
   gamma: 0.1
+
+# Derived per-model capability rank (see docs/benchmark-design.md). The monotone-ladder
+# order is DERIVED from measured co-measured pairwise dominance (Copeland), not from
+# hardcoded tiers — a model that measures weaker than a cheaper one ranks below it from
+# the data, with no manual re-tier hack. A model failing the confidence gate below falls
+# back to its price-implied slot (price ascending). Knobs are pinned (constants_pinned
+# discipline); re-pin only on a material suite-scale change, noting the reason here.
+capability_rank:
+  K: 20            # min real cells for a model's measured rank (guards tiny-n lucky intervals)
+  W: 0.35          # max Wilson CI width for a measured rank (the real confidence gate)
+  min_pairs: 8     # min co-measured disagreement tasks for a pair to inform the Copeland score
+  baseline: null   # optional last-reviewed order; when set, a rank flip requires disjoint CIs
+
+# Monotone-ladder imputation: complete the asymmetric outcome matrix in memory so
+# every strategy is scored on one equal-coverage task set. NEVER persisted to
+# results.csv (recomputed each run). The scoring path reads these flags.
+impute:
+  enabled: true             # gate the completion (false reproduces raw-coverage behaviour)
+  drop_unsolvable: false    # keep universal-fail tasks in the denominator (equal N across strategies)
 
 # p(arm|model) exploration sampling. A model's default_arm always
 # runs; each other bracket arm of rank `r` (0 = cheapest) runs on the fraction of
@@ -96,6 +118,29 @@ collect:
   noninferiority_margin: 0.05   # δ: the pre-registered 5pp equal-quality bar for paired McNemar
   budget_phase_a: null      # per-phase --max-cost override (null = shared ceiling)
   budget_phase_c: null
+
+# Ladder collector (benchmark.runner.ladder_collect). Escalates up to --workers challenges
+# concurrently, each serial cheap->strong. The budget "reservation" that keeps concurrent
+# challenges from jointly overspending --max-cost is a CONSERVATIVE UPPER BOUND (the max
+# observed real_cost per model, not the median). A tier with no measured cost yet reserves
+# `cold_start_tier_cost` instead of 0 — otherwise a fresh run (empty results.csv) would
+# reserve 0 per tier and admit --workers challenges that each run uncapped.
+ladder:
+  cold_start_tier_cost: 1.0   # USD reserved per UNMEASURED tier. Conservative: above the
+                              # measured p90 per-cell real_cost (~$0.27) and below the
+                              # observed max (~$2.95), so a cold-start run won't admit an
+                              # unbounded first wave yet still admits challenges under a
+                              # realistic cap. Superseded per-model once a real cost is measured.
+
+# Live agent-scaffold bounds (benchmark.runner.infer). step_limit is the PRIMARY, model-speed-
+# agnostic per-cell bound: every model gets the SAME number of agent steps regardless of inference
+# speed (wall-clock timing unfairly penalises slow models). The wall-clock ceiling is a generous
+# GRACEFUL secondary backstop set from --timeout (default 1800s), and an external watchdog fires
+# strictly LATER (+300s) as a hard last resort for a genuine single-call hang — so a normal slow
+# run always terminates gracefully with its real usage.cost captured, never abandoned at $0.
+# step_limit 70 justified from benchmark/escalation/data/live: passers' step counts p90=58, p95=68.
+live:
+  step_limit: 70
 
 paths:
   challenges: routing/data/challenges.json        # curated input, relative to config.py dir

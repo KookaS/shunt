@@ -70,11 +70,11 @@ class EscalationPolicy(BaseModel):
     escalate_after_n: int = Field(default=2, gt=0)
     stale_window: int = Field(default=10, gt=0)
     blocking_exit_code: int = Field(default=2, ge=0)
-    ladder: str = Field(default="effort_then_tier")
+    ladder: str = Field(default="effort_then_rank")
 
     @model_validator(mode="after")
     def _check_ladder(self) -> EscalationPolicy:
-        allowed = ("effort_then_tier", "tier_only")
+        allowed = ("effort_then_rank", "rank_only")
         if self.ladder not in allowed:
             joined = ", ".join(allowed)
             raise ValueError(f"unknown escalation.ladder {self.ladder!r}; allowed: {joined}")

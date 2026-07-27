@@ -279,3 +279,49 @@ class TestZeroEvidenceRows:
             _validate_rows([{"strategy": "kNN", "n_tasks": 2, "TotalCost": 1.0, "AvgPerf%": 50.0}])
             is None
         )
+
+
+class TestNeighborhoodPurity:
+    """viz_knn's purity must exclude the query from its own neighbourhood and
+    normalise by the neighbours that exist, not by the requested k."""
+
+    MODELS: Final = ["deepseek-v4-flash", "kimi-k3"]
+
+    def _fixture(self, n: int):
+        """n unit-norm vectors plus a pass matrix where the cheapest model always passes."""
+        rng = np.random.default_rng(0)
+        emb = rng.normal(size=(n, 16))
+        emb /= np.linalg.norm(emb, axis=1, keepdims=True)
+        vecs = np.zeros((n, len(self.MODELS) * 4))
+        vecs[:, 0] = 1.0
+        return emb, vecs
+
+    def test_k_above_task_count_reports_true_purity(self):
+        # 8 tasks all routed to one model: purity is 1.00 by definition. Dividing by
+        # the configured k=20 and counting the query itself as a neighbour reported 0.40.
+        config.load(CONFIG_PATH)
+        n = 8
+        emb, vecs = self._fixture(n)
+        task_ids = [f"t{i}" for i in range(n)]
+        purity, selections = viz_knn.compute_neighborhood_purity(
+            emb @ emb.T, task_ids, vecs, emb, self.MODELS, k=20
+        )
+        assert len(set(selections.values())) == 1
+        assert purity.tolist() == [1.0] * n
+
+    def test_query_is_never_its_own_neighbour(self):
+        n = 8
+        emb, _ = self._fixture(n)
+        sim = emb @ emb.T
+        for i in range(n):
+            neighbors = viz_knn._nearest_neighbors(sim[i], i, 20).tolist()
+            assert i not in neighbors
+            assert len(neighbors) == n - 1
+
+    def test_single_task_matrix_does_not_divide_by_zero(self):
+        config.load(CONFIG_PATH)
+        emb, vecs = self._fixture(1)
+        purity, _ = viz_knn.compute_neighborhood_purity(
+            emb @ emb.T, ["t0"], vecs, emb, self.MODELS, k=10
+        )
+        assert purity.tolist() == [0.0]

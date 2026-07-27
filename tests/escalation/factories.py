@@ -48,7 +48,7 @@ def make_step(  # noqa: PLR0913 (test builder — many optional knobs by design)
         dedup_key=failing_check_id,
         model="m",
         reasoning_effort="default",
-        tier_index=0,
+        rank_index=0,
         effort_index=0,
         real_cost=None,
     )
