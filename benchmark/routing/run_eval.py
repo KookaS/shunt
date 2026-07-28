@@ -11,12 +11,11 @@ from typing import Final
 from benchmark import config
 from benchmark.routing import frontier_estimate, impute, summary
 from benchmark.routing.metrics import discriminating_stats
-from benchmark.routing.strategies.external_prior import ExternalPriorCascade
 from benchmark.routing.strategies.fixed import AlwaysCheap, AlwaysFrontier, Random
 from benchmark.routing.strategies.knn import kNNStrategy
-from benchmark.routing.strategies.knn_blended import kNNBlended
 from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
 from benchmark.routing.strategies.oracle import Oracle, OracleRewardAware
+from benchmark.routing.strategies.price_cascade import PriceCascade
 from benchmark.routing.strategies.tier_classifier import TierClassifier
 
 
@@ -48,13 +47,12 @@ def get_strategies(
             "random",
             "knn",
             "knn_cascade",
+            "price_cascade",
         ]
 
     knn_p = dict(strat_cfg.get("knn", {}))
     cascade_p = dict(strat_cfg.get("knn", {}))
     cascade_p.update(strat_cfg.get("knn_cascade", {}))
-    ext_p = dict(strat_cfg.get("external_prior", {}))
-    blend_p = dict(strat_cfg.get("knn_blended", {}))
     tier_p = dict(strat_cfg.get("knn", {}))
     tier_p.update(strat_cfg.get("tier_classifier", {}))
 
@@ -70,6 +68,9 @@ def get_strategies(
         cascade_p.setdefault("min_samples", min_samples)
     if max_tries is not None:
         cascade_p.setdefault("max_tries", max_tries)
+    # Price-Cascade takes only max_tries — it has no kNN knobs by construction, and
+    # sharing the cascade's depth keeps the two cascades comparable at equal depth.
+    price_p = {"max_tries": cascade_p.get("max_tries", 3)}
 
     registry: dict[str, Callable[[], object]] = {
         "oracle": lambda: Oracle(),
@@ -79,8 +80,7 @@ def get_strategies(
         "random": lambda: Random(seed=42),
         "knn": lambda: kNNStrategy(**knn_p),
         "knn_cascade": lambda: kNNCascadeStrategy(**cascade_p),
-        "external_prior": lambda: ExternalPriorCascade(**ext_p),
-        "knn_blended": lambda: kNNBlended(**blend_p),
+        "price_cascade": lambda: PriceCascade(**price_p),
         "tier_classifier": lambda: TierClassifier(**tier_p),
     }
 

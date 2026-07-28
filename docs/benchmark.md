@@ -24,7 +24,7 @@ different meanings, so keep them apart (see the note below the table).
 | `arm_sampling.default_only_models` | collect | Models pinned to their default reasoning arm (no effort sweep). |
 | `collect.*` (`audit_fraction`, `noninferiority_margin`, `phase_a_mode` …) | collect | Knobs for the `cost_optimal` sampler only. |
 | `sample_size`, `seed`, `n_default` | collect | **Which tasks** run and how many (nested order). |
-| `strategies.enabled` | evaluate | **Which routing policies are scored offline** over the cache — `oracle`, `always_cheap`, `always_frontier`, `knn`, `knn_cascade`, `external_prior`. |
+| `strategies.enabled` | evaluate | **Which routing policies are scored offline** over the cache — `oracle`, `always_cheap`, `always_frontier`, `knn`, `knn_cascade`, `tier_classifier`. |
 | `strategies.knn.*`, `knn_cascade.*` … | evaluate | Per-policy hyperparameters (`k`, `success_rate_threshold`, `max_tries`). |
 | `routing.control_model` | evaluate | The fixed-frontier baseline the kill-gate is measured against. |
 
@@ -203,7 +203,7 @@ the column derive a `stop_reason` on read.
 
 ### Result integrity
 
-CI validates every `results.csv` row (`check_integrity.py`): identity anchors (spec
+CI validates every `results.csv` row (`benchmark/runner/check_integrity.py`): identity anchors (spec
 content hash, model version, reasoning-arm hash, image digest) must match the current
 source, and
 every derivable field is recomputed and cross-checked — the `cost` column against its
@@ -217,7 +217,7 @@ invariant — stronger provenance (signed runs) and sampled re-execution are pla
 
 ### Data-integrity validator (write-time + pre-analysis)
 
-`check_integrity.py` runs in CI, after data already exists. A separate validator
+`benchmark/runner/check_integrity.py` runs in CI, after data already exists. A separate validator
 (`benchmark/routing/validate.py`) encodes what a *valid row* means as invariants that
 fail loud at two earlier points, so invalid data is never silently recorded or analysed:
 
@@ -359,8 +359,20 @@ its own when read outside these docs.
 | Random | Uniform random per task (mean over seeds) |
 | kNN | Embed task → retrieve similar → cheapest capable model |
 | kNN-cascade | kNN-informed try-verify-escalate |
-| External-Prior | SWE-bench leaderboard per-task difficulty prior; escalate on external p_solve signal |
-| kNN-blended | kNN over our verified runs plus down-weighted external neighbours (off by default — embedding the external statements is slow) |
+| Price-Cascade | Try-verify-escalate in ascending price order — no embeddings, no kNN |
+| Tier-Classifier | Single-shot: predict the crossover tier, route there directly |
+
+`Price-Cascade` is the zero-ML floor for cascade routing: it tries the `max_tries`
+cheapest measured models cheapest-first, stops at the first patch that passes, and
+falls back to the frontier model. It has one knob (`max_tries`) and no learned
+component, so it is the baseline any learned router has to beat before its
+embeddings can be said to earn their keep.
+
+Both cascades escalate to the **same** frontier — the most expensive model the
+benchmark actually measured, which is also what `Always-Frontier` routes to.
+Escalating to a model that was never run would make the task unscorable rather
+than answer it, and a different escalation target on each cascade would make the
+zero-ML baseline and the learned router incomparable.
 
 The embedding-based strategies are **offline evaluation strategies**, not live product behavior —
 the proxy today forwards to a cheap default and calls none of them. The cascade
@@ -386,14 +398,12 @@ Scored offline, the embedding-based routing strategies split by workload:
 
 Exploration ships on ([configuration](configuration.md#tune-the-router)), so the
 obvious question is what it costs. You can answer it from the committed data alone.
-`results.csv` is a near-dense grid of *measured* (task, model) outcomes: 285 of the
-49 × 6 cells are filled (96.9%), and 44 tasks have a result for all six models.
-Scoring uses each model's default reasoning arm, which drops one more cell — so the
-sub-grid the replay actually runs on is 43 tasks × 6 models (the largest fully dense
-block, found greedily). On a fully
-dense sub-grid, replaying a routing policy is exact rather than estimated: look up
-the model the policy picks, read the outcome that was actually recorded for that
-cell, average. Nothing is simulated and no request is sent.
+`results.csv` is a partly-dense grid of *measured* (task, model) outcomes. The replay
+runs on the largest fully dense sub-grid inside it, found greedily — currently
+**163 tasks × 2 models = 326 measured cells** against a full matrix that is 61.5%
+dense. On a fully dense sub-grid, replaying a routing policy is exact rather than
+estimated: look up the model the policy picks, read the outcome that was actually
+recorded for that cell, average. Nothing is simulated and no request is sent.
 
 ```bash
 python -m benchmark.routing.scripts.plot_exploration
@@ -405,21 +415,25 @@ off and once with it on, and writes `routing/reports/exploration_replay.png` plu
 summary to stdout. Cells the policy routes to but the benchmark never ran are
 skipped and counted, never filled in with a guess.
 
-On the 43-task dense slice, averaged over 20 seeds: exploration costs **1.10× the
-exploration-off bill** on average and **1.22× on the worst seed**, inside the ~1.4×
-the default budget allows. The paired per-task difference is **−2.8 pp pass rate
-(95% CI −6.5 to +0.3)** and **+$0.013 per task (95% CI −$0.000 to +$0.027)** — the
-paired numbers are the ones to read, since the two arms' marginal intervals are far
-too wide to separate at n=43.
+On the 163-task dense slice, averaged over 20 seeds: exploration costs **1.65× the
+exploration-off bill** on average and **1.77× on the worst seed**. The paired
+per-task difference is **−2.6 pp pass rate (95% CI −3.8 to −1.4)** and **+$0.0021
+per task (95% CI +$0.0017 to +$0.0027)** — the paired numbers are the ones to read,
+since the two arms' marginal pass-rate intervals ([69%, 83%] vs [67%, 81%]) overlap
+heavily.
 
-Three caveats keep this honest. The replay's outcome matrix is **static**, so an
+Four caveats keep this honest. The replay's outcome matrix is **static**, so an
 exploratory pull can never improve a later decision — this measures exploration's
 cost with its learning benefit set to zero, which is the pessimistic half of the
 ledger, not a verdict on whether exploration pays. The budget cap counts the
 router's own confidence-weighted neighbourhood costs, not realized ones, so the
 realized explore/exploit spend ratio can exceed `explore_budget_frac` on an unlucky
-seed (1.29 against a 0.4 cap here) even though the cap is doing its job. And 43
-tasks from one benchmark is a small, single-workload sample.
+seed (0.77 against a 0.4 cap here) even though the cap is doing its job. The dense
+slice maximises *cells*, which currently favours many tasks over many models: it
+holds only the two cheapest models and **no frontier arm**, so the measured overhead
+is the cost of exploring between cheap models and is a **lower bound** on the shipped
+policy's, where an exploratory pull can land on a model ~40× the price. And it is
+one workload.
 
 ## Scoring every strategy on one task set — monotone-rank imputation
 
@@ -483,10 +497,10 @@ equal coverage across the whole suite is guaranteed by **ladder collection mode*
 **What the report shows.** The headline is a **paired** cost/quality contrast — the router
 versus fixed-frontier on the *same* completed task set — with its confidence interval, and
 it stays honest when that interval crosses zero (equal quality is reported as equal, not
-spun as a win). On the current coverage-incomplete data, the kNN-cascade strategy matches
-fixed-frontier quality (**+2.1 pp, CI crosses zero → statistically equal**) at roughly
-**15% lower cost** on the shared measurable set; the full-distribution figure waits on
-ladder-mode collection.
+spun as a win). On the current coverage-incomplete data, the best deployable router is
+`Price-Cascade`: it matches fixed-frontier quality (**+0.6 pp, CI crosses zero →
+statistically equal**) at roughly **76% lower cost** on the shared measurable set; the
+full-distribution figure waits on ladder-mode collection.
 
 **A population estimate, as a cross-check.** Alongside imputation, Shunt can estimate the
 fixed-frontier baseline's pass-rate and cost directly from a *uniformly random audit* of

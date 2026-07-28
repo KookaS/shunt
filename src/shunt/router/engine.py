@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import logging
 import math
+import secrets
 import threading
 from collections.abc import Callable
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -19,6 +21,7 @@ from shunt.router.escalation import (
     EscalationConfig,
     EscalationDirective,
     EscalationRunner,
+    ExplorationStream,
     FailureEvent,
     failure_event_from_outcome,
 )
@@ -87,6 +90,23 @@ class OutcomeIndex(Protocol):
         """Return the *k* nearest labeled sessions to *embedding*."""
 
 
+def _void_exploration(provenance: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite a stamped exploration record to the arm that ACTUALLY happened: an excluded hold."""
+    # Mirrors the ladder-exhausted case in `decide_escalation`: an escalation the engine could
+    # not deliver carries no counterfactual information, so it is logged at propensity 1.0 with
+    # randomized=False and the estimator drops it rather than weighting a fiction.
+    record = provenance.get("escalation_exploration")
+    if not isinstance(record, dict):
+        return provenance
+    voided = {
+        **record,
+        "action": EscalationAction.HOLD,
+        "propensity": 1.0,
+        "randomized": False,
+    }
+    return {**provenance, "escalation_exploration": voided}
+
+
 class RouterEngine:
     """Top-level router decision engine, tying together the embedder, outcome
     index (kNN), and selection rule. Embeddings are cached per session.
@@ -152,6 +172,18 @@ class RouterEngine:
         # its base model. Persisted with the failure log so a restart keeps the higher rung; a
         # verified pass retires it alongside the failures.
         self._task_effort_arm: dict[str, str] = {}
+        # The epsilon-greedy decision stream, built ONLY when the extra opt-in knob is set.
+        # Seeded from config when given, else drawn once and recorded on every decision so a
+        # logged propensity stays auditable after the run.
+        self._escalation_stream = self._build_escalation_stream(escalation)
+
+    @staticmethod
+    def _build_escalation_stream(config: EscalationConfig | None) -> ExplorationStream | None:
+        """The seeded exploration stream, or None when the epsilon knob is off (the default)."""
+        if config is None or not config.enabled or config.exploration_epsilon <= 0.0:
+            return None
+        seed = config.exploration_seed
+        return ExplorationStream.from_seed(seed if seed is not None else secrets.randbits(48))
 
     @staticmethod
     def _build_exploration(
@@ -468,8 +500,6 @@ class RouterEngine:
         """Serialize the auto-escalation failure log + per-task decision counters."""
         # Empty dict when escalation is disabled — a restart then has nothing to restore.
         # Mirrors snapshot_exploration_state: a restart must not silently wipe accrued counts.
-        from dataclasses import asdict
-
         if self._escalation is None or not self._escalation.enabled:
             return {}
         with self._lock:
@@ -562,12 +592,27 @@ class RouterEngine:
             self._task_decision_index.get(task_key, 0),
             config,
             loop_health_alarm=bool(self._loop_health_alarm and self._loop_health_alarm()),
+            stream=self._escalation_stream,
         )
+        # A flagged checkpoint carries the propensity that generated its arm — persisted with the
+        # session so an off-policy estimator can join it to the verified outcome later. Attached
+        # BEFORE the branch so an explored HOLD (which leaves the decision untouched) logs too.
+        if directive.exploration is not None:
+            provenance = {**provenance, "escalation_exploration": asdict(directive.exploration)}
         if directive.action is EscalationAction.RAISE_EFFORT:
-            return self._apply_effort(task_key, model_name, reason, provenance, directive, cur_arm)
-        if directive.action is EscalationAction.RAISE_RANK:
-            return self._apply_rank(task_key, model_name, reason, provenance, directive)
-        return (model_name, reason, provenance)
+            applied = self._apply_effort(
+                task_key, model_name, reason, provenance, directive, cur_arm
+            )
+        elif directive.action is EscalationAction.RAISE_RANK:
+            applied = self._apply_rank(task_key, model_name, reason, provenance, directive)
+        else:  # HOLD — nothing to deliver, and an EXPLORED hold really did happen
+            return (model_name, reason, provenance)
+        if applied is not None:
+            return applied
+        # The rung could not be delivered (no healthy higher model / no arm above). The escalate
+        # arm did NOT happen, so the record must not claim it did — an estimator would weight
+        # this row into exactly the arm it is trying to measure.
+        return (model_name, reason, _void_exploration(provenance))
 
     def _max_rank_index(self) -> int:
         """The top capability-rank index (number of ranked models - 1; -1 when empty)."""
@@ -601,12 +646,13 @@ class RouterEngine:
         provenance: dict[str, Any],
         directive: EscalationDirective,
         cur_arm: str | None,
-    ) -> tuple[str, str, dict[str, Any]]:
+    ) -> tuple[str, str, dict[str, Any]] | None:
         """Step the reasoning arm up one rung, keeping the SAME model (cache-safe)."""
+        del reason
         reasoning = self._reasoning_of(model_name)
         next_arm = reasoning.next_arm_above(cur_arm) if reasoning and cur_arm else None
-        if next_arm is None:  # no headroom after all — leave the decision untouched
-            return (model_name, reason, provenance)
+        if next_arm is None:  # no headroom after all — the caller leaves the decision untouched
+            return None
         self._task_effort_arm[task_key] = next_arm
         self._retire_after_escalation(task_key)
         logger.info(
@@ -635,11 +681,12 @@ class RouterEngine:
         reason: str,
         provenance: dict[str, Any],
         directive: EscalationDirective,
-    ) -> tuple[str, str, dict[str, Any]]:
+    ) -> tuple[str, str, dict[str, Any]] | None:
         """Step to the first healthy model at a strictly-higher capability rank."""
+        del reason
         higher = self._escalate_one_rank(model_name)
-        if higher is None:
-            return (model_name, reason, provenance)
+        if higher is None:  # every higher-rank model unhealthy — the caller voids the record
+            return None
         self._retire_after_escalation(task_key)
         # Drop the old model's effort position: the new-rank model starts at its OWN default
         # arm, never mid-ladder on a stale/foreign arm id (which would silently block its own

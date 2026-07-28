@@ -45,6 +45,17 @@ router:
     # outbound request. It steps to the next-higher-RANK model only once the model's reasoning
     # ladder is exhausted (or the model declares no reasoning arms). rank_only skips the effort rung.
     ladder: effort_then_rank      # effort_then_rank | rank_only (one rank per step, never straight to the top)
+    # Epsilon-greedy randomization at FLAGGED checkpoints, with the realized propensity logged.
+    # A SEPARATE opt-in on top of `enabled`: turning escalation on must never silently randomize
+    # your routing. 0.0 (default) = today's fully deterministic behaviour, bit for bit.
+    # Why it exists: under a deterministic policy P(escalate) = 0, the overlap condition every
+    # off-policy estimator needs FAILS, so "does escalation help?" is not identified at any
+    # sample size. Randomizing a small fraction of flagged checkpoints and logging the
+    # propensity is what makes the question answerable (benchmark/escalation/ope.py). The
+    # explored arm is always HOLD — exploration can only WITHHOLD an escalation, never invent
+    # one, so it introduces no model switch the policy would not already make (cache-safe).
+    exploration_epsilon: 0.0      # 0 = deterministic; 0.1-0.3 while collecting identifiable data
+    exploration_seed: null        # null ⇒ the router draws one and records it on every decision
 
   # Off-wire automatic outcome capture. With a work_dir set, at each session's close shunt
   # re-runs THAT repo's test suite (pytest/jest/go/cargo, auto-detected) off the wire and

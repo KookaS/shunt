@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import hnswlib
 import numpy as np
 
+from benchmark import config
 from shunt.models.config import ModelPool, default_registry_path
 from shunt.router.cold_start import ColdStartStrategy
 from shunt.router.embedder import Embedder
@@ -61,6 +62,22 @@ def _model_pricing(matrix: dict) -> dict[str, float]:
     """Return {model: total_cost_per_1M} from the matrix pricing section."""
     models = matrix.get("models", {})
     return {m: models[m].get("input_price", 0) + models[m].get("output_price", 0) for m in models}
+
+
+def _benchmark_model_pool() -> ModelPool:
+    """The shipped registry, restricted to the models the benchmark has enabled."""
+    # Tiering still comes from the packaged models.yaml (production behaviour), but the
+    # CANDIDATE set is the measured one. The unrestricted pool let the engine select a
+    # registry model the benchmark never ran (disabled, research-estimated price); the
+    # matrix has no such cell, so the task went to `unscorable` and vanished from scoring.
+    enabled = config.enabled_models()
+    if not enabled:
+        # restrict_to_live([]) is a documented no-op — silently reinstating the whole
+        # registry is the exact failure this function exists to prevent.
+        raise ValueError("benchmark.yaml enables no models; kNN has no candidate set.")
+    pool = ModelPool(_BUNDLED_MODEL_CONFIG)
+    pool.restrict_to_live(enabled)
+    return pool
 
 
 def _fallback_model(matrix: dict) -> str:
@@ -243,8 +260,9 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
         # The SHIPPED model pool — tiers come from src/shunt config, not a
         # benchmark-local price heuristic, so the benchmark measures production tiering.
         # Pinned to the packaged shunt/config/models.yaml so an ambient SHUNT_CONFIG_DIR /
-        # ~/.config/shunt override can't silently change the benchmark's tiering.
-        model_pool = ModelPool(_BUNDLED_MODEL_CONFIG)
+        # ~/.config/shunt override can't silently change the benchmark's tiering, then
+        # narrowed to the enabled (measured) models so no pick can be unscorable.
+        model_pool = _benchmark_model_pool()
 
         selection_rule = SelectionRule(
             min_success_rate=self._success_rate_threshold,

@@ -58,11 +58,11 @@ capture = ["cryptography>=43"]
 # talks to its sandbox (a keyless install otherwise fails at first live call).
 benchmark = [
     "matplotlib>=3.9",
-    # scikit-learn/scipy are BENCHMARK-only (PCA, TF-IDF, cosine similarity, the
-    # held-out normal CDF). They were in the core dependency list, so every
+    # scikit-learn/scipy are BENCHMARK-only (PCA, cosine similarity, the
+    # McNemar binomtest). They were in the core dependency list, so every
     # `pip install shunt-router` pulled ~100 MB the shipped router never imports:
-    # `grep -r sklearn src/` is empty. scipy was imported by heldout_eval.py while
-    # undeclared anywhere, surviving only as a transitive of scikit-learn.
+    # `grep -r sklearn src/` is empty. scipy was undeclared anywhere, surviving
+    # only as a transitive of scikit-learn.
     "scikit-learn>=1.5",
     "scipy>=1.13",
     "swebench>=4.1",

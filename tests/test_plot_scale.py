@@ -1,19 +1,16 @@
 """Scale-robustness tests for the task-level plots — must degrade gracefully at 500+ tasks.
 
-Also holds the degenerate-input regressions for the same plots: an empty prior join
-and a heatmap slice that must match the slice its title promises.
+Also holds the degenerate-input regression for the heatmap slice, which must match
+the slice its title promises.
 """
 
 from __future__ import annotations
 
-import csv
-
 import numpy as np
 import pytest
 
-from benchmark import config
 from benchmark.routing import report
-from benchmark.routing.scripts import plot_external, threshold_sweep
+from benchmark.routing.scripts import threshold_sweep
 
 
 def _big_matrix(n_tasks: int, n_models: int) -> dict:
@@ -49,83 +46,6 @@ class TestHeatmapScale:
         assert "+44 more" in s and s.count(",") == 5  # 6 names → 5 separators
 
 
-class TestOursVsExternalScale:
-    def _write(self, tmp_path, n_tasks):
-        rcsv = tmp_path / "results.csv"
-        with rcsv.open("w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["challenge_id", "model", "pass", "cost"])
-            for i in range(n_tasks):
-                w.writerow([f"repo__task-{i}", "deepseek-v4-flash", i % 4 != 0, 0.01])
-        ext = tmp_path / "ext.csv"
-        with ext.open("w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["instance_id", "p_solve"])
-            for i in range(n_tasks):
-                w.writerow([f"repo__task-{i}", round(0.3 + 0.5 * ((i % 5) / 5), 3)])
-        return rcsv, ext
-
-    def test_agreement_matrix_at_500_tasks(self, tmp_path):
-        config.load("benchmark/benchmark.yaml")
-        rcsv, ext = self._write(tmp_path, 500)
-        out = plot_external.plot_ours_vs_external(rcsv, ext, tmp_path)
-        assert out.exists() and out.stat().st_size > 0
-
-    def test_bars_at_small_n(self, tmp_path):
-        config.load("benchmark/benchmark.yaml")
-        rcsv, ext = self._write(tmp_path, 12)
-        out = plot_external.plot_ours_vs_external(rcsv, ext, tmp_path)
-        assert out.exists() and out.stat().st_size > 0
-
-
-class TestAgreementMatrixNoPriorMatch:
-    """41 tasks, none present in the leaderboard CSV — every p_solve is NaN."""
-
-    def _write(self, tmp_path, n_tasks):
-        rcsv = tmp_path / "results.csv"
-        with rcsv.open("w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["challenge_id", "model", "pass", "cost"])
-            for i in range(n_tasks):
-                w.writerow([f"repo__task-{i}", "deepseek-v4-flash", i % 4 != 0, 0.01])
-        ext = tmp_path / "ext.csv"
-        with ext.open("w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["instance_id", "p_solve"])
-            w.writerow(["someone-else__task-0", "0.4"])
-        return rcsv, ext
-
-    def test_renders_instead_of_dividing_by_zero(self, tmp_path):
-        config.load("benchmark/benchmark.yaml")
-        rcsv, ext = self._write(tmp_path, _BARS_OVERFLOW_N)
-        out = plot_external.plot_ours_vs_external(rcsv, ext, tmp_path)
-        assert out.exists() and out.stat().st_size > 0
-
-    def test_footer_states_that_no_task_matched(self, tmp_path):
-        config.load("benchmark/benchmark.yaml")
-        captured = {}
-        orig = plot_external.plot_frame.save
-
-        def spy(fig, path, spec, **kw):
-            captured["extra"] = kw.get("extra")
-            return orig(fig, path, spec, **kw)
-
-        plot_external.plot_frame.save = spy
-        try:
-            rcsv, ext = self._write(tmp_path, _BARS_OVERFLOW_N)
-            plot_external.plot_ours_vs_external(rcsv, ext, tmp_path)
-        finally:
-            plot_external.plot_frame.save = orig
-        limits = " ".join(captured["extra"].limitations)
-        assert "NO TASK MATCHED THE LEADERBOARD PRIOR" in limits
-        assert str(_BARS_OVERFLOW_N) in limits
-        # No cell-share claim can be made when nothing matched.
-        assert not any("red cell holds" in n for n in captured["extra"].notes)
-
-
-_BARS_OVERFLOW_N = plot_external._BARS_MAX_TASKS + 1
-
-
 def _sweep_rows() -> list[dict]:
     """A sweep whose two threshold levels sit 0.1 apart — the epsilon-collision case."""
     rows = []
@@ -139,9 +59,32 @@ def _sweep_rows() -> list[dict]:
                         "min_samples": ms,
                         "Reward": reward + ms,
                         "n_excluded": 0,
+                        "n_scored": 100,
+                        "AvgPerf%": reward + ms,
+                        "TotalCost": 1.0 + ms,
+                        "frontier_share": 0.1 * ms,
+                        "cheapest_share": 0.5,
+                        "n_models_used": 3,
                     }
                 )
     return rows
+
+
+def _selected(**overrides) -> dict:
+    """A stand-in for the cost-at-equal-quality pick the annotations describe."""
+    row = {
+        "k": 4,
+        "Reward": 12.0,
+        "success_rate_thresh": 0.5,
+        "min_samples": 1,
+        "AvgPerf%": 90.0,
+        "TotalCost": 12.0,
+        "n_scored": 100,
+        "frontier_share": 0.2,
+        "n_models_used": 3,
+    }
+    row.update(overrides)
+    return row
 
 
 class TestSweepSliceMatchesTitle:
@@ -169,12 +112,17 @@ class TestSweepSliceMatchesTitle:
         out = tmp_path / "sweep.png"
         threshold_sweep._plot_sweep_heatmap(
             rows,
+            rows,
             out,
             y_name="min_samples",
             fixed=("success_rate_thresh", 0.5),
             swept_ks=[2, 4, 6],
             sensitivity={"k": 0.5, "min_samples": 0.4, "success_rate_thresh": 0.1},
-            excluded_max=0,
+            selected=_selected(min_samples=1),
+            reward_best=_selected(min_samples=2, frontier_share=0.9, n_models_used=1),
+            n_folds=5,
+            imputed=(0, 600),
+            frontier_model="m19",
         )
         assert out.exists() and out.stat().st_size > 0
 
@@ -188,24 +136,32 @@ class TestEtaSentenceFollowsTheData:
         ],
     )
     def test_driver_is_the_parameter_with_the_larger_eta(self, sensitivity, driver, passenger):
-        note = threshold_sweep._heatmap_annotations(
-            {"k": 4, "Reward": 12.0},
+        notes = threshold_sweep._heatmap_annotations(
+            selected=_selected(),
+            reward_best=_selected(),
             y_name="success_rate_thresh",
             sensitivity=sensitivity,
             swept_ks=[2, 4, 6],
-            excluded_max=0,
-        ).notes[0]
+            n_folds=5,
+            imputed=(0, 600),
+            frontier_model="m19",
+        ).notes
+        note = next(n for n in notes if n.startswith("Reward is driven by"))
         assert note.startswith(f"Reward is driven by {driver} (η²=0.90)")
         assert f"{passenger} barely moves it (η²=0.05)" in note
 
     def test_comparable_parameters_are_not_called_negligible(self):
-        note = threshold_sweep._heatmap_annotations(
-            {"k": 4, "Reward": 12.0},
+        notes = threshold_sweep._heatmap_annotations(
+            selected=_selected(),
+            reward_best=_selected(),
             y_name="success_rate_thresh",
             sensitivity={"k": 0.45, "success_rate_thresh": 0.44},
             swept_ks=[2, 4, 6],
-            excluded_max=0,
-        ).notes[0]
+            n_folds=5,
+            imputed=(0, 600),
+            frontier_model="m19",
+        ).notes
+        note = next(n for n in notes if n.startswith("Reward is driven by"))
         assert "barely moves it" not in note
         assert "also matters" in note
 

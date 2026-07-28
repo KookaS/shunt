@@ -21,7 +21,7 @@ import numpy as np  # noqa: E402
 
 from benchmark import config, plot_frame  # noqa: E402
 from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
-from benchmark.routing import plot_style, report, summary  # noqa: E402
+from benchmark.routing import censoring, plot_style, report, summary  # noqa: E402
 
 _STRATEGY_BAR = "#607D8B"  # a single neutral slate — strategies are not model-hued
 
@@ -44,27 +44,64 @@ SPEC = FigureSpec(
     ),
     notes=(
         "We do not record wall-clock latency; calls stand in as a coarse ordinal proxy.",
-        "A strategy's coverage-gap picks (chosen model unmeasured on that task) are skipped, "
-        "never counted as zero calls.",
+        "A strategy's coverage-gap picks (chosen model unmeasured on that task) are skipped in "
+        "the right panel, and rows recording zero calls are dropped from the left panel — "
+        "neither is ever counted as a real 0.",
     ),
     limitations=(
         "Calls are not seconds: a call's duration also depends on its token size, and real "
         "wall-clock time depends on host load and container startup as much as on the model. "
         "Read the bars as ordinal, never as measured latency.",
+        "Each left-hand bar pools every reasoning arm that model ran, and the arm mixes differ "
+        "sharply between models, so a cross-model comparison measures 'model x its arm mix', "
+        "not the model alone.",
     ),
 )
 
 
-def _model_calls(results_csv: Path) -> dict[str, list[int]]:
-    """{model: [calls, ...]} over EVERY measured row (all arms) in results.csv."""
+def _as_bool(value: object) -> bool:
+    """Parse a CSV cell as a boolean — `bool("False")` is True, which is the whole trap."""
+    return str(value).strip().lower() in {"true", "1", "yes"}
+
+
+def _is_censored_row(row: dict[str, str]) -> bool:
+    """True iff a raw results.csv row is a CENSORED stop, via the shared vocabulary.
+
+    censoring.is_censored expects real booleans; a CSV hands it the STRINGS "True"/"False",
+    both truthy, so it must be coerced first or every legacy row reads as solved.
+    """
+    return censoring.is_censored(
+        {
+            "pass": _as_bool(row.get("pass")),
+            "timeout_flag": _as_bool(row.get("timeout_flag")),
+            "stop_reason": row.get("stop_reason") or "",
+        }
+    )
+
+
+def _model_calls(results_csv: Path) -> tuple[dict[str, list[int]], dict[str, int], int]:
+    """``(per-model call counts, per-model dropped-row counts, censored rows kept)``."""
+    # A row recording ZERO calls is a run that never happened (resource-limit stop before the
+    # first round-trip): it carries no latency observation and must be dropped, not averaged
+    # in as a genuine 0. The guard used to be `if not calls`, but `calls` is the STRING "0" —
+    # truthy — so all 15 such rows survived as real zeros and pulled the frontier models'
+    # means down by up to 8%, in the direction that flatters the router.
     per_model: dict[str, list[int]] = {}
+    dropped: dict[str, int] = {}
+    censored_kept = 0
     with results_csv.open(newline="") as f:
         for row in csv.DictReader(f):
-            calls = row.get("calls")
-            if not calls:
+            raw = row.get("calls")
+            if raw is None or raw == "":
                 continue
-            per_model.setdefault(row["model"], []).append(int(float(calls)))
-    return per_model
+            calls = int(float(raw))
+            censored = _is_censored_row(row)
+            if calls == 0:
+                dropped[row["model"]] = dropped.get(row["model"], 0) + 1
+                continue
+            censored_kept += 1 if censored else 0
+            per_model.setdefault(row["model"], []).append(calls)
+    return per_model, dropped, censored_kept
 
 
 def _strategy_calls(matrix: dict, tasks: list[str], gamma: float) -> dict[str, list[int]]:
@@ -132,13 +169,15 @@ def _draw_bars(
     ax.set_axisbelow(True)
 
 
-def _annotations(
+def _annotations(  # noqa: PLR0913
     models: list[str],
     model_calls: dict[str, list[int]],
     strat_calls: dict[str, list[int]],
     dropped: list[str],
+    zero_call: dict[str, int],
+    censored_kept: int,
 ) -> Annotations:
-    """Footer content derived from the data: per-bar sample sizes and absent models."""
+    """Footer content derived from the data: sample sizes, absent models, censoring."""
     sizes = [len(model_calls[m]) for m in models] + [len(v) for v in strat_calls.values()]
     notes: list[str] = []
     limits: list[str] = []
@@ -146,6 +185,18 @@ def _annotations(
         limits.append(
             f"Sample sizes per bar range {min(sizes)}-{max(sizes)} tasks; the smallest bars "
             "move a lot on one unusually chatty task"
+        )
+    if zero_call:
+        detail = ", ".join(f"{m} {c}" for m, c in sorted(zero_call.items(), key=lambda kv: -kv[1]))
+        notes.append(
+            f"{sum(zero_call.values())} censored row(s) recorded ZERO calls — the run stopped "
+            f"before its first round-trip — and are EXCLUDED rather than averaged in as real "
+            f"zeros ({detail})"
+        )
+    if censored_kept:
+        limits.append(
+            f"{censored_kept} row(s) that DID make calls still stopped on a resource limit, so "
+            "their call counts are truncated: those bars are lower bounds, not completed runs"
         )
     if dropped:
         notes.append(
@@ -157,7 +208,7 @@ def _annotations(
 
 def plot_timing(results_csv: Path, matrix: dict, tasks: list[str], out_path: Path) -> Path:
     """Two panels: avg calls/task per model (left) and per routed strategy (right)."""
-    model_calls = _model_calls(results_csv)
+    model_calls, zero_call, censored_kept = _model_calls(results_csv)
     candidates = config.enabled_models() or sorted(model_calls)
     models = [m for m in candidates if m in model_calls]
     dropped = [m for m in candidates if m not in model_calls]
@@ -191,7 +242,10 @@ def plot_timing(results_csv: Path, matrix: dict, tasks: list[str], out_path: Pat
     )
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     return plot_frame.save(
-        fig, out_path, SPEC, extra=_annotations(models, model_calls, strat_calls, dropped)
+        fig,
+        out_path,
+        SPEC,
+        extra=_annotations(models, model_calls, strat_calls, dropped, zero_call, censored_kept),
     )
 
 

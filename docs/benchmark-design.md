@@ -52,8 +52,6 @@ benchmark/
       fixed.py                            Always-cheap, always-frontier, random
       knn.py                              Embed task → retrieve neighbours → cheapest capable
       knn_cascade.py                      kNN-informed try-verify-escalate
-      knn_blended.py                      kNN over our runs + down-weighted external neighbours
-      external_prior.py                   SWE-bench leaderboard difficulty prior
       _template.py                        Skeleton for a new strategy
     run_eval.py                           Evaluate all strategies × tasks
     metrics.py                            Reward, regret, efficiency
@@ -104,7 +102,8 @@ Cost is recorded from actual model API responses: the provider-returned cache-aw
 | **Always-Frontier** | Always most expensive model (derived from pricing matrix). Maximum cost baseline. |
 | **Random** | Random model per task (mean over N seeds). Null baseline. |
 
-Additional strategies in `strategies/`: kNN, kNN-cascade, Tier-Classifier, kNN-blended, and External-Prior.
+Additional strategies in `strategies/`: kNN, kNN-cascade, Price-Cascade (the zero-ML
+price-ascending cascade — the floor a learned router has to beat), and Tier-Classifier.
 
 ## Equal-coverage scoring — monotone-rank imputation
 
@@ -156,7 +155,7 @@ Per task, from its **real** default-arm cells:
    **fail** (by capability rank).
 3. Impute: model at rank `≥ s*` → pass; model at rank `≤ f*` → fail; a model strictly
    between `f*` and `s*` is left **UNKNOWN**. `τ = s*`.
-4. Extend to every ranked model, so always-cheap, kNN, kNN-cascade and always-frontier are
+4. Extend to every ranked model, so always-cheap, kNN, the cascades and always-frontier are
    all scorable on the same task set.
 5. **Observed truth always wins** — a real cell is never overwritten, even when it
    contradicts the axiom.

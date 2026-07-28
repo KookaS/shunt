@@ -1,7 +1,7 @@
 """Per-step verified-outcome stamping — the change that lets escalation recurrence fire."""
 
 # Proves the full chain end-to-end: mocked per-step VerifierResults (from an offline replay) →
-# stamped StepViews carrying a REAL recurring dedup_key → `run_eval.evaluate` reports
+# stamped StepViews carrying a REAL recurring dedup_key → the swept policy cell reports
 # ``n_escalated > 0``. Real machinery, mocked only at the container boundary (unit mocking).
 
 from __future__ import annotations
@@ -115,7 +115,9 @@ def test_recurring_dedup_key_yields_n_escalated_gt_zero() -> None:
         _messages(4), {"trajectory_id": "t", "terminal_resolved": False}, outcomes
     )
     report = run_eval.evaluate([traj], [GridPoint(2, 10)])
-    assert report.n_escalated > 0
+    # Per CELL, never summed across the sweep: the old top-level field reported 415 escalations
+    # over 12 grid cells as 4980.
+    assert report.policy_cells[0].n_escalated > 0
 
 
 def test_two_distinct_single_failures_do_not_escalate() -> None:
@@ -125,4 +127,4 @@ def test_two_distinct_single_failures_do_not_escalate() -> None:
         _messages(4), {"trajectory_id": "t", "terminal_resolved": False}, outcomes
     )
     report = run_eval.evaluate([traj], [GridPoint(2, 10)])
-    assert report.n_escalated == 0
+    assert report.policy_cells[0].n_escalated == 0

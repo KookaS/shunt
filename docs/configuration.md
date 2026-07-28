@@ -371,6 +371,8 @@ router:
     stale_window: 10            # failures not recurring within N decisions retire
     blocking_exit_code: 2       # FUTURE: hook-stream path only; off-wire gate gates on outcome/is_infra_failure
     ladder: effort_then_rank    # effort_then_rank | rank_only (one rank per step, never straight to the top)
+    exploration_epsilon: 0.0    # 0 = deterministic; above 0 randomizes flagged checkpoints
+    exploration_seed: null      # null ⇒ the router draws a seed and records it on every decision
 ```
 
 | Field | Default | Meaning |
@@ -380,6 +382,8 @@ router:
 | `stale_window` | `10` | A failure not recurring within this many decisions is retired from the counter. |
 | `ladder` | `effort_then_rank` | `effort_then_rank` raises reasoning effort first (cache-safe), then steps to the next-higher-rank model. `rank_only` skips the effort rung. |
 | `blocking_exit_code` | `2` | Reserved for a future hook-stream path — **not read by the current off-wire gate** (see below). |
+| `exploration_epsilon` | `0.0` | Fraction of *flagged* checkpoints where the escalation is randomly withheld, so its value becomes measurable. `0.0` is fully deterministic. A **separate** opt-in: `enabled: true` alone never randomizes. |
+| `exploration_seed` | `null` | Seed for that randomization. `null` means shunt draws one and records it on every decision, so any logged propensity stays reproducible. |
 
 Escalation triggers only on **confirmed, verified capability failures** — a test suite
 re-run via `work_dir`, or a manual `shunt flag <session_id> bad`. Non-blocking results

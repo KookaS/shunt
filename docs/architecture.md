@@ -57,8 +57,8 @@ learns from them for subsequent sessions.
 Which algorithm the router runs is one value, `router.strategy`, read from the
 `router.yaml` packaged at `src/shunt/config/router.yaml`. Three strategies are
 live-eligible: `knn` (the default), `always_cheap`, and `always_frontier`. The
-benchmark-only strategies — `oracle`, `external_prior`, `random`, and
-`knn_cascade` — are rejected at boot. `knn_cascade` is excluded on purpose: a real
+benchmark-only strategies — `oracle`, `random`, and `knn_cascade` — are
+rejected at boot. `knn_cascade` is excluded on purpose: a real
 quality cascade has to verify mid-session and escalate, and that is not one
 cache-safe decision per session. Override the file by putting your own in
 `$SHUNT_CONFIG_DIR`, or override single values with the `shunt start` flags — see

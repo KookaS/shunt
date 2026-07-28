@@ -18,7 +18,7 @@ from sklearn.metrics.pairwise import cosine_similarity  # noqa: E402
 
 from benchmark import config, plot_frame  # noqa: E402
 from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
-from benchmark.routing import summary  # noqa: E402
+from benchmark.routing import plot_style, summary  # noqa: E402
 from benchmark.routing.strategies.knn import _embed_texts  # noqa: E402
 from shunt.router.embedder import Embedder  # noqa: E402
 
@@ -68,10 +68,24 @@ def oracle_optimal_model(task_id: str, results_map: dict) -> str | None:
     candidates: list[tuple[str, float]] = []
     for model, outcome in task_results.items():
         if outcome.get("pass"):
-            candidates.append((model, outcome.get("cost", 0.0)))
+            candidates.append((model, plot_style.row_real_cost(outcome)))
     if not candidates:
         return None
     return min(candidates, key=lambda x: x[1])[0]
+
+
+def imputed_label_share(optimal_map: dict, results_map: dict) -> tuple[int, int]:
+    """``(labels derived from an imputed cell, total labels)`` for the optimal-model panel.
+
+    An imputed cell is filled pass=True, so it can BECOME a task's cheapest passing model
+    without anything having been measured. The right panel's percentages inherit that.
+    """
+    imputed = sum(
+        1
+        for tid, model in optimal_map.items()
+        if results_map.get(tid, {}).get(model, {}).get("imputed")
+    )
+    return imputed, len(optimal_map)
 
 
 def jaccard_overlap(neighbors_a: list[int], neighbors_b: list[int]) -> float:
@@ -234,6 +248,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         overlap_stats,
         agreement_stats,
         len(task_ids) - len(optimal_map),
+        imputed_label_share(optimal_map, results_map),
     )
     print(f"\nPlot written to {plot_path}")
 
@@ -254,6 +269,7 @@ def _plot_comparison(
     overlap_stats: dict[int, dict[str, float]],
     agreement_stats: dict[int, dict[str, int]],
     n_no_optimal: int,
+    imputed_labels: tuple[int, int] = (0, 0),
 ) -> Path:
     """Two-panel figure: neighbor-set Jaccard overlap (left) and optimal-model
     agreement among neighbors (right), each split by k.
@@ -338,6 +354,14 @@ def _plot_comparison(
         limits.append(
             f"{n_no_optimal} of {n_tasks} tasks have no passing model at all, yet stay in the "
             "denominator — the right panel's percentages are conservative"
+        )
+    n_imputed, n_labels = imputed_labels
+    if n_imputed:
+        limits.append(
+            f"{n_imputed} of {n_labels} optimal-model labels ({n_imputed / n_labels:.1%}) come "
+            "from a monotone-IMPUTED cell, not a measurement: imputation is pass-only, so it "
+            "can only ever ADD a cheapest-passing model. The right panel is optimistic by that "
+            "share"
         )
     return plot_frame.save(fig, plot_path, SPEC, extra=Annotations(limitations=tuple(limits)))
 

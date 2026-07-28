@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
-"""Strategy comparison Pareto scatter — rows derived exactly as report.py does."""
+"""Strategy comparison Pareto scatter — plotted straight from strategy_summary.csv."""
 
-# Rows come from report.derive_tasks/derive_rows (i.e. summary.py), so this figure and
-# report.py always print the SAME pass rates and costs off ONE denominator: coverage-gap
-# cells are excluded, never scored as fail@$0.
+# This figure USED to re-derive its rows through report.derive_tasks/derive_rows. That was
+# the single source of two defects:
+#   1. STALENESS. The derivation is a second producer of the same numbers, so the PNG and
+#      strategy_summary.csv could (and did) disagree on all 7 points — one by 174% on cost —
+#      whenever the figure was skipped in a refresh sweep.
+#   2. MEMORY. derive_rows instantiates the kNN, kNN-cascade and Tier-Classifier strategies,
+#      each of which loads its own ONNX sentence-embedder and never releases it: >4 GB RSS,
+#      OOM-killed (exit 137) on a 16 GB host.
+# Reading the CSV that summary.py already wrote fixes both at once: one producer, so the
+# figure cannot disagree with the summary, and no embedder is loaded at all (~80 MB, seconds).
+# A freshness gate refuses to draw a figure older than the results it claims to describe.
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import matplotlib
@@ -17,9 +26,23 @@ import numpy as np  # noqa: E402
 
 from benchmark import config, plot_frame  # noqa: E402
 from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
-from benchmark.routing import report, summary  # noqa: E402
+from benchmark.routing import plot_style, summary  # noqa: E402
 from benchmark.routing.metrics import compute_pareto  # noqa: E402
 from benchmark.routing.strategies.fixed import AlwaysFrontier  # noqa: E402
+
+# Written by summary.write_summary_csv (report.py / run_matrix.py). Derived + gitignored:
+# regenerate with `python -m benchmark.routing.report` or a run_matrix pass.
+SUMMARY_CSV = Path("benchmark/routing/reports/strategy_summary.csv")
+_NUMERIC_FIELDS = (
+    "n_tasks",
+    "n_unscorable",
+    "n_pass",
+    "AvgPerf%",
+    "AvgPerf_ci_lower",
+    "AvgPerf_ci_upper",
+    "TotalCost",
+    "AvgCost",
+)
 
 SPEC = FigureSpec(
     reading=(
@@ -36,12 +59,13 @@ SPEC = FigureSpec(
     ),
     definitions=(
         ("pass rate", "share of tasks whose patch passed the repo's tests/typecheck"),
-        ("Pareto frontier", "strategies nothing else beats on BOTH cost and pass rate"),
+        ("Pareto frontier", "strategies nothing else PLOTTED HERE beats on cost and pass rate"),
+        ("error bar", "95% CI on the pass rate (cost has none)"),
         ("Always-Frontier", "baseline sending every task to the most expensive enabled model"),
     ),
     notes=(
-        "Rows come from the same derive_tasks/derive_rows path report.py uses, so both "
-        "producers print identical numbers off one denominator.",
+        "Points are read directly from strategy_summary.csv, the file summary.py writes — "
+        "one producer, so this figure cannot disagree with the summary table.",
         "This frontier is a best-so-far staircase over measured strategies; pareto_scatter.png "
         "draws a convex hull instead, which rides above this line wherever blending two "
         "strategies beats both.",
@@ -49,7 +73,13 @@ SPEC = FigureSpec(
     limitations=(
         "A backtest over the recorded outcome matrix, not live runs; cost is the recorded "
         "per-cell cost, so cache effects are approximated rather than replayed.",
-        "No confidence intervals on any point — a few tasks either way moves a mark.",
+        "Cost carries no interval, and the vertical error bars are pass-rate CIs only — two "
+        "strategies whose bars overlap are not distinguishable by this figure.",
+        "PARETO MEMBERSHIP IS RELATIVE TO THE PLOTTED SET, and the set has changed: a "
+        "strategy flagged Pareto-optimal here is only un-dominated by the strategies drawn "
+        "beside it. External-Prior, which dominated kNN, was deleted from the repo — so kNN "
+        "now reads as Pareto-optimal because its dominator was REMOVED, not because the "
+        "router improved. Read the flag as 'nothing plotted beats it', never as progress.",
     ),
 )
 
@@ -104,7 +134,10 @@ def _coverage_note(matrix: dict, tasks: list[str], results: list[dict]) -> str |
     n = len(tasks)
     measured = sum(1 for tid in tasks if picks[tid] in matrix["results"].get(tid, {}))
     cells = [completed["results"].get(tid, {}).get(picks[tid]) for tid in tasks]
-    imputed = sum(1 for cell in cells if cell and cell.get("imputed"))
+    imputed_cells = [cell for cell in cells if cell and cell.get("imputed")]
+    imputed = len(imputed_cells)
+    imputed_pass = sum(1 for cell in imputed_cells if cell.get("pass"))
+    imputed_cost = sum(plot_style.row_real_cost(cell) for cell in imputed_cells)
     covered = sum(1 for cell in cells if cell)
     if measured >= n:
         return None
@@ -114,11 +147,25 @@ def _coverage_note(matrix: dict, tasks: list[str], results: list[dict]) -> str |
         f"models, as the strategy does), really measured on {measured}/{n} tasks"
     )
     if imputed:
+        # The count alone is not the disclosure that matters: monotone imputation is
+        # PASS-ONLY by construction, so it can never contribute a failure. Quoting
+        # "78 cells completed" without that fact leaves the equal-quality claim circular.
+        total_cost = float(row.get("TotalCost", 0.0) or 0.0)
+        cost_share = (
+            f", i.e. {imputed_cost / total_cost:.0%} of its {plot_style.usd(total_cost)}"
+            if (total_cost > 0)
+            else ""
+        )
         return (
-            f"{head}; monotone imputation completes {imputed} more, for {covered}/{n} "
-            f"completed cells. Its plotted pass rate rests on the {scored} task(s) that row "
-            f"scored — completed cells, measured OR imputed, not measurements alone; cells "
-            f"left uncovered are excluded, not auto-failed"
+            f"{head}; monotone imputation completes {imputed} more ({imputed / n:.0%} of the "
+            f"row), for {covered}/{n} completed cells. THE IMPUTATION IS PASS-ONLY: "
+            f"{imputed_pass}/{imputed} imputed cells are filled pass=True and none can be a "
+            f"failure, so {imputed_pass} of this row's {int(row.get('n_pass', 0) or 0)} passes "
+            f"and {plot_style.usd(imputed_cost)} of its cost{cost_share} are synthetic. "
+            f"The kill-gate "
+            f"baseline this figure is measured against is therefore NOT a measured baseline; "
+            f"its plotted pass rate rests on the {scored} task(s) that row scored — completed "
+            f"cells, measured OR imputed. Cells left uncovered are excluded, not auto-failed"
         )
     return (
         f"{head}; its plotted pass rate rests on the {scored} measured task(s) only "
@@ -126,12 +173,16 @@ def _coverage_note(matrix: dict, tasks: list[str], results: list[dict]) -> str |
     )
 
 
-def _annotations(results: list[dict], coverage_note: str | None) -> Annotations:
+def _annotations(
+    results: list[dict], coverage_note: str | None, stale_note: str | None = None
+) -> Annotations:
     """Footer content that depends on the data: denominators and zero-evidence rows."""
     counts = [int(float(r.get("n_tasks", 0) or 0)) for r in results]
     scored = [c for c in counts if c > 0]
     notes: list[str] = []
     limits: list[str] = []
+    if stale_note:
+        limits.append(stale_note)
     if coverage_note:
         limits.append(coverage_note)
     if scored and min(scored) != max(scored):
@@ -149,14 +200,20 @@ def _annotations(results: list[dict], coverage_note: str | None) -> Annotations:
     return Annotations(notes=tuple(notes), limitations=tuple(limits))
 
 
-def _declutter(fig, anns: list, step: float = 3.0, passes: int = 40) -> None:
+def _declutter(fig, ax, anns: list, step: float = 3.0, passes: int = 40) -> None:  # noqa: ANN001 (matplotlib Figure/Axes)
     """Nudge overlapping point labels apart along y (in offset-point space)."""
     if len(anns) < 2:
         return
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
+    # A label _label_offset placed BELOW its marker is there to stay clear of the title, so
+    # it may never rise above its starting offset; the lower label of the pair then takes
+    # the whole separation. A label placed ABOVE its marker has no such ceiling — giving it
+    # one left `room` at 0 on the first pass for EVERY label, so the nudge was one-directional
+    # and the whole cluster could only ever walk downwards.
+    ceiling = [a.xyann[1] if a.xyann[1] < 0 else float("inf") for a in anns]
     for _ in range(passes):
-        boxes = [a.get_window_extent(renderer) for a in anns]
+        boxes = [_label_box(a, renderer) for a in anns]
         pairs = [
             (i, j)
             for i in range(len(anns))
@@ -167,9 +224,44 @@ def _declutter(fig, anns: list, step: float = 3.0, passes: int = 40) -> None:
             return
         for i, j in pairs:
             lo, hi = (i, j) if boxes[i].y0 <= boxes[j].y0 else (j, i)
-            anns[lo].xyann = (anns[lo].xyann[0], anns[lo].xyann[1] - step)
-            anns[hi].xyann = (anns[hi].xyann[0], anns[hi].xyann[1] + step)
+            room = min(step, max(0.0, ceiling[hi] - anns[hi].xyann[1]))
+            anns[hi].xyann = (anns[hi].xyann[0], anns[hi].xyann[1] + room)
+            anns[lo].xyann = (anns[lo].xyann[0], anns[lo].xyann[1] - (2 * step - room))
         fig.canvas.draw()
+        # The separation itself is unbounded — an unresolvable cluster keeps pushing every
+        # pass — so the axes box, not the pass count, is what keeps a label on the figure.
+        if _clamp_to_axes(ax, anns, renderer, ceiling):
+            fig.canvas.draw()
+
+
+def _clamp_to_axes(ax, anns: list, renderer, ceiling: list[float]) -> bool:  # noqa: ANN001 (matplotlib Axes/Renderer)
+    """Pull any label that left the axes back inside; returns whether anything moved."""
+    bounds = ax.get_window_extent(renderer)
+    to_points = 72.0 / ax.figure.dpi
+    moved = False
+    for ann, top in zip(anns, ceiling, strict=True):
+        box = _label_box(ann, renderer)
+        if box.y0 < bounds.y0:
+            shift = (bounds.y0 - box.y0) * to_points
+        elif box.y1 > bounds.y1:
+            shift = (bounds.y1 - box.y1) * to_points
+        else:
+            continue
+        target = min(ann.xyann[1] + shift, top)
+        if target != ann.xyann[1]:
+            ann.xyann = (ann.xyann[0], target)
+            moved = True
+    return moved
+
+
+def _label_box(ann, renderer):  # noqa: ANN001, ANN202 (matplotlib Annotation/Renderer)
+    """The label's own drawn box — Annotation.get_window_extent spans the leader line too.
+
+    Including the leader made a box grow as its label moved away, so every pair stayed
+    'overlapping' however far apart the text got and the declutter never converged.
+    """
+    patch = ann.get_bbox_patch()
+    return (patch or ann).get_window_extent(renderer)
 
 
 def _label_offset(cost: float, perf: float, cost_mid: float, perf_hi: float) -> dict:
@@ -194,11 +286,16 @@ def plot_pareto(
     out_path: Path,
     coverage_note: str | None = None,
     frontier_cost: float | None = None,
+    stale_note: str | None = None,
 ) -> None:
     names = [r["strategy"] for r in results]
     colors, markers = _style_maps(names)
     costs = np.array([float(r["TotalCost"]) for r in results], dtype=float)
     perfs = np.array([float(r["AvgPerf%"]) for r in results], dtype=float)
+    # The CIs were already in strategy_summary.csv and were simply not drawn. Without them
+    # the top-left cluster reads as a ranking when the intervals overlap almost completely.
+    ci_lo = np.array([float(r.get("AvgPerf_ci_lower", r["AvgPerf%"])) for r in results])
+    ci_hi = np.array([float(r.get("AvgPerf_ci_upper", r["AvgPerf%"])) for r in results])
 
     # Zero-evidence rows are excluded from the frontier: ($0, 0%) is un-dominated
     # by construction, so including them would draw "measured nothing" as optimal.
@@ -220,6 +317,17 @@ def plot_pareto(
         marker = markers[name]
         is_pareto = pareto_map.get(name, False)
 
+        ax.errorbar(
+            costs[i],
+            perfs[i],
+            yerr=[[max(0.0, perfs[i] - ci_lo[i])], [max(0.0, ci_hi[i] - perfs[i])]],
+            fmt="none",
+            ecolor=color,
+            elinewidth=1.3,
+            capsize=4,
+            alpha=0.85,
+            zorder=5,
+        )
         ax.scatter(
             costs[i],
             perfs[i],
@@ -308,7 +416,7 @@ def plot_pareto(
         pad=12,
     )
     ax.set_xlim(left=costs.min() * 0.55, right=costs.max() * 1.7)
-    ax.set_ylim(top=min(103.0, best_perf + 7.0))
+    ax.set_ylim(bottom=max(0.0, float(ci_lo.min()) - 6.0), top=min(103.0, best_perf + 7.0))
     leg = ax.legend(loc="lower right", fontsize=8, framealpha=0.95, ncol=1)
     leg.get_frame().set_edgecolor(_GRID)
     ax.grid(True, which="major", color=_GRID, linewidth=0.6)
@@ -318,13 +426,44 @@ def plot_pareto(
         spine.set_edgecolor(_GRID)
     ax.set_axisbelow(True)
 
-    _declutter(fig, point_labels)
+    _declutter(fig, ax, point_labels)
     # The surface colour rides on the figure itself, so the frame's savefig picks it
     # up (savefig.facecolor defaults to the figure's own).
-    plot_frame.save(fig, out_path, SPEC, extra=_annotations(results, coverage_note))
+    plot_frame.save(fig, out_path, SPEC, extra=_annotations(results, coverage_note, stale_note))
+
+
+def load_summary_rows(path: Path) -> list[dict]:
+    """Read strategy_summary.csv, coercing the numeric columns the figure indexes."""
+    rows: list[dict] = []
+    with path.open(newline="") as f:
+        for raw in csv.DictReader(f):
+            row: dict = dict(raw)
+            for field in _NUMERIC_FIELDS:
+                value = raw.get(field, "")
+                row[field] = float(value) if value not in (None, "") else 0.0
+            row["Pareto"] = str(raw.get("Pareto", "")).strip().lower() == "true"
+            rows.append(row)
+    return rows
+
+
+def _staleness_limit(summary_csv: Path, results_csv: Path) -> str | None:
+    """LIMITS line when the summary predates the results it claims to summarise."""
+    # The defect this closes: the committed PNG once disagreed with strategy_summary.csv on
+    # all seven points because it was skipped in a refresh sweep. Reading one file removes
+    # the disagreement; saying so when the file itself is behind removes the silent version.
+    if not results_csv.exists() or not summary_csv.exists():
+        return None
+    if summary_csv.stat().st_mtime >= results_csv.stat().st_mtime:
+        return None
+    return (
+        f"STALE INPUT: {summary_csv.name} is older than {results_csv.name}, so these points "
+        f"describe an earlier results set. Regenerate the summary "
+        f"(python -m benchmark.routing.report) before trusting any number here"
+    )
 
 
 def main(config_path: str = "benchmark/benchmark.yaml") -> None:
+    """Draw the strategy Pareto scatter from the summary CSV summary.py writes."""
     config.load(config_path)
 
     import argparse
@@ -332,6 +471,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     ap = argparse.ArgumentParser(description="Strategy comparison Pareto plot")
     ap.add_argument("--config", default=config_path, help="Path to config YAML")
     ap.add_argument("--matrix", default=None, help="Path to matrix JSON (default: challenges.json)")
+    ap.add_argument("--summary", default=None, help=f"Path to summary CSV (default: {SUMMARY_CSV})")
     ap.add_argument(
         "--output",
         default="benchmark/routing/reports/strategy_comparison.png",
@@ -344,6 +484,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
 
     matrix_path = Path(args.matrix) if args.matrix else config.challenges_path()
     out_path = Path(args.output)
+    summary_csv = Path(args.summary) if args.summary else SUMMARY_CSV
 
     matrix = load_matrix(matrix_path)
 
@@ -354,28 +495,28 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         )
         return
 
-    # Same task set AND same metric derivation as report.py: one denominator for
-    # both producers (report.derive_tasks/derive_rows go through summary.py, which
-    # drops coverage-gap cells instead of scoring them as fail@$0).
-    tasks = report.derive_tasks(matrix, config.benchmark_params().get("seed", 42))
-    if not tasks:
+    if not summary_csv.exists():
+        # Deliberately NOT falling back to an in-process re-derivation: a second producer of
+        # these numbers is exactly what let the figure drift from the table it must match.
         print(
-            "No results yet — results.csv holds no rows. "
-            "Run the live matrix first: python -m benchmark.runner.run_matrix --live"
+            f"No results yet — {summary_csv} has not been written. "
+            "Generate it first: python -m benchmark.routing.report"
         )
         return
 
-    results = report.derive_rows(matrix, tasks)
+    results = load_summary_rows(summary_csv)
     if not results:
         print("No strategies enabled — nothing to plot.")
         return
 
-    print(f"Evaluating {len(results)} strategies on {len(tasks)} tasks")
+    tasks = sorted(matrix["results"].keys())
+    print(f"Plotting {len(results)} strategies from {summary_csv}")
     for row in results:
         print(
             f"  {row['strategy']:25}  pass={row['AvgPerf%']:>5.2f}%  "
-            f"cost=${row['TotalCost']:<8.4f}  (n={row['n_tasks']}, "
-            f"{row['n_unscorable']} unscorable excluded)"
+            f"[{row['AvgPerf_ci_lower']:.2f}, {row['AvgPerf_ci_upper']:.2f}]  "
+            f"cost=${row['TotalCost']:<8.4f}  (n={int(row['n_tasks'])}, "
+            f"{int(row['n_unscorable'])} unscorable excluded)"
         )
 
     # Fixed-frontier baseline cost anchors the "well left of frontier cost" guide
@@ -389,6 +530,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         out_path,
         coverage_note=_coverage_note(matrix, tasks, results),
         frontier_cost=frontier_cost,
+        stale_note=_staleness_limit(summary_csv, config.results_csv_path()),
     )
     print(f"\nPlot saved to {out_path}")
 

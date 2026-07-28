@@ -23,44 +23,51 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from benchmark import config, plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
-from benchmark.routing import summary
+from benchmark.routing import plot_style, summary
 from benchmark.routing.strategies.knn import _embed_texts
 
 matplotlib.use("Agg")
 
 SPEC = FigureSpec(
     reading=(
-        "Each cell is the routing reward of one kNN hyperparameter combination. x is k, the "
-        "number of nearest neighbours the router consults; y is whichever of "
-        "success_rate_thresh / min_samples explains more reward variance (it is named on the "
-        "axis), and the third swept parameter is held at its best value, stated in the title. "
-        "Brighter = higher reward. The optimum is bold and ringed in red; a white cell scored "
-        "nothing. Expect a broad bright band rather than one standout cell."
+        "Two heatmaps over the SAME grid: x is k, the number of nearest neighbours the "
+        "router consults, y is whichever of success_rate_thresh / min_samples explains more "
+        "variance (named on the axis), and the third swept parameter is fixed at the value "
+        "in the title. LEFT is the held-out pass rate — brighter is better. RIGHT is the "
+        "share of tasks that combination routes to the single most expensive model — "
+        "brighter means MORE escalation, and 1.00 means the 'router' is Always-Frontier. "
+        "The red ring marks the same cell in both panels."
     ),
     goal=(
-        "Settle inside the brightest BAND, not on a single cell — read which axis the band "
-        "runs along, then pick the parameter the NOTE names as the passenger for stability "
-        "rather than for reward."
+        "Read the two panels TOGETHER. A cell is only a routing result if it is bright on "
+        "the left while NOT saturated on the right: quality that came from choosing between "
+        "models, rather than from sending everything to the priciest one. A bright-left, "
+        "bright-right cell has bought its pass rate with money, and a fixed policy would "
+        "have done the same thing for the same price."
     ),
     definitions=(
-        ("reward", "tasks passed minus gamma x total cost, gamma from the benchmark config"),
+        ("held-out pass rate", "scored on tasks whose own fold was excluded from the index"),
+        ("frontier share", "fraction of tasks the combination sends to the priciest model"),
         ("k", "how many nearest tasks the router consults before choosing a model"),
         (
             "success_rate_thresh",
             "neighbour pass-rate below which the router escalates off the cheap model",
         ),
         ("min_samples", "min neighbours with a recorded outcome before the router trusts them"),
-        ("eta^2", "share of reward variance one parameter explains, 0 to 1"),
+        (
+            "cost at equal quality",
+            "cheapest cell whose pass rate clears the best cell's 95% Wilson lower bound — "
+            "the selection rule, replacing reward-argmax",
+        ),
     ),
     notes=(
         "Neighbourhoods use the real shipped jina embedder — the same Embedder the router "
         "runs, never a TF-IDF proxy.",
     ),
     limitations=(
-        "Hyperparameters are selected IN-SAMPLE: every combination is scored on the same "
-        "tasks it is tuned on, with no held-out split, so the winning reward is optimistic "
-        "and will not survive unchanged on new tasks.",
-        "Reward is cost-model dependent — the optimum moves when model prices move.",
+        "Folds split TASKS, not repositories, so a held-out task can still sit next to a "
+        "sibling task from the same repo — this is a lower bound on optimism, not an "
+        "estimate of transfer to a new codebase (see knn_cross_repo_transfer.png).",
     ),
 )
 
@@ -86,19 +93,6 @@ def load_matrix(path: Path) -> dict:
     return summary.load_scored_matrix(path)
 
 
-def oracle(results: dict) -> str:
-    candidates: list[tuple[str, float]] = []
-    for model, outcome in results.items():
-        if outcome.get("pass"):
-            cost = outcome.get("cost", 0.0)
-            candidates.append((model, cost))
-    if not candidates:
-        if results:
-            return min(results, key=lambda m: results[m].get("cost", 0.0))
-        return ""
-    return min(candidates, key=lambda x: x[1])[0]
-
-
 def model_cost(model_name: str, matrix: dict) -> float:
     models = matrix["models"]
     if model_name in models:
@@ -107,7 +101,7 @@ def model_cost(model_name: str, matrix: dict) -> float:
     return 0.0
 
 
-def knn_select(
+def knn_select(  # noqa: PLR0913
     query_idx: int,
     task_ids: list[str],
     task_descs: list[str],
@@ -117,14 +111,29 @@ def knn_select(
     k: int,
     success_rate_thresh: float,
     min_samples: int,
+    allowed: np.ndarray | None = None,
+    sims_row: np.ndarray | None = None,
 ) -> tuple[str, bool, float, bool]:
-    """Returns ``(chosen, passed, cost, scored)``. ``scored`` is False when the
-    chosen model has no measured cell on the query task — a coverage gap the caller
-    EXCLUDES from aggregation, never imputes as fail@$0."""
-    sims = cosine_similarity(features[query_idx : query_idx + 1], features).flatten()
+    """``(chosen, passed, cost, scored)``; ``scored`` is False on an unmeasured chosen cell."""
+    # A coverage gap the caller EXCLUDES from aggregation, never imputes as fail@$0.
+    # ``allowed`` restricts which tasks may act as neighbours — that is what turns the
+    # sweep from in-sample tuning into held-out evaluation. ``sims_row`` accepts a
+    # precomputed similarity row (the whole grid shares one matrix).
+    sims = (
+        np.array(sims_row, dtype=float, copy=True)
+        if sims_row is not None
+        else cosine_similarity(features[query_idx : query_idx + 1], features).flatten()
+    )
     sims[query_idx] = -1.0
+    if allowed is not None:
+        blocked = np.ones(len(sims), dtype=bool)
+        blocked[allowed] = False
+        sims[blocked] = -np.inf
 
-    nearest = np.argsort(sims)[::-1][:k]
+    ranked = np.argsort(sims)[::-1][:k]
+    # -inf marks a task outside the allowed index and -1.0 the query itself; both are
+    # sentinels, never real neighbours, so they must not reach the vote.
+    nearest = [int(i) for i in ranked if np.isfinite(sims[i]) and sims[i] > -1.0]
 
     model_observations: dict[str, list[bool]] = {}
     for nidx in nearest:
@@ -154,14 +163,45 @@ def knn_select(
     outcome = results_map[task_ids[query_idx]].get(chosen)
     if outcome is None:
         return chosen, False, 0.0, False
-    return chosen, outcome.get("pass", False), outcome.get("cost", 0.0), True
+    return chosen, outcome.get("pass", False), plot_style.row_real_cost(outcome), True
 
 
 def compute_reward(passed: bool, cost: float, gamma: float = 0.1) -> float:
     return 1.0 - gamma * cost if passed else 0.0 - gamma * cost
 
 
-def evaluate_params(
+def cost_at_equal_quality(rows: list[dict]) -> dict | None:
+    """The CHEAPEST cell whose pass rate is not significantly below the best one's."""
+    # This replaces reward-argmax as the selection rule, and it removes gamma entirely.
+    # Reward = passes - gamma*cost with the configured gamma=0.1 makes one extra pass worth
+    # $10 against a suite costing $1-$87, so cost is very nearly a no-op and the argmax
+    # degenerates to "escalate everything" — the previous optimum routed 86% of tasks to the
+    # single priciest model, i.e. it selected Always-Frontier and called it routing. The
+    # project's actual criterion is cost AT EQUAL QUALITY, which is what this computes: take
+    # the best pass rate's Wilson lower bound as the quality floor, then minimise cost.
+    scored = [r for r in rows if int(r.get("n_scored", 0) or 0) > 0]
+    if not scored:
+        return None
+    best = max(scored, key=lambda r: r["AvgPerf%"])
+    n_best = int(best["n_scored"])
+    floor_lo, _hi = plot_style.wilson_interval(round(best["AvgPerf%"] / 100 * n_best), n_best)
+    eligible = [r for r in scored if r["AvgPerf%"] / 100 >= floor_lo]
+    return min(eligible, key=lambda r: (r["TotalCost"], -r["AvgPerf%"]))
+
+
+def imputed_share(results_map: dict, task_ids: list[str]) -> tuple[int, int]:
+    """``(imputed cells, total cells)`` in the matrix this sweep is scored on."""
+    cells = [c for tid in task_ids for c in results_map.get(tid, {}).values()]
+    return sum(1 for c in cells if c.get("imputed")), len(cells)
+
+
+def fold_assignment(n: int, folds: int, seed: int = 42) -> np.ndarray:
+    """Deterministic fold id per task — the held-out split the sweep is selected on."""
+    rng = np.random.default_rng(seed)
+    return rng.permutation(np.arange(n) % max(1, folds))
+
+
+def evaluate_params(  # noqa: PLR0913
     task_ids: list[str],
     task_descs: list[str],
     features: np.ndarray,
@@ -170,16 +210,26 @@ def evaluate_params(
     k: int,
     success_rate_thresh: float,
     min_samples: int,
+    sims: np.ndarray | None = None,
+    fold_ids: np.ndarray | None = None,
+    frontier_model: str = "",
 ) -> dict:
+    """Score one hyperparameter cell, held out when ``fold_ids`` is given."""
+    # With ``fold_ids`` the neighbour index for each task EXCLUDES its own fold, so the
+    # combination is evaluated on tasks it never voted over — the held-out reading. Without
+    # it, every task votes over every other, which is the in-sample reading the previous
+    # sweep reported (and selected its optimum on).
     g = config.gamma()
     passes = 0
     total_cost = 0.0
     total_reward = 0.0
     n = len(task_ids)
     scored = 0
+    allocation: dict[str, int] = {}
 
     for i in range(n):
-        _, passed, cost, ok = knn_select(
+        allowed = np.flatnonzero(fold_ids != fold_ids[i]) if fold_ids is not None else None
+        chosen, passed, cost, ok = knn_select(
             i,
             task_ids,
             task_descs,
@@ -189,16 +239,25 @@ def evaluate_params(
             k,
             success_rate_thresh,
             min_samples,
+            allowed=allowed,
+            sims_row=sims[i] if sims is not None else None,
         )
         # A coverage-gap escalation (chosen model unmeasured on this task) is
         # UNSCORABLE — excluded from the aggregation, not imputed fail@$0.
         if not ok:
             continue
+        allocation[chosen] = allocation.get(chosen, 0) + 1
         scored += 1
         passes += 1 if passed else 0
         total_cost += cost
         total_reward += compute_reward(passed, cost, g)
 
+    # The frontier share is the degeneracy detector: a "routing optimum" that sends
+    # almost everything to the priciest model IS Always-Frontier, and no reward number
+    # on its own reveals that.
+    frontier_share = (allocation.get(frontier_model, 0) / scored) if scored else 0.0
+    models = matrix["models"]
+    cheapest = min(models, key=lambda m: model_cost(m, matrix)) if models else ""
     return {
         "k": k,
         "success_rate_thresh": success_rate_thresh,
@@ -208,10 +267,44 @@ def evaluate_params(
         "AvgPerf%": round(passes / scored * 100, 2) if scored else 0.0,
         "TotalCost": round(total_cost, 6),
         "Reward": round(total_reward, 6),
+        "n_models_used": len(allocation),
+        "frontier_share": round(frontier_share, 4),
+        "cheapest_share": round(allocation.get(cheapest, 0) / scored, 4) if scored else 0.0,
     }
 
 
+def _sweep_grid(  # noqa: PLR0913
+    task_ids, task_descs, features, results_map, matrix, sims, grid, frontier_model, fold_ids
+):
+    """Evaluate every (k, thresh, min_samples) cell on one split; returns the rows."""
+    ks, thresholds, mins_samples = grid
+    rows: list[dict] = []
+    total = len(ks) * len(thresholds) * len(mins_samples)
+    for k in ks:
+        for thresh in thresholds:
+            for ms in mins_samples:
+                rows.append(
+                    evaluate_params(
+                        task_ids,
+                        task_descs,
+                        features,
+                        results_map,
+                        matrix,
+                        k,
+                        thresh,
+                        ms,
+                        sims=sims,
+                        fold_ids=fold_ids,
+                        frontier_model=frontier_model,
+                    )
+                )
+                if len(rows) % 200 == 0 or len(rows) == total:
+                    print(f"  [{len(rows)}/{total}] k={k}, thresh={thresh}, min_samp={ms}")
+    return rows
+
+
 def main(config_path: str = "benchmark/benchmark.yaml") -> None:
+    """Sweep kNN hyperparameters on a held-out split and report cost at equal quality."""
     config.load(config_path)
 
     ap = argparse.ArgumentParser()
@@ -220,6 +313,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     ap.add_argument("--output", default="benchmark/routing/reports/threshold_sweep_results.csv")
     ap.add_argument("--plot", default="benchmark/routing/reports/threshold_sweep_heatmap.png")
     ap.add_argument("--ks", nargs="+", type=int, default=None, help="k values to sweep")
+    ap.add_argument("--folds", type=int, default=5, help="held-out folds for selection")
     ap.add_argument(
         "--thresholds",
         nargs="+",
@@ -255,12 +349,17 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
 
     print(f"Loaded {len(task_ids)} tasks from {matrix_path}")
 
-    features = _embed_texts(task_descs)
+    features = np.asarray(_embed_texts(task_descs), dtype=float)
     print(f"Real jina-embedding matrix: {features.shape}")
+    # One similarity matrix for the whole grid: recomputing it per (task, cell) was ~9x
+    # the cost and is what made a two-split sweep look unaffordable.
+    unit = features / np.maximum(np.linalg.norm(features, axis=1, keepdims=True), 1e-12)
+    sims = unit @ unit.T
 
-    # Sweep k up to the largest usable neighbourhood (n-1 neighbours, self excluded)
-    # rather than a hardcoded 20: the reward optimum sat at k=18/20, the edge of the
-    # old window, so the sweep never bracketed its own maximum.
+    frontier_model = (
+        max(matrix["models"], key=lambda m: model_cost(m, matrix)) if matrix["models"] else ""
+    )
+
     k_max = max(2, len(task_ids) - 1)
     ks = args.ks if args.ks is not None else [k for k in range(2, k_max + 1, 2)] or [2]
     thresholds = (
@@ -269,110 +368,103 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         else [round(0.5 + i * 0.1, 1) for i in range(5)]
     )
     mins_samples = args.min_samples_list if args.min_samples_list is not None else [1, 2, 3, 4, 5]
+    grid = (ks, thresholds, mins_samples)
 
     print("Parameters sweeps:")
     print(f"  k = {ks}")
     print(f"  success_rate_thresh = {thresholds}")
     print(f"  min_samples = {mins_samples}")
-    print(f"  Total combos: {len(ks) * len(thresholds) * len(mins_samples)}")
+    print(f"  Total combos: {len(ks) * len(thresholds) * len(mins_samples)} per split")
 
-    output_dir = Path(args.output).parent
-    output_dir.mkdir(parents=True, exist_ok=True)
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
 
-    all_results: list[dict] = []
-    total = len(ks) * len(thresholds) * len(mins_samples)
-    count = 0
+    fold_ids = fold_assignment(len(task_ids), args.folds)
+    print("\nIn-sample split (every task votes over every other):")
+    in_sample = _sweep_grid(
+        task_ids, task_descs, features, results_map, matrix, sims, grid, frontier_model, None
+    )
+    print(f"\nHeld-out split ({args.folds} folds; a task never votes over its own fold):")
+    held_out = _sweep_grid(
+        task_ids, task_descs, features, results_map, matrix, sims, grid, frontier_model, fold_ids
+    )
 
-    for k in ks:
-        for thresh in thresholds:
-            for ms in mins_samples:
-                result = evaluate_params(
-                    task_ids,
-                    task_descs,
-                    features,
-                    results_map,
-                    matrix,
-                    k,
-                    thresh,
-                    ms,
-                )
-                all_results.append(result)
-                count += 1
-                if count % 20 == 0 or count == total:
-                    print(f"  [{count}/{total}] k={k}, thresh={thresh}, min_samp={ms}")
+    for row in in_sample:
+        row["split"] = "in_sample"
+    for row in held_out:
+        row["split"] = "held_out"
 
-    all_results.sort(key=lambda r: r["Reward"], reverse=True)
-
+    all_results = sorted(in_sample + held_out, key=lambda r: r["Reward"], reverse=True)
+    fields = [
+        "split",
+        "k",
+        "success_rate_thresh",
+        "min_samples",
+        "n_scored",
+        "n_excluded",
+        "AvgPerf%",
+        "TotalCost",
+        "Reward",
+        "n_models_used",
+        "frontier_share",
+        "cheapest_share",
+    ]
     with open(args.output, "w", newline="") as f:
-        fields = [
-            "k",
-            "success_rate_thresh",
-            "min_samples",
-            "n_scored",
-            "n_excluded",
-            "AvgPerf%",
-            "TotalCost",
-            "Reward",
-        ]
         w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
         for row in all_results:
-            w.writerow(row)
-
+            w.writerow({k: row.get(k, "") for k in fields})
     print(f"\nResults written to {args.output}")
 
-    best = all_results[0]
-    print("\n=== BEST PARAMETER COMBINATION ===")
-    print(f"  k                   = {best['k']}")
-    print(f"  success_rate_thresh = {best['success_rate_thresh']}")
-    print(f"  min_samples         = {best['min_samples']}")
-    print(f"  AvgPerf%            = {best['AvgPerf%']} (over {best['n_scored']} scored tasks)")
-    print(f"  TotalCost           = ${best['TotalCost']}")
-    print(f"  Reward              = {best['Reward']}")
-    print(f"  excluded (coverage-gap escalations, unmeasured chosen cell) = {best['n_excluded']}")
-    print()
-
-    print("=== TOP 10 COMBOS ===")
-    print(f"{'k':>3} {'thresh':>7} {'min_samp':>8} {'AvgPerf%':>8} {'TotalCost':>10} {'Reward':>8}")
-    for r in all_results[:10]:
+    # The two selection rules, side by side — this contrast IS the finding.
+    reward_best = max(held_out, key=lambda r: r["Reward"])
+    caeq_best = cost_at_equal_quality(held_out)
+    print("\n=== SELECTION (held-out) ===")
+    for label, row in (
+        (f"reward-argmax (gamma={config.gamma():.3g})", reward_best),
+        ("cost-at-equal-quality", caeq_best),
+    ):
+        if row is None:
+            continue
         print(
-            f"{r['k']:>3} {r['success_rate_thresh']:>7.1f} {r['min_samples']:>8d} "
-            f"{r['AvgPerf%']:>8.2f} {r['TotalCost']:>10.6f} {r['Reward']:>8.4f}"
+            f"  {label:32} k={row['k']:>3} thresh={row['success_rate_thresh']:.1f} "
+            f"min_samp={row['min_samples']} pass={row['AvgPerf%']:.2f}% "
+            f"cost=${row['TotalCost']:.4f} frontier_share={row['frontier_share']:.0%} "
+            f"models_used={row['n_models_used']}"
         )
 
     results_arr = np.array(
-        [(r["k"], r["success_rate_thresh"], r["min_samples"], r["Reward"]) for r in all_results]
+        [(r["k"], r["success_rate_thresh"], r["min_samples"], r["Reward"]) for r in held_out]
     )
-
     param_names = ["k", "success_rate_thresh", "min_samples"]
     param_values = [ks, thresholds, mins_samples]
-
     eta_sq = _variance_explained(results_arr, param_values)
     most_sensitive = param_names[int(np.argmax(eta_sq))]
-    print("\n=== SENSITIVITY ANALYSIS ===")
-    print("  eta^2 = fraction of Reward variance explained by that parameter (0-1)")
+    print("\n=== SENSITIVITY ANALYSIS (held-out) ===")
     for pn, pv in zip(param_names, eta_sq, strict=True):
         print(f"  {pn}: variance explained (eta^2) = {pv:.4f}")
     print(f"  Most sensitive parameter: {most_sensitive}")
 
+    selected = caeq_best or reward_best
     if most_sensitive in ("success_rate_thresh", "k"):
-        fixed_name, fixed_val = "min_samples", best["min_samples"]
+        fixed_name, fixed_val = "min_samples", selected["min_samples"]
         y_name = "success_rate_thresh"
     else:
-        fixed_name, fixed_val = "success_rate_thresh", best["success_rate_thresh"]
+        fixed_name, fixed_val = "success_rate_thresh", selected["success_rate_thresh"]
         y_name = "min_samples"
-    filtered = _slice_at(all_results, fixed_name, fixed_val)
 
-    sensitivity = dict(zip(param_names, eta_sq, strict=True))
-    excluded_max = max((int(r["n_excluded"]) for r in all_results), default=0)
     _plot_sweep_heatmap(
-        filtered,
+        _slice_at(held_out, fixed_name, fixed_val),
+        _slice_at(in_sample, fixed_name, fixed_val),
         Path(args.plot),
         y_name=y_name,
         fixed=(fixed_name, fixed_val),
         swept_ks=ks,
-        sensitivity=sensitivity,
-        excluded_max=excluded_max,
+        sensitivity=dict(zip(param_names, eta_sq, strict=True)),
+        selected=selected,
+        reward_best=reward_best,
+        n_folds=args.folds,
+        imputed=imputed_share(results_map, task_ids),
+        frontier_model=frontier_model,
     )
     print(f"\nHeatmap saved to {args.plot}")
 
@@ -405,8 +497,10 @@ def _variance_explained(results_arr: np.ndarray, param_values: list[list]) -> li
     return out
 
 
-def _heat_grid(filtered: list[dict], y_name: str) -> tuple[list, list, np.ndarray]:
-    """``(x_vals, y_vals, rewards)`` over (k x y_name), one row per (y, x) cell."""
+def _heat_grid(
+    filtered: list[dict], y_name: str, value_key: str = "Reward"
+) -> tuple[list, list, np.ndarray]:
+    """``(x_vals, y_vals, values)`` over (k x y_name), one row per (y, x) cell."""
     # Two rows on one cell mean the caller's slice still mixes levels of the third
     # parameter: that would render the last writer's rewards under a title promising
     # the other level, so it raises rather than drawing the wrong data.
@@ -420,7 +514,7 @@ def _heat_grid(filtered: list[dict], y_name: str) -> tuple[list, list, np.ndarra
                 f"two rows at (k={r['k']}, {y_name}={r[y_name]}): the slice mixes levels "
                 "of the fixed parameter, so the heatmap would not match its title"
             )
-        heat_data[yi, xi] = r["Reward"]
+        heat_data[yi, xi] = r[value_key]
     return x_vals, y_vals, heat_data
 
 
@@ -477,130 +571,203 @@ def _driver_sentence(a: tuple[str, float], b: tuple[str, float]) -> str:
     return f"Reward is driven by {driver} (η²={driver_eta:.2f}); {tail}"
 
 
-def _heatmap_annotations(
-    best_row: dict,
+def _heatmap_annotations(  # noqa: PLR0913
     *,
+    selected: dict,
+    reward_best: dict,
     y_name: str,
     sensitivity: dict[str, float],
     swept_ks: list[int],
-    excluded_max: int,
+    n_folds: int,
+    imputed: tuple[int, int],
+    frontier_model: str,
 ) -> Annotations:
-    """Footer content the sweep computes: which knob matters, and whether k is bracketed."""
+    """Footer content the sweep computes: degeneracy, imputation, and which knob matters."""
     notes: list[str] = []
     limits: list[str] = []
+
+    # The headline: what reward-argmax actually selects. A "routing optimum" that sends
+    # almost every task to one model is that model's fixed policy wearing a router's name.
+    share = float(reward_best.get("frontier_share", 0.0))
+    used = int(reward_best.get("n_models_used", 0))
+    degenerate = (
+        f"REWARD-ARGMAX IS DEGENERATE: maximising reward (passes - gamma x cost, "
+        f"gamma={config.gamma():.3g}) picks k={reward_best['k']}, "
+        f"thresh={reward_best['success_rate_thresh']}, which routes "
+        f"{share:.0%} of tasks to {frontier_model} using {used} distinct model(s) — that is "
+        f"Always-Frontier, not a routing result. At this gamma one extra pass is worth "
+        f"{1 / config.gamma():.0f} USD against a suite costing a few dollars, so cost is "
+        f"nearly a no-op and the argmax escalates everything."
+    )
+    (limits if share > 0.5 or used <= 1 else notes).append(degenerate)
+
+    notes.append(
+        f"The ringed cell is chosen by COST AT EQUAL QUALITY, not by reward: cheapest "
+        f"combination whose held-out pass rate clears the best cell's 95% Wilson lower "
+        f"bound. It is k={selected['k']}, thresh={selected['success_rate_thresh']}, "
+        f"min_samples={selected['min_samples']} -> {selected['AvgPerf%']:.1f}% at "
+        f"{plot_style.usd(float(selected['TotalCost']), 4)}, routing "
+        f"{float(selected.get('frontier_share', 0.0)):.0%} to {frontier_model}."
+    )
+    notes.append(
+        f"Selection and scoring are HELD OUT: {n_folds}-fold split over tasks, and a task's "
+        f"neighbourhood never contains its own fold. The right panel's in-sample minus "
+        f"held-out gap is the optimism the previous in-sample-only sweep reported as fact."
+    )
+
     y_eta, k_eta = sensitivity.get(y_name), sensitivity.get("k")
     if y_eta is not None and k_eta is not None:
         notes.append(_driver_sentence((y_name, y_eta), ("k", k_eta)))
+
     lo, hi = (min(swept_ks), max(swept_ks)) if swept_ks else (0, 0)
-    if swept_ks and best_row["k"] in (lo, hi):
-        # An optimum on the first/last swept k is not located: the true peak may lie
-        # outside the window, so this is a limitation, not a reassurance.
+    if swept_ks and selected["k"] in (lo, hi):
         limits.append(
-            f"⚠ max reward ({best_row['Reward']:.1f}) sits at k={best_row['k']}, the EDGE of "
-            f"the swept range k∈[{lo}, {hi}] — the optimum is NOT bracketed and the true peak "
-            "may lie beyond it"
+            f"The selected k={selected['k']} sits at the EDGE of the swept range "
+            f"k in [{lo}, {hi}] — the optimum is not bracketed and the true peak may lie beyond it"
         )
     elif swept_ks:
         notes.append(
-            f"✓ optimum k={best_row['k']} lies inside the swept range k∈[{lo}, {hi}] — the "
-            "maximum is bracketed"
+            f"Selected k={selected['k']} lies inside the swept range k in [{lo}, {hi}] — "
+            "the optimum is bracketed"
         )
-    if excluded_max > 0:
+
+    n_imp, n_cells = imputed
+    if n_imp:
         limits.append(
-            "Coverage-gap escalations (chosen model unmeasured on a task) are excluded per "
-            f"combination — up to {excluded_max} task(s) dropped; never imputed fail@$0"
+            f"{n_imp}/{n_cells} cells ({n_imp / n_cells:.1%}) in the scored matrix are "
+            f"monotone-IMPUTED rather than measured, and the imputation is pass-only, so it "
+            f"can never add a failure. The neighbourhood VOTES and the pass rates on this "
+            f"grid both read those synthetic passes — every quality number here is biased up"
         )
+    limits.append("Cost is model-price dependent — the selected cell moves when model prices move.")
     return Annotations(notes=tuple(notes), limitations=tuple(limits))
 
 
-def _plot_sweep_heatmap(
-    filtered: list[dict],
+def _draw_panel(  # noqa: PLR0913
+    ax: Axes,
+    rows: list[dict],
+    y_name: str,
+    value_key: str,
+    *,
+    title: str,
+    cbar_label: str,
+    cmap_name: str,
+    fig: object,
+    ring: tuple[float, float] | None,
+    fmt: str = "{:.0f}",
+) -> None:
+    """One heatmap panel over (k x y_name), with the selected cell ringed."""
+    x_vals, y_vals, heat = _heat_grid(rows, y_name, value_key)
+    cmap = plt.get_cmap(cmap_name).copy()
+    cmap.set_bad("white")
+    im = ax.imshow(heat, aspect="auto", cmap=cmap, interpolation="nearest")
+    tick_step = max(1, math.ceil(len(x_vals) / 14))
+    ax.set_xticks(range(0, len(x_vals), tick_step))
+    ax.set_xticklabels(x_vals[::tick_step], fontsize=8)
+    ax.set_yticks(range(len(y_vals)))
+    ax.set_yticklabels(y_vals, fontsize=8)
+    ax.set_xlabel("k  (number of nearest neighbours)", fontsize=9)
+    ax.set_ylabel(y_name, fontsize=9)
+    ax.set_title(title, fontsize=10)
+    cb = fig.colorbar(im, ax=ax, shrink=0.85)  # type: ignore[attr-defined]
+    cb.set_label(cbar_label, fontsize=8)
+    cb.ax.tick_params(labelsize=7)
+
+    label_step = max(1, math.ceil(len(x_vals) / 10))
+    mid = (np.nanmax(heat) + np.nanmin(heat)) / 2
+    for yi in range(heat.shape[0]):
+        for xi in range(0, heat.shape[1], label_step):
+            val = heat[yi, xi]
+            if np.isnan(val):
+                continue
+            ax.text(
+                xi,
+                yi,
+                fmt.format(val),
+                ha="center",
+                va="center",
+                fontsize=6.5,
+                color="black" if val > mid else "white",
+            )
+    if ring is not None and ring[0] in y_vals and ring[1] in x_vals:
+        yi, xi = y_vals.index(ring[0]), x_vals.index(ring[1])
+        ax.add_patch(
+            Rectangle((xi - 0.5, yi - 0.5), 1, 1, fill=False, edgecolor="#d03b3b", linewidth=2.4)
+        )
+
+
+def _plot_sweep_heatmap(  # noqa: PLR0913
+    held_out: list[dict],
+    in_sample: list[dict],
     plot_path: Path,
     *,
     y_name: str,
     fixed: tuple[str, float],
     swept_ks: list[int],
     sensitivity: dict[str, float],
-    excluded_max: int = 0,
+    selected: dict,
+    reward_best: dict,
+    n_folds: int,
+    imputed: tuple[int, int],
+    frontier_model: str,
 ) -> None:
-    """Reward heatmap over (k, y_name) at a fixed third parameter."""
-    x_name = "k"
-    x_vals, y_vals, heat_data = _heat_grid(filtered, y_name)
+    """Held-out quality beside the allocation that produced it, on one (k x y_name) grid."""
+    fig, (ax_q, ax_a) = plt.subplots(1, 2, figsize=(17.5, 6.6))
+    ring = (selected[y_name], selected["k"])
 
-    best_row = max(filtered, key=lambda r: r["Reward"])
-    best_yx = (y_vals.index(best_row[y_name]), x_vals.index(best_row[x_name]))
-
-    # Width scales with the (data-driven) k sweep so cells stay legible; a wide k
-    # range would otherwise crush the columns together.
-    fig_w = min(20.0, max(11.0, 0.55 * len(x_vals) + 3.0))
-    fig, ax = plt.subplots(figsize=(fig_w, 6.8))
-    cmap = plt.cm.viridis.copy()
-    cmap.set_bad("white")
-    im = ax.imshow(heat_data, aspect="auto", cmap=cmap, interpolation="nearest")
-    # Thin ticks and in-cell labels to what actually fits: the k sweep reaches ~100
-    # columns on a full matrix, where a tick or a value per column overprints into an
-    # unreadable smear. The colourbar carries the gradient and the CSV the exact values,
-    # so thinning costs nothing a reader could otherwise use.
-    tick_step = max(1, math.ceil(len(x_vals) / 20))
-    ax.set_xticks(range(0, len(x_vals), tick_step))
-    ax.set_xticklabels(x_vals[::tick_step])
-    ax.set_yticks(range(len(y_vals)))
-    ax.set_yticklabels(y_vals)
-
-    label_step = 1 if len(x_vals) <= 12 else max(2, math.ceil(len(x_vals) / 12))
-    _annotate_cells(ax, heat_data, best_yx=best_yx, label_step=label_step, fontsize=7.5)
-
-    # Ring the optimum so the brightest cell is unmistakable, not just "somewhere yellow".
-    ax.add_patch(
-        Rectangle(
-            (best_yx[1] - 0.5, best_yx[0] - 0.5),
-            1,
-            1,
-            fill=False,
-            edgecolor="#d03b3b",
-            linewidth=2.2,
-        )
+    _draw_panel(
+        ax_q,
+        held_out,
+        y_name,
+        "AvgPerf%",
+        title="Held-out pass rate (%) — what a deployed router would score",
+        cbar_label="pass rate (%) on tasks the neighbourhood never saw",
+        cmap_name="viridis",
+        fig=fig,
+        ring=ring,
+    )
+    # The allocation panel is the point: it makes a degenerate "optimum" impossible to
+    # mistake for routing. A cell at 100% is one fixed model, whatever its reward says.
+    _draw_panel(
+        ax_a,
+        held_out,
+        y_name,
+        "frontier_share",
+        title=f"Share of tasks routed to {frontier_model} — 1.00 IS Always-Frontier",
+        cbar_label=f"fraction of tasks sent to {frontier_model}",
+        cmap_name="magma",
+        fig=fig,
+        ring=ring,
+        fmt="{:.2f}",
     )
 
-    # Human-readable axis labels: the swept params are kNN-strategy knobs, so spell
-    # out what each one is rather than printing the bare config key.
-    axis_labels = {
-        "k": "k  (number of nearest neighbours)",
-        "success_rate_thresh": (
-            "success_rate_thresh\n"
-            "(neighbour pass-rate below which the router escalates off the cheap model)"
-        ),
-        "min_samples": (
-            "min_samples\n(min neighbours with a recorded outcome before the router trusts them)"
-        ),
-    }
     fixed_name, fixed_val = fixed
     fixed_eta = sensitivity.get(fixed_name)
     fixed_note = f", {_eta_phrase(fixed_eta)}" if fixed_eta is not None else ""
-    ax.set_xlabel(axis_labels.get(x_name, x_name))
-    ax.set_ylabel(axis_labels.get(y_name, y_name), fontsize=9)
-    ax.set_title(
-        f"kNN routing reward over (k × {y_name})  —  brighter = higher reward = better\n"
-        f"real jina embeddings · reward = tasks passed − γ·cost;  "
-        f"fixed {fixed_name} = {fixed_val} (its best{fixed_note})",
-        fontsize=12,
+    in_best = max(in_sample, key=lambda r: r["AvgPerf%"])["AvgPerf%"] if in_sample else 0.0
+    held_best = max(held_out, key=lambda r: r["AvgPerf%"])["AvgPerf%"] if held_out else 0.0
+    fig.suptitle(
+        f"kNN hyperparameter sweep — held-out quality vs the allocation behind it  "
+        f"(real jina embeddings; fixed {fixed_name}={fixed_val}{fixed_note})\n"
+        f"best in-sample pass {in_best:.1f}% vs best held-out {held_best:.1f}% "
+        f"({in_best - held_best:+.1f}pp optimism) · red ring = cost-at-equal-quality pick",
+        fontsize=11,
+        fontweight="bold",
     )
-
-    cb = fig.colorbar(
-        im, ax=ax, label="Routing reward  =  tasks passed − γ·cost  (higher = better)"
-    )
-    cb.ax.tick_params(labelsize=9)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
     plot_frame.save(
         fig,
         plot_path,
         SPEC,
         extra=_heatmap_annotations(
-            best_row,
+            selected=selected,
+            reward_best=reward_best,
             y_name=y_name,
             sensitivity=sensitivity,
             swept_ks=swept_ks,
-            excluded_max=excluded_max,
+            n_folds=n_folds,
+            imputed=imputed,
+            frontier_model=frontier_model,
         ),
     )
 

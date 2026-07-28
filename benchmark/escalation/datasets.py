@@ -18,12 +18,23 @@ if TYPE_CHECKING:
 
     from benchmark.escalation.schema import Trajectory
 
-# escalate_after_n x stale_window x ladder — the offline sweep / optimal-stop search grid.
+# The sweep varies `escalate_after_n` ONLY, and the two knobs it used to vary are pinned.
+#
+# `stale_window` and `ladder` were measured INERT on this corpus: hashing the full score vector for
+# all 12 old cells returned exactly 2 distinct results. `stale_window` never binds because the
+# median first same-key repeat is at step index 1, so no window >= 5 can retire an entry before it
+# recurs; `ladder` cannot move a detection metric at all, because the metric reads whether the
+# policy fired, not which rung it climbed. Sweeping 12 cells to obtain 2 answers dressed a 1-in-2
+# coin flip as a 1-in-12 optimisation, so the dead axes are pinned at their defaults and named
+# here rather than swept. Re-open them when a knob is shown to change an outcome.
+_PINNED_STALE_WINDOW: Final[int] = 5
+_PINNED_LADDER: Final[str] = "effort_then_rank"
+
+# escalate_after_n=1 is included deliberately: it is not the shipped default (2) but it is the one
+# cell where measured precision separates from the rest, so the report must show it.
 DEFAULT_GRID: Final[list[GridPoint]] = [
-    GridPoint(escalate_after_n=n, stale_window=w, ladder=ladder)
-    for n in (2, 3)
-    for w in (5, 10, 20)
-    for ladder in ("effort_then_rank", "rank_only")
+    GridPoint(escalate_after_n=n, stale_window=_PINNED_STALE_WINDOW, ladder=_PINNED_LADDER)
+    for n in (1, 2, 3)
 ]
 
 _TRUE = "True"

@@ -280,8 +280,29 @@ class ArmStats:
         return is_provisional(self.n)
 
 
+def usd(amount: float, places: int = 2) -> str:
+    r"""A dollar amount safe to put in matplotlib text: ``\$12.34``."""
+    # Matplotlib treats a PAIR of unescaped ``$`` as mathtext delimiters, so a caption with
+    # two amounts silently renders the text between them as italic math (or raises). Every
+    # figure footer quoting money must go through this.
+    return rf"\${amount:,.{places}f}"
+
+
+def row_real_cost(row: dict) -> float:
+    """The provider's own billed cost for one row — `real_cost`, never `estimated_cost`."""
+    # Falls back to `cost` only when `real_cost` is absent (older rows, hand-built test
+    # fixtures). `cost` and `real_cost` happen to agree on every row of the current
+    # results.csv, so reading `cost` is right by luck; `estimated_cost` is ~4.8x larger
+    # across the same file, so a row written with a divergent `cost` would silently
+    # inflate every cost axis. Naming the column makes the invariant a construction.
+    value = row.get("real_cost")
+    if value is None or value == "":
+        value = row.get("cost", 0.0)
+    return float(value)
+
+
 def arm_stats(raw: RawResults, model: str, arm: str) -> ArmStats:
-    """Aggregate one (model, arm) column's sampled n / passes / cost across all tasks."""
+    """Aggregate one (model, arm) column's sampled n / passes / real cost across all tasks."""
     n = 0
     passes = 0
     cost = 0.0
@@ -291,7 +312,7 @@ def arm_stats(raw: RawResults, model: str, arm: str) -> ArmStats:
             n += 1
             if row.get("pass"):
                 passes += 1
-            cost += float(row.get("cost", 0.0))
+            cost += row_real_cost(row)
     return ArmStats(model=model, arm=arm, n=n, passes=passes, total_cost=cost)
 
 

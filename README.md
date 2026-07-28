@@ -47,11 +47,14 @@ plumbing is commoditizing to free.
 This is a **first step, not a one-time implementation**. Long term we expect to
 run more than one model per task and to keep adding routing algorithms, more
 evaluation data, and more features — a continuous project aimed at the best
-cost-effective success rate for any task. Prior work (e.g. the academic
-[ACRouter](https://arxiv.org/abs/2606.22902)) shows a learned, outcome-grounded
-router can match frontier quality at lower cost; we aim to bring that to every CLI
-and agentic tool, and to prove it on our own SWE-bench-based
-[benchmark](#benchmark) rather than borrowed numbers.
+cost-effective success rate for any task.
+
+We work from published research but we don't take it on trust. We previously
+cited [ACRouter](https://arxiv.org/abs/2606.22902) here as evidence that a
+learned, outcome-grounded router matches frontier quality at lower cost. We then
+reproduced it, and **withdrew that citation** — see
+[Research, put to the test](#research-put-to-the-test). Every number in
+[Results](#results) is from our own runs.
 
 **Goal: find the cheapest model for your task, without losing quality.**
 
@@ -86,7 +89,7 @@ What the platform is built to support today:
   own the pool and the prices.
 - 🧠 **A decision core.** Task embedding → nearest-neighbour lookup → a
   cheapest-that-succeeds selection rule, plus pluggable strategies (fixed, kNN,
-  blended, cascade, oracle).
+  cascade, tier-classifier, oracle).
 - ✅ **Outcome verification.** Async, auto-detected test and typecheck verifiers
   that grade a result without blocking the response at session close. Verified
   outcomes feed the next decision via the kNN index and exploration priors.
@@ -189,17 +192,21 @@ Two bets, both testable on your own workflow:
 
 1. **Most coding work is routine.** On real coding tasks, an estimated 70–80% are
    solvable by a cheap or open-weight model; only a hard tail needs a frontier
-   model. On our 188-task SWE-bench Verified subset a cheap/mid model already
-   solves ~74% of tasks.
-2. **Capability and price decorrelate.** A cheaper model can beat a pricier one —
-   we measured `deepseek-v4-flash`, the cheapest model, outperform a pricier
-   one on this suite. So a model is only worth its price if it earns it on *your*
-   tasks; we validate the capability ladder on our own benchmark and never assume
-   it from the price list.
+   model. On our benchmark, always routing to the cheapest model solves **77.4%**
+   of scored tasks. **Supported.**
+2. **Capability and price decorrelate.** A cheaper model can beat a pricier one:
+   `deepseek-v4-flash` is our cheapest model at $0.42/Mtok and solves 68.3%,
+   against `gpt-5-mini` at 5× the price solving 54.5%. So a model is only worth
+   its price if it earns it on *your* tasks; we validate the capability ladder on
+   our own benchmark and never assume it from the price list. **Supported.**
 
 Put together: if most tasks are cheap-solvable and price doesn't track capability,
 then routing routine work to the cheapest model that can do it — and escalating
-only the hard tail — captures the saving without losing quality.
+only the hard tail — should capture the saving without losing quality.
+
+**Both premises hold. The conclusion does not follow yet:** no routing strategy
+we've built converts them into a measured saving over
+fixed-frontier-with-caching. See [Results](#results) for exactly where it breaks.
 
 **The make-or-break bar.** This only matters if it beats the obvious alternative.
 The bar is blunt: the router must beat **fixed-frontier-with-caching** on cost at
@@ -233,11 +240,17 @@ ask first ([Contributing](#contributing)).
 
 <br>
 
-**Strategy comparison** — pass rate (%) vs cost ($) per strategy, with the
-perfect-information oracle marked. *Look for:* a strategy that is **high-performing
-and cheap** — up near the oracle's pass rate but well left of the frontier
-baseline's cost. A good router beats always-cheap on quality and always-frontier on
-cost; the oracle is the ceiling.
+**Strategy comparison** — pass rate (%) vs cost ($) per strategy, with 95% intervals
+and the perfect-information oracle marked. *Look for:* a strategy that is
+**high-performing and cheap** — up near the oracle's pass rate but well left of the
+frontier baseline's cost. A good router beats always-cheap on quality and
+always-frontier on cost; the oracle is the ceiling.
+
+**On our current data, no router does that.** The intervals on the top strategies
+overlap almost entirely, and the frontier baseline's row is roughly half filled by
+monotone imputation (which can only ever add a pass) — so the cost-at-equal-quality
+question is still open, not answered. Read the caveats printed on the figure itself
+before drawing a conclusion from it.
 
 ![Strategy comparison](benchmark/routing/reports/strategy_comparison.png)
 
@@ -262,6 +275,265 @@ the near-chance signal we stay honest about.
 ![Embedding routing map](benchmark/routing/reports/embedding_routing_map.png)
 
 </details>
+
+## Results
+
+Everything below is measured on our own benchmark. Where a result is a null, it
+is reported as a null.
+
+> **Headline, stated plainly: cheap-first routing with verified escalation costs
+> about half of always-frontier at equal quality — but the machine learning
+> contributes nothing to that, and the escalation model does not work.** The
+> saving is real and comes from *mechanism*, not prediction. This section shows
+> exactly what the data says and what we're doing about it.
+
+### Two models, two different jobs
+
+Shunt learns two separate things. Conflating them makes every number ambiguous,
+so we keep them apart throughout.
+
+| | **Routing model** | **Escalation model** |
+|---|---|---|
+| Question | Which (model, effort) should *start* this task? | Is this attempt going to fail — escalate *now*? |
+| When | Once, at the task boundary, before any tokens are spent | Mid-task, at decision boundaries |
+| Input | The task text, embedded | The running trajectory: discussion, tool use, verified check results |
+| Learns from | Task outcome, pass/fail | Whether this attempt ultimately failed |
+| Today | k-nearest-neighbours over task embeddings | A recurrence rule over verified failing-check ids |
+| Status | **No measurable signal over the base rate yet** | **Not working — `NO_SKILL`** |
+| Next | bigram / linear models, calibrated classifiers, better selection rules | calibrated risk scoring, structural loop features, late fusion |
+
+### Rank and cost are different orderings
+
+Easy to conflate — we have conflated them ourselves, so, precisely:
+
+- **Cost** is the dollars a task actually consumed: `real_cost`, cache-aware,
+  read from the provider's own usage accounting. Never a price-list estimate.
+- **Rank** is a model's position in the registry, which is ordered by **price**.
+  It is *not* a capability ordering.
+
+Those two come apart, which is the entire reason routing might be worth doing:
+
+| model | price ($/Mtok) | measured pass rate | 95% CI |
+|---|---:|---:|---|
+| deepseek-v4-flash | 0.42 | 68.3% | 0.613–0.745 |
+| qwen3.7-plus | 1.60 | 43.9% | 0.337–0.547 |
+| gpt-5-mini | 2.25 | 54.5% | 0.476–0.613 |
+| kimi-k2.5 | 3.60 | 50.9% | 0.419–0.598 |
+| zai-glm-5.2 | 5.80 | 57.0% | 0.460–0.673 |
+| kimi-k3 | 18.00 | 84.1% | 0.760–0.898 |
+
+`deepseek-v4-flash` costs **5× less than `gpt-5-mini` and solves more**. Price
+does not buy capability monotonically — so a model is only worth its price if it
+earns it on *your* tasks.
+
+### The dataset — how a challenge becomes a label
+
+The benchmark is a set of **challenges** (SWE-bench Verified tasks we run
+ourselves — we use no precomputed leaderboard numbers). Each challenge is
+attempted by multiple **experiments**, one per (model, reasoning-effort) **arm**,
+and each runs to a verified pass or fail judged by the task's own tests.
+
+One run yields two distinct data products:
+
+1. **A pass/fail label per (challenge, arm)** → supervises the **routing** model.
+2. **A full trajectory log** — discussion, tool calls, verified check results →
+   supervises the **escalation** model.
+
+Both are collected deterministically from real agent runs, so both models can be
+re-evaluated **offline** against data already on disk. That is what makes
+iteration cheap: we can test a new routing rule or a new escalation detector
+without spending another cent. Both are supervised learning problems; the
+benchmark is the label factory.
+
+**An assumption we make, and are still testing.** Running every arm on every
+challenge is expensive, so we assume the capability ladder is monotone: above a
+success is success, below a failure is failure. Our own paired test does **not**
+yet confirm it — across 485 co-measured within-model arm pairs, more reasoning
+effort is worth **+1.6pp (McNemar exact p = 0.428)**, indistinguishable from no
+effect, with 7.2% of pairs violating monotonicity outright. We flag this rather
+than lean on it, because it is load-bearing: it is what fills unmeasured cells.
+
+### Routing results
+
+| strategy | pass rate | total cost |
+|---|---:|---:|
+| Oracle (hindsight — not deployable) | 96.6% | $13.59 |
+| Price-Cascade | 96.6% | $20.46 |
+| kNN-cascade | 96.6% | $23.40 |
+| Always-Frontier | 96.1% | $87.04 |
+| Always-Cheap | 77.4% | $1.36 |
+| kNN | 78.5% | $10.90 |
+| Tier-Classifier | 67.8% | $9.38 |
+
+**The result that matters is which strategy gets there.** `Price-Cascade` uses no
+embeddings, no nearest neighbours and no training at all — it tries the models in
+ascending price order and stops at the first one whose patch passes. It is the
+cheapest deployable strategy in the table. The learned `kNN-cascade` costs *more*
+for the same 96.6%, which means the machine learning is not paying for itself: what
+buys the quality back is **verified escalation**, not prediction.
+
+That table is still part projection — 24% of each cascade's dollars and 49% of
+Always-Frontier's are imputed rather than measured, and every imputed cell is filled
+as a **pass**. On the 86 challenges where both strategies chose genuinely *measured*
+cells:
+
+- Always-Frontier: **$44.82 @ 91.9%**
+- Price-Cascade: **$14.84 @ 93.0%** (McNemar p = 1.000)
+
+On the 52 challenges where *every* model was measured — no projection anywhere —
+Price-Cascade costs **$13.15 @ 88.5%** against Always-Frontier's **$26.11 @ 86.5%**.
+
+So the saving survives measurement, at around half the baseline's cost and
+indistinguishable quality. We still do **not** call the make-or-break gate passed:
+both measured subsets are what survived after removing projected cells, not a
+pre-registered sample. Closing that with a designed run is our top priority.
+
+<details>
+<summary><b>Measured vs projected cost</b> — the figure behind that claim</summary>
+
+<br>
+
+Each bar splits a strategy's total into dollars a provider **actually billed**
+(solid) and dollars **projected** for cells we never ran (hatched), filled under
+the monotone-ladder assumption above. *How to read it:* the hatched fraction is
+how much of the headline is inference rather than measurement. Where a bar is
+about half hatched, any saving computed against it means *"what we expect if the
+ordering holds"* — never *"what we measured"*.
+
+Imputation is **not neutral**: the always-frontier baseline is charged full price
+on tasks a cheaper model demonstrably solved, which is exactly where a router's
+apparent saving comes from.
+
+![Measured vs imputed cost](benchmark/routing/reports/measured_vs_imputed_cost.png)
+
+</details>
+
+The plain `kNN` strategy is weaker still. It buys ~1.1pp of pass rate over
+always-cheapest for ~8× the cost, and that margin sits far inside both confidence
+intervals ([72.3, 84.8] vs [71.2, 83.6]) — indistinguishable at this sample size.
+Its leave-one-out accuracy equals the base rate to four decimals (0.7740), and it
+sits inside a permutation null at every *k*. On current data **the routing model
+has not learned anything the base rate doesn't already give us.**
+
+The one genuinely positive signal: tasks from the same source repository transfer
+slightly better than across repos (+0.0248 against a matched null of
+[−0.0176, 0.0236], z = +2.93) — small, real, and repo-local rather than
+task-semantic.
+
+### How much is left for a smarter router to win?
+
+We decomposed the gap between the hindsight Oracle and the fixed-frontier
+baseline to find out how much of it is *learnable* at all. The answer surprised
+us, and it is the reason this project's roadmap changed:
+
+| | cost | saving vs always-frontier | what it requires |
+|---|---:|---:|---|
+| Always-Frontier | $87.04 | — | nothing |
+| **Price-Cascade** | **$20.46** | **76.5%** | **nothing** |
+| Difficulty-only oracle | $14.25 | 83.6% | perfect difficulty prediction |
+| Oracle (exact model) | $13.59 | 84.4% | + hindsight token counts |
+
+A **difficulty-only oracle** — one that always picks the cheapest model that
+solves the task, ignoring which specific model it is — agrees with the full
+Oracle on **170 of 177 tasks (96%)** and costs only $0.66 more. So there is
+essentially no "one magic model for this task" effect to capture: the Oracle is
+99% *"use cheap when cheap works"*.
+
+That splits the available headroom in two:
+
+- **90.6% of it is mechanically available** — collectable today by trying models
+  cheapest-first and stopping at the first verified pass. No model, no features,
+  no training.
+- **The remaining 7.9% requires predicting task difficulty** — and on our data
+  difficulty is *not* predictable from task embeddings. Leave-one-out accuracy
+  never beats the base rate at any *k*, and sits below the permutation null at
+  k=10.
+
+So the honest conclusion is neither "routing works" nor "there's nothing here".
+It is: **the prize is real and large, almost all of it is mechanical, and the
+learned part is currently worth nothing.** We would rather say that than keep
+selling the model.
+
+### Escalation results — WIP, and currently not working
+
+We rebuilt the escalation evaluation this cycle, because the old one **could not
+have detected success**: its label was *positional* (the last few steps of a
+failed run), so a content-free clock scored AUROC 0.970 while a perfect
+task-level oracle capped at 0.757. Any detector tuned against that was tuned
+against a clock.
+
+On the corrected causal label, over 546 trajectories carrying verified evidence:
+
+- Task identity alone — what the routing model already knows at *t=0* — predicts
+  the outcome at **AUROC 0.886**.
+- The detector's **incremental** contribution over that prior is **−0.000**
+  (range −0.016 to −0.000; p ≥ 0.33 at every prefix depth).
+- Policy precision 0.371–0.375 against a 0.381 base rate — lift 0.97×, every
+  interval containing the base rate.
+- Harness status: **`NO_SKILL`**.
+
+**This is an unsolved problem and we treat it as one.** The feature ships
+disabled. We will not enable an escalation policy that cannot beat knowing which
+task it is.
+
+<details>
+<summary><b>Escalation vs its permutation null</b> — how we know it doesn't work</summary>
+
+<br>
+
+The grey histogram is the same statistic recomputed under randomly shuffled
+outcome labels, with the whole fitting pipeline re-run per shuffle; dashed lines
+bound the null's central 95%. *How to read it:* for the detector to be doing
+anything, the red line must sit **clearly right of the upper dashed line**.
+It sits in the middle of the null. A point estimate above 0.5 is not skill on its
+own — the null is the gate.
+
+![Escalation permutation null](benchmark/escalation/reports/permutation_null.png)
+
+</details>
+
+Two caveats that make this **harder** than the numbers suggest:
+
+- **A data gap.** 253 of 799 trajectories never went through per-step outcome
+  stamping, so the trigger structurally could not fire on them. ~325 are
+  re-stampable offline at zero API cost; that work is queued.
+- **The value is not identified.** Our logging policy never escalates, so
+  P(escalate) = 0 and the overlap condition every off-policy estimator requires
+  fails. We currently **cannot** distinguish "escalation helps" from "escalation
+  hurts" from this data, at any confidence. The fix is ε-greedy randomisation at
+  flagged checkpoints with logged propensities.
+
+### Research, put to the test
+
+This project is deliberately hybrid research-and-development: we implement
+published ideas, then check whether they hold on our own data. Two results so
+far, both negative, both worth knowing.
+
+**ACRouter / Agent-as-a-Router** ([arXiv 2606.22902](https://arxiv.org/abs/2606.22902)
+— these are the same work, so citing both double-counts one source). We
+reproduced their headline from their own committed result matrix. Their cascade
+stops when a task is resolved and then scores against that same label, so the
+stopping rule *is* the metric:
+
+| | AvgPerf | total cost |
+|---|---:|---:|
+| union of the cheap chain (never escalate) | 71.02% | $46.07 |
+| ACRouter as published | 73.30% | $86.72 |
+
+71.02 of those 73.30 points come free from oracle-stopping; **the agentic gate
+contributes +2.28 points for +$40.65**. Their advertised closed loop has **zero
+callers** in their own repository. We previously cited this paper as support for
+our thesis; that citation no longer stands. *(Caveat we could not resolve: the
+paper reports 62.50, the repo 73.30, and the sandbox path 66.96 for the same
+OOD figure. We don't claim which is right.)*
+
+**Rule-based semantic error detection** — the same framework describes a
+self-consistency checker and an LLM-as-Judge in its verifier, but its repository
+contains no implementation of either, so there is no evidence to evaluate. What
+*we* measured is the adjacent idea: regex over **model prose** as an outcome
+label fails badly (~69% reward hacking), which is why our labels come from
+executed tests only. Note the narrow scope — regex over *executed test output*
+works fine and we still use it.
 
 ## Why build it in the open
 
@@ -305,14 +577,25 @@ tool-agnostic, self-hosted, and Apache-2.0 all at once.
 Shunt is a one-person project in the open, and early is the best time to shape
 it.
 
-- ⭐ **Star the repo** if you want to follow where it goes.
+- ⭐ **Star the repo** if you want to follow whether the thesis survives contact
+  with the data.
+- 🧠 **Ideas on the routing model.** kNN is a starting point, not a commitment.
+  Bigram and linear models, calibrated classifiers, better selection rules,
+  different embeddings — if you have reason to think something beats the base
+  rate here, we want to hear it.
+- 🚨 **Ideas on the escalation model.** This is the genuinely unsolved one: what
+  signal in an agent's trajectory actually predicts failure early enough to be
+  worth acting on? We have 546 labelled trajectories and a harness that will tell
+  you honestly whether your idea works. Open to anything — rules, n-grams,
+  embeddings, small classifiers, fusion of several weak signals.
 - 💬 **Open a discussion or issue** with your workflow, your cost pain, or an
-  idea.
+  idea. If you think a number in [Results](#results) is wrong, say so and we'll
+  check it — we would rather publish a null result than a flattering one.
 - 📝 **Docs and typo fixes** make a low-friction first pull request. Contributions
   sign off under the [DCO](CONTRIBUTING.md); there's no CLA.
 - 📊 **Benchmark results** are especially welcome — the benchmark is how we back
   every claim. **Ask before running one:** results are cost-expensive (a single
-  frontier-model datapoint can run $1–3), and we're adding per-contributor key
+  frontier-model datapoint can run $0.5–3), and we're adding per-contributor key
   signing so every datapoint stays attributable to who produced it.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how changes get merged.

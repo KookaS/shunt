@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 # Materialises ALL SWE-bench Verified instance specs and rebuilds the challenges
-# manifest from them, joined with the external difficulty prior:
+# manifest from them:
 #     python -m benchmark.runner.build_challenges            # all 500
 #     python -m benchmark.runner.build_challenges --limit 5  # cheap dry run
 # The HF dataset is pinned to ``swebench_specs.DATASET_REVISION`` for provenance;
@@ -17,11 +17,9 @@ from pathlib import Path
 
 from benchmark import config
 from benchmark.runner import swebench_specs
-from benchmark.runner.select_swebench import load_external_rates, routing_headroom
 from benchmark.runner.swebench_specs import SwebenchSpec
 
 SOURCE = swebench_specs.SOURCE
-Rates = dict[str, tuple[float, float]]
 
 
 def _dataset_rows() -> list[dict[str, object]]:
@@ -59,8 +57,8 @@ def _challenge_entry(spec: SwebenchSpec) -> dict[str, str]:
     }
 
 
-def _task_entry(spec: SwebenchSpec, rates: Rates) -> dict[str, object]:
-    """The rich ``tasks`` entry; p_solve/p_frontier/headroom only when rated."""
+def _task_entry(spec: SwebenchSpec) -> dict[str, object]:
+    """The rich ``tasks`` entry for one instance."""
     stratum = spec.difficulty_stratum
     entry: dict[str, object] = {
         "description": _description(spec),
@@ -72,15 +70,10 @@ def _task_entry(spec: SwebenchSpec, rates: Rates) -> dict[str, object]:
         "source_dataset": "SWE-bench_Verified",
         "spec": f"challenges/{SOURCE}/{spec.instance_id}.json",
     }
-    if spec.instance_id in rates:
-        p_solve, p_frontier = rates[spec.instance_id]
-        entry["p_solve"] = round(p_solve, 4)
-        entry["p_frontier"] = round(p_frontier, 4)
-        entry["routing_headroom"] = round(routing_headroom(p_solve, p_frontier), 4)
     return entry
 
 
-def build_manifest(specs: list[SwebenchSpec], rates: Rates, updated: str) -> dict[str, object]:
+def build_manifest(specs: list[SwebenchSpec], updated: str) -> dict[str, object]:
     """Assemble the manifest dict; challenges list and tasks keys sorted by id."""
     ordered = sorted(specs, key=lambda s: s.instance_id)
     return {
@@ -91,7 +84,7 @@ def build_manifest(specs: list[SwebenchSpec], rates: Rates, updated: str) -> dic
         "dataset_revision": swebench_specs.DATASET_REVISION,
         "count": len(ordered),
         "challenges": [_challenge_entry(s) for s in ordered],
-        "tasks": {s.instance_id: _task_entry(s, rates) for s in ordered},
+        "tasks": {s.instance_id: _task_entry(s) for s in ordered},
     }
 
 
@@ -121,7 +114,7 @@ def main() -> int:
     specs = _specs_from_rows(_dataset_rows(), args.limit)
     for spec in specs:
         swebench_specs.write_spec(spec)
-    manifest = build_manifest(specs, load_external_rates(), args.updated)
+    manifest = build_manifest(specs, args.updated)
     out = config.challenges_path()
     _write_manifest(manifest, out)
     print(f"Wrote {len(specs)} specs -> {swebench_specs.spec_dir()}")

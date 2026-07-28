@@ -791,8 +791,7 @@ def validate(config_path: str | Path | None = None) -> list[str]:
         "random",
         "knn",
         "knn_cascade",
-        "external_prior",
-        "knn_blended",
+        "price_cascade",
         "tier_classifier",
     }
     for name in strat_cfg.get("enabled", []):

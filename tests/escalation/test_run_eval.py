@@ -1,243 +1,218 @@
-"""run_eval runs end-to-end on the fixtures AND the results.csv bootstrap, produces metrics +
-plots + an authenticity count, and reports the length-1 degeneracy explicitly.
+"""run_eval end-to-end: the null gates the status, the shipped default is never silently moved,
+and every figure is written through the annotated frame.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
-from pathlib import Path
+import random
+from typing import Final
 
 import pytest
 
-from benchmark.escalation import datasets, metrics, replay, run_eval
-from shunt.router.escalation import EscalationAction
+from benchmark.escalation import features, run_eval, schema
 from tests.escalation.factories import make_step, make_trajectory
 
-_ROOT = Path(__file__).resolve().parents[2]
-_FIXTURES = Path(__file__).parent / "fixtures"
-_RESULTS = _ROOT / "benchmark/routing/results.csv"
+pytest.importorskip("sklearn")
 
-
-def test_evaluate_reports_degeneracy_on_bootstrap() -> None:
-    trajectories = datasets.results_csv_bootstrap(_RESULTS)
-    assert trajectories, "the real results.csv produced bootstrap trajectories"
-    report = run_eval.evaluate(trajectories, datasets.DEFAULT_GRID)
-    # every bootstrap row is length-1 → fully degenerate, stated explicitly
-    assert report.n_degenerate == report.n_trajectories
-    assert "CANNOT fire" in report.degeneracy_note
-    assert report.n_escalated == 0  # the trigger cannot fire on length-1 streams
-    assert report.authenticity_errors == 0
-
-
-def test_main_runs_end_to_end_exit_zero(tmp_path, capsys) -> None:
-    rc = run_eval.main(
-        [
-            "--fixtures",
-            str(_FIXTURES),
-            "--results-csv",
-            str(_RESULTS),
-            "--plots-dir",
-            str(tmp_path / "reports"),
-        ]
-    )
-    assert rc == 0
-    out = capsys.readouterr()
-    assert '"degeneracy_note"' in out.out
-    assert "CANNOT fire" in out.err  # degeneracy surfaced, not implied
-    assert (tmp_path / "reports" / "pr_curve.png").exists()  # plots produced
-
-
-def test_default_grid_is_the_full_sweep() -> None:
-    # 2 escalate_after_n x 3 stale_window x 2 ladder = 12 grid points
-    assert len(datasets.DEFAULT_GRID) == 12
-
-
-def _long_single_key_trajectory(n_failures: int):  # type: ignore[no-untyped-def]
-    """A long single-dedup-key confirmed-failing trajectory (terminal-failed)."""
-    steps = [
-        make_step(step_index=i, decision_index=i, success=False, failing_check_id="pkg/x.py::t")
-        for i in range(n_failures)
-    ]
-    return make_trajectory(steps, terminal_resolved=False)
-
-
-def test_prefix_scores_are_cumulative_and_monotone() -> None:
-    # The detector score is "has the policy flagged this failing task by prefix t": 0.0 before the
-    # first non-HOLD directive, 1.0 at and after it. A long trajectory drives the abstract ladder
-    # to its ceiling, so the RAW per-step directive stream saturates back to HOLD (non-monotone) —
-    # the exact stream the live engine never emits. The cumulative score is invariant to that.
-    traj = _long_single_key_trajectory(60)
-    point = replay.GridPoint(2, 10)
-    raw = [
-        0.0 if a is EscalationAction.HOLD else 1.0
-        for a in replay.replay_config(traj, point.to_config()).directives
-    ]
-    # The raw stream is non-monotone: it flags, then falls back to HOLD at the ceiling.
-    assert raw != sorted(raw)
-
-    scores = run_eval._prefix_scores(traj, point)
-    assert len(scores) == len(traj.steps)
-    assert scores == sorted(scores), "cumulative detection score must be non-decreasing"
-    assert set(scores) <= {0.0, 1.0}
-    first_flag = raw.index(1.0)
-    assert scores[:first_flag] == [0.0] * first_flag
-    assert scores[first_flag:] == [1.0] * (len(scores) - first_flag)
-
-
-def test_bootstrap_reports_insufficient_data_status() -> None:
-    # Audit P0: on data the trigger cannot fire on, the report is INSUFFICIENT_DATA with a reason,
-    # NOT a misleading auprc==prevalence presented as signal.
-    trajectories = datasets.results_csv_bootstrap(_RESULTS)
-    report = run_eval.evaluate(trajectories, datasets.DEFAULT_GRID)
-    d = report.to_dict()
-    assert d["status"] == "INSUFFICIENT_DATA"
-    assert "recurrence trigger never fired" in d["reason"]
-    assert d["best_config"] is None  # no cell discriminates on degenerate data
-    assert d["recall"] == 0.0  # the legible "detector never fires", not a weak-but-real number
-    assert d["confusion"]["tp"] == 0
-    assert len(d["cells"]) == 12  # full sweep computed, not grid[0] only
-
-
-def _all_fail_single_key(n: int, key: str = "pkg/x.py::t"):  # type: ignore[no-untyped-def]
-    steps = [
-        make_step(step_index=i, decision_index=i, success=False, failing_check_id=key)
-        for i in range(n)
-    ]
-    return make_trajectory(steps, terminal_resolved=False)
-
-
-def _cell_at(auprc: float, prevalence: float) -> metrics.CellReport:
-    from benchmark.calibration.labeler_metrics import ConfusionMatrix
-
-    return metrics.CellReport(
-        escalate_after_n=2,
-        stale_window=5,
-        ladder="effort_then_rank",
-        confusion=ConfusionMatrix(tp=1, fp=9, fn=0, tn=90),
-        precision=0.1,
-        recall=1.0,
-        f1=0.18,
-        fpr=0.09,
-        cohen_kappa=0.0,
-        auprc=auprc,
-        auroc=0.4,
-        prevalence=prevalence,
-        n_escalated=10,
-        mean_steps_to_detection=2.0,
-    )
-
-
-def test_skill_gate_demotes_ok_to_no_skill_at_or_below_baseline() -> None:
-    # A worse-than-no-skill detector (AUPRC ≤ prevalence) must NEVER present as OK — otherwise the
-    # unannotated PR/ROC plots read as "works". This is the honesty gate the audit added.
-    weak = run_eval._apply_skill_gate("OK", "sufficient", _cell_at(auprc=0.099, prevalence=0.111))
-    assert weak[0] == "NO_SKILL"
-    assert "no usable signal" in weak[1]
-    # A real detector (AUPRC > prevalence) stays OK; a non-OK status is passed through untouched.
-    assert run_eval._apply_skill_gate("OK", "s", _cell_at(0.5, 0.111))[0] == "OK"
-    assert run_eval._apply_skill_gate("INSUFFICIENT_DATA", "x", _cell_at(0.0, 0.5))[0] == (
-        "INSUFFICIENT_DATA"
-    )
-
-
-def test_best_config_selects_the_genuine_argmax_on_sufficient_data() -> None:
-    # Proof the selection is REAL when data IS sufficient: a length-5 all-failing single-key
-    # trajectory. escalate_after_n=2 flags at step 1 (a false positive on the pre-risky prefix,
-    # F1=0.857); escalate_after_n=3 flags at step 2, exactly at the risky window (F1=1.0). The
-    # cells genuinely differ, so best_config is a real choice, not an arbitrary pick.
-    report = run_eval.evaluate([_all_fail_single_key(5)], datasets.DEFAULT_GRID)
-    assert report.status == "OK"  # trigger fired, positive labels present
-    assert report.best_config is not None
-    # cells actually discriminate (not all identical) — the precondition for a meaningful choice
-    f1s = {round(c.f1, 3) for c in report.cells}
-    assert len(f1s) > 1, "the sweep must discriminate for the selection to be meaningful"
-    # the selected cell is the independent argmax under the default objective
-    best_recomputed = max(report.cells, key=metrics.objective_max_f1)
-    assert report.best_config.escalate_after_n == best_recomputed.escalate_after_n
-    assert report.best_config.stale_window == best_recomputed.stale_window
-    assert report.best_config.escalate_after_n == 3  # the genuine winner (avoids early-prefix FP)
-    assert report.best_config.f1 == pytest.approx(1.0)
-    assert report.best_config.f1 == max(c.f1 for c in report.cells)
-
-
-def test_main_includes_live_dir_trajectories(tmp_path, capsys) -> None:
-    # Captured live trajectories (schema JSONL under --live-dir) are loaded into the eval.
-    from benchmark.escalation import schema
-
-    live = tmp_path / "live"
-    live.mkdir()
-    steps = [
-        make_step(step_index=i, decision_index=i, failing_check_id="k", success=(i == 2))
-        for i in range(3)
-    ]
-    schema.dump_jsonl(make_trajectory(steps, trajectory_id="live-1"), live / "live-1.jsonl")
-    fixtures = tmp_path / "fixtures"
-    fixtures.mkdir()
-    rc = run_eval.main(
-        [
-            "--fixtures",
-            str(fixtures),
-            "--results-csv",
-            str(tmp_path / "none.csv"),
-            "--live-dir",
-            str(live),
-        ]
-    )
-    assert rc == 0
-    assert '"n_trajectories": 1' in capsys.readouterr().out
-
-
-def _report_with(status: str, reason: str) -> run_eval.EvalReport:
-    cell = _cell_at(auprc=0.099, prevalence=0.111)
-    return run_eval.EvalReport(
-        status=status,
-        reason=reason,
-        n_trajectories=3,
-        n_degenerate=0,
-        n_multistep=3,
-        n_escalated=1,
-        authenticity_errors=0,
-        headline=cell,
-        best_config=cell,
-        cells=[cell],
-        degeneracy_note="",
-    )
-
-
-def test_status_caveats_reach_the_footer_for_both_gates() -> None:
-    # Both gates used to be drawn in-axes and no_skill reached only PR/ROC; the footer channel is
-    # shared by all six figures, so proving the annotation exists proves every figure carries it.
-    thin = _report_with("INSUFFICIENT_DATA", "trigger never fired")
-    insufficient = run_eval._run_annotations(thin)
-    assert any("INSUFFICIENT DATA" in lim for lim in insufficient.limitations)
-    no_skill = run_eval._run_annotations(_report_with("NO_SKILL", "AUPRC ≤ prevalence"))
-    assert any("NO USABLE SIGNAL" in lim for lim in no_skill.limitations)
-    ok = run_eval._run_annotations(_report_with("OK", "sufficient"))
-    assert ok.limitations == ()
-
-
-def test_unchosen_best_config_is_stated_on_the_single_config_figures() -> None:
-    report = _report_with("OK", "sufficient")
-    chosen = run_eval._headline_annotations(report)
-    assert chosen.limitations == ()
-    assert any("escalate_after_n=2" in n for n in chosen.notes)
-    unchosen = run_eval._headline_annotations(replace(report, best_config=None))
-    assert any("first grid point" in lim for lim in unchosen.limitations)
-
-
-def test_all_six_figures_are_written_through_the_frame(tmp_path) -> None:
-    rc = run_eval.main(
-        ["--fixtures", str(_FIXTURES), "--results-csv", str(_RESULTS), "--plots-dir", str(tmp_path)]
-    )
-    assert rc == 0
-    expected = {
+_PERMUTATIONS = 200
+_DEPTHS = (5,)
+_FIGURES: Final[frozenset[str]] = frozenset(
+    {
         "pr_curve.png",
         "roc_curve.png",
-        "steps_to_detection.png",
         "confusion_matrix.png",
-        "sweep_heatmap.png",
-        "cost_quality.png",
+        "permutation_null.png",
+        "lead_time_by_outcome.png",
+        "sweep_table.png",
+        "trajectory_outcomes.png",
+        "failure_capture_coverage.png",
     }
-    assert {p.name for p in tmp_path.glob("*.png")} == expected
+)
+
+
+def _run(tid: str, *, resolved: bool, rng: random.Random, fail_rate: float, n: int = 10):  # type: ignore[no-untyped-def]
+    steps = [
+        make_step(
+            step_index=i,
+            decision_index=i,
+            action=f"cmd{rng.randrange(4)}",
+            success=rng.random() >= fail_rate,
+            failing_check_id="pkg::t" if rng.random() < fail_rate else None,
+        )
+        for i in range(n - 1)
+    ]
+    steps.append(make_step(step_index=n - 1, decision_index=n - 1, success=resolved))
+    return make_trajectory(steps, trajectory_id=tid, terminal_resolved=resolved)
+
+
+def _null_corpus(n_pairs: int = 22):  # type: ignore[no-untyped-def]
+    """Both classes behave identically: there is nothing to find, and the report must say so."""
+    from dataclasses import replace
+
+    rng = random.Random(4)
+    out = []
+    for i in range(n_pairs):
+        for resolved, suffix in ((False, "a"), (True, "b")):
+            traj = _run(f"c{i}__m__{suffix}", resolved=resolved, rng=rng, fail_rate=0.5)
+            out.append(replace(traj, header=replace(traj.header, instance_id=f"c{i}")))
+    return out
+
+
+def _signal_corpus(n_pairs: int = 22):  # type: ignore[no-untyped-def]
+    """Failed runs thrash, resolved runs do not — genuine prefix evidence at the same length."""
+    from dataclasses import replace
+
+    rng = random.Random(6)
+    out = []
+    for i in range(n_pairs):
+        for resolved, suffix, rate in ((False, "a", 0.9), (True, "b", 0.1)):
+            traj = _run(f"c{i}__m__{suffix}", resolved=resolved, rng=rng, fail_rate=rate)
+            out.append(replace(traj, header=replace(traj.header, instance_id=f"c{i}")))
+    return out
+
+
+@pytest.fixture(scope="module")
+def null_report() -> run_eval.EvalReport:
+    """The pipeline is deterministic; refitting it per test only multiplies permutation cost."""
+    return run_eval.evaluate(_null_corpus(), depths=_DEPTHS, n_permutations=_PERMUTATIONS)
+
+
+@pytest.fixture(scope="module")
+def signal_report() -> run_eval.EvalReport:
+    return run_eval.evaluate(_signal_corpus(), depths=_DEPTHS, n_permutations=_PERMUTATIONS)
+
+
+def test_a_pure_null_reports_no_skill_not_ok(null_report: run_eval.EvalReport) -> None:
+    # The old gate was `auprc > prevalence` with no noise floor: a +0.0008 excess against a null sd
+    # of 0.00055 printed `status: OK`. The gate is now the permutation band.
+    report = null_report
+    assert report.status == "NO_SKILL"
+    assert "no usable signal" in report.reason
+    assert not any(d.has_skill for d in report.depth_reports)
+
+
+def test_real_signal_reports_ok(signal_report: run_eval.EvalReport) -> None:
+    report = signal_report
+    assert report.status == "OK"
+    assert "clears its permutation null" in report.reason
+
+
+def test_no_skill_reason_carries_the_number_not_just_the_verdict(
+    null_report: run_eval.EvalReport,
+) -> None:
+    assert "incremental AUROC" in null_report.reason
+    report = null_report
+    assert "p=" in report.reason
+
+
+def test_headline_cell_is_the_shipped_default_not_an_argmax(
+    signal_report: run_eval.EvalReport,
+) -> None:
+    # `best_config` used to be an argmax over a grid that held 2 distinct results, so the reported
+    # configuration was a coin flip dressed as an optimisation. The headline is now the shipped
+    # default by definition; a better cell is FLAGGED in the notes, never applied.
+    report = signal_report
+    assert report.headline_cell is not None
+    assert report.headline_cell.escalate_after_n == run_eval.SHIPPED_ESCALATE_AFTER_N
+
+
+def test_a_better_configuration_is_flagged_rather_than_adopted(
+    signal_report: run_eval.EvalReport,
+) -> None:
+    cells = signal_report.policy_cells
+    best = max(cells, key=lambda c: c.precision)
+    notes = run_eval._default_gap_note(cells)
+    if best.escalate_after_n == run_eval.SHIPPED_ESCALATE_AFTER_N:
+        assert notes == []
+    else:
+        assert any("SHIPPED default" in n and "unchanged" in n for n in notes)
+
+
+def test_unstamped_trajectories_are_excluded_and_counted() -> None:
+    corpus = _signal_corpus()
+    blind = [
+        make_trajectory(
+            [make_step(step_index=j, decision_index=j, confirmed=False) for j in range(9)]
+            + [make_step(step_index=9, decision_index=9, success=False)],
+            trajectory_id=f"z{i}__blind__x",
+            terminal_resolved=False,
+        )
+        for i in range(20)
+    ]
+    report = run_eval.evaluate([*corpus, *blind], depths=_DEPTHS, n_permutations=_PERMUTATIONS)
+    assert report.n_trajectories == len(corpus) + 20
+    assert report.n_stamped == len(corpus)
+    assert any("no per-step verified outcomes" in n for n in report.notes)
+    # …and the exclusion reaches every figure's footer, not just the JSON.
+    limits = run_eval._run_annotations(report).limitations
+    assert any("excluded from this figure" in lim for lim in limits)
+
+
+def test_report_dict_has_no_summed_escalation_count(
+    signal_report: run_eval.EvalReport,
+) -> None:
+    payload = signal_report.to_dict()
+    # The top-level `n_escalated: 4980` next to `n_trajectories: 799` is gone: the count lives on
+    # each cell, where it means "trajectories this configuration escalated".
+    assert "n_escalated" not in payload
+    for cell in payload["policy_cells"]:  # type: ignore[union-attr]
+        assert cell["n_escalated"] <= cell["n_trajectories"]
+
+
+def test_capture_coverage_is_reported_over_the_whole_corpus(
+    signal_report: run_eval.EvalReport,
+) -> None:
+    assert sum(c.n_trajectories for c in signal_report.coverage) == len(_signal_corpus())
+
+
+def test_main_writes_every_figure_through_the_frame(tmp_path, capsys) -> None:
+    live = tmp_path / "live"
+    live.mkdir()
+    for traj in _signal_corpus(
+        n_pairs=25
+    ):  # >= MIN_ROWS at depth 5, else the prefix figures are (correctly) skipped
+        schema.dump_jsonl(traj, live / f"{traj.header.trajectory_id}.jsonl")
+    plots_dir = tmp_path / "reports"
+    rc = run_eval.main(
+        [
+            "--live-dir",
+            str(live),
+            "--plots-dir",
+            str(plots_dir),
+            "--permutations",
+            str(_PERMUTATIONS),
+            "--depths",
+            "5",
+        ]
+    )
+    assert rc == 0
+    assert {p.name for p in plots_dir.glob("*.png")} == _FIGURES
     # dpi 150 at (9, 5.5) plus the footer: a bare dpi=80 figure never reaches this size.
-    assert all(p.stat().st_size > 20_000 for p in tmp_path.glob("*.png"))
+    assert all(p.stat().st_size > 20_000 for p in plots_dir.glob("*.png"))
+    assert '"prefix_model"' in capsys.readouterr().out
+
+
+def test_main_errors_when_the_live_directory_is_missing(tmp_path) -> None:
+    assert run_eval.main(["--live-dir", str(tmp_path / "nope")]) == 1
+
+
+def test_main_errors_on_an_empty_live_directory(tmp_path) -> None:
+    empty = tmp_path / "live"
+    empty.mkdir()
+    assert run_eval.main(["--live-dir", str(empty)]) == 1
+
+
+def test_status_caveats_reach_the_footer(
+    null_report: run_eval.EvalReport, signal_report: run_eval.EvalReport
+) -> None:
+    annotations = run_eval._run_annotations(null_report)
+    assert any("NO USABLE SIGNAL" in lim for lim in annotations.limitations)
+    assert run_eval._run_annotations(signal_report).limitations == ()
+
+
+def test_depths_are_absolute_decisions_not_fractions() -> None:
+    # A fractional prefix needs the total length, which is future information. The CLI takes
+    # integers, and a depth no run reaches yields no report rather than an imputed one.
+    report = run_eval.evaluate(_signal_corpus(), depths=(5, 500), n_permutations=_PERMUTATIONS)
+    assert [d.depth for d in report.depth_reports] == [5]
+    assert features.DEFAULT_DEPTHS == (5, 10, 20)

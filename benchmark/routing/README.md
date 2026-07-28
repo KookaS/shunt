@@ -9,16 +9,12 @@ routing/
   results.csv                 # THE committed source of truth — per-cell outcomes from live runs
   data/                       # Curated read-only inputs
     challenges.json           # Index of the 500 swebench_verified specs (challenges, tasks)
-    external_swebench.csv     # Per-instance resolve rates from SWE-bench/experiments (separate table)
   strategies/
     __init__.py               # Strategy protocol
     oracle.py                 # Upper bound: perfect per-task selection
     fixed.py                  # Always-cheap, always-frontier, random
     knn.py                    # kNN retrieval (shunt's approach)
     knn_cascade.py            # kNN-informed verify-and-escalate
-    external_prior.py         # Escalate on external p_solve difficulty (in-sample lookup)
-    knn_blended.py            # kNN over our verified runs ∪ external Verified priors (down-weighted)
-  heldout_eval.py             # Out-of-sample generalization over held-out instances (no live result yet)
   exploration_replay.py       # Direct-Method replay of the SHIPPED exploration policy on the dense slice
   run_eval.py                 # Evaluate all strategies
   metrics.py                  # Metric definitions
@@ -26,14 +22,15 @@ routing/
   scripts/                    # Analysis + figure producers (all read results.csv, write reports/)
     compute_costs.py          # Per-model cost/pass rollup from the outcome cache
     embedding_compare.py      # Arctic vs Jina-code neighbourhoods (retrieval quality)
+    knn_nulls.py              # Permutation nulls + the shared kNN selection rule (no plotting)
     plot_exploration.py       # Exploit-only vs exploit+exploration cost/quality + explore share
-    plot_external.py          # External-signal plots (difficulty, ours-vs-external, held-out)
-    plot_strategies.py        # Strategy Pareto scatter (same rows as report.py)
-    threshold_sweep.py        # kNN (k, success_rate, min_samples) sweep + reward heatmap
+    plot_knn_nulls.py         # Leave-one-task-out transfer curve + cross-repo transfer matrix
+    plot_strategies.py        # Strategy Pareto scatter (plotted FROM strategy_summary.csv)
+    plot_timing.py            # API calls per task, per model and per routed strategy
+    threshold_sweep.py        # kNN (k, success_rate, min_samples) held-out sweep + allocation
     viz_knn.py                # kNN neighbourhood / routing-map visualisations
   artifacts/                  # gitignored — parameterized run_eval outputs + embedding cache
-  reports/                    # gitignored — regenerable plots (PNG) + derived strategy_summary.csv
-../runner/build_external_prior.py  # Regenerates data/external_swebench.csv from the experiments clone
+  reports/                    # regenerable plots (PNG, tracked) + derived strategy_summary.csv
 benchmark/
   challenges/
     swebench_verified/        # The 500 instance specs (the sole challenge source)
@@ -46,6 +43,12 @@ regenerable, never committed**: the **per-strategy** summary
 (`strategy_summary.csv`) is computed in-memory by `summary.py` (used by
 `report.py`, `run_matrix.py`, `run_eval.py`) and written to the gitignored
 `reports/` dir; plots and parameter sweeps likewise regenerate from `results.csv`.
+
+`plot_strategies.py` **reads** `reports/strategy_summary.csv` rather than re-deriving
+the rows, so the scatter and the summary table cannot disagree (they once differed on
+every point, the worst by 174% on cost). Generate the summary first — `python -m
+benchmark.routing.report` — or the script exits with that instruction; it also refuses
+to vouch for a summary older than `results.csv`.
 
 ## Model registry (`src/shunt/config/models.yaml`) — the cost + routing source of truth
 
@@ -255,7 +258,8 @@ docker compose -f benchmark/compose.yaml run --rm benchmark  # simulated loop + 
 | Random | Uniform random (mean over seeds) |
 | kNN | Embed task → retrieve similar → cheapest capable |
 | kNN-cascade | kNN-informed try-verify-escalate |
-| External-Prior | SWE-bench leaderboard per-task difficulty prior; escalate on external p_solve signal |
+| Price-Cascade | Try-verify-escalate in ascending price order — no embeddings, no kNN |
+| Tier-Classifier | Single-shot: predict the crossover tier, route there directly |
 
 ## Challenge store
 

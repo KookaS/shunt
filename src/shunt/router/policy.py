@@ -17,8 +17,8 @@ from shunt.router.escalation import EscalationConfig
 logger = logging.getLogger(__name__)
 
 # Live-eligible routing strategies — the set ``router.strategy`` may name. Benchmark-only
-# strategies (oracle, external_prior, random) are deliberately absent: they need ground
-# truth / external priors and cannot run on live traffic. ``knn_cascade`` is also absent:
+# strategies (oracle, random) are deliberately absent: they need ground truth or are
+# not routers at all, so they cannot run on live traffic. ``knn_cascade`` is also absent:
 # a true quality-cascade needs mid-session verify-then-escalate, which is not one cache-safe
 # per-session decision (routing once per session is the product's spine), and the upstream
 # fallback chain is availability-only, not quality-based — so it stays benchmark-only.
@@ -71,6 +71,12 @@ class EscalationPolicy(BaseModel):
     stale_window: int = Field(default=10, gt=0)
     blocking_exit_code: int = Field(default=2, ge=0)
     ladder: str = Field(default="effort_then_rank")
+    # Additionally opt-in on top of `enabled` — enabling escalation must never silently
+    # randomize. 0.0 = deterministic; above 0, flagged checkpoints are randomized so the
+    # policy's value becomes identifiable. Bounded below 1.0: at 1.0 the policy arm is never
+    # taken, which loses overlap on the other side.
+    exploration_epsilon: float = Field(default=0.0, ge=0.0, lt=1.0)
+    exploration_seed: int | None = Field(default=None)
 
     @model_validator(mode="after")
     def _check_ladder(self) -> EscalationPolicy:
@@ -88,6 +94,8 @@ class EscalationPolicy(BaseModel):
             stale_window=self.stale_window,
             blocking_exit_code=self.blocking_exit_code,
             ladder=self.ladder,
+            exploration_epsilon=self.exploration_epsilon,
+            exploration_seed=self.exploration_seed,
         )
 
 

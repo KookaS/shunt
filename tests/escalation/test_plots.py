@@ -1,6 +1,6 @@
-"""Plot CODE validated structurally on fixtures (real PNGs arrive with collected data): each
-figure populates its Axes and returns the runtime Annotations its own data earned — the caveats
-that used to be red boxes drawn over the data now travel to the frame's footer.
+"""Plot code validated structurally: each figure populates its Axes and returns the caveats its
+own data earned. The caveats that matter here are the ones that state a NULL result plainly — a
+figure must never let a reader infer skill the numbers do not support.
 """
 
 from __future__ import annotations
@@ -9,10 +9,13 @@ import matplotlib
 
 matplotlib.use("Agg")  # headless; no display in CI
 import matplotlib.pyplot as plt  # noqa: E402
+import pytest  # noqa: E402
 
-from benchmark.escalation import plots, replay  # noqa: E402
-from benchmark.escalation.replay import GridPoint  # noqa: E402
+from benchmark.calibration.labeler_metrics import ConfusionMatrix  # noqa: E402
+from benchmark.escalation import features, metrics, plots, policy_eval, replay  # noqa: E402
 from tests.escalation.factories import make_step, make_trajectory  # noqa: E402
+
+_PERMUTATIONS = 200
 
 
 def _scores_labels() -> tuple[list[float], list[bool]]:
@@ -21,178 +24,227 @@ def _scores_labels() -> tuple[list[float], list[bool]]:
     return scores, labels
 
 
-def test_pr_curve_populates_axes_and_draws_prevalence() -> None:
+def _null(*, real: bool) -> metrics.NullResult:
+    labels = [i < 20 for i in range(60)]
+    scores = [1.0 if lab else 0.0 for lab in labels] if real else [float(i % 7) for i in range(60)]
+    return metrics.permute_statistic(
+        scores, labels, metrics.auroc, n_permutations=_PERMUTATIONS, seed=2
+    )
+
+
+def test_pr_curve_draws_the_prevalence_baseline() -> None:
     scores, labels = _scores_labels()
     fig, ax = plt.subplots()
     plots.pr_curve(scores, labels, ax)
-    assert ax.lines, "PR curve drew at least one line"
-    # the prevalence baseline is a horizontal line at the positive rate
-    from benchmark.escalation import metrics
-
     prevalence = metrics.prevalence(labels)
-    ydata = [line.get_ydata() for line in ax.lines]
-    assert any(all(y == prevalence for y in yd) for yd in ydata), "prevalence baseline present"
-    plt.close(fig)
-
-
-def test_steps_to_detection_hist_runs() -> None:
-    traj = make_trajectory(
-        [
-            make_step(step_index=0, decision_index=0, success=False, failing_check_id="t::a"),
-            make_step(step_index=1, decision_index=1, success=False, failing_check_id="t::a"),
-        ]
-    )
-    sweep = replay.sweep([traj], [GridPoint(2, 10)])
-    fig, ax = plt.subplots()
-    plots.steps_to_detection_hist(sweep, ax)
-    assert ax.patches, "the histogram drew bars for the escalated trajectory"
-    plt.close(fig)
-
-
-def test_cost_quality_frontier_runs() -> None:
-    perf = {"a": 80.0, "b": 90.0, "c": 70.0}
-    cost = {"a": 1.0, "b": 2.0, "c": 3.0}
-    fig, ax = plt.subplots()
-    plots.cost_quality_frontier(perf, cost, ax)
-    assert ax.collections, "the scatter drew the config points"
-    plt.close(fig)
-
-
-def test_steps_to_detection_hist_discrete_bars() -> None:
-    # Two trajectories escalate at distinct integer steps (1 and 2) → two separate bars, not
-    # one solid float-binned block.
-    traj_a = make_trajectory(
-        [
-            make_step(step_index=0, decision_index=0, success=False, failing_check_id="k"),
-            make_step(step_index=1, decision_index=1, success=False, failing_check_id="k"),
-        ],
-        trajectory_id="a",
-    )
-    traj_b = make_trajectory(
-        [
-            make_step(step_index=0, decision_index=0),
-            make_step(step_index=1, decision_index=1, success=False, failing_check_id="k"),
-            make_step(step_index=2, decision_index=2, success=False, failing_check_id="k"),
-        ],
-        trajectory_id="b",
-    )
-    sweep = replay.sweep([traj_a, traj_b], [GridPoint(2, 10)])
-    fig, ax = plt.subplots()
-    plots.steps_to_detection_hist(sweep, ax)
-    populated = [p for p in ax.patches if p.get_height() > 0]
-    assert len(populated) >= 2, "distinct step counts render as separate bars, not one block"
-    # rwidth<1 leaves a visible gap between adjacent bars so equal-height bars don't fuse.
-    assert all(0 < p.get_width() < 1.0 for p in ax.patches), "bars are gapped, not full-width"
-    plt.close(fig)
-
-
-def test_cost_quality_frontier_annotates_single_cost() -> None:
-    # All configs share one cost → no frontier to trace; must be honestly labelled in the footer,
-    # not as a red box drawn over the scatter.
-    perf = {"a": 80.0, "b": 90.0, "c": 70.0}
-    cost = {"a": 1.0, "b": 1.0, "c": 1.0}
-    fig, ax = plt.subplots()
-    ann = plots.cost_quality_frontier(perf, cost, ax)
-    assert ax.collections, "the real scatter is kept"
-    assert not ax.texts, "the caveat travels in Annotations, it does not occlude the data"
-    assert any("no frontier to trace" in lim for lim in ann.limitations)
-    plt.close(fig)
-
-
-def test_cost_quality_y_label_names_the_plotted_quantity() -> None:
-    # The caller passes F1 x 100; the label used to claim AUPRC%.
-    fig, ax = plt.subplots()
-    plots.cost_quality_frontier({"a": 80.0, "b": 90.0}, {"a": 1.0, "b": 2.0}, ax)
-    assert "F1" in ax.get_ylabel()
-    assert "AUPRC" not in ax.get_ylabel()
-    plt.close(fig)
-
-
-def test_pr_curve_draws_no_confidence_interval_footnote() -> None:
-    # The PR figure drew no error bars, so the Wilson-CI footnote it carried was a lie.
-    scores, labels = _scores_labels()
-    fig, ax = plt.subplots()
-    plots.pr_curve(scores, labels, ax)
-    assert not any("Wilson" in t.get_text() for t in ax.texts)
-    plt.close(fig)
-
-
-def test_steps_to_detection_annotates_when_empty() -> None:
-    # a resolved trajectory never escalates → the histogram is empty and MUST be annotated.
-    traj = make_trajectory([make_step(step_index=0, decision_index=0)], terminal_resolved=True)
-    sweep = replay.sweep([traj], [GridPoint(2, 10)])
-    fig, ax = plt.subplots()
-    ann = plots.steps_to_detection_hist(sweep, ax)
-    assert not ax.patches, "no bars on an unexercised trigger"
-    assert any("empty, not flat" in lim for lim in ann.limitations), "empty plot annotated"
+    assert any(all(y == prevalence for y in line.get_ydata()) for line in ax.lines)
     plt.close(fig)
 
 
 def test_pr_curve_reports_sample_counts_at_runtime() -> None:
-    # Counts are data-derived, so they can never be a stale static string in the spec.
     scores, labels = _scores_labels()
     fig, ax = plt.subplots()
     ann = plots.pr_curve(scores, labels, ax)
-    assert any("6 prefixes, 2 of them positive" in n for n in ann.notes)
+    assert any("6 trajectories, 2 of them failed" in n for n in ann.notes)
     plt.close(fig)
 
 
-def test_pr_curve_flags_a_corpus_with_no_positives() -> None:
-    # With zero positives the helper emits one meaningless dot; the footer must say so.
-    fig, ax = plt.subplots()
-    ann = plots.pr_curve([0.0, 1.0], [False, False], ax)
-    assert any("No positive prefixes" in lim for lim in ann.limitations)
-    plt.close(fig)
-
-
-def test_roc_curve_flags_a_single_class_corpus() -> None:
-    # auroc() returns 0.5 as a no-information code, not a measurement — say it on the figure.
-    fig, ax = plt.subplots()
-    ann = plots.roc_curve([0.0, 1.0], [True, True], ax)
-    assert any("no-information code" in lim for lim in ann.limitations)
-    plt.close(fig)
-
-
-def test_roc_curve_runs_and_labels_auxiliary() -> None:
+def test_roc_curve_draws_chance_and_the_null_band() -> None:
     scores, labels = _scores_labels()
     fig, ax = plt.subplots()
-    plots.roc_curve(scores, labels, ax)
-    assert ax.lines, "ROC drew the curve"
+    plots.roc_curve(scores, labels, _null(real=True), ax)
+    assert any(line.get_label() == "chance" for line in ax.lines)
+    assert ax.collections, "the permutation null band was shaded"
     assert "auxiliary" in ax.get_title().lower()
     plt.close(fig)
 
 
-def _cells():  # type: ignore[no-untyped-def]
-    from benchmark.escalation import datasets, run_eval
+def test_roc_curve_says_no_usable_signal_when_inside_the_null() -> None:
+    # The old ROC drew a bow above the diagonal for a below-chance detector and said nothing. A
+    # figure whose observation sits inside its own null must state that in the footer.
+    fig, ax = plt.subplots()
+    ann = plots.roc_curve([0.5, 0.4, 0.6, 0.3], [True, False, False, True], _null(real=False), ax)
+    assert any("NO USABLE SIGNAL" in lim for lim in ann.limitations)
+    assert any("INSIDE the null band" in n for n in ann.notes)
+    plt.close(fig)
 
-    return run_eval.evaluate([_failing_multi_key()], datasets.DEFAULT_GRID).cells
+
+def test_roc_curve_stays_quiet_when_the_signal_clears_its_null() -> None:
+    fig, ax = plt.subplots()
+    ann = plots.roc_curve([1.0, 1.0, 0.0, 0.0], [True, True, False, False], _null(real=True), ax)
+    assert ann.limitations == ()
+    plt.close(fig)
 
 
-def _failing_multi_key():  # type: ignore[no-untyped-def]
-    steps = [
-        make_step(step_index=i, decision_index=i, success=False, failing_check_id="k")
-        for i in range(5)
+def test_confusion_matrix_prints_the_random_baseline() -> None:
+    fig, ax = plt.subplots()
+    # 20 failed / 30 resolved, 25 flags. A random flagger at that rate catches 20*0.5 = 10.
+    ann = plots.confusion_matrix_plot(ConfusionMatrix(tp=10, fp=15, fn=10, tn=15), ax)
+    assert any(t.get_text() == "10\n[10]" for t in ax.texts), "observed and random both rendered"
+    assert any("random flagger" in n for n in ann.notes)
+    # tp equals the random expectation, so the figure must refuse to imply a catch.
+    assert any("no more failures than random" in lim for lim in ann.limitations)
+    plt.close(fig)
+
+
+def test_confusion_matrix_is_quiet_when_it_beats_random() -> None:
+    fig, ax = plt.subplots()
+    ann = plots.confusion_matrix_plot(ConfusionMatrix(tp=19, fp=6, fn=1, tn=24), ax)
+    assert ann.limitations == ()
+    plt.close(fig)
+
+
+def _cell(*, resolved_fire: bool):  # type: ignore[no-untyped-def]
+    """A policy cell where firing tracks either success (resolved_fire) or failure."""
+    corpus = []
+    for i in range(8):
+        thrash = [
+            make_step(step_index=j, decision_index=j, success=False, failing_check_id="k")
+            for j in range(6)
+        ]
+        quiet = [make_step(step_index=j, decision_index=j) for j in range(6)]
+        corpus.append(
+            make_trajectory(thrash, trajectory_id=f"a{i}", terminal_resolved=resolved_fire)
+        )
+        corpus.append(
+            make_trajectory(quiet, trajectory_id=f"b{i}", terminal_resolved=not resolved_fire)
+        )
+    return policy_eval.evaluate_cell(corpus, replay.GridPoint(2, 5), n_permutations=_PERMUTATIONS)
+
+
+def test_outcome_bars_call_out_an_inverted_policy() -> None:
+    # The headline the six old figures could not show: escalation firing on the runs that SUCCEED.
+    # _cell(resolved_fire=True) separates perfectly, so the intervals do not overlap.
+    fig, ax = plt.subplots()
+    ann = plots.outcome_bars(_cell(resolved_fire=True), ax)
+    assert any("INVERTED" in lim for lim in ann.limitations)
+    assert any("P(fail|fired)" in n for n in ann.notes)
+    plt.close(fig)
+
+
+def test_outcome_bars_are_quiet_when_the_policy_points_the_right_way() -> None:
+    fig, ax = plt.subplots()
+    ann = plots.outcome_bars(_cell(resolved_fire=False), ax)
+    assert ann.limitations == ()
+    plt.close(fig)
+
+
+def test_outcome_bars_refuse_to_call_a_direction_off_overlapping_intervals() -> None:
+    # A point estimate below the base rate is NOT an inverted policy while the Wilson intervals
+    # overlap. Reading a sign off overlapping bars is the same error as reading skill off a point
+    # estimate inside its null — the figure must say "no separation", not "INVERTED".
+    corpus = [
+        make_trajectory(
+            [
+                make_step(step_index=j, decision_index=j, success=False, failing_check_id="k")
+                for j in range(6)
+            ],
+            trajectory_id=f"a{i}",
+            terminal_resolved=i % 3 == 0,
+        )
+        for i in range(30)
+    ] + [
+        make_trajectory(
+            [make_step(step_index=j, decision_index=j) for j in range(6)],
+            trajectory_id=f"b{i}",
+            terminal_resolved=i % 3 != 0,
+        )
+        for i in range(30)
     ]
-    return make_trajectory(steps, terminal_resolved=False)
-
-
-def test_sweep_heatmap_runs_and_states_hidden_cells() -> None:
+    cell = policy_eval.evaluate_cell(corpus, replay.GridPoint(2, 5), n_permutations=_PERMUTATIONS)
     fig, ax = plt.subplots()
-    cells = _cells()
-    ann = plots.sweep_heatmap(cells, ax, ladder="effort_then_rank")
-    assert ax.images, "the heatmap drew a colour grid"
-    shown = sum(c.ladder == "effort_then_rank" for c in cells)
-    assert any(f"showing {shown} of {len(cells)} swept cells" in n for n in ann.notes)
-    assert any("different ladder" in lim for lim in ann.limitations), "hidden half stated"
+    ann = plots.outcome_bars(cell, ax)
+    assert any("NO SEPARATION" in lim for lim in ann.limitations)
+    assert not any("INVERTED" in lim for lim in ann.limitations)
     plt.close(fig)
 
 
-def test_confusion_matrix_plot_runs() -> None:
-    from benchmark.calibration.labeler_metrics import ConfusionMatrix
-
+def test_lead_time_reports_a_median_per_outcome_class() -> None:
     fig, ax = plt.subplots()
-    ann = plots.confusion_matrix_plot(ConfusionMatrix(tp=3, fp=1, fn=0, tn=2), ax)
-    assert ax.images, "the confusion heatmap drew"
-    assert any(t.get_text() == "3" for t in ax.texts), "tp count rendered"
-    assert any("6 prefixes scored" in n for n in ann.notes)
+    ann = plots.lead_time_by_outcome(_cell(resolved_fire=False), ax)
+    assert any("median lead time" in n for n in ann.notes)
+    assert ax.patches, "the histogram drew bars"
     plt.close(fig)
+
+
+def test_lead_time_states_an_empty_figure_rather_than_drawing_one() -> None:
+    corpus = [
+        make_trajectory(
+            [make_step(step_index=j, decision_index=j) for j in range(5)],
+            trajectory_id=f"q{i}",
+            terminal_resolved=False,
+        )
+        for i in range(4)
+    ]
+    cell = policy_eval.evaluate_cell(corpus, replay.GridPoint(2, 5), n_permutations=_PERMUTATIONS)
+    fig, ax = plt.subplots()
+    ann = plots.lead_time_by_outcome(cell, ax)
+    assert any("No escalation fired" in lim for lim in ann.limitations)
+    plt.close(fig)
+
+
+def test_sweep_table_says_when_no_configuration_clears_the_base_rate() -> None:
+    fig, ax = plt.subplots()
+    ann = plots.sweep_table([_cell(resolved_fire=True)], ax)
+    assert ax.tables, "the sweep rendered as a table, not a two-value colour grid"
+    assert any("no setting with measured value" in lim for lim in ann.limitations)
+    plt.close(fig)
+
+
+def test_permutation_null_plot_states_the_verdict_both_ways() -> None:
+    fig, ax = plt.subplots()
+    ann = plots.permutation_null_plot(_null(real=False), ax, label="AUROC")
+    assert any("NO USABLE SIGNAL" in lim for lim in ann.limitations)
+    plt.close(fig)
+    fig, ax = plt.subplots()
+    ann = plots.permutation_null_plot(_null(real=True), ax, label="AUROC")
+    assert ann.limitations == ()
+    assert any("clears the null band" in n for n in ann.notes)
+    plt.close(fig)
+
+
+def test_capture_coverage_names_the_models_with_no_per_step_outcomes() -> None:
+    covered = make_trajectory(
+        [
+            make_step(step_index=i, decision_index=i, success=False, failing_check_id="k")
+            for i in range(4)
+        ],
+        trajectory_id="inst__seeing-model__high",
+        terminal_resolved=False,
+    )
+    blind = make_trajectory(
+        [make_step(step_index=i, decision_index=i, confirmed=False) for i in range(4)],
+        trajectory_id="inst__blind-model__high",
+        terminal_resolved=False,
+    )
+    fig, ax = plt.subplots()
+    ann = plots.capture_coverage(features.model_coverage([covered, blind]), ax)
+    assert any("blind-model" in lim for lim in ann.limitations)
+    assert any("NO per-step outcomes" in lim for lim in ann.limitations)
+    plt.close(fig)
+
+
+def test_every_figure_spec_carries_read_and_goal() -> None:
+    specs = [
+        plots.PR_CURVE_SPEC,
+        plots.ROC_CURVE_SPEC,
+        plots.CONFUSION_MATRIX_SPEC,
+        plots.LEAD_TIME_SPEC,
+        plots.SWEEP_TABLE_SPEC,
+        plots.PERMUTATION_NULL_SPEC,
+        plots.OUTCOME_BARS_SPEC,
+        plots.CAPTURE_COVERAGE_SPEC,
+    ]
+    for spec in specs:
+        assert spec.reading.strip()
+        assert spec.goal.strip()
+
+
+@pytest.mark.parametrize(
+    "removed", ["steps_to_detection_hist", "sweep_heatmap", "cost_quality_frontier"]
+)
+def test_replaced_figures_are_gone(removed: str) -> None:
+    # steps_to_detection drew 415 events as 4980; sweep_heatmap drew 6 cells of 2 distinct
+    # results; cost_quality auto-scaled 12 dots that rendered as 2 around a null. All three were
+    # replaced, and leaving the old entry points around invites their reuse.
+    assert not hasattr(plots, removed)

@@ -18,12 +18,12 @@ class TestStrategyFactoriesMatchEnabledSet:
         factories = report._build_strategy_factories(config.gamma())
         assert enabled_names <= factories.keys()
 
-    def test_external_prior_is_not_silently_dropped(self):
-        # external_prior is enabled in benchmark.yaml's strategies.enabled — a
-        # Pareto-front headline strategy that must appear on the regret plot.
+    def test_shipped_knn_is_not_silently_dropped(self):
+        # knn is enabled in benchmark.yaml's strategies.enabled — the shipped
+        # algorithm, and the headline strategy that must appear on the regret plot.
         config.load("benchmark/benchmark.yaml")
         factories = report._build_strategy_factories(config.gamma())
-        assert "External-Prior" in factories
+        assert "kNN" in factories
 
     def test_oracle_reward_always_present_as_internal_reference(self):
         # Oracle-reward is the regret plot's baseline every strategy is scored
@@ -113,8 +113,9 @@ def _matrix(results: dict) -> dict:
 
 
 class TestHullParetoIndices:
-    """K1 (plot_pareto): the hull takes exactly the Pareto-flagged rows. Equal-coverage
-    imputation retired the partial-coverage sparse-frontier exclusion (design S6)."""
+    """K1 (plot_pareto): the hull takes the DEPLOYABLE Pareto-flagged rows. A hindsight
+    oracle anchored the hull apex, so the shaded 'achievable region' reached a height
+    no live router can buy."""
 
     def test_pareto_flagged_rows_enter_hull(self):
         names = ["Always-Cheap", "Always-Frontier"]
@@ -125,6 +126,11 @@ class TestHullParetoIndices:
         names = ["Always-Cheap", "Random", "Always-Frontier"]
         pareto_map = {"Always-Cheap": True, "Random": False, "Always-Frontier": True}
         assert report._hull_pareto_indices(names, pareto_map) == [0, 2]
+
+    def test_hindsight_oracle_never_anchors_the_hull(self):
+        names = ["Always-Cheap", "Oracle", "Oracle-reward", "Always-Frontier"]
+        pareto_map = dict.fromkeys(names, True)
+        assert report._hull_pareto_indices(names, pareto_map) == [0, 3]
 
 
 class TestDisclosureBanner:
@@ -193,7 +199,7 @@ def _imputed(n_multi_observed: int, violations: list | None = None) -> ImputedMa
 
 class TestNoEvidenceRowsDoNotBecomeClaims:
     """A strategy parked at $0 / n_tasks=0 is metrics.py's explicit no-scorable-task
-    signal (see _is_pareto) — no footer sentence may count it as evidence."""
+    signal (see _deployable_pareto) — no footer sentence may count it as evidence."""
 
     def test_coverage_note_excludes_zero_n_rows_from_its_subject(self):
         ann = report._row_coverage_annotations([10, 10, 0])
@@ -206,9 +212,11 @@ class TestNoEvidenceRowsDoNotBecomeClaims:
         assert ann.notes == ("Every plotted strategy is scored on the same 10 task(s).",)
 
     def test_cheapest_claim_ignores_the_no_evidence_row(self):
+        # 8/10 vs the frontier's 9/10 -> intervals overlap, so Always-Cheap qualifies.
         ann = report._cost_savings_annotations(
             names=["Always-Cheap", "Broken", "Always-Frontier"],
             ns=[10, 0, 10],
+            n_pass=[8, 0, 9],
             costs=[3.0, 0.0, 9.0],
             ref=9.0,
             banner=None,
@@ -217,10 +225,26 @@ class TestNoEvidenceRowsDoNotBecomeClaims:
         assert "$3.0000" in cheapest
         assert "$0.0000" not in cheapest
 
+    def test_cheapest_claim_skips_a_strategy_that_is_not_equal_quality(self):
+        # The GOAL is equal-quality cost. 1/10 vs 10/10 does not overlap, so naming
+        # the cheap bar as the cheapest strategy would violate the figure's own goal.
+        ann = report._cost_savings_annotations(
+            names=["Always-Cheap", "Always-Frontier"],
+            ns=[10, 10],
+            n_pass=[1, 10],
+            costs=[3.0, 9.0],
+            ref=9.0,
+            banner=None,
+        )
+        footer = " ".join(ann.notes)
+        assert "no equal-quality cost claim" in footer
+        assert "$3.0000" not in footer
+
     def test_coverage_and_cheapest_notes_do_not_contradict_each_other(self):
         ann = report._cost_savings_annotations(
             names=["Always-Cheap", "Broken"],
             ns=[10, 0],
+            n_pass=[8, 0],
             costs=[3.0, 0.0],
             ref=9.0,
             banner=None,
@@ -276,7 +300,9 @@ class TestMonotonicityUnmeasuredIsNotMeasured:
 
     def test_capability_footer_does_not_assert_100_percent_on_zero_observations(self):
         rank = config.CapabilityRank(ordered=[], evidence={})
-        ann = report._capability_annotations(_imputed(0), rank, n_bands=2, total=4, unsolvable=1)
+        ann = report._capability_annotations(
+            _imputed(0), rank, {}, n_bands=2, total=4, unsolvable=1
+        )
         footer = " ".join(ann.notes)
         assert "UNMEASURED" in footer
         assert "measured, not assumed" not in footer
@@ -291,18 +317,24 @@ class TestMonotonicityUnmeasuredIsNotMeasured:
 class TestCapabilityFooterCounts:
     def test_zero_tasks_reports_zero_not_the_clamped_denominator(self):
         rank = config.CapabilityRank(ordered=[], evidence={})
-        ann = report._capability_annotations(_imputed(2), rank, n_bands=2, total=0, unsolvable=0)
+        ann = report._capability_annotations(
+            _imputed(2), rank, {}, n_bands=2, total=0, unsolvable=0
+        )
         assert "0 task(s) across 2 capability band(s)" in ann.notes[0]
         assert "1 task(s)" not in ann.notes[0]
 
     def test_single_band_axis_is_disclosed(self):
         rank = config.CapabilityRank(ordered=[], evidence={})
-        ann = report._capability_annotations(_imputed(2), rank, n_bands=1, total=4, unsolvable=0)
+        ann = report._capability_annotations(
+            _imputed(2), rank, {}, n_bands=1, total=4, unsolvable=0
+        )
         assert any("COLLAPSED to a single capability band" in n for n in ann.notes)
 
     def test_multi_band_axis_carries_no_collapse_note(self):
         rank = config.CapabilityRank(ordered=[], evidence={})
-        ann = report._capability_annotations(_imputed(2), rank, n_bands=3, total=4, unsolvable=0)
+        ann = report._capability_annotations(
+            _imputed(2), rank, {}, n_bands=3, total=4, unsolvable=0
+        )
         assert not any("COLLAPSED" in n for n in ann.notes)
 
 

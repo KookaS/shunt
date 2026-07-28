@@ -1,9 +1,15 @@
-"""End-to-end escalation-detector eval CLI: normalize -> replay-sweep -> full metric suite ->"""
+"""End-to-end escalation eval: policy replay at trajectory level + a causal prefix risk model."""
 
-# per-cell best-config selection -> plots -> authenticity. Runs on the checked-in fixtures, the
-# terminal results.csv bootstrap, and any real captured live trajectories. On data that cannot
-# exercise the recurrence trigger it reports status=INSUFFICIENT_DATA with the reason (never a
-# misleading auprc==prevalence), and every plot carries a visible insufficient-data annotation.
+# TWO INDEPENDENT BLOCKS, because they answer different questions and only one of them is a model:
+#
+#   POLICY   — replay the SHIPPED recurrence policy over each trajectory and ask whether firing
+#              predicts terminal failure. One row per trajectory (not per prefix), `n_escalated`
+#              per cell (not summed over the sweep), Wilson intervals, permutation null.
+#   PREFIX   — fit a continuous risk score from prefix-only features at fixed decision depths,
+#              grouped-CV by challenge, and report skill INCREMENTAL to the router's t=0 prior.
+#
+# The status gate is the permutation null, not `auprc > prevalence`. The old strict-inequality gate
+# passed a +0.0008 excess against a null sd of 0.00055 and printed `status: OK` on a pure null.
 
 from __future__ import annotations
 
@@ -11,7 +17,7 @@ import argparse
 import json
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -19,253 +25,192 @@ from typing import TYPE_CHECKING, Final
 import matplotlib
 
 from benchmark import plot_frame
-from benchmark.escalation import datasets, metrics, plots, replay
+from benchmark.escalation import (
+    datasets,
+    features,
+    metrics,
+    plots,
+    policy_eval,
+    prefix_eval,
+    replay,
+)
 from benchmark.escalation.authenticity import errors, verify_trajectory
-from benchmark.escalation.metrics import CellReport
-from benchmark.escalation.normalize.base import TrajectoryParser
-from benchmark.escalation.normalize.openhands import OpenHandsParser
-from benchmark.escalation.normalize.swe_agent import SweAgentParser
-from benchmark.escalation.normalize.swe_smith import SweSmithParser
 from benchmark.escalation.schema import Trajectory, load_jsonl
 from benchmark.plot_frame import Annotations, FigureSpec
-from shunt.router.escalation import EscalationAction
 
 matplotlib.use("Agg")
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
 
+    from benchmark.escalation.features import ModelCoverage
+    from benchmark.escalation.policy_eval import PolicyCell
+    from benchmark.escalation.prefix_eval import DepthReport
+
 logger = logging.getLogger(__name__)
 
-# The footer needs room: at matplotlib's 6.4x4.8 / dpi=80 default it renders unreadable.
 _FIGSIZE: Final[tuple[float, float]] = (9.0, 5.5)
 _DPI: Final[int] = 150
-_HORIZON = 3
 _STATUS_OK = "OK"
 _STATUS_INSUFFICIENT = "INSUFFICIENT_DATA"
 _STATUS_NO_SKILL = "NO_SKILL"
-_PARSERS: Final[dict[str, TrajectoryParser]] = {
-    "swe_agent.traj": SweAgentParser(),
-    "swe_smith.traj": SweSmithParser(),
-    "openhands.json": OpenHandsParser(),
-}
+# The configuration the product ships; the sweep must report it even when another cell scores
+# better, so a quiet default change can never hide inside an "argmax" line.
+SHIPPED_ESCALATE_AFTER_N: Final[int] = 2
 
 
 @dataclass(frozen=True)
 class EvalReport:
-    """The eval outcome — status-gated metric suite, per-cell sweep, best config, authenticity."""
+    """The eval outcome: corpus census, policy sweep, prefix risk model, and the skill verdict."""
 
     status: str
     reason: str
     n_trajectories: int
-    n_degenerate: int
+    n_stamped: int
     n_multistep: int
-    n_escalated: int
     authenticity_errors: int
-    headline: CellReport
-    best_config: CellReport | None
-    cells: list[CellReport]
-    degeneracy_note: str
+    policy_cells: list[PolicyCell]
+    depth_reports: list[DepthReport]
+    coverage: list[ModelCoverage]
     notes: list[str] = field(default_factory=list)
 
+    @property
+    def headline_cell(self) -> PolicyCell | None:
+        """The shipped configuration — the one the product actually runs, never an argmax."""
+        shipped = [c for c in self.policy_cells if c.escalate_after_n == SHIPPED_ESCALATE_AFTER_N]
+        return shipped[0] if shipped else (self.policy_cells[0] if self.policy_cells else None)
+
+    @property
+    def best_depth(self) -> DepthReport | None:
+        """The depth with the largest incremental AUROC — reported, never presented as chosen."""
+        return max(self.depth_reports, key=lambda d: d.incremental_auroc, default=None)
+
     def to_dict(self) -> dict[str, object]:
-        cm = self.headline.confusion
+        cell = self.headline_cell
         return {
             "status": self.status,
             "reason": self.reason,
             "n_trajectories": self.n_trajectories,
-            "n_degenerate": self.n_degenerate,
+            "n_stamped": self.n_stamped,
             "n_multistep": self.n_multistep,
-            "n_escalated": self.n_escalated,
             "authenticity_errors": self.authenticity_errors,
-            "prevalence": round(self.headline.prevalence, 4),
-            "auprc": round(self.headline.auprc, 4),
-            "auroc": round(self.headline.auroc, 4),
-            "confusion": {"tp": cm.tp, "fp": cm.fp, "fn": cm.fn, "tn": cm.tn},
-            "precision": round(self.headline.precision, 4),
-            "recall": round(self.headline.recall, 4),
-            "f1": round(self.headline.f1, 4),
-            "fpr": round(self.headline.fpr, 4),
-            "cohen_kappa": round(self.headline.cohen_kappa, 4),
-            "best_config": None if self.best_config is None else self.best_config.to_dict(),
-            "cells": [c.to_dict() for c in self.cells],
-            "degeneracy_note": self.degeneracy_note,
+            "headline_policy_cell": None if cell is None else cell.to_dict(),
+            "policy_cells": [c.to_dict() for c in self.policy_cells],
+            "prefix_model": [d.to_dict() for d in self.depth_reports],
+            "capture_coverage": [c.to_dict() for c in self.coverage],
             "notes": self.notes,
         }
 
-    @property
-    def insufficient_note(self) -> str | None:
-        """Red 'insufficient data' note when data could not exercise the detector, else None."""
-        return self.reason if self.status == _STATUS_INSUFFICIENT else None
 
-    @property
-    def no_skill_note(self) -> str | None:
-        """Orange 'no usable signal' note when data was sufficient but the detector ≤ no-skill."""
-        return self.reason if self.status == _STATUS_NO_SKILL else None
-
-
-def _cumulative_detection(directives: list[EscalationAction]) -> list[float]:
-    """Monotone per-prefix detection score: 0.0 until the policy first fires, 1.0 at and after."""
-    # The metric asks "has this failing task been flagged by prefix t" — once flagged it stays
-    # flagged. This is invariant to the post-first-flag ladder rungs (effort, tier, ceiling), an
-    # isolation-model abstraction that need not match the concrete routing ladder; scoring the raw
-    # per-step directive there would grade the metric on a directive stream production never runs.
-    scores: list[float] = []
-    flagged = False
-    for action in directives:
-        flagged = flagged or action is not EscalationAction.HOLD
-        scores.append(1.0 if flagged else 0.0)
-    return scores
-
-
-def _prefix_scores(traj: Trajectory, cfg_point: replay.GridPoint) -> list[float]:
-    """The cumulative detection score per prefix from the imported policy replay (see helper)."""
-    return _cumulative_detection(replay.replay_config(traj, cfg_point.to_config()).directives)
-
-
-def _all_labels(trajectories: list[Trajectory]) -> list[bool]:
-    """Prefix-risk labels flattened across trajectories (grid-independent — computed once)."""
-    labels: list[bool] = []
-    for traj in trajectories:
-        labels.extend(metrics.label_prefixes(traj, _HORIZON))
-    return labels
-
-
-def _mean_steps_to_detection(point: replay.SweepPoint) -> float | None:
-    """Mean first-escalation step over the escalated trajectories of one cell, or None."""
-    firsts = [
-        d.first_escalation_index for d in point.decisions if d.first_escalation_index is not None
-    ]
-    return sum(firsts) / len(firsts) if firsts else None
-
-
-def _cell_reports(sweep: replay.SweepResult, labels: list[bool]) -> list[CellReport]:
-    """The full metric suite for EVERY grid cell (not just grid[0]) over the whole corpus."""
-    reports: list[CellReport] = []
-    for point in sweep.points:
-        scores: list[float] = []
-        for decision in point.decisions:
-            scores.extend(_cumulative_detection(decision.directives))
-        gp = point.grid_point
-        reports.append(
-            metrics.cell_report(
-                escalate_after_n=gp.escalate_after_n,
-                stale_window=gp.stale_window,
-                ladder=gp.ladder,
-                scores=scores,
-                labels=labels,
-                n_escalated=sum(d.escalated for d in point.decisions),
-                mean_steps_to_detection=_mean_steps_to_detection(point),
-            )
-        )
-    return reports
-
-
-def _status(
-    labels: list[bool], n_escalated: int, n_multistep: int, headline_scores: list[float]
-) -> tuple[str, str]:
-    """Gate the report: refuse to present a null result as signal (audit P0)."""
-    if not any(labels):
-        return _STATUS_INSUFFICIENT, "no positive prefix labels — nothing to detect"
-    if n_escalated == 0:
+def _status(report_cells: Sequence[PolicyCell], depths: Sequence[DepthReport]) -> tuple[str, str]:
+    """Gate on the permutation null: only a result outside its own null band may report OK."""
+    if not report_cells and not depths:
+        return _STATUS_INSUFFICIENT, "no trajectory reached a scorable depth — nothing to measure"
+    skilled = [d for d in depths if d.has_skill]
+    if skilled:
+        best = max(skilled, key=lambda d: d.incremental_auroc)
         return (
-            _STATUS_INSUFFICIENT,
-            f"recurrence trigger never fired — N={n_multistep} multi-step, "
-            "0 with recurring failing_check_id",
+            _STATUS_OK,
+            f"prefix risk model clears its permutation null at depth {best.depth}: "
+            f"incremental AUROC {best.incremental_auroc:+.3f} over the t=0 task prior "
+            f"(null 97.5th pct {best.null_incremental.ci_high:+.3f}, "
+            f"p={best.null_incremental.p_value:.3f})",
         )
-    if len(set(headline_scores)) <= 1:
-        return _STATUS_INSUFFICIENT, "constant detector score — detector not exercised"
-    return _STATUS_OK, "sufficient: recurrence trigger fired and positive labels present"
+    return _STATUS_NO_SKILL, _no_skill_reason(depths)
 
 
-def _apply_skill_gate(status: str, reason: str, headline: CellReport) -> tuple[str, str]:
-    """Demote OK→NO_SKILL when data was sufficient but the detector fails to beat no-skill.
-
-    AUPRC-vs-prevalence is primary on this imbalanced problem; a headline at/below prevalence is a
-    legible *null* result, not signal — it must never present as OK (audit F2).
-    """
-    if status != _STATUS_OK or headline.auprc > headline.prevalence:
-        return status, reason
+def _no_skill_reason(depths: Sequence[DepthReport]) -> str:
+    """State which half of the gate failed, with the number, at the depth that came closest."""
+    if not depths:
+        return "no depth was estimable — the corpus cannot support a grouped-CV fit"
+    best = max(depths, key=lambda d: d.incremental_auroc)
     return (
-        _STATUS_NO_SKILL,
-        f"detector at/below no-skill baseline: AUPRC={headline.auprc:.3f} "
-        f"≤ prevalence={headline.prevalence:.3f} — no usable signal",
+        f"no depth clears its permutation null; best is depth {best.depth} with incremental "
+        f"AUROC {best.incremental_auroc:+.3f} (null 95% "
+        f"[{best.null_incremental.ci_low:+.3f}, {best.null_incremental.ci_high:+.3f}], "
+        f"p={best.null_incremental.p_value:.3f}) — no usable signal"
     )
 
 
-def evaluate(trajectories: list[Trajectory], grid: list[replay.GridPoint]) -> EvalReport:
-    """Score the labeler + full metric suite per cell, pick the best config, gate on sufficiency."""
-    labels = _all_labels(trajectories)
-    sweep = replay.sweep(trajectories, grid)
-    cells = _cell_reports(sweep, labels)
-    best = metrics.select_best_config(cells)
-    headline = best if best is not None else cells[0]
-    n_escalated = sum(c.n_escalated for c in cells) if cells else 0
-    n_degenerate = sum(datasets.is_degenerate(t) for t in trajectories)
-    n_multistep = len(trajectories) - n_degenerate
-    headline_scores = _prefix_scores_flat(trajectories, headline)
-    status, reason = _status(labels, n_escalated, n_multistep, headline_scores)
-    status, reason = _apply_skill_gate(status, reason, headline)
+def evaluate(
+    trajectories: Sequence[Trajectory],
+    grid: Sequence[replay.GridPoint] = tuple(datasets.DEFAULT_GRID),
+    *,
+    depths: Sequence[int] = features.DEFAULT_DEPTHS,
+    n_permutations: int = metrics.MIN_PERMUTATIONS,
+) -> EvalReport:
+    """Score the shipped policy and the prefix risk model, then gate on the permutation null."""
+    stamped = [t for t in trajectories if features.is_stamped(t)]
+    multistep = [t for t in trajectories if not datasets.is_degenerate(t)]
+    policy_cells = policy_eval.evaluate(stamped, list(grid), n_permutations=n_permutations)
+    depth_reports = prefix_eval.evaluate(stamped, depths, n_permutations=n_permutations)
+    status, reason = _status(policy_cells, depth_reports)
     return EvalReport(
         status=status,
         reason=reason,
         n_trajectories=len(trajectories),
-        n_degenerate=n_degenerate,
-        n_multistep=n_multistep,
-        n_escalated=n_escalated,
+        n_stamped=len(stamped),
+        n_multistep=len(multistep),
         authenticity_errors=sum(len(errors(verify_trajectory(t))) for t in trajectories),
-        headline=headline,
-        best_config=best,
-        cells=cells,
-        degeneracy_note=_degeneracy_note(n_degenerate, len(trajectories)),
+        policy_cells=policy_cells,
+        depth_reports=depth_reports,
+        coverage=features.model_coverage(trajectories),
+        notes=_corpus_notes(trajectories, stamped, policy_cells),
     )
 
 
-def _prefix_scores_flat(trajectories: list[Trajectory], cell: CellReport) -> list[float]:
-    """Flatten a cell's cumulative-detection scores across the corpus (for the status gate)."""
-    point = replay.GridPoint(cell.escalate_after_n, cell.stale_window, cell.ladder)
-    scores: list[float] = []
-    for traj in trajectories:
-        scores.extend(_prefix_scores(traj, point))
-    return scores
+def _corpus_notes(
+    trajectories: Sequence[Trajectory],
+    stamped: Sequence[Trajectory],
+    cells: Sequence[PolicyCell],
+) -> list[str]:
+    """Caveats the numbers cannot carry themselves: coverage loss and the shipped-default gap."""
+    notes: list[str] = []
+    dropped = len(trajectories) - len(stamped)
+    if dropped:
+        notes.append(
+            f"{dropped}/{len(trajectories)} trajectories carry no per-step verified outcomes "
+            "(the stamping stage never ran on them) and are excluded from every metric here. "
+            "Their fields are parser defaults, so including them would feed the model a "
+            "collection-date proxy rather than escalation evidence."
+        )
+    notes.extend(_default_gap_note(cells))
+    return notes
 
 
-def _degeneracy_note(n_degenerate: int, total: int) -> str:
-    """State the length-1 degeneracy plainly — never imply the recurrence trigger was exercised."""
-    if n_degenerate == 0:
-        return "no degenerate trajectories: the recurrence trigger is exercisable."
-    return (
-        f"{n_degenerate}/{total} trajectories are length-1 (degenerate): the recurrence trigger "
-        "CANNOT fire on a length-1 stream. This run validates the prefix-labeler, metrics, and "
-        "plots on real terminal data — NOT the escalation trigger, which needs multi-step data."
-    )
-
-
-def _load_fixtures(fixtures_dir: Path) -> list[Trajectory]:
-    out: list[Trajectory] = []
-    for name, parser in _PARSERS.items():
-        path = fixtures_dir / name
-        if path.exists():
-            out.append(
-                parser.parse(json.loads(path.read_text(encoding="utf-8")), {"trajectory_id": name})
-            )
-    return out
+def _default_gap_note(cells: Sequence[PolicyCell]) -> list[str]:
+    """Flag — never silently apply — a swept configuration that beats the shipped default."""
+    shipped = next((c for c in cells if c.escalate_after_n == SHIPPED_ESCALATE_AFTER_N), None)
+    if shipped is None or not cells:
+        return []
+    best = max(cells, key=lambda c: c.precision)
+    if best.escalate_after_n == shipped.escalate_after_n:
+        return []
+    return [
+        f"escalate_after_n={best.escalate_after_n} reaches P(fail|fired)={best.precision:.3f} "
+        f"against the SHIPPED default n={shipped.escalate_after_n}'s {shipped.precision:.3f}. "
+        "The shipped default is unchanged here: this is a measurement, and the intervals "
+        f"([{best.precision_ci[0]:.3f}, {best.precision_ci[1]:.3f}] vs "
+        f"[{shipped.precision_ci[0]:.3f}, {shipped.precision_ci[1]:.3f}]) must be read before "
+        "anyone acts on it."
+    ]
 
 
 def _run_annotations(report: EvalReport) -> Annotations:
-    """Status caveats every figure must carry, whatever it plots (audit P0/F2)."""
+    """Status caveats every figure must carry, whatever it plots."""
     limitations: list[str] = []
-    if report.insufficient_note:
-        limitations.append(f"INSUFFICIENT DATA — {report.insufficient_note}.")
-    if report.no_skill_note:
-        limitations.append(f"NO USABLE SIGNAL — {report.no_skill_note}.")
-    if report.n_degenerate:
+    if report.status == _STATUS_NO_SKILL:
+        limitations.append(f"NO USABLE SIGNAL — {report.reason}.")
+    if report.status == _STATUS_INSUFFICIENT:
+        limitations.append(f"INSUFFICIENT DATA — {report.reason}.")
+    dropped = report.n_trajectories - report.n_stamped
+    if dropped:
         limitations.append(
-            f"{report.n_degenerate}/{report.n_trajectories} trajectories are length-1, on which "
-            "the recurrence trigger cannot fire at all."
+            f"{dropped}/{report.n_trajectories} trajectories have no per-step verified outcomes "
+            "and are excluded from this figure."
         )
     return Annotations(
-        notes=(f"{report.n_trajectories} trajectories, status={report.status}",),
+        notes=(f"{report.n_stamped} scored trajectories, status={report.status}",),
         limitations=tuple(limitations),
     )
 
@@ -279,83 +224,88 @@ def _merge(*parts: Annotations) -> Annotations:
     )
 
 
-def _headline_annotations(report: EvalReport) -> Annotations:
-    """Which configuration the single-config figures are actually showing."""
-    h = report.headline
-    note = (
-        f"config: escalate_after_n={h.escalate_after_n}, stale_window={h.stale_window}, "
-        f"ladder={h.ladder}"
-    )
-    unchosen = (
-        "No cell was selected as best, so this shows the first grid point rather than a chosen "
-        "configuration."
-    )
-    return Annotations(
-        # Scoped here, not to every figure: only the label-bearing figures (PR, ROC, confusion)
-        # actually use the words "positive"/"risky" on the canvas.
-        definitions=(
-            (
-                "positive / risky",
-                f"a prefix within {_HORIZON} decisions of the end of a terminally failed run",
-            ),
-        ),
-        notes=(note,),
-        limitations=() if report.best_config is not None else (unchosen,),
-    )
-
-
-def _save_plots(
-    trajectories: list[Trajectory], grid: list[replay.GridPoint], report: EvalReport, out_dir: Path
-) -> None:
-    """Render every detector figure on the real data to `out_dir`, each degrading gracefully."""
+def _save_plots(report: EvalReport, out_dir: Path) -> None:
+    """Render every figure to `out_dir`. Figures whose data is absent are skipped, not faked."""
     out_dir.mkdir(parents=True, exist_ok=True)
     run = _run_annotations(report)
-    headline = _merge(run, _headline_annotations(report))
-    labels = _all_labels(trajectories)
-    scores = _prefix_scores_flat(trajectories, report.headline)
-    sweep = replay.sweep(trajectories, grid)
-    ladder = report.headline.ladder
+    _render(
+        out_dir / "failure_capture_coverage.png",
+        plots.CAPTURE_COVERAGE_SPEC,
+        lambda ax: _merge(plots.capture_coverage(report.coverage, ax), run),
+    )
+    if report.policy_cells:
+        _save_policy_plots(report, out_dir, run)
+    if report.best_depth is not None:
+        _save_prefix_plots(report.best_depth, out_dir, run)
 
+
+def _save_policy_plots(report: EvalReport, out_dir: Path, run: Annotations) -> None:
+    """The shipped policy's trajectory-level figures (sweep table, outcome bars, lead time)."""
+    cells = report.policy_cells
+    cell = report.headline_cell
+    assert cell is not None  # noqa: S101 (guarded by the caller's `if report.policy_cells`)
+    _render(
+        out_dir / "sweep_table.png",
+        plots.SWEEP_TABLE_SPEC,
+        lambda ax: _merge(plots.sweep_table(cells, ax), run),
+    )
+    _render(
+        out_dir / "trajectory_outcomes.png",
+        plots.OUTCOME_BARS_SPEC,
+        lambda ax: _merge(plots.outcome_bars(cell, ax), run),
+    )
+    _render(
+        out_dir / "lead_time_by_outcome.png",
+        plots.LEAD_TIME_SPEC,
+        lambda ax: _merge(plots.lead_time_by_outcome(cell, ax), run),
+    )
+
+
+def _save_prefix_plots(depth: DepthReport, out_dir: Path, run: Annotations) -> None:
+    """The risk model's figures — every one drawn against its own permutation null."""
+    scores = list(depth.scores)
+    labels = list(depth.labels)
+    detail = Annotations(notes=(_depth_note(depth),))
     _render(
         out_dir / "pr_curve.png",
         plots.PR_CURVE_SPEC,
-        lambda ax: _merge(plots.pr_curve(scores, labels, ax), headline),
+        lambda ax: _merge(plots.pr_curve(scores, labels, ax), detail, run),
     )
     _render(
         out_dir / "roc_curve.png",
         plots.ROC_CURVE_SPEC,
-        lambda ax: _merge(plots.roc_curve(scores, labels, ax), headline),
-    )
-    _render(
-        out_dir / "steps_to_detection.png",
-        plots.STEPS_TO_DETECTION_SPEC,
-        lambda ax: _merge(plots.steps_to_detection_hist(sweep, ax), run),
+        lambda ax: _merge(plots.roc_curve(scores, labels, depth.null_prefix, ax), detail, run),
     )
     _render(
         out_dir / "confusion_matrix.png",
         plots.CONFUSION_MATRIX_SPEC,
-        lambda ax: _merge(plots.confusion_matrix_plot(report.headline.confusion, ax), headline),
+        lambda ax: _merge(
+            plots.confusion_matrix_plot(metrics.detection_metrics(scores, labels).confusion, ax),
+            detail,
+            run,
+        ),
     )
     _render(
-        out_dir / "sweep_heatmap.png",
-        plots.SWEEP_HEATMAP_SPEC,
-        lambda ax: _merge(plots.sweep_heatmap(report.cells, ax, ladder=ladder), run),
-    )
-    _render(
-        out_dir / "cost_quality.png",
-        plots.COST_QUALITY_SPEC,
-        lambda ax: _merge(_cost_quality(report.cells, ax), run),
+        out_dir / "permutation_null.png",
+        plots.PERMUTATION_NULL_SPEC,
+        lambda ax: _merge(
+            plots.permutation_null_plot(
+                depth.null_incremental, ax, label="incremental AUROC over the t=0 task prior"
+            ),
+            detail,
+            run,
+        ),
     )
 
 
-def _cost_quality(cells: list[CellReport], ax: Axes) -> Annotations:
-    """Cost-quality frontier: escalation count (cost proxy) vs F1 quality, per grid cell."""
-    perf = {f"n{c.escalate_after_n}_w{c.stale_window}_{c.ladder[:6]}": c.f1 * 100 for c in cells}
-    cost = {
-        f"n{c.escalate_after_n}_w{c.stale_window}_{c.ladder[:6]}": float(c.n_escalated)
-        for c in cells
-    }
-    return plots.cost_quality_frontier(perf, cost, ax)
+def _depth_note(depth: DepthReport) -> str:
+    """The one line that stops a reader mistaking raw discrimination for incremental value."""
+    return (
+        f"prefix depth {depth.depth} decisions, {depth.n_rows} trajectories over "
+        f"{depth.n_groups} challenges; AUROC prior-only={depth.auroc_prior:.3f}, "
+        f"prefix-only={depth.auroc_prefix:.3f}, combined={depth.auroc_combined:.3f}, "
+        f"incremental={depth.incremental_auroc:+.3f}"
+    )
 
 
 def _render(path: Path, spec: FigureSpec, draw: Callable[[Axes], Annotations]) -> None:
@@ -364,61 +314,75 @@ def _render(path: Path, spec: FigureSpec, draw: Callable[[Axes], Annotations]) -
 
 
 def _print_summary(report: EvalReport) -> None:
-    """Print the best hyperparameter + the per-cell metric table to stdout (audit P4)."""
+    """Print the policy sweep and the prefix-model table to stdout."""
     print(f"\nstatus: {report.status} — {report.reason}")  # noqa: T201
-    if report.best_config is None:
-        print("best_config: null (no cell discriminates — insufficient data)")  # noqa: T201
-    else:
-        b = report.best_config
+    print(  # noqa: T201
+        f"\n{'n':>3} {'esc':>5} {'P(fail|fired)':>14} {'95% CI':>18} {'base':>6} {'lift':>6}"
+    )
+    for c in report.policy_cells:
+        marker = "  <- shipped default" if c.escalate_after_n == SHIPPED_ESCALATE_AFTER_N else ""
         print(  # noqa: T201
-            f"best_config: escalate_after_n={b.escalate_after_n} stale_window={b.stale_window} "
-            f"ladder={b.ladder} | F1={b.f1:.3f} steps={b.mean_steps_to_detection}"
+            f"{c.escalate_after_n:>3} {c.n_escalated:>5} {c.precision:>14.3f} "
+            f"{f'[{c.precision_ci[0]:.3f}, {c.precision_ci[1]:.3f}]':>18} "
+            f"{c.base_failure_rate:>6.3f} {c.lift:>5.2f}x{marker}"
         )
-    header = f"{'n':>3} {'window':>6} {'ladder':>16} {'F1':>6} {'prec':>6} {'rec':>6} {'esc':>5}"
-    print(header)  # noqa: T201
-    for c in report.cells:
+    print(  # noqa: T201
+        f"\n{'depth':>5} {'n':>5} {'prior':>7} {'prefix':>7} {'combined':>9} "
+        f"{'incr':>7} {'null p':>7}"
+    )
+    for d in report.depth_reports:
         print(  # noqa: T201
-            f"{c.escalate_after_n:>3} {c.stale_window:>6} {c.ladder:>16} "
-            f"{c.f1:>6.3f} {c.precision:>6.3f} {c.recall:>6.3f} {c.n_escalated:>5}"
+            f"{d.depth:>5} {d.n_rows:>5} {d.auroc_prior:>7.3f} {d.auroc_prefix:>7.3f} "
+            f"{d.auroc_combined:>9.3f} {d.incremental_auroc:>+7.3f} "
+            f"{d.null_incremental.p_value:>7.3f}"
         )
+    for note in report.notes:
+        print(f"\nNOTE: {note}", file=sys.stderr)  # noqa: T201
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Run the eval on fixtures + results.csv bootstrap + live data; print the JSON report."""
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="escalation-detector offline eval")
     here = Path(__file__).resolve()
-    parser.add_argument(
-        "--fixtures", type=Path, default=here.parents[2] / "tests/escalation/fixtures"
-    )
-    parser.add_argument(
-        "--results-csv", type=Path, default=here.parent.parent / "routing/results.csv"
-    )
     parser.add_argument(
         "--live-dir",
         type=Path,
         default=here.parent / "data/live",
-        help="Real captured live trajectories (schema JSONL) to include, if present.",
+        help="Real captured live trajectories (schema JSONL).",
     )
     # Defaults to the committed reports dir: `make escalation-eval` must actually refresh the
     # figures, or they silently rot while the JSON report says everything is current.
     parser.add_argument("--plots-dir", type=Path, default=here.parent / "reports")
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--permutations",
+        type=int,
+        default=metrics.MIN_PERMUTATIONS,
+        help="Label shuffles behind every null band (the skill gate reads this).",
+    )
+    parser.add_argument(
+        "--depths",
+        type=int,
+        nargs="+",
+        default=list(features.DEFAULT_DEPTHS),
+        help="Decision depths (absolute, never fractional) to score prefixes at.",
+    )
+    return parser
 
-    trajectories = _load_fixtures(args.fixtures)
-    if args.results_csv.exists():
-        trajectories.extend(datasets.results_csv_bootstrap(args.results_csv))
-    if args.live_dir.exists():
-        trajectories.extend(load_jsonl(p) for p in sorted(args.live_dir.glob("*.jsonl")))
-    if not trajectories:
-        logger.error("no trajectories found (fixtures + results.csv both empty)")
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the eval on the live corpus and print the JSON report."""
+    args = _build_parser().parse_args(argv)
+    if not args.live_dir.exists():
+        logger.error("live trajectory directory not found: %s", args.live_dir)
         return 1
-
-    report = evaluate(trajectories, datasets.DEFAULT_GRID)
+    trajectories = [load_jsonl(p) for p in sorted(args.live_dir.glob("*.jsonl"))]
+    if not trajectories:
+        logger.error("no trajectories found under %s", args.live_dir)
+        return 1
+    report = evaluate(trajectories, depths=args.depths, n_permutations=args.permutations)
     if args.plots_dir is not None:
-        _save_plots(trajectories, datasets.DEFAULT_GRID, report, args.plots_dir)
+        _save_plots(report, args.plots_dir)
     print(json.dumps(report.to_dict(), indent=2))  # noqa: T201 (CLI report to stdout)
     _print_summary(report)
-    print(report.degeneracy_note, file=sys.stderr)  # noqa: T201
     return 0
 
 

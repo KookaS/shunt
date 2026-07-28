@@ -124,7 +124,9 @@ def test_disclosure_banner_equal_coverage_wording(monkeypatch: pytest.MonkeyPatc
     banner = report._disclosure_banner(_im(), equal_rows)
     assert banner is not None
     assert "equal-coverage via monotone imputation" in banner
-    assert "widens the router" in banner  # the load-bearing conservative framing
+    # The banner must NOT assert a direction imputation was never shown to have.
+    assert "widens the router" not in banner
+    assert "EVERY imputed cell is filled pass=True" in banner
 
 
 def test_disclosure_banner_downgrades_when_unequal(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -177,6 +179,25 @@ def test_capability_bands_merge_overlapping_cis() -> None:
     assert meta[2]["capability_range"]["pass_rate_max"] == 0.60
 
 
+def test_capability_bands_do_not_chain_through_disjoint_cis() -> None:
+    # a-b overlap and b-c overlap, but a and c are DISJOINT. The old chained rule put
+    # all three in one band while the legend promised "CIs overlap"; pairwise cuts.
+    order = ["a", "b", "c"]
+    ci = {"a": (0.10, 0.40), "b": (0.35, 0.60), "c": (0.55, 0.90)}
+    rank = CapabilityRank(
+        ordered=[RankedModel(m, "x", i, "measured") for i, m in enumerate(order)],
+        evidence={
+            m: ModelEvidence(m, 40, sum(ci[m]) / 2, ci[m][0], ci[m][1], i, "measured", float(i))
+            for i, m in enumerate(order)
+        },
+    )
+    bands = report.capability_bands(rank)
+    assert bands["a"] != bands["c"]
+    lo = max(rank.evidence[m].ci_lo for m in order if bands[m] == bands["a"])
+    hi = min(rank.evidence[m].ci_hi for m in order if bands[m] == bands["a"])
+    assert lo <= hi  # every member of a band overlaps every other member
+
+
 def test_band_metadata_pct_tasks_from_im() -> None:
     meta = report.band_metadata(RANK, report.capability_bands(RANK), _im())
     # pct_tasks_min_solved is populated from the imputed matrix's τ distribution.
@@ -194,20 +215,50 @@ def test_plot_capability_distribution(tmp_path: Path, monkeypatch: pytest.Monkey
     assert path.exists() and path.stat().st_size > 0
 
 
-def test_plot_per_stratum_winrate_excludes_oracle(
+def test_plot_per_stratum_winrate_shows_a_tie_as_a_tie(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The replaced figure named ONE winner per stratum via max(), so an exact
+    # three-way tie broken by list order carried the whole headline conclusion.
     _use_rank(monkeypatch)
-    rows_by_stratum = {
-        1: [
-            {"strategy": "Always-Cheap", "Reward": 1.5, "n_tasks": 2},
-            {"strategy": "Oracle", "Reward": 9.0, "n_tasks": 2},  # excluded upper bound
-        ],
-        2: [{"strategy": "kNN-cascade", "Reward": 0.8, "n_tasks": 1}],
+    stats: report.StratumStats = {
+        1: {
+            "Always-Cheap": {"n": 2.0, "mean": 0.75, "lo": 0.5, "hi": 1.0},
+            "kNN-cascade": {"n": 2.0, "mean": 0.75, "lo": 0.5, "hi": 1.0},
+        },
+        2: {
+            "Always-Cheap": {"n": 1.0, "mean": 0.2, "lo": 0.2, "hi": 0.2},
+            "kNN-cascade": {"n": 1.0, "mean": 0.8, "lo": 0.8, "hi": 0.8},
+        },
     }
-    assert report._stratum_winner(rows_by_stratum[1]) == ("Always-Cheap", 1.5)
-    path = report.plot_per_stratum_winrate(rows_by_stratum, tmp_path)
+    assert report._stratum_ties(stats[1]) == ["Always-Cheap", "kNN-cascade"]
+    assert report._stratum_ties(stats[2]) == ["kNN-cascade"]
+    ann = report._per_stratum_annotations(stats, [1, 2])
+    assert any("EXACT TIE" in n for n in ann.notes)
+    path = report.plot_per_stratum_winrate(stats, tmp_path)
     assert path.exists() and path.stat().st_size > 0
+
+
+def test_stratum_reward_stats_scores_every_strategy_on_the_same_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_rank(monkeypatch)
+    im = _im()
+    matrix = {"tasks": dict.fromkeys(im.matrix, {}), "results": im.matrix}
+
+    class _Pick:
+        def __init__(self, name: str, model: str) -> None:
+            self.name, self._model = name, model
+
+        def select(self, tid: str, meta: dict, matrix: dict) -> str:  # noqa: ARG002
+            return self._model
+
+    tasks = sorted(im.complete)
+    stats = report.stratum_reward_stats(
+        matrix, im, [_Pick("cheap", "c0"), _Pick("strong", "f0")], tasks, 0.1
+    )
+    for per_strategy in stats.values():
+        assert len({s["n"] for s in per_strategy.values()}) == 1  # one shared denominator
 
 
 # ------------------------------------------------------- phantom machinery removed

@@ -81,13 +81,18 @@ class _Embedder:
         return np.zeros(8, dtype=np.float32)
 
 
-def _engine(*, enabled: bool) -> RouterEngine:
+def _engine(*, enabled: bool, epsilon: float = 0.0) -> RouterEngine:
     return RouterEngine(
         model_pool=_RankedPool(),
         session_manager=_SessionManager(),
         outcome_index=_Index(),
         embedder=_Embedder(),
-        escalation=EscalationConfig(enabled=enabled, escalate_after_n=2),
+        escalation=EscalationConfig(
+            enabled=enabled,
+            escalate_after_n=2,
+            exploration_epsilon=epsilon,
+            exploration_seed=1234,
+        ),
         # B3: the decide-side task key is the repo (resolved work_dir), matching the key the
         # record_outcome calls below use ("repoA") — not the client tool_identity.
         task_key_resolver=lambda _session: "repoA",
@@ -171,3 +176,59 @@ def test_disabled_never_escalates() -> None:
     m3, r3, _ = eng.decide("s3", "task")
     assert m3 == "qwen"
     assert r3 != "auto_escalation"
+
+
+def test_exploration_only_ever_withholds_an_escalation_never_invents_one() -> None:
+    # Cache-safety under randomization: the explored arm is HOLD, so every decision is either
+    # the escalation the deterministic policy would have made, or the base pick. There is no
+    # third model, hence no switch the deterministic path would not also have made.
+    seen: set[tuple[str, str]] = set()
+    eng = _engine(enabled=True, epsilon=0.5)
+    for i in range(60):
+        eng.decide(f"a{i}", "task")
+        _fail(eng)
+        eng.decide(f"b{i}", "task")
+        _fail(eng)
+        model, reason, provenance = eng.decide(f"c{i}", "task")
+        assert model in ("qwen", "glm")
+        if model == "qwen":  # explored HOLD -> the base decision is untouched
+            assert reason != "auto_escalation"
+        record = provenance.get("escalation_exploration")
+        if record is not None:  # a flagged checkpoint (the only place a propensity is logged)
+            assert record["randomized"] is True
+            assert 0.0 < record["propensity"] < 1.0
+            seen.add((model, reason))
+    assert len(seen) == 2, "both arms must actually be realized at epsilon=0.5"
+
+
+class _TopUnhealthyPool(_RankedPool):
+    """Headroom exists on paper, but every higher-rank model is circuit-broken."""
+
+    def is_healthy(self, name: str) -> bool:
+        return name == "qwen"
+
+
+def test_an_escalation_that_cannot_be_delivered_is_not_logged_as_one() -> None:
+    # The rung is unavailable (every higher model unhealthy), so the escalate arm did NOT
+    # happen. Logging it as taken would corrupt exactly the arm the estimate is about.
+    eng = RouterEngine(
+        model_pool=_TopUnhealthyPool(),
+        session_manager=_SessionManager(),
+        outcome_index=_Index(),
+        embedder=_Embedder(),
+        escalation=EscalationConfig(
+            enabled=True, escalate_after_n=2, exploration_epsilon=0.2, exploration_seed=7
+        ),
+        task_key_resolver=lambda _session: "repoA",
+    )
+    eng.decide("s1", "task")
+    _fail(eng)
+    eng.decide("s2", "task")
+    _fail(eng)
+    model, reason, provenance = eng.decide("s3", "task")
+    assert model == "qwen"  # nothing was delivered
+    assert reason != "auto_escalation"
+    record = provenance["escalation_exploration"]
+    assert record["action"] == "hold"
+    assert record["randomized"] is False  # carries no counterfactual information
+    assert record["propensity"] == 1.0

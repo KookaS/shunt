@@ -20,7 +20,7 @@ import numpy as np  # noqa: E402
 
 from benchmark import config, plot_frame  # noqa: E402
 from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
-from benchmark.routing import summary  # noqa: E402
+from benchmark.routing import plot_style, summary  # noqa: E402
 from benchmark.routing.exploration_replay import ReplayReport, evaluate  # noqa: E402
 from shunt.router.policy import load_router_policy  # noqa: E402
 
@@ -194,6 +194,28 @@ def _annotations(report: ReplayReport) -> Annotations:
             f"The two marginal pass-rate CIs overlap ([{base.lo:.0%}, {base.hi:.0%}] vs "
             f"[{expl.lo:.0%}, {expl.hi:.0%}]) — at {len(slice_.tasks)} tasks only the paired "
             "difference separates the arms"
+        )
+    # The dense-slice search maximises CELLS, so it prefers many tasks x few models. When the
+    # models it lands on are all cheap, the measured "exploration overhead" is the overhead of
+    # exploring between cheap models — not the shipped policy's, where an exploratory pull can
+    # land on the frontier model at ~40x the price. That has to be said on the figure.
+    priced = [(m, config.cost_per_1m(m, config.enabled_pricing())) for m in slice_.models]
+    all_enabled = [
+        (m, config.cost_per_1m(m, config.enabled_pricing()))
+        for m in (config.enabled_models() or slice_.models)
+    ]
+    top_slice = max((c for _m, c in priced), default=0.0)
+    top_enabled = max((c for _m, c in all_enabled), default=0.0)
+    if priced and all_enabled and top_slice < top_enabled:
+        absent = [m for m, _c in sorted(all_enabled, key=lambda t: -t[1]) if m not in slice_.models]
+        limits.append(
+            f"NO FRONTIER ARM IN THIS SLICE: the dense sub-grid covers only "
+            f"{', '.join(slice_.models)} — the priciest model here is "
+            f"{plot_style.usd(top_slice)}/Mtok against {plot_style.usd(top_enabled)} across "
+            f"all enabled models ({', '.join(absent)} are "
+            f"absent). The exploration overhead measured here is between CHEAP models and is a "
+            f"LOWER BOUND on the shipped policy's, where an exploratory pull can land on the "
+            f"frontier model"
         )
     return Annotations(
         notes=(

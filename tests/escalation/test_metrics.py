@@ -1,4 +1,4 @@
-"""Metrics: AUPRC matches sklearn, prefix labels recompute, prevalence baseline is available."""
+"""Metrics: statistics match sklearn, drawn curves match their own titles, nulls are real."""
 
 from __future__ import annotations
 
@@ -7,9 +7,10 @@ import random
 import pytest
 
 from benchmark.escalation import metrics
-from tests.escalation.factories import make_step, make_trajectory
 
-sklearn_ap = pytest.importorskip("sklearn.metrics").average_precision_score
+sklearn_metrics = pytest.importorskip("sklearn.metrics")
+sklearn_ap = sklearn_metrics.average_precision_score
+sklearn_roc = sklearn_metrics.roc_auc_score
 
 
 def test_auprc_matches_sklearn_on_a_fixture() -> None:
@@ -33,28 +34,12 @@ def test_auprc_zero_when_no_positives() -> None:
     assert metrics.auprc([0.5, 0.9], [False, False]) == 0.0
 
 
-def test_label_prefixes_recompute_from_terminal_and_index() -> None:
-    steps = [make_step(step_index=i, decision_index=i) for i in range(5)]
-    failed = make_trajectory(steps, terminal_resolved=False)
-    # horizon 2 over a length-5 failed trajectory → last two prefixes positive.
-    assert metrics.label_prefixes(failed, horizon=2) == [False, False, False, True, True]
-    resolved = make_trajectory(steps, terminal_resolved=True)
-    assert metrics.label_prefixes(resolved, horizon=2) == [False] * 5  # a solved run has no risk
-
-
-def test_prevalence_is_the_positive_rate() -> None:
-    assert metrics.prevalence([True, False, False, False]) == pytest.approx(0.25)
-    assert metrics.prevalence([]) == 0.0
-
-
-sklearn_roc = pytest.importorskip("sklearn.metrics").roc_auc_score
-
-
-def test_auroc_matches_sklearn_random() -> None:
+def test_auroc_matches_sklearn_random_including_heavy_ties() -> None:
     rng = random.Random(1)
     for _ in range(20):
         n = rng.randint(5, 40)
-        scores = [rng.random() for _ in range(n)]
+        # Coarse quantisation forces large tie blocks — the case the drawn curve used to mishandle.
+        scores = [float(rng.randint(0, 2)) for _ in range(n)]
         labels = [rng.random() < 0.4 for _ in range(n)]
         if not any(labels) or all(labels):
             continue
@@ -66,64 +51,120 @@ def test_auroc_is_chance_when_one_class_absent() -> None:
     assert metrics.auroc([0.1, 0.9, 0.3], [True, True, True]) == 0.5
 
 
+def test_prevalence_is_the_positive_rate() -> None:
+    assert metrics.prevalence([True, False, False, False]) == pytest.approx(0.25)
+    assert metrics.prevalence([]) == 0.0
+
+
 def test_detection_metrics_hand_computed_confusion_and_f1() -> None:
-    # Positive class = risky/flagged prefix. Threshold 0.5 on the binary cumulative score.
     #   score  label   -> cell
-    #   1.0    True     tp
-    #   1.0    True     tp
-    #   1.0    False    fp
-    #   0.0    True     fn
-    #   0.0    False    tn
-    #   0.0    False    tn
+    #   1.0    True     tp        0.0    True     fn
+    #   1.0    True     tp        0.0    False    tn
+    #   1.0    False    fp        0.0    False    tn
     scores = [1.0, 1.0, 1.0, 0.0, 0.0, 0.0]
     labels = [True, True, False, True, False, False]
     m = metrics.detection_metrics(scores, labels)
     assert (m.confusion.tp, m.confusion.fp, m.confusion.fn, m.confusion.tn) == (2, 1, 1, 2)
-    assert m.precision == pytest.approx(2 / 3)  # tp / (tp+fp)
-    assert m.recall == pytest.approx(2 / 3)  # tp / (tp+fn)
-    assert m.f1 == pytest.approx(2 / 3)  # 2tp / (2tp+fp+fn) = 4/6
-    assert m.fpr == pytest.approx(1 / 3)  # fp / (fp+tn)
+    assert m.precision == pytest.approx(2 / 3)
+    assert m.recall == pytest.approx(2 / 3)
+    assert m.f1 == pytest.approx(2 / 3)
+    assert m.fpr == pytest.approx(1 / 3)
 
 
-def _cell(f1: float, *, n_escalated: int = 5, steps: float | None = 3.0) -> metrics.CellReport:
-    from benchmark.calibration.labeler_metrics import ConfusionMatrix
-
-    return metrics.CellReport(
-        escalate_after_n=2,
-        stale_window=5,
-        ladder="effort_then_rank",
-        confusion=ConfusionMatrix(tp=1, fp=0, fn=0, tn=1),
-        precision=1.0,
-        recall=1.0,
-        f1=f1,
-        fpr=0.0,
-        cohen_kappa=0.0,
-        auprc=0.0,
-        auroc=0.5,
-        prevalence=0.5,
-        n_escalated=n_escalated,
-        mean_steps_to_detection=steps,
+def _polyline_area(points: list[tuple[float, float]]) -> float:
+    """Trapezoidal area under a polyline — what a reader integrates by eye."""
+    ordered = sorted(points)
+    return sum(
+        (b[0] - a[0]) * (a[1] + b[1]) / 2.0 for a, b in zip(ordered, ordered[1:], strict=False)
     )
 
 
-def test_select_best_config_argmax_on_f1() -> None:
-    cells = [_cell(0.4), _cell(0.9), _cell(0.6)]
-    best = metrics.select_best_config(cells)
-    assert best is not None
-    assert best.f1 == pytest.approx(0.9)
+def test_drawn_roc_area_equals_the_reported_auroc() -> None:
+    # The committed figure drew area 0.554 under a title reading 0.450, because the old builder
+    # admitted one tied ROW at a time in corpus order. Collapsing ties to distinct thresholds makes
+    # the drawn shape and the reported statistic the same number, by construction.
+    rng = random.Random(5)
+    for _ in range(20):
+        scores = [float(rng.randint(0, 3)) for _ in range(200)]
+        labels = [rng.random() < 0.3 for _ in range(200)]
+        if not any(labels) or all(labels):
+            continue
+        drawn = _polyline_area(metrics.roc_operating_points(scores, labels))
+        assert drawn == pytest.approx(metrics.auroc(scores, labels), abs=1e-9)
 
 
-def test_select_best_config_tie_broken_by_earlier_detection() -> None:
-    early = _cell(0.8, steps=2.0)
-    late = _cell(0.8, steps=9.0)
-    assert metrics.select_best_config([late, early]) is early  # same F1 → earlier detection wins
+def test_drawn_roc_is_invariant_to_input_row_order() -> None:
+    # The old polyline moved from 0.554 to ~0.450 when the rows were shuffled: the shape was the
+    # corpus's ordering, not the detector. The tie-collapsed curve cannot depend on row order.
+    rng = random.Random(9)
+    scores = [float(rng.randint(0, 2)) for _ in range(300)]
+    labels = [rng.random() < 0.35 for _ in range(300)]
+    before = metrics.roc_operating_points(scores, labels)
+    pairs = list(zip(scores, labels, strict=True))
+    rng.shuffle(pairs)
+    after = metrics.roc_operating_points([s for s, _ in pairs], [lab for _, lab in pairs])
+    assert before == after
 
 
-def test_select_best_config_null_when_all_degenerate() -> None:
-    cells = [_cell(0.0, n_escalated=0), _cell(0.0, n_escalated=0)]
-    assert metrics.select_best_config(cells) is None
+def test_roc_and_pr_collapse_a_binary_score_to_its_real_operating_points() -> None:
+    scores = [1.0] * 40 + [0.0] * 60
+    labels = [i % 3 == 0 for i in range(100)]
+    # A binary score has exactly two thresholds, so ROC has 3 vertices: (0,0), the point, (1,1).
+    assert len(metrics.roc_operating_points(scores, labels)) == 3
+    assert len(metrics.pr_operating_points(scores, labels)) == 3
 
 
-def test_select_best_config_null_when_no_discrimination() -> None:
-    cells = [_cell(0.5), _cell(0.5)]  # identical objective → arbitrary pick refused
-    assert metrics.select_best_config(cells) is None
+def test_permutation_null_places_a_real_signal_outside_the_band() -> None:
+    labels = [i < 50 for i in range(100)]
+    scores = [1.0 if lab else 0.0 for lab in labels]  # perfect
+    null = metrics.permute_statistic(scores, labels, metrics.auroc, n_permutations=200)
+    assert null.observed == pytest.approx(1.0)
+    assert null.mean == pytest.approx(0.5, abs=0.05)
+    assert null.beats_null
+    assert null.p_value < 0.01
+
+
+def test_permutation_null_keeps_pure_noise_inside_the_band() -> None:
+    # The old gate was a bare `auprc > prevalence` with no noise floor, so a +0.0008 excess against
+    # a null sd of 0.00055 reported `status: OK`. A null must not clear its own band.
+    rng = random.Random(11)
+    labels = [rng.random() < 0.4 for _ in range(300)]
+    scores = [rng.random() for _ in range(300)]
+    null = metrics.permute_statistic(scores, labels, metrics.auroc, n_permutations=200)
+    assert not null.beats_null
+    assert null.p_value > 0.05
+
+
+def test_permutation_null_refuses_too_few_draws() -> None:
+    with pytest.raises(ValueError, match="permutation null needs"):
+        metrics.permutation_null(0.9, [0.5] * 10)
+
+
+def test_permutation_p_value_can_never_be_zero() -> None:
+    # An exact permutation test has resolution 1/(n+1); reporting p=0 would overclaim.
+    null = metrics.permutation_null(99.0, [0.0] * 200)
+    assert null.p_value == pytest.approx(1 / 201)
+
+
+def test_wilson_interval_brackets_the_point_estimate() -> None:
+    low, high = metrics.wilson_interval(37, 100)
+    assert low < 0.37 < high
+    # Oracle: the closed-form Wilson bounds for p=0.37, n=100 (cross-checked against an
+    # independent evaluation with scipy's exact z, which agrees to 5 dp).
+    assert (low, high) == pytest.approx((0.281824, 0.467795), abs=1e-4)
+    # Degenerate counts stay inside [0, 1] instead of a nonsense normal-approx interval.
+    assert metrics.wilson_interval(0, 10)[0] == 0.0
+    assert metrics.wilson_interval(10, 10)[1] == 1.0
+    assert metrics.wilson_interval(0, 0) == (0.0, 0.0)
+
+
+def test_grouped_bootstrap_resamples_groups_not_rows() -> None:
+    # 10 challenges of 10 correlated rows each. A row-level bootstrap would report a spuriously
+    # tight interval on this structure; the grouped one must stay wide enough to contain the point.
+    rng = random.Random(3)
+    groups = [f"c{i // 10}" for i in range(100)]
+    labels = [i // 10 < 5 for i in range(100)]
+    scores = [rng.random() for _ in range(100)]
+    low, high = metrics.grouped_bootstrap_ci(scores, labels, groups, metrics.auroc, n_resamples=200)
+    assert low <= metrics.auroc(scores, labels) <= high
+    assert high - low > 0.05

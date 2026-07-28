@@ -157,6 +157,65 @@ router:
 The knob reference, including the reserved `blocking_exit_code` field, is in
 [Configuration](configuration.md#auto-escalate-on-repeated-verified-failure).
 
+## Measuring whether escalation actually helps
+
+Turning escalation on tells you nothing about whether it *worked*. A deterministic policy
+escalates at every checkpoint it flags and nowhere else, so the logs contain no case where a
+flagged checkpoint was left alone. There is no comparison to make — not a noisy one, none. Any
+"escalation improved things" read off such logs is a difficulty proxy: escalation fires on the
+runs that were already going badly.
+
+`exploration_epsilon` fixes that by withholding the escalation at a small random fraction of
+flagged checkpoints and **recording the probability that generated each choice**:
+
+```yaml
+router:
+  escalation:
+    enabled: true
+    exploration_epsilon: 0.2    # withhold ~1 in 5 flagged escalations
+    exploration_seed: 20260728  # optional; omit and shunt draws + records one
+```
+
+It is a **separate opt-in**: `enabled: true` on its own never randomizes anything, and
+`exploration_epsilon: 0.0` (the default) is today's behaviour bit for bit.
+
+What gets recorded, on the session's decision provenance, at flagged checkpoints only:
+
+| Field | What it is |
+|---|---|
+| `checkpoint_id` | The recurring failing-check id that flagged this checkpoint |
+| `action` / `policy_action` | The arm taken, and what the deterministic policy would have done |
+| `propensity` | `P(action taken)` — `1-ε` for the escalation arm, `ε` for the withheld arm |
+| `epsilon`, `seed` | Enough to re-derive the draw after the fact |
+| `features` | The state as of the decision — failure counts, distinct keys, ladder headroom |
+| `randomized` | `false` for a checkpoint with no rung left to climb; those are excluded, not weighted |
+
+Three properties worth knowing:
+
+- **It cannot cost you cache.** The explored arm is always *hold*. Randomizing can only
+  withhold an escalation, never invent one, so it introduces no model switch the deterministic
+  policy would not have made — and the directive still applies at the next boundary.
+- **It is reproducible.** Given the seed, the sequence of draws is exact, so a logged
+  propensity can be audited rather than trusted.
+- **It costs quality while it runs.** You are deliberately declining some escalations. Turn it
+  off outside collection windows.
+
+Read the logs back with the estimator in `benchmark/escalation/ope.py`:
+
+```python
+from benchmark.escalation.ope import always_escalate, estimate_policy_value, rows_from_records
+from shunt.db.store import OutcomeStore
+
+store = OutcomeStore()
+result = estimate_policy_value(rows_from_records(store.escalation_exploration_rows()))
+print(result.status, result.dr_estimate, result.ci_low, result.ci_high)
+```
+
+It reports a doubly-robust estimate of a target policy's value with a 90% bootstrap interval —
+**or** `status == "not_identified"` with every numeric field `None`, which is what you get from
+logs that contain no randomization, only one realized arm, or no verified outcomes. That refusal
+is deliberate: the estimator will not hand you a number the data cannot support.
+
 ## Evaluating the detector offline
 
 Before you trust the trigger on live traffic, you can measure it — offline, at no API
@@ -175,43 +234,62 @@ make escalation-eval
 The `--extra benchmark` flag (baked into the Make target) is required — it pulls the
 eval deps (`matplotlib`, `swebench`, …); a bare `uv run` strips them.
 
-It prints a JSON report, a per-cell metric table and the chosen config to stdout, and
-renders the figures. What the numbers mean:
+It prints a JSON report and two metric tables to stdout, and renders the figures. The eval
+has **two independent blocks**, because they answer different questions:
 
-- **`status` gates the whole report.** When the data cannot exercise the recurrence trigger
-  (no escalation ever fires, no positive labels, or a constant detector score) the report
-  is `INSUFFICIENT_DATA` with a `reason`, and every figure states it in red under the plot,
-  so a null result is never mistaken for signal. A second gate catches the subtler failure:
-  when the data **was** sufficient but the detector still fails to beat the no-skill baseline
-  (`AUPRC ≤ prevalence`), the status is **`NO_SKILL`** and every figure says "no usable
-  signal" the same way — a legible-but-worse-than-random detector is never allowed to
-  present as `OK` with clean plots.
-- **AUPRC vs prevalence is the headline.** Escalation is a rare-event problem — most steps
-  are not failures — so the precision-recall curve, compared against the **prevalence
-  baseline** (the no-skill rate), is the honest measure. AUROC is reported too but only as
-  an **auxiliary** — ROC hides the imbalance; every PR figure draws the prevalence line.
-- **Full detection suite.** The report includes the confusion matrix plus precision,
-  recall, F1, FPR and Cohen's κ at the operating threshold — recall/F1 make "the detector
-  never fires" legible at a glance.
-- **Per-hyperparameter sweep + `best_config`.** The full metric suite is computed for
-  **every** grid cell (`escalate_after_n × stale_window × ladder`), and an explicit
-  objective (default: **max F1, tie-broken by earlier detection**) selects the winning
-  cell. When no cell discriminates on the available data, `best_config` is `null` with a
-  reason rather than an arbitrary pick.
-- **Figures.** PR curve, ROC (auxiliary), steps-to-detection histogram, the sweep heatmap
-  (F1 over `escalate_after_n × stale_window`), the confusion matrix, and the cost-quality
-  frontier (escalation count as the cost proxy vs F1). Each carries a footer — what the axes
-  are, what to look for, what the jargon means, and the honest limits including the status
-  above — so a figure pasted somewhere else is still readable on its own.
+**1. The policy, graded per trajectory.** The shipped recurrence policy is replayed over each
+stored run and asked the question the product actually asks: given it fired, is this run more
+likely to fail? One row is one trajectory (not one prefix), `n_escalated` is per configuration,
+and every rate carries a 95% Wilson interval next to the corpus base failure rate. Read
+`P(fail | fired)` against `base`: an interval containing the base rate is a configuration with
+no measured value, and an interval below it means firing predicts *success*.
 
-**The bundled bootstrap is deliberately coarse.** Out of the box the harness runs on the
-committed terminal benchmark results, which are single-decision (length-1) trajectories.
-The recurrence trigger **cannot fire** on a length-1 stream, so the report comes back
-`INSUFFICIENT_DATA` and every plot says so — the bootstrap validates the labelling,
-metrics, and plots on real data, not the trigger itself. Exercising the trigger needs real
-multi-step trajectories; drop them under `benchmark/escalation/data/` (tracked via Git LFS,
-with a content-hash `manifest.json` that fails CI if a label is tampered with) and point
-the datasets registry at them.
+**2. A prefix risk model, graded against the null.** A continuous risk score — the probability
+this run ends unresolved — is fit from prefix-only features at fixed decision depths and
+evaluated out-of-fold. Three numbers are reported and only the last one is meaningful:
+
+- `prior` — the router's own t=0 knowledge (leave-one-out per-challenge failure rate). Task
+  identity alone is a strong predictor, so any unconditional number mostly rediscovers task
+  difficulty.
+- `prefix` — out-of-fold discrimination from the prefix alone.
+- `incremental` — `AUROC(prior + prefix) − AUROC(prior)`. **This is the number that decides
+  whether escalation is worth anything.** Everything else overstates it.
+
+What the rest of the report means:
+
+- **`status` is gated by a permutation null, not by a point estimate.** The status is `OK`
+  only when a depth's incremental AUROC sits above the 97.5th percentile of at least 200
+  label shuffles, with the whole fitting pipeline re-run per shuffle. Otherwise it is
+  `NO_SKILL` (with the number and the p-value in the reason) or `INSUFFICIENT_DATA`, and
+  every figure states it in red under the plot. A point estimate above 0.5 is never treated
+  as skill on its own.
+- **Two structural anti-leak rules.** Features are read at a **fixed absolute depth**, never a
+  fraction of the run — a fraction needs the total length, which is future information. And
+  the **terminal step is excluded**, because the harness verdict is stamped onto it. Both are
+  pinned by tests; see `benchmark/escalation/features.py`.
+- **Grouped cross-validation by challenge.** A challenge never appears in both train and test,
+  so the model cannot rediscover task identity through the fold boundary.
+- **The sweep varies `escalate_after_n` only.** `stale_window` and `ladder` are pinned at their
+  defaults because both were measured inert on the current corpus: the full 12-cell grid
+  collapsed to 2 distinct score vectors. `escalate_after_n=1` is swept alongside the shipped
+  default of 2 so the two are always reported side by side; the report **flags** a better cell
+  in its notes and never changes the shipped default.
+- **Runs with no per-step verified outcomes are excluded and counted.** A trajectory the
+  stamping stage never processed carries parser defaults, not evidence; including it would feed
+  the model a collection-date proxy. The exclusion count appears in the JSON and in every
+  figure footer.
+- **Figures.** PR curve, ROC (both tie-collapsed, so the drawn area equals the reported
+  statistic, with the permutation null band shaded), the confusion matrix with a
+  random-at-the-same-flag-rate baseline in each cell, the permutation-null histogram, lead time
+  split by terminal outcome, the sweep as an interval table, trajectory outcomes against the
+  base rate, and failure-capture coverage per model. Each carries a footer — what the axes are,
+  what to look for, what the jargon means, and the honest limits — so a figure pasted elsewhere
+  is still readable on its own.
+
+**The harness runs on captured multi-step trajectories only.** The recurrence trigger cannot
+fire on a length-1 stream, and a prefix model needs a prefix, so the eval reads
+`benchmark/escalation/data/live/` (tracked via Git LFS, with a content-hash `manifest.json`
+that fails CI if a label is tampered with). Point `--live-dir` elsewhere to score your own.
 
 ### Capturing your own trajectories (opt-in, encrypted, local-only)
 

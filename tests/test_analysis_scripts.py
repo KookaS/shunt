@@ -16,6 +16,7 @@ from benchmark.routing.scripts import (
     compute_costs,
     embedding_compare,
     plot_exploration,
+    plot_knn_nulls,
     plot_strategies,
     plot_timing,
     threshold_sweep,
@@ -30,6 +31,7 @@ _GUARDED_SCRIPTS: Final = [
     compute_costs.main,
     embedding_compare.main,
     plot_exploration.main,
+    plot_knn_nulls.main,
     plot_strategies.main,
     plot_timing.main,
     threshold_sweep.main,
@@ -258,11 +260,14 @@ class TestZeroEvidenceRows:
         assert m["AvgPerf%"] == 0.0
 
     def test_zero_task_strategy_is_not_pareto(self):
-        from benchmark.routing.report import _is_pareto
+        # report._is_pareto (which read the summary's own Pareto column) was removed:
+        # that column ranks hindsight oracles alongside routers, so on the cost-quality
+        # plane it painted a real router "dominated". _deployable_pareto is the single
+        # definition now, and it keeps the same no-evidence guard.
+        from benchmark.routing.report import _deployable_pareto
 
-        assert _is_pareto({"strategy": "kNN", "n_tasks": 0, "Pareto": True}) is False
-        assert _is_pareto({"strategy": "kNN", "n_tasks": "", "Pareto": "True"}) is False
-        assert _is_pareto({"strategy": "kNN", "n_tasks": 3, "Pareto": True}) is True
+        assert _deployable_pareto(["kNN"], [0.0], [0.0], [0]) == set()
+        assert _deployable_pareto(["kNN"], [1.0], [50.0], [3]) == {"kNN"}
 
     def test_thin_rows_are_rejected_with_a_reason(self):
         from benchmark.routing.report import _validate_rows
@@ -325,3 +330,336 @@ class TestNeighborhoodPurity:
             emb @ emb.T, ["t0"], vecs, emb, self.MODELS, k=10
         )
         assert purity.tolist() == [0.0]
+
+
+class TestPlotStrategiesReadsTheSummary:
+    """The figure must plot strategy_summary.csv, never a second derivation of it."""
+
+    # The committed PNG once disagreed with that CSV on all seven points (Tier-Classifier
+    # by 174% on cost) because it re-derived the rows itself. It also loaded three ONNX
+    # embedders to do so and was OOM-killed at >4 GB.
+
+    def _write(self, path: Path) -> None:
+        path.write_text(
+            "strategy,n_tasks,n_unscorable,n_pass,AvgPerf%,AvgPerf_ci_lower,AvgPerf_ci_upper,"
+            "TotalCost,AvgCost,Reward,CumReg,CumReg_ci_lower,CumReg_ci_upper,rAcc,Pareto\n"
+            "Oracle,177,23,171,96.61,93.79,98.87,13.5896,0.076778,169.641,0.0,0.0,0.0,1.0,True\n"
+            "kNN,174,26,136,78.16,71.84,83.91,9.5279,0.054758,135.05,31.6,22.3,41.3,0.6,False\n"
+        )
+
+    def test_rows_are_typed_and_match_the_csv(self, tmp_path):
+        csv_path = tmp_path / "strategy_summary.csv"
+        self._write(csv_path)
+        rows = plot_strategies.load_summary_rows(csv_path)
+        assert [r["strategy"] for r in rows] == ["Oracle", "kNN"]
+        assert rows[0]["AvgPerf%"] == 96.61
+        assert rows[0]["TotalCost"] == 13.5896
+        # The CIs the old figure discarded must survive the read.
+        assert rows[1]["AvgPerf_ci_lower"] == 71.84
+        assert rows[1]["AvgPerf_ci_upper"] == 83.91
+        assert rows[0]["Pareto"] is True
+        assert rows[1]["Pareto"] is False
+
+    def test_no_embedding_strategy_is_instantiated(self, monkeypatch, tmp_path):
+        """Reading the CSV must not touch the strategy factories that load embedders."""
+        import benchmark.routing.report as report_mod
+
+        def _boom(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+            raise AssertionError("plot_strategies must not re-derive rows")
+
+        monkeypatch.setattr(report_mod, "derive_rows", _boom, raising=False)
+        csv_path = tmp_path / "strategy_summary.csv"
+        self._write(csv_path)
+        assert len(plot_strategies.load_summary_rows(csv_path)) == 2
+
+    def test_stale_summary_is_flagged(self, tmp_path):
+        summary_csv = tmp_path / "strategy_summary.csv"
+        results_csv = tmp_path / "results.csv"
+        self._write(summary_csv)
+        results_csv.write_text("x\n")
+        import os
+
+        # Summary predates results -> the figure would describe an earlier results set.
+        os.utime(summary_csv, (1_000_000, 1_000_000))
+        os.utime(results_csv, (2_000_000, 2_000_000))
+        note = plot_strategies._staleness_limit(summary_csv, results_csv)
+        assert note is not None and "STALE INPUT" in note
+
+    def test_fresh_summary_is_not_flagged(self, tmp_path):
+        summary_csv = tmp_path / "strategy_summary.csv"
+        results_csv = tmp_path / "results.csv"
+        self._write(summary_csv)
+        results_csv.write_text("x\n")
+        import os
+
+        os.utime(results_csv, (1_000_000, 1_000_000))
+        os.utime(summary_csv, (2_000_000, 2_000_000))
+        assert plot_strategies._staleness_limit(summary_csv, results_csv) is None
+
+    def test_missing_summary_exits_cleanly(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr("sys.argv", ["prog", "--summary", str(tmp_path / "absent.csv")])
+        assert plot_strategies.main(CONFIG_PATH) is None
+        assert "No results yet" in capsys.readouterr().out
+
+
+class TestLabelDeclutter:
+    """Nudging overlapping labels apart must stay bounded."""
+
+    # The nudge has no natural stop: every unresolved pass moves a label further, so without
+    # a ceiling that only applies to below-marker labels AND a clamp on the axes box, a dense
+    # cluster walks its labels clean off the figure.
+
+    @staticmethod
+    def _stack(dy: float, n: int = 6):
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.scatter([0.5] * n, [0.5] * n)
+        anns = [
+            ax.annotate(
+                f"label {i}\n99%, $9.99",
+                (0.5, 0.5),
+                fontsize=8,
+                textcoords="offset points",
+                xytext=(10, dy),
+                va="bottom" if dy > 0 else "top",
+                bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "edgecolor": "none"},
+            )
+            for i in range(n)
+        ]
+        return fig, ax, anns
+
+    def test_labels_stay_inside_the_axes(self):
+        fig, ax, anns = self._stack(dy=-13.0)
+        plot_strategies._declutter(fig, ax, anns)
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        bounds = ax.get_window_extent(renderer)
+        for ann in anns:
+            box = plot_strategies._label_box(ann, renderer)
+            assert box.y0 >= bounds.y0 - 1.0
+            assert box.y1 <= bounds.y1 + 1.0
+
+    def test_a_label_above_its_marker_may_move_up(self):
+        # The ceiling exists so a BELOW-marker label never rises into the title. Applying it
+        # to above-marker labels too left room == 0 on every first pass, so labels could only
+        # ever move DOWN and the whole cluster drifted one way.
+        fig, ax, anns = self._stack(dy=11.0)
+        plot_strategies._declutter(fig, ax, anns)
+        assert max(ann.xyann[1] for ann in anns) > 11.0
+
+    def test_a_label_below_its_marker_never_rises_above_its_start(self):
+        fig, ax, anns = self._stack(dy=-13.0)
+        plot_strategies._declutter(fig, ax, anns)
+        assert max(ann.xyann[1] for ann in anns) <= -13.0
+
+
+class TestTimingExcludesCensoredZeroCallRows:
+    """15 rows recorded 0 calls; `if not calls` let them through because "0" is truthy."""
+
+    HEADER: Final = "model,calls,pass,timeout_flag,stop_reason\n"
+
+    def _csv(self, tmp_path: Path, body: str) -> Path:
+        path = tmp_path / "results.csv"
+        path.write_text(self.HEADER + body)
+        return path
+
+    def test_zero_call_rows_are_dropped_not_averaged(self, tmp_path):
+        csv_path = self._csv(
+            tmp_path,
+            "kimi-k3,40,True,False,solved\n"
+            "kimi-k3,30,True,False,solved\n"
+            "kimi-k3,0,False,True,\n",  # censored before the first round-trip
+        )
+        calls, zero, _cens = plot_timing._model_calls(csv_path)
+        assert calls["kimi-k3"] == [40, 30]
+        assert zero == {"kimi-k3": 1}
+        # Counting the 0 would have reported 23.3 instead of 35.0.
+        assert sum(calls["kimi-k3"]) / len(calls["kimi-k3"]) == 35.0
+
+    def test_censored_rows_that_made_calls_are_kept_and_counted(self, tmp_path):
+        csv_path = self._csv(
+            tmp_path,
+            "kimi-k3,40,False,False,step_limit\nkimi-k3,30,True,False,solved\n",
+        )
+        calls, zero, censored = plot_timing._model_calls(csv_path)
+        assert calls["kimi-k3"] == [40, 30]
+        assert zero == {}
+        assert censored == 1  # truncated run -> the bar is a lower bound
+
+    def test_csv_string_booleans_are_coerced(self):
+        # bool("False") is True, so a raw row must never be handed to censoring.is_censored.
+        assert plot_timing._as_bool("False") is False
+        assert plot_timing._as_bool("True") is True
+        assert plot_timing._is_censored_row({"pass": "False", "timeout_flag": "True"}) is True
+        assert plot_timing._is_censored_row({"pass": "True", "timeout_flag": "False"}) is False
+
+    def test_blank_calls_column_is_skipped(self, tmp_path):
+        csv_path = self._csv(tmp_path, "kimi-k3,,False,False,\nkimi-k3,12,True,False,solved\n")
+        calls, zero, _c = plot_timing._model_calls(csv_path)
+        assert calls["kimi-k3"] == [12]
+        assert zero == {}
+
+
+class TestSweepSelectionIsNotRewardArgmax:
+    """gamma=0.1 makes reward-argmax degenerate to escalate-everything."""
+
+    def test_cost_at_equal_quality_prefers_the_cheap_equivalent(self):
+        rows = [
+            # Statistically indistinguishable pass rates, wildly different cost.
+            {"k": 54, "n_scored": 177, "AvgPerf%": 96.0, "TotalCost": 81.2, "Reward": 161.9},
+            {"k": 24, "n_scored": 177, "AvgPerf%": 92.1, "TotalCost": 62.0, "Reward": 155.0},
+        ]
+        best = threshold_sweep.cost_at_equal_quality(rows)
+        assert best["k"] == 24  # cheaper, and not significantly worse
+
+    def test_a_significantly_worse_cell_is_not_selected(self):
+        rows = [
+            {"k": 54, "n_scored": 177, "AvgPerf%": 96.0, "TotalCost": 81.2, "Reward": 161.9},
+            {"k": 2, "n_scored": 177, "AvgPerf%": 40.0, "TotalCost": 1.0, "Reward": 70.0},
+        ]
+        best = threshold_sweep.cost_at_equal_quality(rows)
+        assert best["k"] == 54  # the cheap cell is far below the quality floor
+
+    def test_zero_evidence_rows_are_never_selected(self):
+        rows = [
+            {"k": 9, "n_scored": 0, "AvgPerf%": 0.0, "TotalCost": 0.0, "Reward": 0.0},
+            {"k": 24, "n_scored": 177, "AvgPerf%": 92.1, "TotalCost": 62.0, "Reward": 155.0},
+        ]
+        assert threshold_sweep.cost_at_equal_quality(rows)["k"] == 24
+
+    def test_empty_rows_return_none(self):
+        assert threshold_sweep.cost_at_equal_quality([]) is None
+
+    def test_folds_partition_every_task(self):
+        folds = threshold_sweep.fold_assignment(177, 5)
+        assert len(folds) == 177
+        assert set(folds.tolist()) == {0, 1, 2, 3, 4}
+        # Balanced to within one task, so no fold dominates the index.
+        counts = [int((folds == f).sum()) for f in range(5)]
+        assert max(counts) - min(counts) <= 1
+
+    def test_fold_assignment_is_deterministic(self):
+        a = threshold_sweep.fold_assignment(50, 5)
+        b = threshold_sweep.fold_assignment(50, 5)
+        assert a.tolist() == b.tolist()
+
+
+class TestSweepHeldOutRestrictsTheIndex:
+    """A task must never vote over its own fold — that is what makes the sweep held-out."""
+
+    def test_allowed_restricts_the_neighbourhood(self):
+        config.load(CONFIG_PATH)
+        models = {
+            "cheap-model": {"input_price": 0.1, "output_price": 0.1},
+            "frontier-model": {"input_price": 5.0, "output_price": 5.0},
+        }
+        matrix = {"models": models}
+        # Tasks 0,1 pass on cheap; task 2 (the only one allowed as a neighbour) fails it.
+        results_map = {
+            "t0": {"cheap-model": {"pass": True, "cost": 1.0}},
+            "t1": {"cheap-model": {"pass": True, "cost": 1.0}},
+            "t2": {
+                "cheap-model": {"pass": False, "cost": 1.0},
+                "frontier-model": {"pass": True, "cost": 10.0},
+            },
+        }
+        task_ids = ["t0", "t1", "t2"]
+        features = np.array([[1.0, 0.0], [1.0, 0.01], [0.99, 0.0]])
+
+        # Voting over everything: t0's neighbours include the passing t1 -> cheap qualifies.
+        chosen_all, _p, _c, _s = threshold_sweep.knn_select(
+            0,
+            task_ids,
+            task_ids,
+            features,
+            results_map,
+            matrix,
+            k=2,
+            success_rate_thresh=0.5,
+            min_samples=1,
+        )
+        assert chosen_all == "cheap-model"
+
+        # Restricted to t2 only: the sole neighbour fails cheap, so the rule escalates.
+        chosen_held, _p, _c, _s = threshold_sweep.knn_select(
+            0,
+            task_ids,
+            task_ids,
+            features,
+            results_map,
+            matrix,
+            k=2,
+            success_rate_thresh=0.5,
+            min_samples=1,
+            allowed=np.array([2]),
+        )
+        assert chosen_held == "frontier-model"
+
+    def test_precomputed_sims_row_matches_the_on_the_fly_computation(self):
+        config.load(CONFIG_PATH)
+        matrix = {"models": {"m": {"input_price": 1.0, "output_price": 1.0}}}
+        results_map = {f"t{i}": {"m": {"pass": i % 2 == 0, "cost": 1.0}} for i in range(6)}
+        task_ids = sorted(results_map)
+        rng = np.random.default_rng(0)
+        feats = rng.normal(size=(6, 4))
+        unit = feats / np.linalg.norm(feats, axis=1, keepdims=True)
+        sims = unit @ unit.T
+        for i in range(6):
+            direct = threshold_sweep.knn_select(
+                i,
+                task_ids,
+                task_ids,
+                feats,
+                results_map,
+                matrix,
+                k=3,
+                success_rate_thresh=0.5,
+                min_samples=1,
+            )
+            cached = threshold_sweep.knn_select(
+                i,
+                task_ids,
+                task_ids,
+                feats,
+                results_map,
+                matrix,
+                k=3,
+                success_rate_thresh=0.5,
+                min_samples=1,
+                sims_row=sims[i],
+            )
+            assert direct == cached
+
+    def test_evaluate_params_reports_allocation_degeneracy(self):
+        config.load(CONFIG_PATH)
+        matrix = {
+            "models": {
+                "cheap-model": {"input_price": 0.1, "output_price": 0.1},
+                "frontier-model": {"input_price": 5.0, "output_price": 5.0},
+            }
+        }
+        # Nothing clears a 0.99 threshold on cheap, so every task escalates.
+        results_map = {
+            f"t{i}": {
+                "cheap-model": {"pass": False, "cost": 1.0},
+                "frontier-model": {"pass": True, "cost": 10.0},
+            }
+            for i in range(6)
+        }
+        task_ids = sorted(results_map)
+        rng = np.random.default_rng(1)
+        feats = rng.normal(size=(6, 4))
+        row = threshold_sweep.evaluate_params(
+            task_ids,
+            task_ids,
+            feats,
+            results_map,
+            matrix,
+            k=3,
+            success_rate_thresh=0.99,
+            min_samples=1,
+            frontier_model="frontier-model",
+        )
+        assert row["frontier_share"] == 1.0
+        assert row["n_models_used"] == 1  # a "router" that uses one model is a fixed policy

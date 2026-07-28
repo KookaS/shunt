@@ -7,7 +7,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import random
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 
@@ -38,6 +39,16 @@ class EscalationConfig:
     # effort_then_rank: raise the current model's reasoning effort first (cache-safe), step a
     # model rank only on recurrence at the higher effort. "rank_only" skips the effort rung.
     ladder: str = "effort_then_rank"
+    # SMART-style epsilon-greedy exploration at FLAGGED checkpoints only. 0.0 = fully
+    # deterministic (today's behaviour, bit for bit). Above 0 the policy arm is taken with
+    # probability 1-epsilon and the HOLD arm with epsilon, and the realized propensity is
+    # logged — without which the escalation policy's value stays non-identified (P(escalate)=0
+    # breaks the overlap condition every off-policy estimator needs). Additionally opt-in:
+    # enabling escalation alone must never randomize anything.
+    exploration_epsilon: float = 0.0
+    # Seed of the injected decision stream, recorded on every record so a logged propensity
+    # can be re-derived after the fact. None ⇒ the caller draws and records one.
+    exploration_seed: int | None = None
 
 
 @dataclass(frozen=True)
@@ -70,12 +81,47 @@ class EscalationContext:
 
 
 @dataclass(frozen=True)
+class ExplorationStream:
+    """A seeded RNG stream for epsilon-greedy escalation — injected, never a module global."""
+
+    seed: int
+    rng: random.Random
+
+    @classmethod
+    def from_seed(cls, seed: int) -> ExplorationStream:
+        """Build a stream whose draws are exactly reproducible from *seed*."""
+        return cls(seed=seed, rng=random.Random(seed))
+
+
+@dataclass(frozen=True)
+class ExplorationRecord:
+    """One flagged-checkpoint decision and the propensity that generated it.
+
+    The propensity IS the deliverable: without it, randomized data is still unusable for
+    IPS/DR. ``randomized=False`` marks a decision the estimator must exclude, not weight.
+    """
+
+    checkpoint_id: str  # the recurring dedup key that flagged this checkpoint
+    decision_index: int
+    action: EscalationAction  # the arm actually taken
+    policy_action: EscalationAction  # what the deterministic policy WOULD have done
+    propensity: float  # P(action taken | state) under the logging policy
+    epsilon: float
+    seed: int | None
+    randomized: bool
+    features: dict[str, float] = field(default_factory=dict)  # state, as of the decision
+
+
+@dataclass(frozen=True)
 class EscalationDirective:
     """The pre-decided branch for the next decision (never 'ask the human')."""
 
     action: EscalationAction
     reason: str
     new_label_window: bool = False  # escalation opens a fresh, non-policy label window
+    # Present only at a flagged checkpoint; None everywhere else (an unflagged step is not a
+    # decision the estimator may weight, so it must carry no propensity).
+    exploration: ExplorationRecord | None = None
 
 
 def derive_blocking(success: bool, is_infra_failure: bool) -> bool:
@@ -169,22 +215,94 @@ def _ladder_action(ctx: EscalationContext, config: EscalationConfig) -> Escalati
     return EscalationDirective(EscalationAction.HOLD, "escalation_ceiling")
 
 
+def _checkpoint_features(
+    windowed: list[FailureEvent],
+    current_index: int,
+    ctx: EscalationContext,
+    config: EscalationConfig,
+) -> dict[str, float]:
+    """The state a doubly-robust model component may condition on, as of THIS decision."""
+    # Decision-time only — nothing here reads a later step or the terminal outcome, so a model
+    # fit on these features cannot read its own label off the future.
+    return {
+        "decision_index": float(current_index),
+        "window_events": float(len(windowed)),
+        "countable_failures": float(sum(1 for e in windowed if counts_as_failure(e, config))),
+        "distinct_keys": float(len({e.dedup_key for e in windowed})),
+        "effort_headroom": float(ctx.max_effort_index - ctx.current_effort_index),
+        "rank_headroom": float(ctx.max_rank_index - ctx.current_rank_index),
+    }
+
+
+def _randomize(
+    directive: EscalationDirective,
+    record: ExplorationRecord,
+    config: EscalationConfig,
+    stream: ExplorationStream | None,
+) -> EscalationDirective:
+    """Epsilon-greedy over {policy arm, HOLD} at a flagged checkpoint, logging the propensity."""
+    # The alternative arm is always HOLD, so exploration can only WITHHOLD an escalation, never
+    # invent one: no model switch exists here that the deterministic policy would not also make,
+    # and the directive still applies to the NEXT boundary (cache-safety is untouched).
+    if directive.action is EscalationAction.HOLD:  # no viable rung — do not fabricate an arm
+        return replace(directive, exploration=record)
+    if config.exploration_epsilon <= 0.0:
+        return replace(directive, exploration=record)
+    if stream is None:
+        raise ValueError(
+            "escalation.exploration_epsilon > 0 requires an injected ExplorationStream "
+            "(a silent deterministic fallback would log propensities that never happened)"
+        )
+    if stream.rng.random() < config.exploration_epsilon:
+        held = EscalationDirective(EscalationAction.HOLD, "exploration_hold")
+        return replace(
+            held,
+            exploration=replace(
+                record,
+                action=EscalationAction.HOLD,
+                propensity=config.exploration_epsilon,
+                randomized=True,
+            ),
+        )
+    return replace(
+        directive,
+        exploration=replace(record, propensity=1.0 - config.exploration_epsilon, randomized=True),
+    )
+
+
 def decide_escalation(
-    events: list[FailureEvent], current_index: int, ctx: EscalationContext, config: EscalationConfig
+    events: list[FailureEvent],
+    current_index: int,
+    ctx: EscalationContext,
+    config: EscalationConfig,
+    stream: ExplorationStream | None = None,
 ) -> EscalationDirective:
     """The escalation decision for the next boundary. Pure; every branch ends in a directive.
 
-    Collapse suppresses first; then same-key recurrence drives the ladder; otherwise HOLD
-    (absent signal). Disabled config always holds.
+    Collapse suppresses first; then same-key recurrence flags a checkpoint (the only place
+    exploration may randomize); otherwise HOLD. Disabled config always holds.
     """
     if not config.enabled:
         return EscalationDirective(EscalationAction.HOLD, "disabled")
     if ctx.loop_health_alarm:  # escalating into a routing collapse voids the cost gate
         return EscalationDirective(EscalationAction.HOLD, "collapse_suppressed")
     windowed = _in_window(events, current_index, config)
-    if _recurring_key(windowed, config) is None:  # no same-key recurrence → nothing to do
+    key = _recurring_key(windowed, config)
+    if key is None:  # no same-key recurrence → unflagged, so no decision to weight
         return EscalationDirective(EscalationAction.HOLD, "no_recurring_failure")
-    return _ladder_action(ctx, config)
+    policy_directive = _ladder_action(ctx, config)
+    record = ExplorationRecord(
+        checkpoint_id=key,
+        decision_index=current_index,
+        action=policy_directive.action,
+        policy_action=policy_directive.action,
+        propensity=1.0,
+        epsilon=config.exploration_epsilon,
+        seed=stream.seed if stream is not None else config.exploration_seed,
+        randomized=False,
+        features=_checkpoint_features(windowed, current_index, ctx, config),
+    )
+    return _randomize(policy_directive, record, config, stream)
 
 
 @dataclass(frozen=True)
@@ -243,7 +361,12 @@ class EscalationRunner:
             self._log.append(event)
 
     def decide(
-        self, current_index: int, config: EscalationConfig, *, loop_health_alarm: bool = False
+        self,
+        current_index: int,
+        config: EscalationConfig,
+        *,
+        loop_health_alarm: bool = False,
+        stream: ExplorationStream | None = None,
     ) -> EscalationDirective:
         """The directive for the next boundary at the current ladder position (pure)."""
         ctx = EscalationContext(
@@ -253,7 +376,7 @@ class EscalationRunner:
             max_effort_index=self._max_effort_index,
             loop_health_alarm=loop_health_alarm,
         )
-        return decide_escalation(self._log, current_index, ctx, config)
+        return decide_escalation(self._log, current_index, ctx, config, stream=stream)
 
     def commit(self, action: EscalationAction) -> None:
         """Retire the window the escalation acted on and advance one rung (effort then rank)."""
@@ -263,7 +386,7 @@ class EscalationRunner:
         elif action is EscalationAction.RAISE_RANK:
             self._state = _LadderState(0, self._state.rank_index + 1)
 
-    def step(
+    def step(  # noqa: PLR0913 (lifecycle driver: one arg per stage of observe→decide→commit)
         self,
         *,
         success: bool,
@@ -271,10 +394,13 @@ class EscalationRunner:
         current_index: int,
         config: EscalationConfig,
         loop_health_alarm: bool = False,
+        stream: ExplorationStream | None = None,
     ) -> EscalationDirective:
         """One outcome → directive via the full lifecycle (observe, decide, retire+advance)."""
         self.observe(success=success, event=event)
-        directive = self.decide(current_index, config, loop_health_alarm=loop_health_alarm)
+        directive = self.decide(
+            current_index, config, loop_health_alarm=loop_health_alarm, stream=stream
+        )
         if directive.action is not EscalationAction.HOLD:
             self.commit(directive.action)
         return directive
@@ -286,6 +412,8 @@ __all__ = [
     "EscalationContext",
     "EscalationDirective",
     "EscalationRunner",
+    "ExplorationRecord",
+    "ExplorationStream",
     "FailureEvent",
     "counts_as_failure",
     "decide_escalation",

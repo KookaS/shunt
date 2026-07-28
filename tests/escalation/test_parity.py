@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from benchmark.escalation import replay, run_eval
+from benchmark.escalation import replay
 from benchmark.escalation.replay import GridPoint
 from shunt.models.config import ModelConfig, ReasoningArm, ReasoningConfig
 from shunt.router.engine import RouterEngine
@@ -257,15 +257,17 @@ def test_effort_parity_holds_across_a_verified_success() -> None:
     assert offline[6] is EscalationAction.RAISE_EFFORT
 
 
-def test_cumulative_detection_metric_is_parity_faithful_past_the_tier_ceiling() -> None:
-    # Even where the raw directive streams diverge (index 23), the detector metric run_eval scores
-    # — "has the policy flagged this failing task by prefix t" — is identical for both paths,
-    # because both flag at the SAME first-escalation step. This is why the metric is robust to the
-    # rank-ladder abstraction: it does not read the post-flag rungs.
+def _first_flag(stream: list[EscalationAction]) -> int | None:
+    """The index the policy first fired at — the ONLY thing the trajectory-level metric reads."""
+    return next((i for i, a in enumerate(stream) if a is not EscalationAction.HOLD), None)
+
+
+def test_detection_point_is_parity_faithful_past_the_tier_ceiling() -> None:
+    # Even where the raw directive streams diverge (index 23), what the eval consumes — the
+    # first-escalation index, via replay.ReplayDecision — is identical for both paths. This is why
+    # the metric is robust to the rank-ladder abstraction: it never reads the post-flag rungs.
     live = _live_stream(24)
     offline = _offline_stream(24)
     assert live != offline  # raw streams part at the ceiling
-    live_scores = run_eval._cumulative_detection(live)
-    offline_scores = run_eval._cumulative_detection(offline)
-    assert live_scores == offline_scores
-    assert live_scores == sorted(live_scores)  # monotone
+    assert _first_flag(live) == _first_flag(offline)
+    assert _first_flag(offline) is not None

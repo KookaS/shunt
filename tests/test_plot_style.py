@@ -192,3 +192,46 @@ class TestLabelPointsWithLeaders:
         names = {t.get_text() for t in ax.texts}
         assert names == {"Oracle", "Always-Cheap", "kNN"}
         plt.close(fig)
+
+
+class TestRowRealCost:
+    """arm_stats must read `real_cost`, not `cost` — they agree today only by luck."""
+
+    def test_prefers_real_cost_over_cost(self):
+        # estimated_cost is ~4.8x real_cost across results.csv, and `cost` is the column
+        # that could silently drift to it; naming real_cost makes the invariant structural.
+        assert ps.row_real_cost({"real_cost": 1.5, "cost": 9.9}) == 1.5
+
+    def test_falls_back_to_cost_when_real_cost_absent(self):
+        assert ps.row_real_cost({"cost": 2.25}) == 2.25
+
+    def test_falls_back_when_real_cost_is_blank(self):
+        assert ps.row_real_cost({"real_cost": "", "cost": 3.0}) == 3.0
+
+    def test_missing_both_is_zero(self):
+        assert ps.row_real_cost({}) == 0.0
+
+    def test_arm_stats_totals_real_cost(self):
+        raw = {
+            "t1": {"m": {"a": {"pass": True, "cost": 100.0, "real_cost": 1.0}}},
+            "t2": {"m": {"a": {"pass": False, "cost": 100.0, "real_cost": 2.0}}},
+        }
+        stats = ps.arm_stats(raw, "m", "a")
+        assert stats.n == 2
+        assert stats.passes == 1
+        assert stats.total_cost == 3.0
+
+
+class TestUsd:
+    r"""Money in a matplotlib caption must be escaped — two bare `$` open mathtext."""
+
+    def test_escapes_the_dollar_sign(self):
+        assert ps.usd(12.5) == r"\$12.50"
+
+    def test_two_amounts_leave_no_unescaped_pair(self):
+        caption = f"router {ps.usd(1.47)} vs frontier {ps.usd(87.04)}"
+        assert "$" in caption
+        assert caption.count("$") == caption.count(r"\$")
+
+    def test_honours_precision(self):
+        assert ps.usd(1.23456, 4) == r"\$1.2346"
