@@ -186,16 +186,17 @@ it), so the median is tight; the current report does not attach a confidence int
 imputed cost, and because the gate is a **paired-quality** test, cost-point noise moves only
 the cost axis of the plot, not the decision.
 
-### The violation rate (measured ~93%)
+### The violation rate (measured ~90%)
 
 Stronger models sometimes fail where weaker ones pass, so the axiom is not exact. When a
 task has a real higher-ranked fail sitting below a real lower-ranked pass (`f* > s*`), the
 region between them is left un-imputed and the task is recorded as a violation. The
 **violation rate** — violating tasks over tasks with two or more observed models, with a
 Wilson interval — is reported as a first-class number: on the current data monotonicity
-holds about **93% of the time** (violation rate ≈ 0.07, 95% CI [0.04, 0.11]). The report
-also recomputes every conclusion with the violating tasks **excluded** (the sensitivity
-check) and flags any result whose sign or CI side flips.
+holds about **90% of the time** (19 violations over 192 multi-observed pairs — holds
+90.1%, violation rate 0.099, 95% CI [0.064, 0.149]). The report also recomputes every
+conclusion with the violating tasks **excluded** (the sensitivity check) and flags any
+result whose sign or CI side flips.
 
 ### Why the axiom is conservative
 

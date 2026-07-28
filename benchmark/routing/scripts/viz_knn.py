@@ -22,7 +22,7 @@ from sklearn.decomposition import PCA  # noqa: E402
 
 from benchmark import config, plot_frame  # noqa: E402
 from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
-from benchmark.routing import plot_style  # noqa: E402
+from benchmark.routing import plot_style, summary  # noqa: E402
 from benchmark.routing.strategies.knn import _embed_texts  # noqa: E402
 
 # Cheapest-above-threshold cutoff, matching the shipped KnnPolicy.success_rate_threshold
@@ -443,7 +443,9 @@ def main(config_path: str = "benchmark/benchmark.yaml"):
         config.load(args.config)
 
     matrix_path = Path(args.matrix) if args.matrix else config.challenges_path()
-    matrix = config.load_matrix(matrix_path)
+    # Analytical routing views (PCA/purity/allocation/cost) default to the VALID set —
+    # complete challenges, censored cells + incomplete challenges excluded.
+    matrix = summary.load_scored_matrix(matrix_path)
 
     models_order = config.enabled_models()
     if not models_order:
@@ -704,7 +706,12 @@ def main(config_path: str = "benchmark/benchmark.yaml"):
 
     # 3b. Descriptive all-model view (strategy-agnostic, straight from results.csv).
     # Answers "how does EVERY model do", not "which model does the router pick".
-    plot_descriptive_model_performance(results, models_order, output_dir)
+    # DIAGNOSTIC coverage view: it contrasts each model's full measured set against the
+    # common-coverage subset (MNAR missingness), so it MUST read the RAW matrix — the
+    # valid/imputed matrix has equal coverage by construction, which would collapse that
+    # very contrast. Explicit opt-in to raw (config.load_matrix), unlike the plots above.
+    raw_results = config.load_matrix(matrix_path)["results"]
+    plot_descriptive_model_performance(raw_results, models_order, output_dir)
 
     # 4. Cost comparison plot (replaces the old knn_viz_report.txt)
     pricing = config.enabled_pricing()
@@ -733,7 +740,8 @@ def main(config_path: str = "benchmark/benchmark.yaml"):
     # measured on. "Saves X% vs frontier" is a ratio of two such sums, so it is
     # comparable only when BOTH denominators are the full n — a short frontier bar
     # (sparse coverage) and a short kNN bar (coverage-gap exclusions) each break it
-    # on their own. (This script reads the RAW matrix, not the imputed one.)
+    # on their own. (The analytical path reads the VALID matrix — equal-coverage by
+    # construction — so these guards usually resolve to comparable; they still fire on a gap.)
     frontier_covered = (
         sum(1 for tid in task_ids if frontier_model in results[tid]) if frontier_model else 0
     )

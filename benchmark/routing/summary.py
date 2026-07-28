@@ -81,6 +81,19 @@ def complete_scored_matrix(matrix: dict) -> tuple[dict, ImputedMatrix | None]:
     return {**matrix, "results": completed}, im
 
 
+def load_scored_matrix(path: str | Path | None = None) -> dict:
+    """Load the matrix, reduce to the VALID set (complete, uncensored), and restrict to
+    the deterministic sampled set."""
+    # load_matrix -> complete_scored_matrix -> the SAME sample_tasks restriction run_eval
+    # applies, so every analytical plot scores exactly the tasks run_eval/strategy_summary
+    # do — never an off-sample row that leaked into results.csv.
+    matrix = config.load_matrix(path)
+    scored, _imputed = complete_scored_matrix(matrix)
+    sampled = set(config.sample_tasks(sorted(matrix["results"].keys())))
+    scored["results"] = {tid: cells for tid, cells in scored["results"].items() if tid in sampled}
+    return scored
+
+
 def evaluate(strategy: object, matrix: dict, tasks: list[str]) -> tuple[list[Decision], set[str]]:
     """Run one strategy, returning ``(decisions, unscorable)``: ``(task, model,
     passed, cost)`` tuples plus the set of task ids whose chosen cell was never

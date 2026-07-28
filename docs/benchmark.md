@@ -463,8 +463,9 @@ keep exploration cheap, never to make the router look better than it is.
 
 **We measure how often it breaks — we don't assume it away.** Stronger models sometimes
 fail where weaker ones pass. Shunt reports that **monotonicity violation rate** as a
-first-class, measured number: on the current data it holds about **93% of the time**
-(violation rate ≈ 0.07, 95% CI [0.04, 0.11]). Where a real higher-ranked fail sits below a
+first-class, measured number: on the current data it holds about **90% of the time**
+(19 violations over 192 multi-observed pairs — holds 90.1%, violation rate 0.099, 95% CI
+[0.064, 0.149]). Where a real higher-ranked fail sits below a
 real lower-ranked pass, the contradicted cells are kept as measured — never overwritten by an
 imputed value — and the task is flagged. The report also ships a **sensitivity check**:
 every conclusion is recomputed with the violating tasks excluded, and any result whose sign

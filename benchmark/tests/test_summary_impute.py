@@ -9,7 +9,11 @@ import pytest
 
 from benchmark import config
 from benchmark.routing.strategies.fixed import AlwaysCheap, AlwaysFrontier
-from benchmark.routing.summary import complete_scored_matrix, compute_strategy_rows
+from benchmark.routing.summary import (
+    complete_scored_matrix,
+    compute_strategy_rows,
+    load_scored_matrix,
+)
 
 
 def _rank_models() -> list[str]:
@@ -133,6 +137,57 @@ def test_completed_matrix_flags_and_never_mutates_input(_cfg) -> None:
     # Imputed cells are flagged; real cells are not.
     assert completed["results"]["t1"][ORD[-1]]["imputed"] is True  # frontier imputed on t1
     assert completed["results"]["t1"][ORD[0]]["imputed"] is False  # weakest is the real pass
+
+
+def test_load_scored_matrix_returns_only_valid_challenges(
+    _cfg, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The canonical valid-matrix entrypoint (the DEFAULT for the analytical plot scripts)
+    # must return ONLY complete challenges: an incomplete one (open UNKNOWN band) and a
+    # top-tier-censored one (crossover never established) are both excluded, so a plot
+    # cannot silently regress back onto the raw all-challenges + censored set.
+    _cfg(True)
+    matrix = _matrix()
+    matrix["tasks"]["gap"] = {}
+    matrix["results"]["gap"] = {ORD[1]: _cell(True, 0.20)}  # incomplete: no crossover from below
+    matrix["tasks"]["cens"] = {}
+    below = {m: _cell(False, 0.02 * (i + 1)) for i, m in enumerate(ORD[:-1])}
+    matrix["results"]["cens"] = {
+        **below,
+        ORD[-1]: {"pass": False, "cost": 0.6, "real_cost": 0.6, "stop_reason": "step_limit"},
+    }
+    monkeypatch.setattr(config, "load_matrix", lambda path=None: matrix)
+
+    scored = load_scored_matrix()
+
+    assert set(scored["results"]) == {"t1", "t2", "t3"}  # only the complete/valid ones
+    assert "gap" not in scored["results"] and "cens" not in scored["results"]
+
+
+def test_load_scored_matrix_excludes_off_sample_complete_challenge(
+    _cfg, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A COMPLETE challenge that leaked into results.csv but is NOT in the deterministic
+    # sampled set must be dropped: load_scored_matrix applies the SAME sample_tasks
+    # restriction run_eval uses, so a valid-but-off-sample row can never inflate a plot's
+    # challenge count above what run_eval / strategy_summary score.
+    _cfg(True)
+    matrix = _matrix()
+    # 'off' is a fully-observed complete challenge (only the frontier passes) — valid on
+    # its own, but excluded because sample_tasks does not select it.
+    matrix["tasks"]["off"] = {}
+    matrix["results"]["off"] = {
+        **{m: _cell(False, 0.02 * (i + 1)) for i, m in enumerate(ORD[:-1])},
+        ORD[-1]: _cell(True, 0.60),
+    }
+    monkeypatch.setattr(config, "load_matrix", lambda path=None: matrix)
+    # The sampled set omits 'off' (it leaked into results but was never sampled).
+    monkeypatch.setattr(config, "sample_tasks", lambda tasks, seed=42: ["t1", "t2", "t3"])
+
+    scored = load_scored_matrix()
+
+    assert set(scored["results"]) == {"t1", "t2", "t3"}
+    assert "off" not in scored["results"]  # complete but off-sample -> dropped
 
 
 def test_drop_unsolvable_removes_dead_tasks(_cfg, monkeypatch: pytest.MonkeyPatch) -> None:

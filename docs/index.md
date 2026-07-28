@@ -142,6 +142,7 @@ trust rules: [Feedback](feedback.md).
 - [Feedback](feedback.md) — how outcomes are captured (auto + manual) and learned from
 - [Error detection & auto-escalation](escalation.md) — how a verified failure is detected and, on repeat, escalates a rung (opt-in)
 - [Benchmark](benchmark.md) — run the offline model-capability and routing evals
+- [Benchmark dataset](benchmark-data.md) — what data is collected and usable, censored cells, outliers, collection modes
 - [Benchmark design](benchmark-design.md) — two-tree structure, strategy interface
 
 ## Status

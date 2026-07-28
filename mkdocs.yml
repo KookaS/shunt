@@ -39,6 +39,7 @@ nav:
   - Feedback: feedback.md
   - Error detection & auto-escalation: escalation.md
   - Benchmark: benchmark.md
+  - Benchmark dataset: benchmark-data.md
   - Benchmark design: benchmark-design.md
   - Decision records: decisions/index.md
 

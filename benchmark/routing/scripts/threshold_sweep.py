@@ -23,6 +23,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from benchmark import config, plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
+from benchmark.routing import summary
 from benchmark.routing.strategies.knn import _embed_texts
 
 matplotlib.use("Agg")
@@ -80,7 +81,9 @@ def _eta_phrase(eta: float) -> str:
 
 
 def load_matrix(path: Path) -> dict:
-    return config.load_matrix(path)
+    # Analytical (routing reward): default to the VALID set — complete challenges,
+    # censored cells and incomplete challenges excluded (summary.load_scored_matrix).
+    return summary.load_scored_matrix(path)
 
 
 def oracle(results: dict) -> str:

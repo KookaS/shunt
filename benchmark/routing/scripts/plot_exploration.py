@@ -20,6 +20,7 @@ import numpy as np  # noqa: E402
 
 from benchmark import config, plot_frame  # noqa: E402
 from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
+from benchmark.routing import summary  # noqa: E402
 from benchmark.routing.exploration_replay import ReplayReport, evaluate  # noqa: E402
 from shunt.router.policy import load_router_policy  # noqa: E402
 
@@ -227,6 +228,16 @@ def plot(report: ReplayReport, out_path: Path, budget_frac: float) -> None:
     plot_frame.save(fig, out_path, SPEC, extra=_annotations(report))
 
 
+def _measured_only(matrix: dict) -> dict:
+    """Keep only REAL (non-imputed) cells — the replay looks up recorded outcomes, never guessed."""
+    results = {
+        tid: {m: c for m, c in cells.items() if not c.get("imputed")}
+        for tid, cells in matrix.get("results", {}).items()
+    }
+    results = {tid: cells for tid, cells in results.items() if cells}
+    return {**matrix, "results": results}
+
+
 def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     config.load(config_path)
     parser = argparse.ArgumentParser(description=__doc__)
@@ -238,7 +249,13 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     if args.config != config_path:
         config.load(args.config)
 
-    matrix = config.load_matrix()
+    # The replay is a Direct-Method estimator: it looks up RECORDED outcomes on a dense
+    # sub-grid ("never guessed"), so it must run on MEASURED cells only. Default to the
+    # VALID set (complete challenges, censored + incomplete excluded), then drop the
+    # imputed cells the completion added — leaving real measured outcomes on valid
+    # challenges for dense_slice. (Unlike the other analytical plots, imputed cells are
+    # excluded here because presenting them as recorded outcomes would break the replay.)
+    matrix = _measured_only(summary.load_scored_matrix())
     if not matrix.get("results"):
         # Same clean early-exit contract as the other analysis scripts: an empty
         # cache is "nothing measured yet", not a crash in the dense-slice search.

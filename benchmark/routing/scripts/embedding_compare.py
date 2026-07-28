@@ -18,6 +18,7 @@ from sklearn.metrics.pairwise import cosine_similarity  # noqa: E402
 
 from benchmark import config, plot_frame  # noqa: E402
 from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
+from benchmark.routing import summary  # noqa: E402
 from benchmark.routing.strategies.knn import _embed_texts  # noqa: E402
 from shunt.router.embedder import Embedder  # noqa: E402
 
@@ -57,7 +58,9 @@ _ARCTIC_MODEL = "Snowflake/snowflake-arctic-embed-m-long"
 
 
 def load_matrix(path: Path) -> dict:
-    return config.load_matrix(path)
+    # Analytical (optimal-model-in-neighbourhood): default to the VALID set — complete
+    # challenges, censored cells and incomplete challenges excluded.
+    return summary.load_scored_matrix(path)
 
 
 def oracle_optimal_model(task_id: str, results_map: dict) -> str | None:

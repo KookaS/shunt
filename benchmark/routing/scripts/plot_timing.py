@@ -21,7 +21,7 @@ import numpy as np  # noqa: E402
 
 from benchmark import config, plot_frame  # noqa: E402
 from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
-from benchmark.routing import plot_style, report  # noqa: E402
+from benchmark.routing import plot_style, report, summary  # noqa: E402
 
 _STRATEGY_BAR = "#607D8B"  # a single neutral slate — strategies are not model-hued
 
@@ -206,7 +206,11 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         config.load(args.config)
 
     matrix_path = Path(args.matrix) if args.matrix else config.challenges_path()
-    matrix = config.load_matrix(matrix_path)
+    # The right panel replays routed strategies over the matrix — analytical, so it
+    # defaults to the VALID set (complete challenges, censored + incomplete excluded).
+    # The left panel reads results.csv directly in _model_calls (every measured run, all
+    # arms) — a per-model latency characterization that is deliberately left raw.
+    matrix = summary.load_scored_matrix(matrix_path)
     if not matrix.get("results"):
         print(
             "No results yet — results.csv holds no rows. "
