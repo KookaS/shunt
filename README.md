@@ -46,32 +46,62 @@ Point your agent at it with one env var. It picks a model per task, tracks how
 each model actually performs on *your* work, and escalates to a stronger one when
 the evidence says the current attempt is going nowhere.
 
-Everything it learns comes from **verified outcomes** — did your tests pass? —
-never from a model's own confidence, and never from a hand-written guess about
-what "hard" looks like.
-
-## Goal and vision
+## Goal
 
 **Build the best router for cost-effective model allocation: same results or
 better, for less money.** Three jobs make that up: allocate the right model up
 front, track what each model actually delivers, and escalate to a
 higher-reasoning model when an attempt is failing.
 
-The core bet on *how* to get there: **break the routing problem into narrow
-subtasks, and give each one its own dataset, its own model, and its own honest
-evaluation.** Routing and escalation are the first two. Each is a
-supervised problem with labels we collect ourselves, so each can be replaced,
-benchmarked, and beaten independently. More subtasks should follow:
-domain-specific verifiers, cost models, human feedback. The architecture is built
-to take them.
+## Vision
 
-> **This is a pre-alpha research repo, and it is honest about that.** Despite what
-> the literature claims, we cannot confirm a production-ready result today. What
-> we have is a benchmark, a dataset we own end to end, and a set of measured
-> findings, several of them negative. **Contributions are the point.** One person
-> is shortsighted; the biggest contribution you can make is an idea — system
-> design, applied ML, ML research. We want a community around this, and a live,
-> evolving project rather than a paper.
+**Routing is a mathematical and statistical problem, not a systems problem.**
+Making the pipeline faster or cleaner buys nothing until the underlying decision
+rule is right. Systems work pays off only once it does. So the job is to find
+that rule, and we will take it from wherever it comes: deterministic, statistical,
+or learned, judged only on our own data. That is not a preference, it is where the
+evidence points — the cheapest strategy we have found so far uses no embeddings
+and no training at all, and it beats the learned one.
+
+Five criteria set what belongs in this repo. Read them as scope, not slogans: a
+proposal that breaks one is out, however well it scores. And read them against
+what this is. Pre-alpha research, honest about it. Despite what the literature
+claims, we cannot confirm a production-ready result today. What we have is a
+benchmark, a dataset we own end to end, and measured findings, several of them
+negative.
+
+- **Data driven.** We act only on data we own and can re-score offline. The label
+  is a verified outcome from our own run: did your tests pass? A model's
+  self-reported confidence does not count, and neither does a hand-written guess
+  about what "hard" looks like. When the data says a mechanism fails, we publish
+  that.
+- **Lightweight.** It has to run on any laptop. A router that needs a big machine
+  to save you money defeats its own purpose. Embeddings come from fastembed and
+  the index is hnswlib, both CPU-only. The `Dockerfile` builds hnswlib with
+  `HNSWLIB_NO_NATIVE=1`, then runs `objdump` over the compiled extension and
+  fails the build if an AVX-512 opcode got baked in, so a wheel that would
+  SIGILL on an older CPU never ships.
+- **Divide and conquer.** Break routing into narrow subtasks, and give each one
+  its own dataset, its own model, and its own honest evaluation. Routing and
+  escalation are the first two. Each is a supervised problem with labels we
+  collect ourselves, so each can be replaced, benchmarked, and beaten
+  independently. Domain-specific verifiers, cost models, and human feedback
+  should follow; the architecture is built to take them.
+- **Community driven.** One person is shortsighted. The highest-value
+  contribution here is an idea rather than a patch: applied maths, statistics,
+  applied ML, ML research, system design. Ideas and code are both shared, and an
+  idea that turns out to be wrong is still worth posting — we publish our own
+  negative results for the same reason. Many brains on one problem, as a live
+  evolving project rather than a paper.
+- **Open source.** We think AI infrastructure should be open, and a tool that
+  runs on your laptop holding your provider keys has to be inspectable to be
+  trustworthy. Existing routers make you pick: cloud-only with a take-rate,
+  licensed so enterprises can't self-host, proxy-only with no real routing, or a
+  research artifact never built to ship. Shunt's core is Apache-2.0, free for
+  everyone including companies, and never gated on routing quality. You own the
+  model pool, the keys, and the learning data, nothing phones home, and
+  contributions sign off under a DCO rather than a CLA. Support and governance
+  features, if they ever exist, will be a separate offering.
 
 ## How it works
 
@@ -344,8 +374,7 @@ Where the work goes next, in priority order.
 
 ## Contributing
 
-Shunt is a one-person project in the open, and early is the best time to shape
-it. **Ideas are worth more than code here.**
+Early is the best time to shape this. Concretely, here is what helps most:
 
 - ⭐ **Star the repo** if you want to follow whether the thesis survives contact
   with the data.
@@ -359,8 +388,8 @@ it. **Ideas are worth more than code here.**
 - 💬 **Open a discussion or issue** with your workflow, your cost pain, or an idea.
   If you think a number in [Results](#results) is wrong, say so and we'll check
   it — we would rather publish a null result than a flattering one.
-- 📝 **Docs and typo fixes** make a low-friction first pull request. Contributions
-  sign off under the [DCO](CONTRIBUTING.md); there's no CLA.
+- 📝 **Docs and typo fixes** make a low-friction first pull request. Sign off
+  under the [DCO](CONTRIBUTING.md).
 - 📊 **Benchmark results** are especially welcome. **Ask before running one:**
   results are cost-expensive (a single frontier-model datapoint can run $0.5–3),
   and we're adding per-contributor key signing so every datapoint stays
@@ -368,16 +397,6 @@ it. **Ideas are worth more than code here.**
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how changes get merged. Architecture,
 layout, and capabilities: [docs/architecture.md](docs/architecture.md).
-
-## Why it's open
-
-Existing routers make you choose: cloud-only with a take-rate, licensed so
-enterprises can't self-host, proxy-only with no real routing, or a research
-artifact never built to ship. Shunt aims to be cache-safe, outcome-grounded,
-tool-agnostic, self-hosted, and Apache-2.0 all at once. You own the model pool,
-the keys, and the learning data — no phone-home, no take-rate, no CLA. The core
-stays free for everyone including companies; support and governance features, if
-they ever exist, will be a separate offering and never a gate on core routing.
 
 ## License
 

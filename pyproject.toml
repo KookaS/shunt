@@ -101,7 +101,11 @@ pythonpath = ["."]
 # leave hundreds of files named test_output.txt — pytest's default --doctest-glob is
 # `test*.txt`, so collection ERRORS on the first one and the whole gate reports red for a
 # reason unrelated to the code. CI never saw it: a fresh checkout has no artifacts.
-testpaths = ["tests"]
+# `benchmark/tests` is named EXPLICITLY rather than `benchmark`, which keeps that
+# protection while still collecting the harness's own suite — listing only `tests`
+# silently dropped 227 benchmark tests (14 files, including the pipeline staleness
+# and imputation coverage) from every local run AND from CI.
+testpaths = ["tests", "benchmark/tests"]
 
 [tool.setuptools.package-data]
 # The bundled defaults (models.yaml registry + router.yaml policy) are loaded at

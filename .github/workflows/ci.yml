@@ -70,7 +70,10 @@ jobs:
           SHUNT_DISALLOW_REAL_EMBEDDER: "1"
         run: uv run pytest -v tests/config/test_packaged_config_bundling.py
       - name: Test
-        run: uv run pytest tests/ -v --tb=short
+        # No path argument on purpose: an explicit `tests/` OVERRIDES pyproject's
+        # `testpaths`, which is what silently kept benchmark/tests (227 tests) out of
+        # CI. Let testpaths be the single source of truth for what gets collected.
+        run: uv run pytest -v --tb=short
 
   # Benchmark integrity: challenge content hashes match the stored version_hash,
   # no removed challenges, model versions current, AND the per-strategy summary
@@ -117,4 +120,5 @@ jobs:
         run: uv run deptry .
       - name: coverage (floor advisory)
         continue-on-error: true
-        run: uv run pytest tests/ --cov=src/shunt --cov-report=term-missing
+        # Path-less for the same reason as the Test step: `testpaths` decides.
+        run: uv run pytest --cov=src/shunt --cov-report=term-missing
