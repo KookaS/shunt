@@ -437,14 +437,15 @@ class TestBothCascadesEscalateToTheSameModel:
         assert "never-run" not in strategy.cascade_tried_models
 
 
-class TestUnpricedModelIsNeverTheCheapestPick:
-    """An unknown price must sort LAST, not as $0.
+class TestUnpricedModelIsExcludedFromBothCascades:
+    """An unpriced model is EXCLUDED from both cascades — the like-for-like requirement."""
 
-    Price is the sole cascade sort key, so a missing price defaulting to 0.0 would make an
-    unpriced model the first thing every cascade tries.
-    """
+    # Price-Cascade draws candidates from the priced registry, so it structurally cannot route
+    # to an unpriced model. Sorting one last in kNN-cascade was not enough: it stayed inside
+    # the `max_tries` shortlist, so kNN-cascade could route where its own baseline never could
+    # and the published head-to-head stopped being a comparison.
 
-    def test_compute_cascade_order_puts_an_unpriced_model_last(self):
+    def test_compute_cascade_order_excludes_an_unpriced_model(self):
         neighbor_results = {
             "ghost": [(0.0, True)] * 3,
             "cheap": [(0.0, True)] * 3,
@@ -457,7 +458,24 @@ class TestUnpricedModelIsNeverTheCheapestPick:
             min_samples=1,
             success_rate_threshold=0.0,
         )
-        assert order == ["cheap", "dear", "ghost"]
+        assert order == ["cheap", "dear"]
+
+    def test_an_unpriced_model_cannot_displace_a_priced_one_from_the_shortlist(self):
+        # max_tries=2 with the unpriced model admitted would spend a slot on `ghost` and drop
+        # `dear` — the shortlist itself, not just its order, has to match Price-Cascade's.
+        neighbor_results = {
+            "ghost": [(0.0, True)] * 3,
+            "cheap": [(0.0, True)] * 3,
+            "dear": [(0.0, True)] * 3,
+        }
+        order = compute_cascade_order(
+            neighbor_results,
+            {"cheap": 1.0, "dear": 9.0},
+            max_tries=2,
+            min_samples=1,
+            success_rate_threshold=0.0,
+        )
+        assert order == ["cheap", "dear"]
 
     def test_price_cascade_skips_a_model_the_registry_does_not_price(self):
         matrix = {

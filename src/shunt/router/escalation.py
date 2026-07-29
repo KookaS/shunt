@@ -8,8 +8,10 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
+
+from shunt.proxy.redaction import redact_secrets
 
 
 class EscalationAction(StrEnum):
@@ -110,6 +112,17 @@ class ExplorationRecord:
     seed: int | None
     randomized: bool
     features: dict[str, float] = field(default_factory=dict)  # state, as of the decision
+
+    def persistable(self) -> dict[str, object]:
+        """The projection that may be stored — `checkpoint_id` scrubbed like a committable id."""
+        # `checkpoint_id` IS a normalized failing-check id, the one field here carrying arbitrary
+        # text (a parametrized test id can embed a secret), so it is redacted on the way out
+        # exactly as `StepRecord.committable` does. Every consumer — the sqlite
+        # `decision_provenance` column and the OPE export read back off it — is downstream of
+        # this one seam, so redacting here covers them all.
+        out: dict[str, object] = asdict(self)
+        out["checkpoint_id"] = redact_secrets(self.checkpoint_id)
+        return out
 
 
 @dataclass(frozen=True)

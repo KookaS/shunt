@@ -598,7 +598,10 @@ class RouterEngine:
         # session so an off-policy estimator can join it to the verified outcome later. Attached
         # BEFORE the branch so an explored HOLD (which leaves the decision untouched) logs too.
         if directive.exploration is not None:
-            provenance = {**provenance, "escalation_exploration": asdict(directive.exploration)}
+            provenance = {
+                **provenance,
+                "escalation_exploration": directive.exploration.persistable(),
+            }
         if directive.action is EscalationAction.RAISE_EFFORT:
             applied = self._apply_effort(
                 task_key, model_name, reason, provenance, directive, cur_arm

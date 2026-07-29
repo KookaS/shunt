@@ -24,7 +24,7 @@ different meanings, so keep them apart (see the note below the table).
 | `arm_sampling.default_only_models` | collect | Models pinned to their default reasoning arm (no effort sweep). |
 | `collect.*` (`audit_fraction`, `noninferiority_margin`, `phase_a_mode` …) | collect | Knobs for the `cost_optimal` sampler only. |
 | `sample_size`, `seed`, `n_default` | collect | **Which tasks** run and how many (nested order). |
-| `strategies.enabled` | evaluate | **Which routing policies are scored offline** over the cache — `oracle`, `always_cheap`, `always_frontier`, `knn`, `knn_cascade`, `tier_classifier`. |
+| `strategies.enabled` | evaluate | **Which routing policies are scored offline** over the cache — `oracle`, `always_cheap`, `always_frontier`, `knn`, `knn_cascade`, `price_cascade`, `tier_classifier`. |
 | `strategies.knn.*`, `knn_cascade.*` … | evaluate | Per-policy hyperparameters (`k`, `success_rate_threshold`, `max_tries`). |
 | `routing.control_model` | evaluate | The fixed-frontier baseline the kill-gate is measured against. |
 
@@ -85,7 +85,7 @@ make benchmark ARGS="--live --max-cost 2"   # collect + process everything
 make benchmark ARGS="--from report"         # recompute artifacts from existing data (no spend)
 ```
 
-It composes four existing stages in order and prints one consolidated summary:
+It composes five existing stages in order and prints one consolidated summary:
 
 1. **collect** — `run_matrix` runs the outcome matrix (honours `--strategy`, `--live`,
    `--max-cost`, `--max-cost-overshoot`, `--workers`, `--timeout`, `--step-limit`,
@@ -117,6 +117,11 @@ It composes four existing stages in order and prints one consolidated summary:
 3. **evaluate** — `escalation.run_eval` scores the escalation detector (metrics + plots).
 4. **report** — `routing.report` regenerates the routing plots plus
    `capability_evidence.json`, `coverage_table.csv`, and `strategy_summary.csv`.
+5. **figures** — the standalone plots under `benchmark/routing/scripts/` that
+   `report` does not draw. They are heavy (several load the real fastembed
+   embedder), so they run last and only when their inputs changed.
+   `--check-figures` proves the committed PNGs are not stale without regenerating
+   anything.
 
 The final **summary** block prints the routing paired kill-gate line, the escalation
 status (SKILL / NO_SKILL), the capability rank order with the strongest-vs-control

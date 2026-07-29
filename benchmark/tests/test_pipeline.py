@@ -6,6 +6,7 @@ Every stage module is stubbed (no live/Docker/paid path) by patching `pipeline.r
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 from pathlib import Path
 
@@ -13,6 +14,9 @@ import pytest
 
 from benchmark import config, pipeline
 from benchmark.escalation import schema
+
+# Captured before the autouse fixture below stubs the module attribute out.
+_REAL_WRITE_MANIFEST = pipeline.write_figure_manifest
 
 
 def _args(**over: object) -> argparse.Namespace:
@@ -61,6 +65,15 @@ class _Recorder:
         return [m for m, _ in self.calls]
 
 
+@pytest.fixture(autouse=True)
+def _never_rebaseline_the_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stop the stubbed figures stage from re-baselining the committed manifest."""
+    # Every test here stubs run_module, so nothing is ever actually redrawn — letting the
+    # write through would re-baseline the staleness gate from the test suite, which is the
+    # one thing that gate must never do.
+    monkeypatch.setattr(pipeline, "write_figure_manifest", lambda *a, **k: pipeline.FIGURE_MANIFEST)
+
+
 @pytest.fixture
 def stub(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
     """Stub run_module and neutralise the file-reading summary helpers (no real artifacts)."""
@@ -90,11 +103,13 @@ def test_stages_dispatch_in_order_when_live(
     assert mods.index(pipeline.RUN_MATRIX) < mods.index(pipeline.OFFLINE_REPLAY)
     assert mods.index(pipeline.OFFLINE_REPLAY) < mods.index(pipeline.ESCALATION_EVAL)
     assert mods.index(pipeline.ESCALATION_EVAL) < mods.index(pipeline.ROUTING_REPORT)
+    assert mods.index(pipeline.ROUTING_REPORT) < mods.index(pipeline.STANDALONE_FIGURES[0].module)
     assert result.outcomes == {
         pipeline.COLLECT: "ran",
         pipeline.STAMP: "ran",
         pipeline.EVALUATE: "ran",
         pipeline.REPORT: "ran",
+        pipeline.FIGURES: "ran",
     }
 
 
@@ -213,3 +228,47 @@ def test_unstamped_skips_already_stamped(monkeypatch: pytest.MonkeyPatch, tmp_pa
     pending = pipeline._unstamped_trajectories(tmp_path)
     names = [p.name for _, _, p in pending]
     assert names == ["fresh.jsonl"]
+
+
+class TestStandaloneFigureFreshness:
+    """The 12 standalone figures sat on NO refresh path; timing_comparison.png shipped
+    stale because of it. The gate below is what makes that state visible."""
+
+    def test_every_committed_standalone_figure_is_declared(self) -> None:
+        declared = {out for job in pipeline.STANDALONE_FIGURES for out in job.outputs}
+        # report.py owns the rest of the directory; these are the ones no stage touched.
+        assert "timing_comparison.png" in declared
+        assert "strategy_comparison.png" in declared
+        assert len(declared) == 12
+
+    def test_declared_outputs_all_exist(self) -> None:
+        assert pipeline.missing_figures() == []
+
+    def test_committed_figures_are_not_stale(self) -> None:
+        """FAILS when a figure's inputs moved without the figure being redrawn.
+
+        Fix by running `make benchmark-figures` (it redraws and re-records the manifest) —
+        never by hand-editing benchmark/routing/figure_inputs.json.
+        """
+        assert pipeline.stale_figures() == []
+
+    def test_a_changed_input_is_detected(self, tmp_path: Path) -> None:
+        manifest = tmp_path / "figure_inputs.json"
+        _REAL_WRITE_MANIFEST(manifest)
+        assert pipeline.stale_figures(manifest) == []
+        digests = pipeline.figure_digests()
+        digests["plot_timing"] = "0" * 64
+        manifest.write_text(json.dumps(digests))
+        assert pipeline.stale_figures(manifest) == ["plot_timing"]
+
+    def test_an_absent_manifest_is_stale_not_silently_ok(self, tmp_path: Path) -> None:
+        assert pipeline.stale_figures(tmp_path / "absent.json") == [
+            job.name for job in pipeline.STANDALONE_FIGURES
+        ]
+
+    def test_the_strategy_set_is_part_of_the_digest(self) -> None:
+        """Adding a strategy must mark the strategy/timing figures stale — the exact
+        drift that let Price-Cascade never reach timing_comparison.png."""
+        jobs = {job.name: job for job in pipeline.STANDALONE_FIGURES}
+        for name in ("plot_timing", "plot_strategies"):
+            assert any(p.name == "strategies" for p in jobs[name].inputs)

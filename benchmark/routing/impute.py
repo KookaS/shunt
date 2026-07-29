@@ -141,7 +141,7 @@ class _CostModel:
         return _COST_FLOOR
 
 
-def _is_non_observation(cell: dict) -> bool:
+def is_non_observation(cell: dict) -> bool:
     """True iff a cell is a NON-observation (censored / zero-work) — not a real $0 measurement."""
     # A CENSORED cell (step/wall/abandon limit — subsumes the old timeout_flag check), or a cell
     # that made zero priced calls AND recorded $0, is a non-event: no model attempted AND completed
@@ -158,7 +158,7 @@ def _build_cost_model(matrix: dict, order: tuple[str, ...]) -> _CostModel:
     mp_fail: dict[str, list[float]] = {}
     for per_model in matrix.values():
         for model, cell in per_model.items():
-            if _is_non_observation(cell):
+            if is_non_observation(cell):
                 continue  # timeout / zero-work rows are non-observations, not $0 observations
             cost = _real_cost(cell)
             passed = bool(cell.get("pass", False))

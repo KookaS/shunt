@@ -8,8 +8,7 @@ from pathlib import Path
 from typing import Final
 
 from benchmark import config
-from benchmark.routing import censoring
-from benchmark.routing.impute import ImputedMatrix, complete_matrix
+from benchmark.routing.impute import ImputedMatrix, complete_matrix, is_non_observation
 from benchmark.routing.metrics import (
     bootstrap_ci,
     compare_to_oracle,
@@ -95,19 +94,28 @@ def load_scored_matrix(path: str | Path | None = None) -> dict:
 
 
 def evaluate(strategy: object, matrix: dict, tasks: list[str]) -> tuple[list[Decision], set[str]]:
-    """Run one strategy, returning ``(decisions, unscorable)``: ``(task, model,
-    passed, cost)`` tuples plus the set of task ids whose chosen cell was never
-    measured (a coverage gap, NOT a real fail@$0 — callers must exclude them)."""
+    """Run one strategy, returning ``(decisions, unscorable)``: ``(task, model, passed,
+    cost)`` tuples plus the task ids that cannot be scored — the chosen cell was never
+    measured, or a cascade's PATH crossed an unmeasured cell (callers must exclude them)."""
     decisions: list[Decision] = []
     unscorable: set[str] = set()
     for tid in tasks:
         task_meta = matrix["tasks"].get(tid, {})
         model = strategy.select(tid, task_meta, matrix)  # type: ignore[attr-defined]
         outcome = matrix["results"].get(tid, {}).get(model, {})
-        # An unmeasured cell (coverage gap) OR a CENSORED cell (resource-limit stop, unknown
-        # true outcome) is unscorable: counting a censored cell as a clean pass=False would
-        # understate the chosen model's quality. Callers exclude the unscorable set from metrics.
-        if not outcome or censoring.is_censored(outcome):
+        # A cascade bills an unmeasured intermediate cell at $0, so its aggregated cost
+        # understates reality even when the FINAL cell is measured. `cascade_scorable` is the
+        # strategy's own report of that; the kill gate already gates on it, and reading it here
+        # makes it authoritative on the path that produces the published numbers too. Set during
+        # `select` above, so it must be read after. Non-cascade strategies default to True.
+        cascade_ok = bool(getattr(strategy, "cascade_scorable", True))
+        # An unmeasured cell (coverage gap) OR any NON-OBSERVATION is unscorable: a censored
+        # cell (resource-limit stop, unknown true outcome) and a never-executed cell (zero
+        # priced calls AND $0 real spend) are both the absence of a measurement, so scoring
+        # either as a clean pass=False understates the chosen model's quality and hands the
+        # strategy a free fail@$0. This is the SAME predicate the cost model excludes on, applied
+        # here so the supported `impute.enabled` toggle cannot change what counts as measured.
+        if not outcome or is_non_observation(outcome) or not cascade_ok:
             unscorable.add(tid)
         passed = outcome.get("pass", False)
         cascade_cost = getattr(strategy, "cascade_total_cost", None)

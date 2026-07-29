@@ -96,6 +96,60 @@ accumulate via off-wire test re-execution (when configured with a `work_dir`), a
 the router adapts over time. Cold-start sessions default to the cheap model until
 verified outcomes build a neighbourhood for kNN to search.
 
+## Repository layout
+
+```
+├── src/shunt/             Router package
+│   ├── cli.py             CLI entry point (shunt start, explain, flag, reindex, version)
+│   ├── proxy/             HTTP server: /health, /v1/chat/completions, /v1/messages, /v1/models
+│   │                      (calls router to decide model; cold-starts to cheap default)
+│   ├── router/            Decision core — embed → nearest-neighbour → selection rule
+│   │                      (called on the first turn; learns from verified outcomes)
+│   ├── capture/           Off-wire outcome capture at session close (work_dir resolver, coordinator, background worker)
+│   ├── verifiers/         Async outcome verification (auto-detected tests, typecheck runner)
+│   ├── db/                SQLite persistence for sessions, outcomes, index
+│   ├── session/           Session lifecycle, inactivity timeout, model lock
+│   ├── models/            Provider config, price-derived capability rank, fallback chain
+│   └── config/            Shipped defaults: models.yaml registry, router.yaml policy
+├── benchmark/             Offline model-capability and routing evaluation
+├── docs/                  User documentation (MkDocs)
+├── examples/providers/    Copy-paste registry config, one file per provider
+├── examples/integrations/ Tool integration examples (CLI agents, frameworks, gateways)
+└── tests/                 Test suite
+```
+
+## Capabilities
+
+What the platform is built to support today.
+
+- **Drop-in for any agent.** Speaks both the OpenAI and Anthropic wire formats
+  and translates between them, so Claude Code, opencode, aider, Continue, Cline,
+  Cursor, and Zed all connect with one line — plus agent frameworks (LangChain,
+  Pydantic AI, LiteLLM) and no-code builders (n8n, Flowise).
+- **A configurable model pool.** A provider registry ranked by price (cheapest →
+  priciest), per-model enable/disable, and a fallback chain. You own the pool and
+  the prices. See [configuration](configuration.md).
+- **A decision core.** Task embedding → nearest-neighbour lookup → a
+  cheapest-that-succeeds selection rule, plus pluggable strategies (fixed, kNN,
+  cascade, tier-classifier, oracle).
+- **Outcome verification.** Async, auto-detected test and typecheck verifiers
+  grade a result at session close without blocking the response. Verified
+  outcomes feed the next decision via the kNN index and exploration priors. See
+  [feedback](feedback.md).
+- **Cache-safety as a design center.** Decisions land at task and session
+  boundaries, never mid-cached-turn, so normal operation never silently re-reads
+  a cached conversation at full price. The one exception is an upstream failure:
+  falling back to another model means that model must prefill the whole
+  conversation, because a provider's cache is per-model and cannot be
+  transferred. Shunt's job is to make that rare and deliberate, not to pretend it
+  is free.
+- **An offline benchmark.** Scores any routing strategy against a cache of
+  verified outcomes — reward (quality minus cost), bootstrap confidence
+  intervals, and a Pareto check against a perfect-oracle baseline. See
+  [benchmark](benchmark.md) and [results](results.md).
+- **Bring-your-own keys, zero telemetry.** Your provider accounts, your keys,
+  localhost-bound by default. Nothing is phoned home, replayed, or resold.
+
 ## Running
 
 The package is published; install it directly.
@@ -117,7 +171,8 @@ each model's `base_url` and `api_key_env_var` come from the model config.
 
 ## Integration
 
-Point your tool at Shunt (today every request forwards to the cheap default):
+Point your tool at Shunt (the router picks the session model on the first turn,
+cold-starting to the cheap default until verified outcomes accumulate):
 
 | Tool | Config |
 |---|---|

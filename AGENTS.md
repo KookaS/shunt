@@ -18,7 +18,10 @@ so it stays correct as the codebase grows.
 | Need | Start here |
 |------|-----------|
 | What Shunt is · status · quick start | `README.md` |
-| The repo & package layout | `README.md` → "Repository layout" |
+| The repo & package layout | `docs/architecture.md` → "Repository layout" |
+| What the platform supports today | `docs/architecture.md` → "Capabilities" |
+| The measured results (routing + escalation) | `docs/results.md` |
+| Published ideas we tested, and what held | `docs/research-log.md` |
 | **The docs map** — every doc, in order | `mkdocs.yml` (`nav:`) and `docs/index.md` (Contents) |
 | How the pieces fit at runtime | `docs/architecture.md` |
 | The feedback / learning loop (Context → Action → Feedback) | `docs/feedback.md` |

@@ -216,3 +216,42 @@ def test_depths_are_absolute_decisions_not_fractions() -> None:
     report = run_eval.evaluate(_signal_corpus(), depths=(5, 500), n_permutations=_PERMUTATIONS)
     assert [d.depth for d in report.depth_reports] == [5]
     assert features.DEFAULT_DEPTHS == (5, 10, 20)
+
+
+class TestOffPolicyEstimateIsReachableFromTheEval:
+    """`ope.py` had zero production consumers; the eval now reaches it.
+
+    It is the identification guard for the escalation policy's value. Unreachable, it could
+    never say the value is unmeasured — and that silence is why escalation looked measurable.
+    """
+
+    def _trajectories(self):
+        return [make_trajectory([make_step(step_index=0), make_step(step_index=1)])]
+
+    def test_omitting_an_exploration_log_leaves_the_estimate_absent_not_zero(self):
+        # None means "not asked". It must never render as a numeric 0.0, which would read as
+        # a measured no-effect.
+        report = run_eval.evaluate(self._trajectories())
+        assert report.policy_value is None
+        assert report.to_dict()["escalation_policy_value"] is None
+
+    def test_a_deterministic_exploration_log_is_reported_as_not_identified(self):
+        # Today's shipped config is exploration_epsilon=0.0, so every logged decision has
+        # propensity 1.0 and the estimator MUST refuse. Reporting that refusal honestly — in
+        # the eval's own JSON — is the whole point of wiring this in.
+        rows = [
+            {
+                "checkpoint_id": f"t::{i}",
+                "action": "raise_rank",
+                "propensity": 1.0,
+                "epsilon": 0.0,
+                "outcome": "success",
+                "features": {},
+            }
+            for i in range(8)
+        ]
+        report = run_eval.evaluate(self._trajectories(), exploration_rows=rows)
+        assert report.policy_value is not None
+        assert report.policy_value.status == "not_identified"
+        assert report.policy_value.dr_estimate is None
+        assert report.to_dict()["escalation_policy_value"]["status"] == "not_identified"

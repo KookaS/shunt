@@ -296,12 +296,12 @@ def test_real_results_csv_completes_sanely() -> None:
 # ------------------------------------------ FIX D: non-observations excluded from cost model
 
 
-def test_is_non_observation_classifies_rows() -> None:
+def testis_non_observation_classifies_rows() -> None:
     # A timed-out cell OR a zero-call/$0 cell is a NON-observation; a real $0 call is kept.
-    assert impute._is_non_observation({"timeout_flag": True, "calls": 5, "real_cost": 1.0}) is True
-    assert impute._is_non_observation({"calls": 0, "real_cost": 0.0}) is True
-    assert impute._is_non_observation({"pass": True, "calls": 2, "real_cost": 0.0}) is False
-    assert impute._is_non_observation({"pass": False, "calls": 3, "real_cost": 0.30}) is False
+    assert impute.is_non_observation({"timeout_flag": True, "calls": 5, "real_cost": 1.0}) is True
+    assert impute.is_non_observation({"calls": 0, "real_cost": 0.0}) is True
+    assert impute.is_non_observation({"pass": True, "calls": 2, "real_cost": 0.0}) is False
+    assert impute.is_non_observation({"pass": False, "calls": 3, "real_cost": 0.30}) is False
 
 
 def test_cost_model_excludes_non_observations_from_median() -> None:

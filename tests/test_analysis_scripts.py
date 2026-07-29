@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from benchmark import config
+from benchmark.routing import plot_style
 from benchmark.routing.scripts import (
     compute_costs,
     embedding_compare,
@@ -396,10 +397,16 @@ class TestPlotStrategiesReadsTheSummary:
         os.utime(summary_csv, (2_000_000, 2_000_000))
         assert plot_strategies._staleness_limit(summary_csv, results_csv) is None
 
-    def test_missing_summary_exits_cleanly(self, monkeypatch, capsys, tmp_path):
+    def test_missing_summary_fails_loudly(self, monkeypatch, tmp_path):
+        """A fresh clone lacks the gitignored summary: exit NON-ZERO, naming the fix."""
+        # The old behaviour printed "No results yet" and returned None, so the process
+        # exited 0 having produced no figure — a refresh sweep could not tell the
+        # difference between "rebuilt" and "silently skipped".
         monkeypatch.setattr("sys.argv", ["prog", "--summary", str(tmp_path / "absent.csv")])
-        assert plot_strategies.main(CONFIG_PATH) is None
-        assert "No results yet" in capsys.readouterr().out
+        with pytest.raises(SystemExit) as exc:
+            plot_strategies.main(CONFIG_PATH)
+        assert exc.value.code != 0
+        assert "make routing-report" in str(exc.value)
 
 
 class TestLabelDeclutter:
@@ -663,3 +670,44 @@ class TestSweepHeldOutRestrictsTheIndex:
         )
         assert row["frontier_share"] == 1.0
         assert row["n_models_used"] == 1  # a "router" that uses one model is a fixed policy
+
+
+class TestParetoErrorBarsAreClamped:
+    """viz_knn's Pareto panel must route its CI offsets through plot_style.ci_yerr."""
+
+    # wilson_interval(21, 21) returns hi = 0.9999999999999998, so an inlined
+    # `hi - rate` is -2.22e-16 and matplotlib rejects the whole yerr array with
+    # "'yerr' must not contain negative values". The clamp in ci_yerr exists for
+    # exactly this; two call sites here used to bypass it and the script exited 1.
+
+    N_ALL_PASS: Final = 21
+
+    def test_wilson_upper_bound_undershoots_one(self):
+        _lo, hi = plot_style.wilson_interval(self.N_ALL_PASS, self.N_ALL_PASS)
+        assert hi < 1.0
+        assert plot_style.ci_yerr(1.0, _lo, hi)[1] == 0.0
+
+    def test_all_pass_policy_does_not_raise(self, monkeypatch):
+        monkeypatch.setattr(config, "enabled_pricing", lambda: {"m-cheap": 1.0, "m-dear": 9.0})
+        prices = {"m-cheap": 1.0, "m-dear": 9.0}
+        monkeypatch.setattr(config, "cost_per_1m", lambda model, _pricing: prices[model])
+        task_ids = [f"t{i}" for i in range(self.N_ALL_PASS)]
+        results = {
+            tid: {
+                "m-cheap": {"pass": True, "real_cost": 0.01},
+                "m-dear": {"pass": True, "real_cost": 0.10},
+            }
+            for tid in task_ids
+        }
+        selections = dict.fromkeys(task_ids, "m-cheap")
+        fig, _notes, _limits = viz_knn._pareto_figure(
+            results,
+            task_ids,
+            selections,
+            ["m-cheap", "m-dear"],
+            {"m-cheap": "#0072B2", "m-dear": "#D55E00"},
+            n=self.N_ALL_PASS,
+            k=5,
+        )
+        # Rendering is where matplotlib validates yerr — draw, don't just build.
+        fig.canvas.draw()

@@ -111,11 +111,11 @@ CONFUSION_MATRIX_SPEC = FigureSpec(
 LEAD_TIME_SPEC = FigureSpec(
     reading=(
         "Two overlaid histograms of lead time — decisions between the policy's first escalation "
-        "and the end of the run — split by how the run actually ended. Orange is runs that failed, "
-        "blue is runs that resolved. Counts are trajectories in ONE configuration, not pooled."
+        "and the end of the run — split by how the run actually ended. Blue is runs that failed, "
+        "orange is runs that resolved. Counts are trajectories in ONE configuration, not pooled."
     ),
     goal=(
-        "Want the orange (failed) distribution shifted RIGHT of the blue one: escalating earlier "
+        "Want the blue (failed) distribution shifted RIGHT of the orange one: escalating earlier "
         "on the runs that go on to fail. Two overlapping distributions mean the policy fires at "
         "the same time whether or not the run is doomed — no timing signal."
     ),

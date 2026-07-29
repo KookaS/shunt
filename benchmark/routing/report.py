@@ -7,6 +7,7 @@ import csv
 import hashlib
 import json
 import math
+import resource
 import sys
 import zlib
 from collections.abc import Callable, Iterable, Sequence
@@ -38,6 +39,52 @@ HINDSIGHT_STRATEGIES: Final[frozenset[str]] = frozenset({"Oracle", "Oracle-rewar
 MIN_N_RELIABLE: Final[int] = 30
 
 _HINDSIGHT_LABEL: Final[str] = "hindsight — not achievable"
+
+
+# ---------------------------------------------------------------------------
+# Progress + memory diagnostics. This report holds the kNN family's ONNX embedders
+# and their per-task index in RSS at once and has peaked near 5 GB; an OOM kill is
+# SIGKILL, so nothing it was about to print survives. Every step therefore reports
+# as it completes, on a line-buffered stdout, with the peak RSS so far — the last
+# line printed names the step that was running when the kernel stepped in.
+# ---------------------------------------------------------------------------
+
+_OOM_HEADROOM_MB: Final[float] = 6000.0
+
+
+def _peak_rss_mb() -> float:
+    """Peak resident set size of this process so far, in MB (Linux ru_maxrss is KB)."""
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+
+
+def _available_mb() -> float | None:
+    """MemAvailable from /proc, or None where the kernel does not publish it."""
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                return float(line.split()[1]) / 1024.0
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def _memory_preflight() -> None:
+    """Warn BEFORE the embedders load when this host cannot hold the report."""
+    available = _available_mb()
+    if available is None:
+        return
+    print(f"Memory: {available:,.0f} MB available; this report has peaked near 5,000 MB.")
+    if available < _OOM_HEADROOM_MB:
+        print(
+            f"WARNING: under {_OOM_HEADROOM_MB:,.0f} MB free — the kernel may OOM-kill this "
+            "run (exit 137) mid-figure. Free memory or run it alone.",
+            file=sys.stderr,
+        )
+
+
+def _step(label: str, value: object) -> None:
+    """One completed step, with the peak RSS reached by the time it finished."""
+    print(f"  {label:13}: {value}   [peak RSS {_peak_rss_mb():,.0f} MB]")
 
 
 def _is_hindsight(name: str) -> bool:
@@ -1045,8 +1092,37 @@ def plot_cost_savings(
 # evidence" is a first-class question these figures must be able to answer.
 # ---------------------------------------------------------------------------
 
-# tid -> (passed, cost, imputed)
+# tid -> (passed, cost, imputed-anywhere-on-the-billed-path)
 StrategyCells = dict[str, tuple[bool, float, bool]]
+
+
+class _PathRecorder:
+    """Wraps a strategy so ``summary.evaluate`` also yields each task's billed path."""
+
+    # A cascade's reported cost sums every model it tried, but only the model it RETURNED
+    # is visible in the decision tuple. Reading the imputed flag off that final cell alone
+    # let projected dollars enter a panel labelled "no imputed cell on either side".
+    # Recording the path during the one evaluate pass keeps that single-producer property
+    # (no second, re-embedding evaluation) while making the flag cover what was billed.
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+        self.paths: dict[str, list[str]] = {}
+
+    @property
+    def name(self) -> str:
+        return str(self._inner.name)  # type: ignore[attr-defined]
+
+    def select(self, task_id: str, task_meta: dict, matrix: dict) -> str:
+        model: str = self._inner.select(task_id, task_meta, matrix)  # type: ignore[attr-defined]
+        tried = getattr(self._inner, "cascade_tried_models", None)
+        self.paths[task_id] = list(tried) if tried else [model]
+        return model
+
+    def __getattr__(self, item: str) -> object:
+        # Forwards `cascade_total_cost` (set per select) to evaluate; absent on
+        # single-shot strategies, where evaluate's getattr default takes over.
+        return getattr(self._inner, item)
 
 
 def strategy_cells(
@@ -1056,15 +1132,19 @@ def strategy_cells(
     # Cost is read from `real_cost` for a single-shot pick; a cascade keeps
     # summary.evaluate's cascade total so these numbers reconcile with
     # strategy_summary.csv rather than quietly forming a second accounting path.
+    # `imputed` is PATH-AWARE: true when ANY cell the decision billed was projected.
     out: dict[str, tuple[StrategyCells, set[str]]] = {}
     for strategy in strategies:
-        decisions, unscorable = summary.evaluate(strategy, matrix, tasks)
+        recorder = _PathRecorder(strategy)
+        decisions, unscorable = summary.evaluate(recorder, matrix, tasks)
         is_cascade = getattr(strategy, "cascade_total_cost", None) is not None
         cells: StrategyCells = {}
         for tid, model, passed, cost in decisions:
-            cell = matrix.get("results", {}).get(tid, {}).get(model, {})
-            spend = float(cost) if is_cascade else row_real_cost(cell)
-            cells[tid] = (bool(passed), spend, bool(cell.get("imputed", False)))
+            per_task = matrix.get("results", {}).get(tid, {})
+            spend = float(cost) if is_cascade else row_real_cost(per_task.get(model, {}))
+            path = recorder.paths.get(tid) or [model]
+            imputed = any(bool(per_task.get(m, {}).get("imputed", False)) for m in path)
+            cells[tid] = (bool(passed), spend, imputed)
         out[strategy.name] = (cells, unscorable)  # type: ignore[attr-defined]
     return out
 
@@ -1085,11 +1165,14 @@ def _split_measured(cells: StrategyCells, unscorable: set[str]) -> dict[str, flo
 def paired_measured(
     router: str, baseline: str, by_strategy: dict[str, tuple[StrategyCells, set[str]]]
 ) -> dict[str, float] | None:
-    """Router vs baseline on the tasks where BOTH landed on a genuinely MEASURED cell.
+    """Router vs baseline on the tasks where NEITHER side billed a projected cell.
 
     This is the kill gate with the projection taken out. ``None`` when either side
     is absent or the overlap is empty.
     """
+    # The imputed flag is path-aware (see strategy_cells), so a cascade that probed an
+    # imputed cell on its way to a measured final pick is excluded here — the panel's
+    # "no imputed cell on either side" title is then literally true of every dollar shown.
     if router not in by_strategy or baseline not in by_strategy:
         return None
     r_cells, r_un = by_strategy[router]
@@ -1444,9 +1527,10 @@ _MEASURED_SPLIT_SPEC = FigureSpec(
         "median of MEASURED real_cost, never a fabricated proxy.",
     ),
     limitations=(
-        "A cascade strategy's bar is its cascade TOTAL, bucketed by whether the FINAL chosen "
-        "cell was measured — a failed cheaper probe inside a measured-final cascade is counted "
-        "as measured spend even if that probe's own cell was imputed.",
+        "A cascade strategy's bar is its cascade TOTAL, bucketed as PROJECTED whenever ANY cell "
+        "on the billed path was imputed — including a failed cheaper probe ahead of a measured "
+        "final pick. That over-attributes rather than under-attributes: the bar's measured "
+        "segment is a floor on billed dollars, never an overstatement of them.",
         "The projected segment carries no uncertainty at all: it is a point estimate with no "
         "interval, stacked on top of billed dollars that are exact.",
     ),
@@ -1609,8 +1693,28 @@ _HEATMAP_SPEC = FigureSpec(
 )
 
 
-def _heatmap_annotations(
-    grid: np.ndarray, coverage: np.ndarray, glyphs: bool, raw: RawResults, synthesized: bool
+_MIN_ROW_LABEL_PT: Final[float] = 4.0
+_MAX_ROW_LABEL_PT: Final[float] = 7.0
+
+
+def _row_label_step(n_tasks: int, fig_h: float) -> tuple[int, float]:
+    """``(every-nth-row-to-label, fontsize)`` sized to the canvas the grid was given."""
+    # A label needs roughly its own font size in vertical points to stay legible, so the
+    # row pitch — not a hardcoded row budget — decides how many rows can carry a name.
+    axes_pt = max(1.0, (fig_h - 2.0) * 72.0)
+    row_pt = axes_pt / max(1, n_tasks)
+    if row_pt >= _MIN_ROW_LABEL_PT:
+        return 1, min(_MAX_ROW_LABEL_PT, row_pt * 0.75)
+    return max(1, int(np.ceil(_MIN_ROW_LABEL_PT / row_pt))), _MIN_ROW_LABEL_PT
+
+
+def _heatmap_annotations(  # noqa: PLR0913 (one footer per plotted channel)
+    grid: np.ndarray,
+    coverage: np.ndarray,
+    glyphs: bool,
+    raw: RawResults,
+    synthesized: bool,
+    ystep: int = 1,
 ) -> Annotations:
     """Runtime footer content for K4/N3: how much of the grid was actually sampled."""
     n_tasks, n_cols = grid.shape
@@ -1625,8 +1729,13 @@ def _heatmap_annotations(
     limits: list[str] = []
     if not glyphs:
         limits.append(
-            "At this size per-cell glyphs are off and task labels are thinned to ~40 evenly "
-            "spaced rows, so most rows are unlabelled."
+            "At this size per-cell glyphs are off, so a cell's outcome is read from its colour "
+            "against the legend rather than from a tick or cross."
+        )
+    if ystep > 1:
+        limits.append(
+            f"More rows than the canvas can label: only every {ystep}th task carries a name, "
+            f"so {n_tasks - len(range(0, n_tasks, ystep))} of {n_tasks} rows are unlabelled."
         )
     if synthesized:
         limits.append(
@@ -1687,11 +1796,14 @@ def plot_heatmap(matrix_path: Path, out_dir: Path, raw_results: RawResults | Non
     ax.set_xticks(range(n_cols))
     ax.set_xticklabels(col_labels, fontsize=7, rotation=35, ha="right")
 
-    # Thin task labels when there are too many to read; show ~40 evenly spaced.
-    ystep = max(1, int(np.ceil(n_tasks / 40)))
+    # Label every row the canvas can physically fit, and only thin when it cannot.
+    # The previous fixed "~40 evenly spaced" rule left 160 of 200 rows anonymous on a
+    # 32-inch canvas whose row pitch (10.8 pt) had room for all of them.
+    ystep, ylabel_fs = _row_label_step(n_tasks, fig_h)
     yticks = list(range(0, n_tasks, ystep))
     ax.set_yticks(yticks)
-    ax.set_yticklabels([tasks[i].split("__")[-1] for i in yticks], fontsize=7)
+    ax.set_yticklabels([tasks[i].split("__")[-1] for i in yticks], fontsize=ylabel_fs)
+    ax.tick_params(axis="y", length=2, pad=1.5)
 
     # Per-cell glyphs only when cells are big enough to read; else colour-only + legend.
     glyphs = n_tasks <= 40 and n_cols <= 20
@@ -1741,7 +1853,7 @@ def plot_heatmap(matrix_path: Path, out_dir: Path, raw_results: RawResults | Non
         fig,
         out_dir / "model_complementarity_heatmap.png",
         _HEATMAP_SPEC,
-        extra=_heatmap_annotations(grid, coverage, glyphs, raw, raw_results is None),
+        extra=_heatmap_annotations(grid, coverage, glyphs, raw, raw_results is None, ystep),
     )
 
 
@@ -2530,7 +2642,10 @@ def plot_embedding_routing_map(
         denominators.append(len(passes))
 
     embeddings = np.asarray(_embed_texts([tasks[tid]["description"] for tid in task_ids]))
-    pca = PCA(n_components=2)
+    # random_state pins the randomized SVD solver ('auto' picks it at 768-d input), so the
+    # committed figure is byte-reproducible run-to-run instead of re-churning git on every
+    # regeneration. Same fix, same reason, as viz_knn's PCA scatter.
+    pca = PCA(n_components=2, random_state=0)
     coords = pca.fit_transform(embeddings)
     explained = pca.explained_variance_ratio_
 
@@ -3333,9 +3448,9 @@ def _run_arm_plots(
         try:
             result_path = fn(*args)
         except Exception as exc:  # noqa: BLE001 (each N-plot is independently optional)
-            print(f"  {label}: skipped ({type(exc).__name__}: {exc})")
+            _step(label.strip(), f"skipped ({type(exc).__name__}: {exc})")
             continue
-        print(f"  {label}: {result_path}" if result_path else f"  {label}: skipped (no data)")
+        _step(label.strip(), result_path or "skipped (no data)")
     _ = matrix_path  # kept for signature symmetry with the other plot entry points
 
 
@@ -3374,6 +3489,9 @@ def _report_imputation_outputs(
 
 
 def main(config_path: str = "benchmark/benchmark.yaml") -> None:
+    # Line-buffered: a piped stdout otherwise buffers 8 KB, and an OOM SIGKILL
+    # discards it — the first observed failure of this report printed NOTHING.
+    sys.stdout.reconfigure(line_buffering=True)  # type: ignore[union-attr]
     config.load(config_path)
 
     ap = argparse.ArgumentParser(
@@ -3404,6 +3522,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     matrix_path = Path(args.matrix) if args.matrix else config.challenges_path()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    _memory_preflight()
 
     # ONE strategy set for the whole run. Each kNN-family strategy embeds every task
     # description and builds its own HNSW index on first select, so re-instantiating
@@ -3412,12 +3531,15 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
 
     strategies = run_eval.get_strategies()
 
+    # ONE load of the matrix for the whole run: it was loaded twice (once to derive the
+    # rows, once for the plots), holding two full copies alongside the embedders.
+    matrix = load_matrix(matrix_path) if matrix_path and matrix_path.exists() else None
+
     if args.results:
         results = load_results(Path(args.results))
         source = args.results
         tasks: list[str] = []
     else:
-        matrix = load_matrix(matrix_path)
         if matrix is None or not matrix.get("results"):
             print(
                 "No results yet — results.csv holds no rows. "
@@ -3453,48 +3575,45 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     print()
 
     raw_results = _load_raw_results()
-    matrix_for_plots = load_matrix(matrix_path) if matrix_path and matrix_path.exists() else None
+    matrix_for_plots = matrix
 
-    # Complete the matrix ONCE for the diagnostics; the scored rows already came
-    # through the same completion inside compute_strategy_rows.
+    # Complete the matrix ONCE and keep the completed copy: the measured-vs-projected
+    # cells below used to re-run the same completion, doubling the work and the peak.
     imputed: ImputedMatrix | None = None
+    completed: dict | None = None
     if matrix_for_plots is not None:
-        _completed, imputed = summary.complete_scored_matrix(matrix_for_plots)
+        completed, imputed = summary.complete_scored_matrix(matrix_for_plots)
     banner = _disclosure_banner(imputed, results)
 
-    p1 = plot_pareto(results, out_dir, raw_results, len(tasks), banner)
-    print(f"  Pareto       : {p1}")
+    _step("Pareto", plot_pareto(results, out_dir, raw_results, len(tasks), banner))
 
     g = config.gamma()
     factories = _build_strategy_factories(g)
-    p2 = plot_cumulative_regret(
-        results,
-        out_dir,
-        matrix_path,
-        gamma=g,
-        strategy_factories=factories,
-        raw_results=raw_results,
+    _step(
+        "Regret",
+        plot_cumulative_regret(
+            results,
+            out_dir,
+            matrix_path,
+            gamma=g,
+            strategy_factories=factories,
+            raw_results=raw_results,
+        ),
     )
-    print(f"  Regret       : {p2}")
 
-    p3 = plot_cost_savings(results, out_dir, banner)
-    print(f"  Cost savings : {p3}")
+    _step("Cost savings", plot_cost_savings(results, out_dir, banner))
 
     # Per-task selections with the imputed flag: what the measured-only kill-gate
     # panel and the measured-vs-projected breakdown are both built from.
     by_strategy: dict[str, tuple[StrategyCells, set[str]]] | None = None
-    if matrix_for_plots is not None and tasks:
-        from benchmark.routing import run_eval
+    if completed is not None and tasks:
+        by_strategy = strategy_cells(completed, tasks, strategies)
 
-        completed_cells, _im3 = summary.complete_scored_matrix(matrix_for_plots)
-        by_strategy = strategy_cells(completed_cells, tasks, strategies)
-
-    p1n = plot_cost_quality_equal(results, out_dir, banner, by_strategy)
-    print(f"  Cost=quality : {p1n}")
+    _step("Cost=quality", plot_cost_quality_equal(results, out_dir, banner, by_strategy))
 
     if by_strategy:
         p5 = plot_measured_vs_imputed(by_strategy, out_dir)
-        print(f"  Meas/imputed : {p5}" if p5 else "  Meas/imputed : skipped (no scored cost)")
+        _step("Meas/imputed", p5 or "skipped (no scored cost)")
 
     if imputed is not None and matrix_for_plots is not None:
         _report_imputation_outputs(imputed, matrix_for_plots, tasks, out_dir, strategies)
@@ -3502,16 +3621,16 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     if matrix_path is not None:
         if matrix_path.exists():
             try:
-                p4 = plot_heatmap(matrix_path, out_dir, raw_results)
-                print(f"  Heatmap      : {p4}")
+                _step("Heatmap", plot_heatmap(matrix_path, out_dir, raw_results))
             except (FileNotFoundError, ValueError, KeyError) as exc:
-                print(f"  Heatmap      : skipped ({exc})")
+                _step("Heatmap", f"skipped ({exc})")
         else:
             print(f"  Heatmap      : matrix file {matrix_path} not found, skipping")
 
     _run_arm_plots(out_dir, matrix_for_plots, matrix_path, tasks, raw_results)
 
     plt.close("all")
+    print(f"Done. Peak RSS {_peak_rss_mb():,.0f} MB.")
 
 
 if __name__ == "__main__":

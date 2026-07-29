@@ -8,7 +8,7 @@ import hnswlib
 import numpy as np
 
 from . import Strategy
-from ._cascade_common import UNPRICED, cheapest_priced_model, frontier_model, model_pricing
+from ._cascade_common import cheapest_priced_model, frontier_model, model_pricing
 
 # ---------------------------------------------------------------------------
 # Lazy fastembed loader
@@ -59,15 +59,20 @@ def compute_cascade_order(
     # express "cheapest that clears the bar": whatever weight the price term carries, a
     # rate gap wide enough outvotes an arbitrarily large price gap, and the shipped
     # version put the frontier first on 79% of tasks in a cascade documented as cheap-first.
+    # `model in pricing` is the LIKE-FOR-LIKE bar: Price-Cascade draws its candidates from
+    # `matrix["models"]` (priced by construction), so admitting an unpriced model here would
+    # let kNN-cascade route somewhere its own baseline structurally cannot, and the published
+    # head-to-head is only a comparison if both draw from the same universe. Sorting an
+    # unpriced model last was not enough — it stayed inside the `max_tries` shortlist.
     eligible = [
         model
         for model, outcomes in neighbor_results.items()
-        if len(outcomes) >= min_samples
+        if model in pricing
+        and len(outcomes) >= min_samples
         and _weighted_success_rate(outcomes) >= success_rate_threshold
     ]
     # Name breaks exact price ties so the order is deterministic across dict orderings.
-    # Price is the SOLE sort key, so an unknown price must sort last, never as free.
-    eligible.sort(key=lambda model: (pricing.get(model, UNPRICED), model))
+    eligible.sort(key=lambda model: (pricing[model], model))
     return eligible[:max_tries]
 
 

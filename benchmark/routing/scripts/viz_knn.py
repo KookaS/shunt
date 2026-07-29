@@ -603,11 +603,12 @@ def _pareto_figure(  # noqa: PLR0913
     for label, cost, passes, scored, color in points:
         rate = passes / scored
         lo, hi = plot_style.wilson_interval(passes, scored)
+        down, up = plot_style.ci_yerr(rate * 100, lo * 100, hi * 100)
         constant_xy.append((cost, rate * 100))
         ax.errorbar(
             cost,
             rate * 100,
-            yerr=[[(rate - lo) * 100], [(hi - rate) * 100]],
+            yerr=[[down], [up]],
             fmt="o",
             markersize=9,
             color=color,
@@ -627,10 +628,11 @@ def _pareto_figure(  # noqa: PLR0913
 
     r_rate = r_pass / r_n if r_n else 0.0
     r_lo, r_hi = plot_style.wilson_interval(r_pass, r_n)
+    r_down, r_up = plot_style.ci_yerr(r_rate * 100, r_lo * 100, r_hi * 100)
     ax.errorbar(
         r_cost,
         r_rate * 100,
-        yerr=[[(r_rate - r_lo) * 100], [(r_hi - r_rate) * 100]],
+        yerr=[[r_down], [r_up]],
         fmt="D",
         markersize=12,
         color="#4a4a4a",

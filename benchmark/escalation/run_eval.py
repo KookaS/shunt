@@ -17,8 +17,8 @@ import argparse
 import json
 import logging
 import sys
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -35,6 +35,11 @@ from benchmark.escalation import (
     replay,
 )
 from benchmark.escalation.authenticity import errors, verify_trajectory
+from benchmark.escalation.ope import (
+    PolicyValueEstimate,
+    estimate_policy_value,
+    rows_from_records,
+)
 from benchmark.escalation.schema import Trajectory, load_jsonl
 from benchmark.plot_frame import Annotations, FigureSpec
 
@@ -73,6 +78,9 @@ class EvalReport:
     depth_reports: list[DepthReport]
     coverage: list[ModelCoverage]
     notes: list[str] = field(default_factory=list)
+    # The off-policy escalation-value estimate, present only when a real exploration log was
+    # supplied. None means "not asked", NOT "no effect" — the two must stay distinguishable.
+    policy_value: PolicyValueEstimate | None = None
 
     @property
     def headline_cell(self) -> PolicyCell | None:
@@ -99,6 +107,9 @@ class EvalReport:
             "prefix_model": [d.to_dict() for d in self.depth_reports],
             "capture_coverage": [c.to_dict() for c in self.coverage],
             "notes": self.notes,
+            "escalation_policy_value": (
+                None if self.policy_value is None else asdict(self.policy_value)
+            ),
         }
 
 
@@ -138,6 +149,7 @@ def evaluate(
     *,
     depths: Sequence[int] = features.DEFAULT_DEPTHS,
     n_permutations: int = metrics.MIN_PERMUTATIONS,
+    exploration_rows: Sequence[Mapping[str, object]] | None = None,
 ) -> EvalReport:
     """Score the shipped policy and the prefix risk model, then gate on the permutation null."""
     stamped = [t for t in trajectories if features.is_stamped(t)]
@@ -156,6 +168,14 @@ def evaluate(
         depth_reports=depth_reports,
         coverage=features.model_coverage(trajectories),
         notes=_corpus_notes(trajectories, stamped, policy_cells),
+        # Only ever computed from a REAL exploration log. Trajectories carry no propensity
+        # (the committable whitelist has no `action`/`propensity`), so deriving rows from them
+        # would manufacture propensity=1.0 for every decision — a fabricated input, not data.
+        policy_value=(
+            None
+            if exploration_rows is None
+            else estimate_policy_value(rows_from_records(exploration_rows))
+        ),
     )
 
 
@@ -336,6 +356,11 @@ def _print_summary(report: EvalReport) -> None:
             f"{d.auroc_combined:>9.3f} {d.incremental_auroc:>+7.3f} "
             f"{d.null_incremental.p_value:>7.3f}"
         )
+    if report.policy_value is not None:
+        # Printed even (especially) when it refuses: a visible `not_identified` is the point —
+        # it says the escalation policy's value is UNMEASURED, not that it is zero.
+        pv = report.policy_value
+        print(f"\nescalation OPE: {pv.status} — {pv.reason}")  # noqa: T201
     for note in report.notes:
         print(f"\nNOTE: {note}", file=sys.stderr)  # noqa: T201
 
@@ -365,6 +390,15 @@ def _build_parser() -> argparse.ArgumentParser:
         default=list(features.DEFAULT_DEPTHS),
         help="Decision depths (absolute, never fractional) to score prefixes at.",
     )
+    parser.add_argument(
+        "--exploration-db",
+        type=Path,
+        default=None,
+        help=(
+            "OutcomeStore sqlite path. When given, ALSO report the off-policy escalation "
+            "value — or, on a deterministic log, its honest refusal."
+        ),
+    )
     return parser
 
 
@@ -378,7 +412,21 @@ def main(argv: list[str] | None = None) -> int:
     if not trajectories:
         logger.error("no trajectories found under %s", args.live_dir)
         return 1
-    report = evaluate(trajectories, depths=args.depths, n_permutations=args.permutations)
+    exploration_rows = None
+    if args.exploration_db is not None:
+        from shunt.db.store import OutcomeStore
+
+        store = OutcomeStore(db_path=str(args.exploration_db))
+        try:
+            exploration_rows = store.escalation_exploration_rows()
+        finally:
+            store.close()
+    report = evaluate(
+        trajectories,
+        depths=args.depths,
+        n_permutations=args.permutations,
+        exploration_rows=exploration_rows,
+    )
     if args.plots_dir is not None:
         _save_plots(report, args.plots_dir)
     print(json.dumps(report.to_dict(), indent=2))  # noqa: T201 (CLI report to stdout)

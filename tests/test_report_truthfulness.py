@@ -8,6 +8,9 @@
 
 from __future__ import annotations
 
+import numpy as np
+import pytest
+
 from benchmark.routing import report
 
 
@@ -163,6 +166,75 @@ class TestMeasuredVersusImputed:
         assert "EVERY projected cell is filled pass=True" in footer
 
 
+class TestStrategyCellsPathAwareImputation:
+    """A cascade bills every model it probed, so the imputed flag must cover the PATH."""
+
+    # Filtering on the FINAL cell alone put $0.1567 of projected spend inside the panel
+    # titled "MEASURED ONLY — no imputed cell on either side".
+
+    class _Cascade:
+        """Minimal stand-in for the shipped cascades' evaluate contract."""
+
+        name = "Cascade"
+
+        def __init__(self) -> None:
+            self.cascade_total_cost = 0.0
+            self.cascade_tried_models = []
+
+        def select(self, task_id, task_meta, matrix):  # noqa: ANN001, ANN201, ARG002
+            self.cascade_tried_models = []
+            self.cascade_total_cost = 0.0
+            for model in ("cheap", "dear"):
+                cell = matrix["results"].get(task_id, {}).get(model, {})
+                self.cascade_tried_models.append(model)
+                self.cascade_total_cost += cell.get("cost", 0.0)
+                if cell.get("pass"):
+                    return model
+            return "dear"
+
+    _MATRIX = {
+        "tasks": {"t1": {}, "t2": {}},
+        "results": {
+            # t1: the probe is imputed, the returned cell is measured — the leak.
+            "t1": {
+                "cheap": {"pass": False, "cost": 0.1, "real_cost": 0.1, "imputed": True},
+                "dear": {"pass": True, "cost": 1.0, "real_cost": 1.0},
+            },
+            # t2: nothing on the path is imputed.
+            "t2": {
+                "cheap": {"pass": True, "cost": 0.2, "real_cost": 0.2},
+                "dear": {"pass": True, "cost": 1.0, "real_cost": 1.0},
+            },
+        },
+    }
+
+    def _cells(self):  # noqa: ANN202
+        cells, _unscorable = report.strategy_cells(self._MATRIX, ["t1", "t2"], [self._Cascade()])[
+            "Cascade"
+        ]
+        return cells
+
+    def test_an_imputed_probe_marks_the_whole_decision(self):
+        assert self._cells()["t1"][2] is True
+
+    def test_a_fully_measured_path_stays_measured(self):
+        assert self._cells()["t2"][2] is False
+
+    def test_the_cascade_total_cost_still_reconciles(self):
+        # The recorder must not disturb what evaluate reads back off the strategy.
+        assert self._cells()["t1"][1] == pytest.approx(1.1)
+
+    def test_the_measured_only_panel_excludes_the_tainted_task(self):
+        cells = self._cells()
+        by_strategy = {
+            "Cascade": (cells, set()),
+            "Always-Frontier": ({"t1": (True, 1.0, False), "t2": (True, 1.0, False)}, set()),
+        }
+        paired = report.paired_measured("Cascade", "Always-Frontier", by_strategy)
+        assert paired is not None
+        assert paired["n"] == 1.0  # t1 is out: its cascade billed a projected cell
+
+
 class TestPairedMeasuredKillGate:
     def test_only_tasks_measured_on_both_sides_enter(self):
         by_strategy = {
@@ -244,3 +316,32 @@ class TestDroppedTasksAreDisclosedByComposition:
 
     def test_nothing_is_claimed_when_nothing_was_dropped(self):
         assert report._routing_share_lines({"kimi-k3": 94}, {}) == []
+
+
+class TestHeatmapRowLabels:
+    """Every task row the canvas can fit must carry its name, and the footer must
+    only claim rows are unlabelled when they actually are."""
+
+    # The figure's own LIMITS used to state "labels are thinned to ~40 evenly spaced
+    # rows, so most rows are unlabelled" while the 32-inch canvas had 10.8 pt of pitch
+    # per row — room for all 200.
+
+    def test_the_committed_shape_labels_every_row(self):
+        step, fontsize = report._row_label_step(200, 32.0)
+        assert step == 1
+        assert 4.0 <= fontsize <= 7.0
+
+    def test_an_impossible_density_thins_and_says_so(self):
+        step, fontsize = report._row_label_step(2000, 32.0)
+        assert step > 1
+        assert fontsize == 4.0
+        limits = report._heatmap_annotations(
+            np.zeros((2000, 3)), np.array([1, 1, 1]), False, {}, False, step
+        ).limitations
+        assert any("unlabelled" in text for text in limits)
+
+    def test_no_unlabelled_claim_when_every_row_is_labelled(self):
+        limits = report._heatmap_annotations(
+            np.zeros((200, 3)), np.array([1, 1, 1]), False, {}, False, 1
+        ).limitations
+        assert not any("unlabelled" in text for text in limits)

@@ -1,19 +1,21 @@
-"""Unified benchmark pipeline: collect -> stamp -> evaluate -> report -> summary."""
+"""Unified benchmark pipeline: collect -> stamp -> evaluate -> report -> figures -> summary."""
 
 # One entrypoint that composes the existing stage modules (run_matrix, offline_replay,
 # escalation.run_eval, routing.report) so a single command regenerates the CORE artifacts:
 # results.csv, the stamped live trajectories, the escalation metrics + plots, and the
 # routing.report figures (pareto_scatter, cost_savings, cost_quality_equal, cumulative_regret,
 # the heatmap, capability_evidence.json, and the coverage/summary CSVs).
-# The standalone plots under benchmark/routing/scripts/ (threshold_sweep, embedding_compare,
-# viz_knn, plot_strategies/external/timing/exploration, compute_costs) are NOT wired into any
-# stage — several run the heavy real fastembed embedder — so run them individually when needed.
+# The standalone plots under benchmark/routing/scripts/ run in the FIGURES stage (see
+# STANDALONE_FIGURES): they are heavy — several load the real fastembed embedder — so they
+# are not part of a --live collection run, but `--from figures` refreshes all of them and
+# `--check-figures` proves the committed PNGs are not stale without regenerating anything.
 # Each stage shells out to its module unchanged; this file only orchestrates them.
 
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import logging
 import re
@@ -34,7 +36,8 @@ COLLECT = "collect"
 STAMP = "stamp"
 EVALUATE = "evaluate"
 REPORT = "report"
-STAGE_ORDER = (COLLECT, STAMP, EVALUATE, REPORT)
+FIGURES = "figures"
+STAGE_ORDER = (COLLECT, STAMP, EVALUATE, REPORT, FIGURES)
 
 RUN_MATRIX = "benchmark.runner.run_matrix"
 OFFLINE_REPLAY = "benchmark.runner.offline_replay"
@@ -182,12 +185,170 @@ def stage_report(_args: argparse.Namespace, _state: PipelineState) -> None:
         raise StageError(f"{ROUTING_REPORT} exited {result.returncode}")
 
 
+# ---------------------------------------------------------------------------
+# The standalone figures + their staleness gate.
+#
+# Every committed PNG under benchmark/routing/reports/ that report.py does NOT write is
+# produced by one of the modules below. They used to sit on no refresh path at all, which
+# is how timing_comparison.png shipped for a release cycle without the Price-Cascade bar
+# and with a 57%-wrong denominator: the strategy was added, nothing re-ran the producer,
+# and no check could tell.
+#
+# `inputs` is what the figure is ABOUT — the outcome data, the strategy set, and the
+# producing script(s). Their combined digest is recorded in FIGURE_MANIFEST when the
+# figures stage regenerates; `stale_figures()` recomputes it and reports any drift. That
+# check is seconds (it hashes files, it does not draw), so it can run in the test suite
+# while the regeneration itself stays a deliberate `make benchmark-figures`.
+#
+# Deliberately NOT in the digest: the shared analysis modules (summary, impute, metrics).
+# They are exercised by their own tests and by the report stage; folding them in would
+# turn every unrelated refactor into a 15-minute figure rebuild, and a gate people
+# routinely override is not a gate.
+# ---------------------------------------------------------------------------
+
+# Repo-root-anchored so a digest is identical wherever the checkout lives (a CWD-relative
+# path would hash its own string and make the gate machine-dependent).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_ROUTING = _REPO_ROOT / "benchmark" / "routing"
+_SCRIPTS = _ROUTING / "scripts"
+_STRATEGIES = _ROUTING / "strategies"
+FIGURE_MANIFEST = _ROUTING / "figure_inputs.json"
+
+
+@dataclass(frozen=True)
+class FigureJob:
+    """One standalone figure producer: the module to run, what it writes, what it reads."""
+
+    module: str
+    outputs: tuple[str, ...]
+    inputs: tuple[Path, ...]
+
+    @property
+    def name(self) -> str:
+        return self.module.rsplit(".", 1)[-1]
+
+
+def _data_inputs() -> tuple[Path, ...]:
+    """The measured outcomes + task set every routing figure is derived from."""
+    return (
+        config.results_csv_path(),
+        config.challenges_path(),
+        _REPO_ROOT / "benchmark" / "benchmark.yaml",
+    )
+
+
+STANDALONE_FIGURES: Final[tuple[FigureJob, ...]] = (
+    FigureJob(
+        "benchmark.routing.scripts.viz_knn",
+        (
+            "knn_cost_comparison.png",
+            "knn_pca_scatter.png",
+            "model_allocation.png",
+            "model_performance_descriptive.png",
+            "neighborhood_purity.png",
+        ),
+        (_SCRIPTS / "viz_knn.py", _SCRIPTS / "knn_nulls.py", _ROUTING / "plot_style.py"),
+    ),
+    FigureJob(
+        "benchmark.routing.scripts.plot_knn_nulls",
+        ("knn_cross_repo_transfer.png", "knn_transfer_curve.png"),
+        (_SCRIPTS / "plot_knn_nulls.py", _SCRIPTS / "knn_nulls.py", _SCRIPTS / "viz_knn.py"),
+    ),
+    FigureJob(
+        "benchmark.routing.scripts.threshold_sweep",
+        ("threshold_sweep_heatmap.png",),
+        (_SCRIPTS / "threshold_sweep.py",),
+    ),
+    FigureJob(
+        "benchmark.routing.scripts.plot_exploration",
+        ("exploration_replay.png",),
+        (_SCRIPTS / "plot_exploration.py", _ROUTING / "exploration_replay.py"),
+    ),
+    FigureJob(
+        "benchmark.routing.scripts.embedding_compare",
+        ("embedding_compare.png",),
+        (_SCRIPTS / "embedding_compare.py",),
+    ),
+    FigureJob(
+        "benchmark.routing.scripts.plot_strategies",
+        ("strategy_comparison.png",),
+        (_SCRIPTS / "plot_strategies.py", _STRATEGIES),
+    ),
+    FigureJob(
+        "benchmark.routing.scripts.plot_timing",
+        ("timing_comparison.png",),
+        (_SCRIPTS / "plot_timing.py", _STRATEGIES),
+    ),
+)
+
+
+def _digest(paths: tuple[Path, ...]) -> str:
+    """SHA-256 over the named files, directories expanded to their sorted *.py."""
+    sha = hashlib.sha256()
+    for path in paths:
+        members = sorted(path.rglob("*.py")) if path.is_dir() else [path]
+        for member in members:
+            sha.update(str(member.resolve().relative_to(_REPO_ROOT)).encode())
+            sha.update(member.read_bytes() if member.exists() else b"<missing>")
+    return sha.hexdigest()
+
+
+def figure_digests() -> dict[str, str]:
+    """Current input digest per standalone figure job."""
+    data = _data_inputs()
+    return {job.name: _digest((*data, *job.inputs)) for job in STANDALONE_FIGURES}
+
+
+def write_figure_manifest(path: Path = FIGURE_MANIFEST) -> Path:
+    """Record the digests the committed PNGs were last regenerated from."""
+    path.write_text(json.dumps(figure_digests(), indent=2, sort_keys=True) + "\n")
+    return path
+
+
+def stale_figures(path: Path = FIGURE_MANIFEST) -> list[str]:
+    """Figure jobs whose inputs changed since the committed PNGs were produced."""
+    if not path.exists():
+        return [job.name for job in STANDALONE_FIGURES]
+    try:
+        recorded = json.loads(path.read_text())
+    except ValueError:
+        return [job.name for job in STANDALONE_FIGURES]
+    return [name for name, digest in figure_digests().items() if recorded.get(name) != digest]
+
+
+def missing_figures(reports_dir: Path = _REPO_ROOT / _ROUTING_REPORTS_DIR) -> list[str]:
+    """Declared outputs that are not on disk — a producer that 'succeeded' writing nothing."""
+    return [
+        f"{job.name}:{out}"
+        for job in STANDALONE_FIGURES
+        for out in job.outputs
+        if not (reports_dir / out).exists()
+    ]
+
+
+def stage_figures(_args: argparse.Namespace, _state: PipelineState) -> None:
+    """Regenerate every standalone figure, then re-record the input manifest."""
+    failed: list[str] = []
+    for job in STANDALONE_FIGURES:
+        print(f"  figures: {job.name}", flush=True)  # noqa: T201
+        result = run_module(job.module, [])
+        if result.returncode != 0:
+            failed.append(f"{job.module} exited {result.returncode}")
+    absent = missing_figures()
+    if absent:
+        failed.append(f"declared figures never written: {', '.join(absent)}")
+    if failed:
+        raise StageError("; ".join(failed))
+    print(f"  figures: manifest -> {write_figure_manifest()}")  # noqa: T201
+
+
 _StageFunc = Callable[[argparse.Namespace, "PipelineState"], None]
 _STAGE_FUNCS: Final[dict[str, _StageFunc]] = {
     COLLECT: stage_collect,
     STAMP: stage_stamp,
     EVALUATE: stage_evaluate,
     REPORT: stage_report,
+    FIGURES: stage_figures,
 }
 
 
@@ -206,7 +367,8 @@ def run_pipeline(args: argparse.Namespace) -> PipelineResult:
     """Drive the selected stages with per-stage failure isolation, then the summary."""
     outcomes = dict.fromkeys(STAGE_ORDER, _SKIPPED)
     state = PipelineState()
-    for stage in _selected_stages(args):
+    selected = _selected_stages(args)
+    for stage in selected:
         _banner(stage)
         try:
             _STAGE_FUNCS[stage](args, state)
@@ -217,7 +379,9 @@ def run_pipeline(args: argparse.Namespace) -> PipelineResult:
         except Exception as exc:  # noqa: BLE001 — isolation: one stage never aborts the rest
             outcomes[stage] = _FAILED
             logger.error("stage %s crashed: %s", stage, exc)
-    if not args.no_report:
+    # A figures-only refresh does not re-derive the kill-gate/escalation numbers, so the
+    # consolidated summary would just re-run both evaluations to restate stale text.
+    if not args.no_report and REPORT in selected:
         run_summary(args, state, outcomes)
     rc = 1 if any(v == _FAILED for v in outcomes.values()) else 0
     return PipelineResult(returncode=rc, outcomes=outcomes)
@@ -341,7 +505,7 @@ def run_summary(args: argparse.Namespace, state: PipelineState, outcomes: dict[s
 
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="Unified benchmark pipeline: collect -> stamp -> evaluate -> report -> summary."
+        description="Benchmark pipeline: collect -> stamp -> evaluate -> report -> figures."
     )
     ap.add_argument(
         "--strategy", choices=("cost_optimal", "full", "ladder"), default="cost_optimal"
@@ -365,13 +529,39 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Start at a later stage (e.g. --from report re-derives artifacts, no re-collection)",
     )
     ap.add_argument("--replay-timeout", type=float, default=DEFAULT_REPLAY_TIMEOUT)
+    ap.add_argument(
+        "--check-figures",
+        action="store_true",
+        help="Only verify the committed standalone figures are current, then exit (no drawing)",
+    )
     return ap
+
+
+def check_figures() -> int:
+    """Report stale/missing standalone figures; 0 when the committed set is current."""
+    stale, absent = stale_figures(), missing_figures()
+    for name in stale:
+        print(f"STALE: {name} — its inputs changed since the committed PNGs were drawn")  # noqa: T201
+    for name in absent:
+        print(f"MISSING: {name}")  # noqa: T201
+    if not stale and not absent:
+        print(f"Figures current: {len(STANDALONE_FIGURES)} standalone jobs.")  # noqa: T201
+        return 0
+    print(  # noqa: T201
+        "Regenerate with: make benchmark-figures "
+        "(or: uv run --extra benchmark python -m benchmark.pipeline --from figures)",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint: parse flags and drive the pipeline; returns the process exit code."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     args = _build_parser().parse_args(argv)
+    if args.check_figures:
+        config.load(args.config)
+        return check_figures()
     return run_pipeline(args).returncode
 
 

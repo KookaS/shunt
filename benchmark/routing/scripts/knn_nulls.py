@@ -145,16 +145,34 @@ def purity_null_band(  # noqa: PLR0913
 
 
 # ---------------------------------------------------------------------------
-# The routing rule, defined once — shared by viz_knn and by every null below.
+# The null-analysis selection rule. NOT the shipped product rule — see below.
 # ---------------------------------------------------------------------------
 
 
 def select_from_rates(rates: np.ndarray, threshold: float) -> np.ndarray:
     """Column index of the chosen model per row; `rates` columns MUST be price-ascending.
 
-    The shipped product rule: cheapest model whose neighbourhood pass-rate clears the
-    threshold, else the best-scoring model with ties broken toward the cheaper one.
+    An ANALYSIS rule for the permutation nulls, deliberately NOT `router.SelectionRule`.
     """
+    # This is a vectorized approximation of the shipped rule, not the shipped rule. It shares
+    # the core — cheapest column whose rate clears `threshold` — and differs in three named
+    # ways, each forced by the fact that `rates` is a LOSSY aggregate: `neighbourhood_rates`
+    # has already collapsed the neighbourhood to one number per (row, model), discarding the
+    # per-neighbour distance, cost and confidence that the shipped rule needs.
+    #
+    #   1. WEIGHTING — `rates` is an unweighted mean over the top-k; `SelectionRule` weights
+    #      each neighbour by `confidence * (1 - distance)`.
+    #   2. min_samples — no floor here; `SelectionRule` rejects a model with fewer than
+    #      `min_samples` neighbours regardless of its rate.
+    #   3. FALLBACK — when nothing clears the threshold this returns `argmax` (the
+    #      best-scoring model, ties to the cheaper); `SelectionRule._escalate` instead returns
+    #      the cheapest UNTESTED model, so on identical evidence the two can disagree — the
+    #      shipped rule escalating to a dearer model where this one picks a cheap tested one.
+    #
+    # Reconstructing per-neighbour objects inside the permutation loop to delegate would cost
+    # `n_perm x n_tasks` object builds and would still need distances this matrix no longer
+    # carries. The divergence is therefore pinned by tests rather than removed; the shared
+    # core and each of the three differences are asserted in `tests/test_knn_nulls.py`.
     qualifies = rates >= threshold
     return np.where(qualifies.any(axis=1), qualifies.argmax(axis=1), rates.argmax(axis=1))
 

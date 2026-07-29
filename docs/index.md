@@ -141,6 +141,8 @@ trust rules: [Feedback](feedback.md).
 - [Configuration](configuration.md) — add provider keys and register models
 - [Feedback](feedback.md) — how outcomes are captured (auto + manual) and learned from
 - [Error detection & auto-escalation](escalation.md) — how a verified failure is detected and, on repeat, escalates a rung (opt-in)
+- [Results](results.md) — every measured routing and escalation number, with its caveats
+- [Research log](research-log.md) — published ideas we tested, and what held
 - [Benchmark](benchmark.md) — run the offline model-capability and routing evals
 - [Benchmark dataset](benchmark-data.md) — what data is collected and usable, censored cells, outliers, collection modes
 - [Benchmark design](benchmark-design.md) — two-tree structure, strategy interface
@@ -149,9 +151,9 @@ trust rules: [Feedback](feedback.md).
 
 Pre-alpha. The core hypothesis — cheap-first routing beats always-frontier at
 equal quality on agentic coding — is unproven and, on the coding workload, the
-embedding difficulty signal did not clear the bar. The kill gate (beat
-fixed-frontier-with-caching at equal quality on a real workflow) is now
-adjudicated online on production sessions. If it does not hold, the router does not ship.
+embedding difficulty signal did not clear the bar. The make-or-break gate has
+been tested offline on SWE-bench Verified; **it has not been passed** (see
+[Results](results.md#why-we-still-do-not-call-the-gate-passed)). The router does not ship unless and until this gate clears on a real workflow.
 
 Apache-2.0. Import as `shunt` (`shunt-router` on PyPI — `shunt` is taken).
 </content>

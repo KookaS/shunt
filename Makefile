@@ -8,6 +8,8 @@
 #   make offline-replay Derive real per-step outcomes from captured diffs (no spend)
 #   make escalation-eval Score the escalation detector offline (no spend)
 #   make routing-report Regenerate the routing backtest plots/report (no spend)
+#   make benchmark-figures Regenerate the standalone routing figures + their manifest (no spend)
+#   make check-figures  Prove the committed standalone figures are not stale (seconds, no spend)
 #   make reconcile-cost Reconcile tracked benchmark cost against the billed bill (no spend)
 #
 # Docs deps are pulled ephemerally with `uv run --with-requirements`, so nothing
@@ -20,7 +22,7 @@
 # cell with `No module named 'minisweagent'`. Pass extra flags via ARGS=…, e.g.
 # `make benchmark-live ARGS="--live --max-cost 2"`.
 
-.PHONY: docs docs-build stop help benchmark benchmark-live offline-replay escalation-eval routing-report reconcile-cost
+.PHONY: docs docs-build stop help benchmark benchmark-live offline-replay escalation-eval routing-report benchmark-figures check-figures reconcile-cost
 .DEFAULT_GOAL := help
 
 DOCS_REQS := docs/requirements.txt
@@ -37,6 +39,8 @@ help:
 	@echo "make offline-replay  Derive real per-step outcomes from captured diffs (no spend)"
 	@echo "make escalation-eval Score the escalation detector offline (no spend)"
 	@echo "make routing-report  Regenerate the routing backtest report (no spend)"
+	@echo "make benchmark-figures Regenerate the standalone routing figures + manifest (no spend)"
+	@echo "make check-figures   Verify the committed standalone figures are current (seconds)"
 	@echo "make reconcile-cost  Reconcile tracked cost vs the real bill (ARGS=\"--billed 35 --timestamp 2026-07-27T00:00:00\")"
 
 # Live-reload preview. Ctrl-C to stop. This is the same config gh-pages ships.
@@ -75,6 +79,14 @@ escalation-eval:
 
 routing-report:
 	$(BENCH) benchmark.routing.report $(ARGS)
+
+# The 12 figures under benchmark/routing/scripts/. Heavy (real fastembed), so they are a
+# deliberate target rather than a pre-commit hook — `make check-figures` is the cheap gate.
+benchmark-figures:
+	$(BENCH) benchmark.pipeline --from figures $(ARGS)
+
+check-figures:
+	$(BENCH) benchmark.pipeline --check-figures $(ARGS)
 
 # Close the loop between tracked benchmark cost and the real provider bill (no spend).
 # --billed is the owner-read Requesty dashboard figure; --timestamp is required.

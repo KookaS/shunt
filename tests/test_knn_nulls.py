@@ -335,3 +335,117 @@ class TestCrossRepoGuards:
             kn.cross_repo_transfer(
                 emb @ emb.T, pass_mat, task_ids, k=5, threshold=0.6, min_tasks=8, n_perm=_PERM
             )
+
+
+class TestRelationshipToTheShippedSelectionRule:
+    """`select_from_rates` is an analysis approximation, NOT `router.SelectionRule`."""
+
+    # Its docstring once claimed to BE the shipped product rule. It is not, and an audit probe
+    # found the two returning different models on identical evidence. These tests pin what the
+    # two genuinely share and each documented way they diverge, so the claim cannot silently
+    # drift back.
+
+    # price-ascending, matching the rates-column contract
+    _MODELS = ("cheap", "mid", "dear")
+
+    def _pool(self):
+        models = self._MODELS
+
+        class _Pool:
+            def ranked_models(self):
+                return [type("M", (), {"name": n})() for n in models]
+
+        return _Pool()
+
+    def _neighbors(self, per_model, distance=0.0, confidence=1.0):
+        """Neighbours with EQUAL distance, so confidence weighting is uniform."""
+        from shunt.router.selection import NeighborResult
+
+        out = []
+        for model, outcomes in per_model.items():
+            for i, passed in enumerate(outcomes):
+                out.append(
+                    NeighborResult(
+                        model=model,
+                        outcome=passed,
+                        cost=1.0,
+                        verification_confidence=confidence,
+                        distance=distance,
+                        session_id=f"{model}-{i}",
+                    )
+                )
+        return out
+
+    def _shipped(self, per_model, threshold, min_samples):
+        from shunt.router.selection import SelectionRule
+
+        rule = SelectionRule(min_success_rate=threshold, min_samples=min_samples)
+        model, _reason = rule.select(self._neighbors(per_model), self._pool(), False)
+        return model
+
+    def _analysis(self, per_model, threshold):
+        rates = np.array([[float(np.mean(per_model[m])) for m in self._MODELS]], dtype=float)
+        return self._MODELS[int(kn.select_from_rates(rates, threshold)[0])]
+
+    def test_the_shared_core_agrees_cheapest_above_threshold(self):
+        # Uniform distances, every group above min_samples, at least one model clearing the
+        # bar: the three documented differences are all neutralized, so the two rules MUST
+        # agree. This is the part that is genuinely "the shipped rule".
+        per_model = {
+            "cheap": [True, True, True, True],  # 1.00 — clears
+            "mid": [True, True, True, False],  # 0.75 — clears
+            "dear": [True, True, True, True],  # 1.00 — clears
+        }
+        assert self._analysis(per_model, 0.7) == "cheap"
+        assert self._shipped(per_model, 0.7, min_samples=3) == "cheap"
+
+    def test_difference_2_the_shipped_rule_applies_a_min_samples_floor(self):
+        # `cheap` has the best rate but only ONE neighbour. The analysis rule has no floor and
+        # takes it; the shipped rule rejects it and takes the next model that clears the bar.
+        per_model = {
+            "cheap": [True],
+            "mid": [True, True, True, True],
+            "dear": [True, True, True, True],
+        }
+        assert self._analysis(per_model, 0.7) == "cheap"
+        assert self._shipped(per_model, 0.7, min_samples=3) == "mid"
+
+    def test_difference_3_the_fallback_diverges_when_nothing_clears_the_bar(self):
+        # Nothing clears the threshold. The analysis rule returns argmax — the best-scoring
+        # TESTED model. The shipped rule escalates to the cheapest UNTESTED model instead, so
+        # the two return different models on identical evidence. This is the audit's probe.
+        per_model = {
+            "cheap": [False, False, True, False],  # 0.25
+            "dear": [False, True, True, False],  # 0.50 — the argmax
+        }
+        rates = np.array([[0.25, 0.0, 0.50]], dtype=float)
+        assert self._MODELS[int(kn.select_from_rates(rates, 0.7)[0])] == "dear"
+
+        from shunt.router.selection import SelectionRule
+
+        rule = SelectionRule(min_success_rate=0.7, min_samples=3)
+        model, reason = rule.select(self._neighbors(per_model), self._pool(), False)
+        assert model == "mid"  # the cheapest UNTESTED model, not the best-scoring tested one
+        assert reason == "exploration_untested"
+
+    def test_difference_1_the_shipped_rule_weights_neighbours_by_distance(self):
+        # `cheap`'s passes are all FAR (distance 0.9, weight 0.1) and its failures are NEAR
+        # (distance 0.0, weight 1.0). Unweighted that is 0.50; distance-weighted it is 0.09.
+        # So the analysis rule takes `cheap` and the shipped rule rejects it as too weak.
+        from shunt.router.selection import NeighborResult, SelectionRule
+
+        neighbors = [
+            NeighborResult("cheap", True, 1.0, 1.0, 0.9, "c1"),
+            NeighborResult("cheap", True, 1.0, 1.0, 0.9, "c2"),
+            NeighborResult("cheap", False, 1.0, 1.0, 0.0, "c3"),
+            NeighborResult("cheap", False, 1.0, 1.0, 0.0, "c4"),
+            NeighborResult("mid", True, 1.0, 1.0, 0.0, "m1"),
+            NeighborResult("mid", True, 1.0, 1.0, 0.0, "m2"),
+            NeighborResult("mid", True, 1.0, 1.0, 0.0, "m3"),
+        ]
+        rates = np.array([[0.5, 1.0, 0.0]], dtype=float)  # the UNWEIGHTED view
+        assert self._MODELS[int(kn.select_from_rates(rates, 0.4)[0])] == "cheap"
+
+        rule = SelectionRule(min_success_rate=0.4, min_samples=3)
+        model, _reason = rule.select(neighbors, self._pool(), False)
+        assert model == "mid"

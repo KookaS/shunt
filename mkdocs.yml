@@ -5,7 +5,7 @@ site_description: >-
 site_url: https://kookas.github.io/shunt/
 repo_url: https://github.com/KookaS/shunt
 repo_name: KookaS/shunt
-edit_uri: edit/master/docs/
+edit_uri: edit/main/docs/
 copyright: Apache-2.0
 
 docs_dir: docs
@@ -38,6 +38,8 @@ nav:
   - Configuration: configuration.md
   - Feedback: feedback.md
   - Error detection & auto-escalation: escalation.md
+  - Results: results.md
+  - Research log: research-log.md
   - Benchmark: benchmark.md
   - Benchmark dataset: benchmark-data.md
   - Benchmark design: benchmark-design.md

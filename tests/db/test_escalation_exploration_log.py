@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import numpy as np
@@ -20,6 +21,9 @@ from benchmark.escalation.ope import (
 from shunt.db.store import OutcomeStore
 from shunt.router.engine import RouterEngine
 from shunt.router.escalation import EscalationConfig
+
+_SECRET = "sk-live-abcdefghijklmnop"
+_SECRET_CHECK_ID = f"/home/olivier/secretrepo/tests/test_auth.py::test_key[{_SECRET}]"
 
 
 @pytest.fixture
@@ -92,24 +96,26 @@ def _engine(epsilon: float, seed: int | None = 5) -> RouterEngine:
     )
 
 
-def _fail(engine: RouterEngine) -> None:
+def _fail(engine: RouterEngine, dedup_key: str = "t::a") -> None:
     engine.record_outcome(
         downshift=False,
         success=False,
         task_key="repoA",
-        dedup_key="t::a",
+        dedup_key=dedup_key,
         exit_code=1,
         is_infra_failure=False,
         confirmed=True,
     )
 
 
-def _flagged_provenance(engine: RouterEngine, session_id: str) -> dict[str, Any]:
+def _flagged_provenance(
+    engine: RouterEngine, session_id: str, dedup_key: str = "t::a"
+) -> dict[str, Any]:
     """Drive the engine to a flagged checkpoint and return that decision's provenance."""
     engine.decide(f"{session_id}-warm", "task")
-    _fail(engine)
+    _fail(engine, dedup_key)
     engine.decide(f"{session_id}-mid", "task")
-    _fail(engine)
+    _fail(engine, dedup_key)
     _model, _reason, provenance = engine.decide(session_id, "task")
     return provenance
 
@@ -159,6 +165,37 @@ def test_the_record_round_trips_through_the_store_joined_to_the_verified_outcome
     estimator_rows = rows_from_records(rows)
     assert estimator_rows[0].reward == 1.0
     assert 0.0 < estimator_rows[0].propensity < 1.0
+
+
+def test_a_secret_bearing_checkpoint_id_is_redacted_in_the_db_and_the_export(
+    store: OutcomeStore,
+) -> None:
+    # `checkpoint_id` IS a failing-check id, the one behaviour field that carries arbitrary text
+    # (a parametrized test id can embed a secret). `StepRecord.committable` scrubs it; the
+    # exploration log must scrub it too, or a key reaches sqlite and the documented OPE export.
+    provenance = _flagged_provenance(_engine(0.4), "s3", _SECRET_CHECK_ID)
+    assert _SECRET not in json.dumps(provenance)
+
+    store.store_session(
+        session_id="s3",
+        prompt_text="task",
+        embedding=np.zeros(8, dtype=np.float32),
+        model_chosen="cheap",
+        cost=1.0,
+        cache_stats={},
+        duration=1.0,
+        decision_provenance=provenance,
+    )
+    stored = store._conn.execute(  # noqa: SLF001 (the persisted column is the thing under test)
+        "SELECT decision_provenance FROM sessions WHERE session_id = 's3'"
+    ).fetchone()[0]
+    assert _SECRET not in stored
+
+    checkpoint_id = store.escalation_exploration_rows()[0]["checkpoint_id"]
+    assert _SECRET not in checkpoint_id
+    assert "<redacted>" in checkpoint_id
+    # The non-secret structure survives — redaction scrubs the key, it does not blank the id.
+    assert checkpoint_id.startswith("/home/olivier/secretrepo/tests/test_auth.py::test_key[")
 
 
 def test_sessions_without_an_escalation_record_are_not_returned(store: OutcomeStore) -> None:

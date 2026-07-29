@@ -6,10 +6,6 @@ escalate to the SAME model or their rows are not comparable. One helper, one sem
 
 from __future__ import annotations
 
-# A model the matrix does not price sorts LAST. Defaulting a missing price to 0.0 makes an
-# unpriced model the cheapest thing in the ladder, i.e. the first cell every cascade tries.
-UNPRICED = float("inf")
-
 # Only reachable on a matrix that prices nothing at all — the cheap end of the shipped
 # ladder, so a degraded cascade still degrades downwards.
 _LAST_RESORT_MODEL = "deepseek-v4-flash"

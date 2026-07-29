@@ -498,11 +498,15 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     if not summary_csv.exists():
         # Deliberately NOT falling back to an in-process re-derivation: a second producer of
         # these numbers is exactly what let the figure drift from the table it must match.
-        print(
-            f"No results yet — {summary_csv} has not been written. "
-            "Generate it first: python -m benchmark.routing.report"
+        # This exits NON-ZERO: the summary is gitignored, so on a fresh clone this is the
+        # normal state, and a silent exit 0 would let any refresh sweep or CI job record
+        # "produced the figure" while the tracked PNG stayed whatever was last committed.
+        raise SystemExit(
+            f"ERROR: {summary_csv} is missing, so {out_path.name} cannot be rebuilt.\n"
+            "It is a derived, gitignored input — regenerate it with:\n"
+            "  make routing-report\n"
+            "  (or: uv run --extra benchmark python -m benchmark.routing.report)"
         )
-        return
 
     results = load_summary_rows(summary_csv)
     if not results:
