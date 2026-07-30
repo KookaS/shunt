@@ -268,29 +268,34 @@ is the near-chance signal above, seen directly.
 
 **1. The gate: is it beating its own null?** The grey histogram is the same
 statistic recomputed under randomly shuffled outcome labels, with the whole
-fitting pipeline re-run per shuffle; dashed lines bound the null's central 95%.
+fitting pipeline re-run per shuffle, and labels shuffled *inside* each challenge
+so both arms keep the same prior; dashed lines bound the null's central 95%.
 *How to read it:* for the detector to be doing anything, the red line must sit
-clearly right of the upper dashed line. It sits in the middle of the null.
+clearly right of the upper dashed line. It sits just past it (+0.076, p = 0.015)
+— but resampling whole challenges puts that increment at [−0.014, +0.145],
+across zero, so the harness still returns `NO_SKILL`.
 
 ![Escalation permutation null](benchmark/escalation/reports/permutation_null.png)
 
 **2. The question the product actually asks.** Of the runs the policy escalated,
 how many failed — against the runs it left alone, and against the corpus base
 rate. *Look for:* the escalated bar clearly above the base-rate line. Both
-intervals overlap and both contain the base rate (lift 0.97×).
+intervals overlap and both contain the base rate (lift 0.98×).
 
 ![Outcome by escalation](benchmark/escalation/reports/trajectory_outcomes.png)
 
 **3. Ranking quality.** The ROC curve for the detector's score against the
-corrected causal label. *Look for:* a curve bowing toward the top-left. It tracks
-the diagonal.
+corrected causal label. *Look for:* a curve bowing toward the top-left. At the
+best depth it barely leaves the diagonal (AUROC 0.543); five decisions in it sits
+*below* it (0.428).
 
 ![Escalation ROC](benchmark/escalation/reports/roc_curve.png)
 
-**4. A data gap, stated plainly.** Share of each model's trajectories that went
-through per-step outcome stamping. *Look for:* every bar at 1.0. Three models
-(191 trajectories, 24% of the corpus) sit at **zero** — the recurrence trigger is
-structurally dead on them. This is a pipeline coverage gap, not agent behaviour.
+**4. A data gap, now closed.** Share of each model's trajectories that went
+through per-step outcome stamping. *Look for:* every bar at 1.0. All six now are.
+Three models used to sit at **zero**, leaving the recurrence trigger structurally
+dead on them; offline container replay re-stamped those runs at zero API cost.
+Closing the gap did not change the verdict.
 
 ![Failure capture coverage](benchmark/escalation/reports/failure_capture_coverage.png)
 
@@ -342,13 +347,92 @@ Three things we will not let you take away from that table:
    figure is best-of-N coverage while Always-Frontier's is single-shot. We flagged
    exactly this pattern as a flaw in prior work; it applies to us too. The cost
    axis is honest — every attempt in the chain is billed.
-3. **The learned part is currently worth nothing.** kNN's leave-one-out accuracy
-   equals the base rate to four decimals, and it sits inside a permutation null
-   at every *k*. Escalation returns `NO_SKILL`: task identity alone predicts the
-   outcome at AUROC 0.883, and the detector adds **−0.000** on top.
+3. **The learned part contributes nothing here — but read the next section
+   before concluding it cannot.** kNN's leave-one-out accuracy equals the base
+   rate to four decimals and sits inside a permutation null at every *k*. That
+   result stands as a description of what our shipped router does. It is *not*
+   yet a result about embeddings, for the reason below.
 
 We would rather publish that than keep selling the model. **We do not claim the
 make-or-break gate is passed.**
+
+### Two claims we retracted after auditing our own benchmark
+
+An audit of every committed figure found that two conclusions we were about to
+sell you were **measurement artifacts**. We are leaving this section in the
+README rather than quietly fixing it, because how a project handles its own bad
+results is the only evidence you have about the rest of its numbers.
+
+**We were not embedding the task.** The router embedded a string built as
+`repo@sha — resolve <pytest node id>` — a median of 106 characters containing a
+repo slug, a truncated commit hash and a test path. No problem statement, no
+code, nothing about difficulty. 61% of each task's twenty nearest neighbours
+shared its repo, against a 10% chance rate: it was behaving as a path detector.
+So *"prompt embeddings cannot separate task difficulty"* had never actually been
+tested. The signal is demonstrably there — task identity accounts for 43% of
+outcome variance (ICC 0.427), and SWE-bench's crude three-level human difficulty
+tag recovers r = +0.287 where our 768-dimension embedding recovers r = −0.05.
+
+**We re-ran it on the real problem statements, and the result held.** Feeding the
+genuine SWE-bench issue text (median 1,572 characters instead of 106) to the same
+shipped embedder moves nothing: R² goes −0.072 → **−0.061**, r goes −0.052 →
+**−0.026** with a confidence interval straddling zero, and the same-repo
+neighbour rate barely shifts, 61% → 58%. Adding the failing test names does not
+help, and neither does lifting the 4,000-character clip that silently truncates
+10.7% of statements — that made it marginally *worse*. Every per-model
+neighbourhood purity lift sits within ±0.03 of chance, and every AUC interval
+covers 0.50.
+
+So the conclusion stands, but it is worth being precise about what it is. It is
+not "embeddings are useless." It is: **on this benchmark, with this embedder, at
+n = 177, nearest neighbours in prompt space carry no recoverable signal about
+which model will solve a task** — with an honest detection floor of |r| = 0.21,
+below which we could not have seen an effect anyway. Meanwhile a three-level
+human difficulty tag clears r = +0.27 on the same data, and survives grouped
+cross-validation. The cheap categorical label beats the 768-dimension vector.
+
+There is a blunter way to say it. Across every variant, the learned router sent
+172–175 of 177 tasks to the cheapest model, landed on *exactly* the always-cheap
+pass rate, and cost more doing it — $1.58–1.78 against $1.36. That is not a
+router. It is a routing tax.
+
+**Our escalation baseline was reading the test labels.** The comparison gave each
+run the leave-one-out failure rate of *its own instance's other runs*, while the
+cross-validation split grouped by instance — so the baseline was scored on labels
+from its own test fold. A router meeting a new task has no such siblings. That is
+where `AUROC 0.883` came from; computed honestly it is about 0.42–0.45. Since the
+headline was `detector − baseline`, the detector was being asked to beat an
+oracle, which is why it reported −0.000.
+
+Worse, the permutation test that was supposed to catch this **could not fire.**
+Shuffling labels globally collapses the baseline to chance, giving the null 0.5
+of headroom while the observed statistic was arithmetically capped at 0.117 — and
+the null's 97.5th percentile sat at 0.117. No detector, however good, could ever
+have passed that gate. The null now permutes labels **inside each challenge**, so
+every challenge keeps its outcome multiset and the baseline is identical under
+the null and the observation; only the prefix's contribution is nulled.
+
+**And the comparison was floored the wrong way — or rather, not at all.** The
+honest prior scores *below* chance on this corpus (0.42 at 5 decisions), so
+`combined − prior` was handing the detector the baseline's deficit as if it were
+skill. Measured against `max(prior, 0.5)`, as it always should have been, the
+headline increment at 5 decisions falls from **+0.144 to +0.061** — 57% of it was
+the broken comparator. What remains does not clear the corrected null.
+
+So we are withdrawing *"the escalation model does not work"* and replacing it
+with something less satisfying and more accurate: **we cannot yet tell.** This
+evaluation could only ever have detected a detector at AUROC ≥ 0.57. The raw
+features hint at ≈ 0.54 — squarely inside the blind spot. Resolving it needs
+roughly four times the distinct challenges (160 → ~640); more runs per existing
+challenge buy almost nothing, because the clustering already inflates variance
+2.4×.
+
+**What survives all of it:** the cascade result. Price-Cascade at $20.46 against
+Always-Frontier's $87.04 is untouched by every defect above — it uses no model,
+so there was no model to get wrong. If anything the audit sharpened it: 90.6% of
+the headroom is mechanical, which bounds the entire remaining prize for a perfect
+difficulty predictor at **$6.87 on a $20.46 base**. That number is the honest
+answer to "how much is routing intelligence worth here", and it is small.
 
 ## Future
 
@@ -366,9 +450,9 @@ Where the work goes next, in priority order.
   randomisation at flagged checkpoints with logged propensities fixes it.
 - **More routing algorithms.** kNN is the first, not a commitment. Bigram and
   linear models, calibrated classifiers, better selection rules.
-- **More data.** 253 of 799 trajectories never went through per-step stamping.
-  Counting those plus the ones that were stamped but captured nothing, ~325 are
-  re-stampable offline at zero API cost.
+- **More distinct challenges.** Offline re-stamping is done — 791 of 799
+  trajectories are now scored — but they cluster on only 160 challenges, and that
+  clustering, not the trajectory count, is what caps what the eval can resolve.
 - **CLI / UI** to monitor and manage Shunt, low-level work on the hot path,
   mid-session model adaptation, and an enterprise suite (audit, RBAC, monitoring).
 
@@ -380,7 +464,7 @@ Early is the best time to shape this. Concretely, here is what helps most:
   with the data.
 - 🚨 **Ideas on the escalation model.** The genuinely unsolved one. What signal in
   an agent's trajectory actually predicts failure early enough to be worth acting
-  on? We have 546 labelled trajectories and a harness that will tell you honestly
+  on? We have 791 labelled trajectories and a harness that will tell you honestly
   whether your idea works. Rules, n-grams, embeddings, small classifiers, fusion
   of several weak signals — open to anything.
 - 🧠 **Ideas on the routing model.** kNN is a starting point. If you have reason to

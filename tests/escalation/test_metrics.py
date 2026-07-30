@@ -71,6 +71,36 @@ def test_detection_metrics_hand_computed_confusion_and_f1() -> None:
     assert m.fpr == pytest.approx(1 / 3)
 
 
+def test_operating_threshold_is_reachable_on_a_calibrated_score() -> None:
+    # THE BUG THIS FIXES: a fixed 0.5 cut on a calibrated probability whose base rate is ~0.38
+    # is unreachable — the score centres near 0.38, so almost nothing is ever flagged. The
+    # threshold must instead come from the scores, spending a flag budget equal to prevalence.
+    scores = [0.30 + 0.001 * i for i in range(100)]  # 0.300 .. 0.399: NOTHING crosses 0.5
+    labels = [i < 38 for i in range(100)]
+    assert sum(s >= 0.5 for s in scores) == 0, "the fixed cut really is unreachable here"
+    threshold = metrics.operating_threshold(scores, labels)
+    assert sum(s >= threshold for s in scores) == 38  # exactly the base-rate flag budget
+    assert metrics.prevalence(labels) == pytest.approx(0.38)
+
+
+def test_operating_threshold_honours_an_explicit_flag_budget() -> None:
+    scores = [float(i) / 100 for i in range(100)]
+    labels = [i < 38 for i in range(100)]
+    tenth = metrics.operating_threshold(scores, labels, flag_rate=0.1)
+    assert sum(s >= tenth for s in scores) == 10
+    # A zero budget flags nothing rather than silently flagging the top row.
+    none_at_all = metrics.operating_threshold(scores, labels, flag_rate=0.0)
+    assert sum(s >= none_at_all for s in scores) == 0
+
+
+def test_detection_metrics_derives_its_threshold_when_none_is_given() -> None:
+    scores = [0.30 + 0.001 * i for i in range(100)]
+    labels = [i >= 62 for i in range(100)]  # the 38 highest-scoring rows are the failures
+    m = metrics.detection_metrics(scores, labels)
+    assert (m.confusion.tp, m.confusion.fp) == (38, 0)  # perfectly ranked, so the budget is exact
+    assert metrics.detection_metrics(scores, labels, threshold=0.5).confusion.tp == 0
+
+
 def _polyline_area(points: list[tuple[float, float]]) -> float:
     """Trapezoidal area under a polyline — what a reader integrates by eye."""
     ordered = sorted(points)

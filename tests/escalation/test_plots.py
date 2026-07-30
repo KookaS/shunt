@@ -5,6 +5,8 @@ figure must never let a reader infer skill the numbers do not support.
 
 from __future__ import annotations
 
+import re
+
 import matplotlib
 
 matplotlib.use("Agg")  # headless; no display in CI
@@ -79,9 +81,14 @@ def test_roc_curve_stays_quiet_when_the_signal_clears_its_null() -> None:
 def test_confusion_matrix_prints_the_random_baseline() -> None:
     fig, ax = plt.subplots()
     # 20 failed / 30 resolved, 25 flags. A random flagger at that rate catches 20*0.5 = 10.
-    ann = plots.confusion_matrix_plot(ConfusionMatrix(tp=10, fp=15, fn=10, tn=15), ax)
+    ann = plots.confusion_matrix_plot(
+        ConfusionMatrix(tp=10, fp=15, fn=10, tn=15), ax, threshold=0.372
+    )
     assert any(t.get_text() == "10\n[10]" for t in ax.texts), "observed and random both rendered"
     assert any("random flagger" in n for n in ann.notes)
+    # The operating point is data-derived, so the reader must be able to see WHICH point it is.
+    assert "0.372" in ax.get_title()
+    assert any("0.372" in n for n in ann.notes)
     # tp equals the random expectation, so the figure must refuse to imply a catch.
     assert any("no more failures than random" in lim for lim in ann.limitations)
     plt.close(fig)
@@ -89,7 +96,7 @@ def test_confusion_matrix_prints_the_random_baseline() -> None:
 
 def test_confusion_matrix_is_quiet_when_it_beats_random() -> None:
     fig, ax = plt.subplots()
-    ann = plots.confusion_matrix_plot(ConfusionMatrix(tp=19, fp=6, fn=1, tn=24), ax)
+    ann = plots.confusion_matrix_plot(ConfusionMatrix(tp=19, fp=6, fn=1, tn=24), ax, threshold=0.4)
     assert ann.limitations == ()
     plt.close(fig)
 
@@ -221,6 +228,56 @@ def test_capture_coverage_names_the_models_with_no_per_step_outcomes() -> None:
     ann = plots.capture_coverage(features.model_coverage([covered, blind]), ax)
     assert any("blind-model" in lim for lim in ann.limitations)
     assert any("NO per-step outcomes" in lim for lim in ann.limitations)
+    plt.close(fig)
+
+
+def _lead_cell(failed: tuple[int, ...], resolved: tuple[int, ...]) -> policy_eval.PolicyCell:
+    """A PolicyCell carrying only the lead-time arrays the histogram reads."""
+    return policy_eval.PolicyCell(
+        escalate_after_n=2,
+        stale_window=5,
+        ladder="default",
+        n_trajectories=len(failed) + len(resolved),
+        n_escalated=len(failed) + len(resolved),
+        tp=len(failed),
+        fp=len(resolved),
+        fn=0,
+        tn=0,
+        base_failure_rate=0.5,
+        precision_ci=(0.0, 1.0),
+        null_auroc=_null(real=False),
+        lead_times_failed=failed,
+        lead_times_resolved=resolved,
+    )
+
+
+def test_lead_time_discloses_the_p99_clip() -> None:
+    # np.clip folds every outlier into the top bin, so the rightmost bar is inflated. Silently.
+    # The figure must name the cap AND how many trajectories were folded into it.
+    failed, resolved = tuple([1] * 50 + [900]), (2, 3, 800)
+    fig, ax = plt.subplots()
+    ann = plots.lead_time_by_outcome(_lead_cell(failed, resolved), ax)
+    clipped = [lim for lim in ann.limitations if "CLIPPED" in lim]
+    assert len(clipped) == 1
+    # The counts are DERIVED from the fixture and the cap the figure itself reports, never
+    # frozen: the cap is a percentile, so a hardcoded count rots the moment the fixture or the
+    # percentile changes — which is exactly how this test broke. Asserting the relationship
+    # keeps it a test of the DISCLOSURE, not of one arithmetic snapshot.
+    cap_match = re.search(r"cap of ([0-9.]+)", clipped[0])
+    assert cap_match, clipped[0]
+    cap = float(cap_match.group(1))
+    n_failed = sum(v > cap for v in failed)
+    n_resolved = sum(v > cap for v in resolved)
+    assert n_failed + n_resolved > 0, "fixture must actually clip something"
+    assert f"{n_failed + n_resolved} " in clipped[0], clipped[0]
+    assert f"{n_failed} failed, {n_resolved} resolved" in clipped[0], clipped[0]
+    plt.close(fig)
+
+
+def test_lead_time_says_nothing_about_clipping_when_nothing_was_clipped() -> None:
+    fig, ax = plt.subplots()
+    ann = plots.lead_time_by_outcome(_lead_cell((4, 4, 4, 4), (4, 4, 4, 4)), ax)
+    assert not any("CLIPPED" in lim for lim in ann.limitations)
     plt.close(fig)
 
 

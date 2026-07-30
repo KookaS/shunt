@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -127,11 +128,15 @@ class ReplayReport:
     cost_delta: Estimate
     explore_ratio: float  # measured exploratory / exploit spend, mean over seeds
     explore_ratio_worst_seed: float
-    # Arm total vs the exploration-OFF total — the honest overhead the ~1.4x claim is about.
+    # Arm spend vs the exploration-OFF spend, PAIRED on the tasks both arms scored.
+    # An unpaired ratio of raw totals compares different task sets and overstates it.
+    # NaN when a seed shares no scored task with the baseline: the ratio has no denominator
+    # there, and "undefined" is the honest report — 1.0 would read as measured parity.
     cost_multiple: float
     cost_multiple_worst_seed: float
     budget_explore_ratio: float  # the cap's own internal counter (neighborhood costs)
     baseline_missing: int
+    baseline_missing_by_model: dict[str, int]  # which models the dropped cells belong to
     exploration_missing_per_seed: float
     per_task_baseline_pass: dict[str, float]
     per_task_exploration_pass: dict[str, float]
@@ -338,6 +343,49 @@ def _per_task(outcomes: Sequence[RunOutcome]) -> tuple[dict[str, float], dict[st
     )
 
 
+def _paired_cost_multiples(baseline: RunOutcome, runs: Sequence[RunOutcome]) -> list[float]:
+    """Per-seed spend ratio over the tasks BOTH arms actually scored."""
+    # The trap: the two arms skip different cells (a pull can land on a (task, model)
+    # the matrix never measured), so a ratio of raw ``total_spend`` divides spend over
+    # one task set by spend over a different, smaller one. That is not an overhead --
+    # it is a coverage difference wearing an overhead's units. Pair on the shared tasks.
+    _, base_cost = _per_task([baseline])
+    multiples: list[float] = []
+    for run in runs:
+        _, run_cost = _per_task([run])
+        shared = set(base_cost) & set(run_cost)
+        denom = sum(base_cost[t] for t in shared)
+        # NaN, never 1.0. With no shared scored task the ratio has no denominator, and the honest
+        # answer is "undefined" — 1.0 reads as the measured finding "exploration cost no overhead",
+        # which is a hardcoded stand-in for absent data on a benchmark path.
+        multiples.append(sum(run_cost[t] for t in shared) / denom if denom > 0 else float("nan"))
+    return multiples
+
+
+def _mean_multiple(multiples: Sequence[float]) -> float:
+    """Mean overhead across seeds — NaN if any seed is undefined, or if there are no seeds."""
+    # Propagated, not skipped: averaging only the seeds that HAD a shared task quietly reports an
+    # overhead over a different seed set than `n_seeds` claims.
+    if not multiples:
+        return float("nan")
+    return float(np.mean(multiples))
+
+
+def _worst_multiple(multiples: Sequence[float]) -> float:
+    """Worst seed's overhead. NaN dominates — `max` over NaN is order-dependent and silent."""
+    if not multiples or any(math.isnan(m) for m in multiples):
+        return float("nan")
+    return max(multiples)
+
+
+def _missing_by_model(outcome: RunOutcome) -> dict[str, int]:
+    """How many unscorable cells each model accounts for, so drops aren't read as random."""
+    counts: dict[str, int] = {}
+    for _task, model in outcome.missing:
+        counts[model] = counts.get(model, 0) + 1
+    return counts
+
+
 def _explore_share_by_round(outcomes: Sequence[RunOutcome]) -> list[float]:
     """Running fraction of decisions that were exploratory, averaged over seeds."""
     if not outcomes:
@@ -381,8 +429,7 @@ def evaluate(
     # Bootstrap seeds are offset far from the replay seeds so the two streams never alias.
     bs = seed + 10_000
 
-    baseline_total = baseline.total_spend
-    multiples = [r.total_spend / baseline_total if baseline_total > 0 else 1.0 for r in runs]
+    multiples = _paired_cost_multiples(baseline, runs)
 
     return ReplayReport(
         slice_=slice_,
@@ -395,10 +442,11 @@ def evaluate(
         cost_delta=bootstrap_ci([exp_cost[t] - base_cost[t] for t in tasks], bs + 5, n_resamples),
         explore_ratio=float(np.mean([r.explore_ratio for r in runs])),
         explore_ratio_worst_seed=max((r.explore_ratio for r in runs), default=0.0),
-        cost_multiple=float(np.mean(multiples)),
-        cost_multiple_worst_seed=max(multiples, default=1.0),
+        cost_multiple=_mean_multiple(multiples),
+        cost_multiple_worst_seed=_worst_multiple(multiples),
         budget_explore_ratio=float(np.mean([r.budget_explore_ratio for r in runs])),
         baseline_missing=len(baseline.missing),
+        baseline_missing_by_model=_missing_by_model(baseline),
         exploration_missing_per_seed=float(np.mean([len(r.missing) for r in runs])),
         per_task_baseline_pass=base_pass,
         per_task_exploration_pass=exp_pass,

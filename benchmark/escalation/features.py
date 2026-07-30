@@ -13,12 +13,25 @@
 #    feature that can see step n-1 reads the label verbatim (AUROC 1.00 including it, 0.56
 #    excluding). The prefix is clipped to `n_steps - 1` before `depth` is applied.
 #
-# FIELD CENSUS (measured over all 799 live trajectories / 29 422 steps — do not add features on
-# fields outside this list). POPULATED: success, blocking, is_infra_failure, confirmed, status,
-# action, tool, exit_code (17 559 non-null), failing_check_id / dedup_key (11 537 non-null).
+# FIELD CENSUS (do not add features on fields outside this list).
+# POPULATED: success, blocking, is_infra_failure, confirmed, status, action, tool, exit_code.
 # CONSTANT OR 100% NULL, therefore unusable: is_revert (always False), retry_count (always 0),
 # loop_signal (always False), subgoal_progress, test_passed, test_total, model, reasoning_effort,
 # rank_index, effort_index, real_cost.
+#
+# NOT INDEPENDENT — one field wearing three names. `normalize/mini_swe_agent.stamp_step` writes
+# `success = not failure`, `failing_check_id = <id> if failure else None` and
+# `blocking = recompute_blocking(...)` in the same assignment, so
+# `success == (failing_check_id is None) == (not blocking)` holds BY CONSTRUCTION. It was measured
+# at 28 623/28 623 scorable steps: `failing_check_id`/`dedup_key`'s non-null count is exactly the
+# complement of `success`, not an independently populated field. Rates over the three therefore
+# produce ONE column under three names; only `fail_rate` is kept (dropping `blocking_rate` and
+# `check_id_rate`, which were bit-identical to it at every depth).
+#
+# ALSO DROPPED: `missing_exit_rate` (share of prefix steps with a null exit_code). On the stamped
+# corpus it is 0 at depths 5 and 10 and near-constant deeper (std 0.026 at depth 20); a null
+# exit_code means the stamping stage recorded none, so it tracks capture coverage — a collection
+# artifact — rather than agent behaviour, which is the same reason unstamped runs are excluded.
 
 from __future__ import annotations
 
@@ -37,19 +50,46 @@ DEFAULT_DEPTHS: Final[tuple[int, ...]] = (5, 10, 20)
 # The tail window for the recency features — short enough to differ from the whole-prefix rate.
 _RECENT: Final[int] = 3
 
+# ALSO DROPPED, for the same reason: `error_status_rate` (share of prefix steps with
+# `status != "ok"`). The normalizer assigns `status` and `success` together, so it is a FOURTH
+# alias of `fail_rate` — bit-identical on the corpus, caught by the duplicate-column test rather
+# than by inspection, which is exactly why that test exists.
+#
+# TWO MORE DROPPED, for AFFINE dependence rather than bit-identity. Exact duplication is only the
+# easiest case; a column that is an exact linear combination of others carries no extra rank while
+# still splitting the L2 logistic's weight. Both were measured on all 791 stamped trajectories:
+#
+#   `nonzero_exit_rate` == `fail_rate` + `infra_rate`, EXACTLY: over every depth-5 and depth-10
+#     prefix step (3 955 and 7 810 steps) a non-zero exit_code occurs iff the step failed or was an
+#     infra failure, and the two are disjoint (0 steps are both). It holds at depth 20 too bar
+#     27/11 680 steps. It is arithmetic, not correlation: the exit code is what the verifier reads
+#     to decide `success`, so its rate cannot be independent of the failure rates it produces.
+#   `distinct_action_rate` == 1 + 1/depth - `max_action_repeat_rate` at depth 5 (their sum is 1.2
+#     for EVERY row) and correlates at r = -0.973 at depth 10. At a fixed prefix length the two are
+#     the same fact about the action multiset — how concentrated it is — read from opposite ends.
+#     `max_action_repeat_rate` is kept because repetition is the construct escalation is about
+#     (an agent thrashing on one command); the variety reading adds no rank at the shallow depths.
+#
+# NOT dropped, but disclosed: `fail_rate` and `recent_fail_rate` correlate at r = +0.9988 at depth
+# 5 (the recency window is 3 of the 5 prefix steps, so it is mostly the same steps). The dependence
+# is near, not exact — the design keeps full rank with both — so removing one would be a judgement
+# call on a real column rather than the arithmetic removal the two above are. It shrinks with depth
+# as the window becomes a smaller share of the prefix.
+#
+# With both in, the design matrix ranked 7 of 8 at depths 5 and 10, so the "each column carries
+# signal no other carries" claim below was false and the eval was fitting a rank-deficient design.
+# `tests/escalation/test_features.py` now gates on the RANK of [features | intercept] over the real
+# corpus, not on pairwise inequality, which affine dependence passes by construction.
+
+# Six columns, each carrying rank no other column already carries — see the census above for the
+# six removed as aliases of `fail_rate`, as affine combinations, or as a coverage artifact.
 FEATURE_NAMES: Final[tuple[str, ...]] = (
     "fail_rate",
-    "blocking_rate",
     "infra_rate",
-    "error_status_rate",
-    "check_id_rate",
     "distinct_check_id_rate",
     "max_key_repeat_rate",
-    "nonzero_exit_rate",
-    "missing_exit_rate",
     "recent_fail_rate",
     "max_action_repeat_rate",
-    "distinct_action_rate",
 )
 
 
@@ -97,20 +137,13 @@ def _features(steps: Sequence[StepView]) -> tuple[float, ...]:
     keys = [s.failing_check_id for s in steps if s.failing_check_id is not None]
     actions = Counter(s.action for s in steps)
     recent = steps[-_RECENT:]
-    exits = [s.exit_code for s in steps]
     return (
         _rate(sum(not s.success for s in steps), n),
-        _rate(sum(s.blocking for s in steps), n),
         _rate(sum(s.is_infra_failure for s in steps), n),
-        _rate(sum(s.status != "ok" for s in steps), n),
-        _rate(len(keys), n),
         _rate(len(set(keys)), n),
         _rate(max(Counter(keys).values()) if keys else 0, n),
-        _rate(sum(code not in (None, 0) for code in exits), n),
-        _rate(sum(code is None for code in exits), n),
         _rate(sum(not s.success for s in recent), len(recent)),
         _rate(max(actions.values()), n),
-        _rate(len(actions), n),
     )
 
 

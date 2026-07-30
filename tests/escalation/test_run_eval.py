@@ -10,7 +10,7 @@ from typing import Final
 import pytest
 
 from benchmark.escalation import features, run_eval, schema
-from tests.escalation.factories import make_step, make_trajectory
+from tests.escalation.factories import make_depth_report, make_null, make_step, make_trajectory
 
 pytest.importorskip("sklearn")
 
@@ -87,7 +87,7 @@ def test_a_pure_null_reports_no_skill_not_ok(null_report: run_eval.EvalReport) -
     # of 0.00055 printed `status: OK`. The gate is now the permutation band.
     report = null_report
     assert report.status == "NO_SKILL"
-    assert "no usable signal" in report.reason
+    assert "skill conditions" in report.reason
     assert not any(d.has_skill for d in report.depth_reports)
 
 
@@ -103,6 +103,30 @@ def test_no_skill_reason_carries_the_number_not_just_the_verdict(
     assert "incremental AUROC" in null_report.reason
     report = null_report
     assert "p=" in report.reason
+
+
+def test_no_skill_reason_names_the_condition_that_actually_failed() -> None:
+    # Regression: the message hardcoded "no depth clears its permutation null" and then printed an
+    # incremental AUROC sitting OUTSIDE that null's band — the sentence contradicted its own
+    # numbers on two committed figure canvases. The failing condition here is the PREFIX-only null.
+    depth = make_depth_report(
+        auroc_prefix=0.428,
+        incremental_auroc=0.144,
+        null_prefix=make_null(0.428, 0.510, p_value=0.975),
+        null_incremental=make_null(0.144, 0.135, p_value=0.015),
+        ci_incremental=(0.003, 0.290),
+    )
+    assert depth.null_incremental.beats_null  # the increment DOES clear its null
+    assert not depth.null_prefix.beats_null  # the prefix-only score does not
+    assert not depth.has_skill  # ...so the gate still refuses, and must keep refusing
+
+    status, reason = run_eval._status([], [depth])
+    assert status == "NO_SKILL"
+    # Behavioural, not a frozen sentence: every unmet condition is named, every met one is not.
+    for met, clause in run_eval._skill_conditions(depth):
+        assert (clause in reason) is (not met)
+    # ...and the cleared increment is reported as cleared, not silently claimed to have failed.
+    assert f"{0.144:+.3f}" in reason
 
 
 def test_headline_cell_is_the_shipped_default_not_an_argmax(

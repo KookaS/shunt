@@ -154,9 +154,11 @@ model or penalised logistic regression over a handful of structural features, wi
 Platt or Venn-Abers calibration and a conformally controlled firing threshold.
 This is the family that best fits our data volume — a few hundred independent
 tasks supports roughly ten parameters, not a sequence model. Open question: does
-it beat the routing model's own task-level prior, which already predicts outcome
-well from task identity alone? A detector that merely rediscovers task difficulty
-is not an escalation signal.
+it beat the routing model's own task-level prior? We previously recorded that the
+prior "already predicts outcome well from task identity alone"; that measurement
+was leaking test-fold labels and has been retracted — grouped honestly the prior
+is about 0.42–0.45. The open question stands on its own merits: a detector that merely
+rediscovers task difficulty is not an escalation signal.
 
 **N-gram or bigram models over trajectory events.** Count and TF-IDF
 representations regularly beat semantic embeddings on small log-classification

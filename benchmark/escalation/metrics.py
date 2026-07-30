@@ -17,9 +17,6 @@ from dataclasses import dataclass
 
 from benchmark.calibration.labeler_metrics import ConfusionMatrix, LabelerMetrics, compute_metrics
 
-# The operating threshold for turning a risk score into a hard flag.
-DETECTION_THRESHOLD = 0.5
-
 # A permutation null needs enough draws that the 97.5th percentile is not itself noise.
 MIN_PERMUTATIONS = 200
 
@@ -85,12 +82,32 @@ def auroc(scores: Sequence[float], labels: Sequence[bool]) -> float:
     return (rank_sum_pos - positives * (positives + 1) / 2.0) / (positives * negatives)
 
 
+def operating_threshold(
+    scores: Sequence[float], labels: Sequence[bool], *, flag_rate: float | None = None
+) -> float:
+    """The score cut that flags `flag_rate` of runs — the corpus base rate by default."""
+    # DERIVED, never hardcoded. A fixed 0.5 used to stand here and was unreachable: the score is a
+    # calibrated probability, so on a corpus with a ~0.38 base rate it centres near 0.38 and almost
+    # nothing crosses 0.5 (2 true positives against 203 false negatives — prevalence read as a bug).
+    # Spending a flag budget equal to prevalence is the break-even point: at that budget a no-skill
+    # flagger reaches exactly base-rate precision, so any excess is real ranking skill.
+    if not scores:
+        return 0.0
+    rate = prevalence(labels) if flag_rate is None else flag_rate
+    if rate <= 0.0:
+        return math.inf
+    ordered = sorted(scores, reverse=True)
+    k = max(1, min(len(ordered), round(min(rate, 1.0) * len(ordered))))
+    return ordered[k - 1]
+
+
 def detection_metrics(
-    scores: Sequence[float], labels: Sequence[bool], *, threshold: float = DETECTION_THRESHOLD
+    scores: Sequence[float], labels: Sequence[bool], *, threshold: float | None = None
 ) -> LabelerMetrics:
     """Confusion + precision/recall/F1/FPR/Cohen-kappa at the operating threshold."""
+    cut = operating_threshold(scores, labels) if threshold is None else threshold
     owner = {str(i): ("good" if lab else "bad") for i, lab in enumerate(labels)}
-    auto = {str(i): ("good" if s >= threshold else "bad") for i, s in enumerate(scores)}
+    auto = {str(i): ("good" if s >= cut else "bad") for i, s in enumerate(scores)}
     return compute_metrics(owner, auto)
 
 
@@ -295,7 +312,6 @@ def grouped_bootstrap_ci(
 
 
 __all__ = [
-    "DETECTION_THRESHOLD",
     "MIN_PERMUTATIONS",
     "ConfusionMatrix",
     "NullResult",
@@ -306,6 +322,7 @@ __all__ = [
     "detection_metrics",
     "grouped_bootstrap_ci",
     "grouped_resamples",
+    "operating_threshold",
     "permutation_null",
     "permute_statistic",
     "pr_operating_points",

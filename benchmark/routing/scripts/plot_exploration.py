@@ -184,6 +184,24 @@ def _panel_explore_share(ax, report: ReplayReport, budget_frac: float) -> None:
     leg.get_frame().set_edgecolor(_GRID)
 
 
+def _missing_concentration_limit(report: ReplayReport) -> list[str]:
+    """Say so when the dropped baseline cells sit in one model rather than spreading."""
+    by_model = report.baseline_missing_by_model
+    if not by_model:
+        return []
+    top_model, top_n = max(by_model.items(), key=lambda kv: kv[1])
+    if top_n < report.baseline_missing:
+        return []
+    where = "outside the dense slice" if top_model not in report.slice_.models else "in the slice"
+    return [
+        f"THE DROPPED BASELINE CELLS ARE NOT A RANDOM SAMPLE: all {report.baseline_missing} "
+        f"unscorable exploit-only cells are {top_model}, a model {where} — so the "
+        "exploit-only arm is systematically missing that model's tasks, not a random "
+        "subset. The overhead is therefore reported PAIRED, over only the tasks both "
+        "arms scored"
+    ]
+
+
 def _annotations(report: ReplayReport) -> Annotations:
     """Footer content derived from the replay: slice size, seeds, skipped cells."""
     slice_ = report.slice_
@@ -217,6 +235,7 @@ def _annotations(report: ReplayReport) -> Annotations:
             f"LOWER BOUND on the shipped policy's, where an exploratory pull can land on the "
             f"frontier model"
         )
+    limits.extend(_missing_concentration_limit(report))
     return Annotations(
         notes=(
             f"Direct-Method replay on the fully-dense slice: {len(slice_.tasks)} tasks x "

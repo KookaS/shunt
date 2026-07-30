@@ -248,18 +248,23 @@ no measured value, and an interval below it means firing predicts *success*.
 this run ends unresolved — is fit from prefix-only features at fixed decision depths and
 evaluated out-of-fold. Three numbers are reported and only the last one is meaningful:
 
-- `prior` — the router's own t=0 knowledge (leave-one-out per-challenge failure rate). Task
+- `prior` — the router's own t=0 knowledge: the per-challenge failure rate estimated from
+  **train folds only**, which is what a router meeting an unseen instance actually has. Task
   identity alone is a strong predictor, so any unconditional number mostly rediscovers task
   difficulty.
 - `prefix` — out-of-fold discrimination from the prefix alone.
-- `incremental` — `AUROC(prior + prefix) − AUROC(prior)`. **This is the number that decides
-  whether escalation is worth anything.** Everything else overstates it.
+- `incremental` — `AUROC(prior + prefix) − max(AUROC(prior), 0.5)`. **This is the number that
+  decides whether escalation is worth anything.** Everything else overstates it. The comparator
+  is floored at chance so an anti-predictive prior cannot be beaten into an apparent finding.
 
 What the rest of the report means:
 
 - **`status` is gated by a permutation null, not by a point estimate.** The status is `OK`
   only when a depth's incremental AUROC sits above the 97.5th percentile of at least 200
-  label shuffles, with the whole fitting pipeline re-run per shuffle. Otherwise it is
+  label shuffles, with the whole fitting pipeline re-run per shuffle. Labels are permuted
+  **within each challenge**, never globally: a global shuffle destroys the challenge-level
+  clustering of outcomes, which leaves the null and the observation with different amounts of
+  headroom and the gate with no power. Otherwise it is
   `NO_SKILL` (with the number and the p-value in the reason) or `INSUFFICIENT_DATA`, and
   every figure states it in red under the plot. A point estimate above 0.5 is never treated
   as skill on its own.
@@ -268,7 +273,15 @@ What the rest of the report means:
   the **terminal step is excluded**, because the harness verdict is stamped onto it. Both are
   pinned by tests; see `benchmark/escalation/features.py`.
 - **Grouped cross-validation by challenge.** A challenge never appears in both train and test,
-  so the model cannot rediscover task identity through the fold boundary.
+  so the model cannot rediscover task identity through the fold boundary. **This guarded the
+  prefix model but not the task prior it was scored against:** the prior was built from the
+  leave-one-out mean of each row's *own* challenge, so it read labels from its own test fold.
+  The published prior AUROC has been retracted (see `results.md`). The comparison baseline is
+  now estimated from **train folds only** over the same grouped partition, so it never reads a
+  test row's own challenge; the leaked leave-one-out figure is still reported alongside, marked
+  as a diagnostic contrast rather than the baseline. Because that honest prior scores *below*
+  chance on this corpus, the increment is measured against `max(prior, 0.5)` — an
+  anti-predictive baseline must not be beatable into an apparent finding.
 - **The sweep varies `escalate_after_n` only.** `stale_window` and `ladder` are pinned at their
   defaults because both were measured inert on the current corpus: the full 12-cell grid
   collapsed to 2 distinct score vectors. `escalate_after_n=1` is swept alongside the shipped

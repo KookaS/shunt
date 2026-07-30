@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Final
 
 from benchmark import config
-from benchmark.escalation import schema
+from benchmark.escalation import features, schema
 from benchmark.escalation.live_capture import LIVE_DIR
 
 logger = logging.getLogger(__name__)
@@ -123,7 +123,11 @@ def stage_collect(args: argparse.Namespace, _state: PipelineState) -> None:
 
 
 def _unstamped_trajectories(live_dir: Path = LIVE_DIR) -> list[tuple[str, str, Path]]:
-    """Live trajectories with no per-step failing_check_id yet — the ones stamping still owes."""
+    """Live trajectories the stamping stage still owes — `features.is_stamped` is the ONE test."""
+    # This used to test `any(step.failing_check_id)`, which diverged from the eval's predicate: a
+    # fully replayed run in which no step ever failed carries no check id, so the eval scored it
+    # while this queued it for replay forever. One predicate, both call sites. `features` imports
+    # nothing heavier than the stdlib, so sharing it keeps this cheap path cheap.
     pending: list[tuple[str, str, Path]] = []
     if not live_dir.exists():
         return pending
@@ -133,7 +137,7 @@ def _unstamped_trajectories(live_dir: Path = LIVE_DIR) -> list[tuple[str, str, P
         except (OSError, ValueError, KeyError) as exc:
             logger.warning("stamp: skipping unreadable %s (%s)", path, exc)
             continue
-        if any(step.failing_check_id for step in traj.steps):
+        if features.is_stamped(traj):
             continue
         instance_id = traj.header.instance_id
         if not instance_id:
@@ -358,7 +362,12 @@ def _selected_stages(args: argparse.Namespace) -> list[str]:
         return [COLLECT]
     start = STAGE_ORDER.index(args.start_from)
     stages = list(STAGE_ORDER[start:])
-    if not args.live and STAMP in stages:
+    # Stamping is a CONTAINER replay of already-collected trajectories — it costs Docker
+    # time, never API budget — so it is dropped only when it was implied rather than asked
+    # for. `--from stamp` asks for it explicitly; silently removing it there stranded 332
+    # trajectories unstamped from 2026-07-26 (three model families fell out of the scored
+    # escalation corpus entirely, and the only route to the replay looked like `--live`).
+    if not args.live and args.start_from != STAMP and STAMP in stages:
         stages.remove(STAMP)  # no new live trajectories to stamp on a simulated run
     return stages
 

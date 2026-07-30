@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import random
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -106,27 +107,81 @@ def test_grouped_cv_never_splits_a_challenge() -> None:
         assert not (train_groups & test_groups)
 
 
-def test_task_prior_is_leave_one_out_not_self_scoring() -> None:
+def test_leaked_prior_is_leave_one_out_not_self_scoring() -> None:
     rows = [
         features.EvalRow(f"t{i}", group="c0", model="m", failed=i < 3, features=(0.0,))
         for i in range(4)
     ]
     labels = [r.failed for r in rows]
-    prior = prefix_eval.task_prior(rows, labels)
+    prior = prefix_eval.leaked_task_prior(rows, labels)
     # Row 0 failed; the other three in its challenge are 2 failed / 1 resolved → 2/3.
     assert prior[0] == pytest.approx(2 / 3)
     # Row 3 resolved; the other three all failed → 1.0. A self-scoring prior would give 0.0 here.
     assert prior[3] == pytest.approx(1.0)
 
 
-def test_task_prior_falls_back_to_the_global_rate_for_a_singleton_challenge() -> None:
+def test_leaked_prior_falls_back_to_the_global_rate_for_a_singleton_challenge() -> None:
     rows = [
         features.EvalRow("a", group="c0", model="m", failed=True, features=(0.0,)),
         features.EvalRow("b", group="c1", model="m", failed=True, features=(0.0,)),
         features.EvalRow("c", group="c2", model="m", failed=False, features=(0.0,)),
     ]
-    prior = prefix_eval.task_prior(rows, [r.failed for r in rows])
+    prior = prefix_eval.leaked_task_prior(rows, [r.failed for r in rows])
     assert prior[0] == pytest.approx(0.5)  # (2 failed - self) / (3 - 1)
+
+
+def _grouped_rows(n_groups: int = 40):  # type: ignore[no-untyped-def]
+    """Two rows per challenge, and the whole outcome is decided by the challenge."""
+    rows = []
+    for g in range(n_groups):
+        for k in range(2):
+            rows.append(
+                features.EvalRow(
+                    f"t{g}_{k}", group=f"c{g}", model="m", failed=g % 2 == 0, features=(0.0,)
+                )
+            )
+    return rows
+
+
+def test_the_headline_prior_never_reads_a_test_row_s_own_challenge() -> None:
+    # THE LEAK THIS FIX CLOSES. On a corpus where the outcome is a pure function of the challenge,
+    # the leave-one-out prior scores a perfect 1.0 by reading its sibling's label out of its OWN
+    # test fold. The deployable prior cannot: GroupKFold puts every sibling in train-or-test
+    # together, so an unseen challenge falls back to the train base rate and the prior is chance.
+    rows = _grouped_rows()
+    labels = [r.failed for r in rows]
+    groups = [r.group for r in rows]
+    assert metrics.auroc(prefix_eval.leaked_task_prior(rows, labels), labels) == 1.0
+    honest = prefix_eval.grouped_task_prior(labels, groups)
+    assert metrics.auroc(honest, labels) < 0.65
+    # And concretely: every test row was scored with its fold's TRAIN base rate — never with a
+    # value derived from its own challenge, which is what "unachievable in deployment" means.
+    y = [int(lab) for lab in labels]
+    for train, test in prefix_eval.grouped_splits(labels, groups):
+        assert not ({groups[i] for i in train} & {groups[i] for i in test})
+        base = sum(y[i] for i in train) / len(train)
+        # Compared elementwise: `pytest.approx` is unhashable, so it cannot go inside a set.
+        assert all(honest[i] == pytest.approx(base) for i in test)
+
+
+def test_the_prior_uses_a_challenge_train_rate_when_that_challenge_is_in_training() -> None:
+    # The fallback is not a hardcoded constant. GroupKFold makes the "seen" case unreachable, so
+    # the branch is proved on a hand-made split rather than through the grouped path.
+    labels = [True, False, True, True]
+    groups = ["c0", "c1", "c0", "c2"]
+    split = [(np.array([0, 1]), np.array([2, 3]))]
+    prior = prefix_eval.prior_from_splits(labels, groups, split)
+    assert prior[2] == pytest.approx(1.0)  # c0 IS in train, and its one train row failed
+    assert prior[3] == pytest.approx(0.5)  # c2 is unseen → the train base rate, 1 of 2
+
+
+def test_the_prior_and_the_risk_model_share_one_partition() -> None:
+    # A prior fitted on a DIFFERENT split than the model would re-open the leak by the back door.
+    labels = [i % 3 == 0 for i in range(60)]
+    groups = [f"c{i // 3}" for i in range(60)]
+    splits = prefix_eval.grouped_splits(labels, groups)
+    assert len(splits) == prefix_eval.N_SPLITS
+    assert sorted(i for _, test in splits for i in test) == list(range(60))
 
 
 @pytest.fixture(scope="module")
@@ -167,6 +222,46 @@ def test_real_prefix_signal_is_detected_and_clears_the_null(signal_report) -> No
     assert signal_report is not None
     assert signal_report.auroc_prefix > 0.8
     assert signal_report.null_prefix.beats_null
+
+
+def test_the_incremental_is_measured_against_a_prior_floored_at_chance() -> None:
+    # THE DEFECT THIS PINS. The module header has always said the comparator is `max(prior, 0.5)`,
+    # and `prior_comparator` implemented it — with zero consumers. The shipped headline was
+    # `combined - prior`, unfloored, against a prior that is anti-predictive on the real corpus
+    # (0.4175 at depth 5), so ~57% of the published +0.144 was the broken baseline's deficit
+    # re-labelled as detector skill. Floored, the same fit reports +0.061.
+    anti = prefix_eval._Fit(
+        prior=[],
+        prefix=[],
+        combined=[],
+        auroc_prior=0.40,
+        auroc_prior_leaked=0.0,
+        auroc_prefix=0.55,
+        auroc_combined=0.60,
+    )
+    assert anti.prior_comparator == prefix_eval.CHANCE
+    assert anti.incremental == pytest.approx(0.10)  # 0.60 - 0.50, NOT 0.60 - 0.40
+    # A prior that beats chance is its own comparator — the floor binds one way only.
+    good = replace(anti, auroc_prior=0.70)
+    assert good.prior_comparator == pytest.approx(0.70)
+    assert good.incremental == pytest.approx(-0.10)
+
+
+def test_the_null_permutes_within_a_challenge_not_globally() -> None:
+    # THE DEFECT THIS PINS. The header declares the null permutes inside each challenge so every
+    # challenge's outcome multiset — and therefore the deployable prior — is identical under the
+    # null and the observation. `_null_draws` called a flat `rng.shuffle` over the whole label
+    # list: a probe found 10/10 groups had their multiset changed, putting the two arms in
+    # different headroom regimes and leaving the gate with no power.
+    groups = [f"c{i // 4}" for i in range(40)]
+    labels = [(i % 4) < (i // 4) % 3 for i in range(40)]
+    shuffled = prefix_eval.permute_within_groups(labels, groups, random.Random(0))
+    assert shuffled != labels  # it really permutes
+    for group in set(groups):
+        picked = [i for i, g in enumerate(groups) if g == group]
+        assert sorted(labels[i] for i in picked) == sorted(shuffled[i] for i in picked), (
+            f"challenge {group}'s outcome multiset changed — that is a global shuffle"
+        )
 
 
 def test_depth_is_skipped_when_the_corpus_cannot_support_it() -> None:

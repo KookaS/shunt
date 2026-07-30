@@ -97,12 +97,20 @@ CONFUSION_MATRIX_SPEC = FigureSpec(
         "at or below random means the flag carries no information."
     ),
     definitions=(
-        ("flagged", "detector score above the operating threshold"),
+        ("flagged", "detector score at or above the operating threshold"),
+        ("operating threshold", "score cut set so the flag budget equals the base failure rate"),
         ("random baseline", "expected count if the same number of flags were scattered at random"),
     ),
-    notes=("Counts are per trajectory, not per prefix.",),
+    notes=(
+        "Counts are per trajectory, not per prefix.",
+        "The threshold is DERIVED from this corpus (the base-rate quantile of the score), not a "
+        "fixed 0.5: the score is a calibrated probability, so a 0.5 cut on a corpus that fails "
+        "~38% of the time is unreachable and would report almost every run as not flagged.",
+    ),
     limitations=(
-        "One arbitrary operating point, not a sweep — the curve figures show the rest.",
+        "One operating point, not a sweep — the curve figures show the rest.",
+        "Spending a flag budget equal to prevalence is a choice, not an optimum; a different "
+        "budget moves every count in this grid.",
         "The random baseline is an expectation, not a sampled interval; a cell one or two counts "
         "above it is not evidence.",
     ),
@@ -132,6 +140,9 @@ LEAD_TIME_SPEC = FigureSpec(
         "are absent from both distributions.",
         "Lead time is measured backwards from the end, so it is an offline diagnostic — an online "
         "detector cannot know it.",
+        "The x axis is clipped at the p99 lead time and everything above it is folded into the "
+        "rightmost bin, which is therefore an OVERFLOW bin rather than a bar of equal width. When "
+        "anything was clipped the count and the cap are stated in the runtime limitations below.",
     ),
 )
 
@@ -162,9 +173,9 @@ SWEEP_TABLE_SPEC = FigureSpec(
 
 PERMUTATION_NULL_SPEC = FigureSpec(
     reading=(
-        "The grey histogram is the statistic recomputed under randomly shuffled outcome labels, "
-        "with the whole fitting pipeline re-run per shuffle. The dashed lines bound the null's "
-        "central 95%. The red line is the real, unshuffled value. x is AUROC."
+        "The grey histogram is the statistic recomputed under outcome labels shuffled WITHIN each "
+        "challenge, with the whole fitting pipeline re-run per shuffle. The dashed lines bound the "
+        "null's central 95%. The red line is the real, unshuffled value. x is AUROC."
     ),
     goal=(
         "The red line must sit clearly to the RIGHT of the upper dashed line. Inside the dashed "
@@ -172,12 +183,25 @@ PERMUTATION_NULL_SPEC = FigureSpec(
     ),
     definitions=(
         ("null", "what this pipeline scores when the labels carry no information"),
-        ("incremental", "AUROC of prior+prefix minus AUROC of the router's t=0 prior alone"),
+        (
+            "incremental",
+            "AUROC of prior+prefix minus the router's t=0 prior FLOORED at chance, "
+            "max(prior, 0.5) — an anti-predictive prior must not be beatable",
+        ),
     ),
-    notes=("The null is the gate: a point estimate above 0.5 is not skill on its own.",),
+    notes=(
+        "The null is the gate: a point estimate above 0.5 is not skill on its own.",
+        "Permuting inside each challenge preserves every challenge's outcome multiset, so the "
+        "deployable prior is IDENTICAL under the null and the observation and only the prefix's "
+        "contribution is nulled. A global shuffle collapses the prior to chance and leaves the "
+        "two arms in different headroom regimes, which is a gate with no power.",
+    ),
     limitations=(
-        "Shuffling labels globally destroys the challenge-level clustering of outcomes, so the "
-        "null is slightly narrower than a fully group-preserving null would be.",
+        "Clearing this null is necessary, not sufficient: the paired grouped bootstrap must also "
+        "exclude zero, or the estimate is a property of this particular set of challenges.",
+        "A challenge whose runs all share an outcome cannot move under a within-challenge "
+        "permutation, so this null is estimated off the heterogeneous challenges only — here "
+        "roughly half the corpus.",
     ),
 )
 
@@ -288,7 +312,7 @@ def _null_band(null: NullResult, ax: Axes) -> None:
     ax.fill_between(x, low, high, color=_NULL_BAND, alpha=0.55, label="permutation null 95%")
 
 
-def confusion_matrix_plot(cm: ConfusionMatrix, ax: Axes) -> Annotations:
+def confusion_matrix_plot(cm: ConfusionMatrix, ax: Axes, *, threshold: float) -> Annotations:
     """2x2 confusion counts with the expected-under-random count printed in each cell."""
     grid = np.array([[cm.tp, cm.fn], [cm.fp, cm.tn]], dtype=float)
     total = float(grid.sum())
@@ -304,7 +328,9 @@ def confusion_matrix_plot(cm: ConfusionMatrix, ax: Axes) -> Annotations:
     ax.imshow(grid, cmap="Blues", aspect="auto")
     ax.set_xticks([0, 1], ["flagged", "not flagged"])
     ax.set_yticks([0, 1], ["failed", "resolved"])
-    ax.set_title("confusion @ operating threshold (random baseline in brackets)")
+    ax.set_title(
+        f"confusion @ derived operating threshold {threshold:.3f} (random baseline in brackets)"
+    )
     for r in range(2):
         for c in range(2):
             ax.text(
@@ -317,7 +343,7 @@ def confusion_matrix_plot(cm: ConfusionMatrix, ax: Axes) -> Annotations:
             )
     return Annotations(
         notes=(
-            f"{int(total)} trajectories at threshold {metrics.DETECTION_THRESHOLD}",
+            f"{int(total)} trajectories at the derived operating threshold {threshold:.4f}",
             f"flag rate {flagged:.3f}; a random flagger at that rate catches "
             f"{expected[0, 0]:.0f} of {positives} failures against the detector's {cm.tp}",
         ),
@@ -334,10 +360,10 @@ def lead_time_by_outcome(cell: PolicyCell, ax: Axes) -> Annotations:
     failed = list(cell.lead_times_failed)
     resolved = list(cell.lead_times_resolved)
     both = failed + resolved
+    cap = float(np.percentile(both, 99)) if both else 0.0
     if both:
         # Clip at p99 with an overflow bin: a handful of 80-step outliers otherwise stretch the
         # axis until 97% of the canvas is blank, which is what the old figure did.
-        cap = float(np.percentile(both, 99))
         bins = np.linspace(0, max(cap, 1.0), 25).tolist()
         ax.hist(np.clip(failed, 0, cap), bins=bins, alpha=0.6, label=f"failed (n={len(failed)})")
         ax.hist(
@@ -349,7 +375,25 @@ def lead_time_by_outcome(cell: PolicyCell, ax: Axes) -> Annotations:
     ax.set_title(f"lead time by outcome — escalate_after_n={cell.escalate_after_n}")
     return Annotations(
         notes=(_lead_note(failed, resolved),),
-        limitations=() if both else ("No escalation fired: both distributions are empty.",),
+        limitations=(
+            _lead_limits(failed, resolved, cap)
+            if both
+            else ("No escalation fired: both distributions are empty.",)
+        ),
+    )
+
+
+def _lead_limits(failed: Sequence[int], resolved: Sequence[int], cap: float) -> tuple[str, ...]:
+    """Disclose the p99 clip — an inflated rightmost bar is a lie the axis cannot show."""
+    n_failed = sum(v > cap for v in failed)
+    n_resolved = sum(v > cap for v in resolved)
+    total = n_failed + n_resolved
+    if not total:
+        return ()
+    return (
+        f"CLIPPED: {total} trajectories ({n_failed} failed, {n_resolved} resolved) have a lead "
+        f"time above the p99 cap of {cap:.1f} decisions and are folded into the rightmost bin, "
+        "so that bar is taller than the lead times it sits under. Read it as an overflow bin.",
     )
 
 

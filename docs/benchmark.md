@@ -420,8 +420,12 @@ off and once with it on, and writes `routing/reports/exploration_replay.png` plu
 summary to stdout. Cells the policy routes to but the benchmark never ran are
 skipped and counted, never filled in with a guess.
 
-On the 163-task dense slice, averaged over 20 seeds: exploration costs **1.65× the
-exploration-off bill** on average and **1.77× on the worst seed**. The paired
+On the 163-task dense slice, averaged over 20 seeds: exploration costs **1.27× the
+exploration-off bill** on average and **1.38× on the worst seed**. That ratio is
+paired over the 137 tasks both arms scored — the exploit-only arm drops 26 cells as
+unscorable and all 26 are `qwen3.7-plus`, a model outside the dense slice, so
+comparing the arms' raw totals would compare different task sets. We previously
+published **1.65×/1.77×** from that unpaired ratio; it was ~30% too high. The paired
 per-task difference is **−2.6 pp pass rate (95% CI −3.8 to −1.4)** and **+$0.0021
 per task (95% CI +$0.0017 to +$0.0027)** — the paired numbers are the ones to read,
 since the two arms' marginal pass-rate intervals ([69%, 83%] vs [67%, 81%]) overlap

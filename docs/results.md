@@ -267,36 +267,65 @@ tuned against that was tuned against a clock.
 
 ### On the corrected causal label
 
-Over 546 scored trajectories:
+Over 791 scored trajectories:
 
 - **Task identity alone**, which is what the routing model already knows at
-  *t=0*, predicts the outcome at **AUROC 0.886**.
-- The detector's **incremental** contribution over that prior is **−0.000**
-  (range −0.016 to −0.000; p ≥ 0.33 at every prefix depth). At the best depth,
-  10 decisions, the observed −0.0005 sits inside a permutation null of
-  [−0.112, +0.117], p = 0.333.
-- The prefix-only risk model scores AUROC 0.485, inside its own null band of
-  [0.408, 0.548], p = 0.413. AUPRC 0.351 against a prevalence of 0.382.
-- Policy precision runs **0.371–0.375** against a **0.381** base rate, lift
-  0.97–0.98×, every interval containing the base rate.
+  *t=0*, was once published here at **AUROC 0.886**. **We have retracted that
+  number.** The prior gave each run the leave-one-out failure rate of *its own
+  instance's other runs*, while the cross-validation split grouped by instance —
+  so it was scored on labels from its own test fold. A router meeting a new task
+  has no such siblings. That leaked quantity still appears in the harness, now
+  explicitly labelled as *not* the baseline (it scores 0.846–0.859 here). Grouped
+  honestly the deployable prior is **0.42–0.45**, i.e. no better than chance.
+- **The increment is measured against the prior floored at chance**, i.e.
+  `AUROC(prior + prefix) − max(AUROC(prior), 0.5)`. Without the floor, an
+  anti-predictive baseline donates its own deficit to the detector: the
+  previously published **+0.144** at 5 decisions is **+0.061** floored, so 57% of
+  it was the broken comparator rather than prefix evidence.
+- **The null permutes labels within a challenge, not globally.** A global shuffle
+  destroys the challenge-level clustering of outcomes, which collapses the prior
+  to chance under the null while the observation keeps a real one — the two arms
+  then sit in different headroom regimes and the gate has no power. Permuting
+  inside each challenge preserves every challenge's outcome multiset, so the
+  prior is identical in both arms and only the prefix's contribution is nulled.
+- The detector's **incremental** contribution over that honest, floored prior is
+  **+0.076** at the best depth, 20 decisions, against a permutation null of
+  [+0.036, +0.070], p = 0.015. Across depths the incremental runs +0.061 to
+  +0.076, p = 0.015–0.677.
+- That clearance is **not** skill, and the harness does not score it as such: the
+  paired bootstrap over challenges puts the increment's 95% interval across zero,
+  [−0.014, +0.145]. At the same depth the prefix-only risk model reads AUROC
+  **0.543** (AUPRC 0.529 against a prevalence of 0.495), and at 5 decisions it
+  reads **0.428** — *below* chance. The gate requires the prefix null, the
+  incremental null, and the bootstrap interval to all exclude no-information, and
+  at no depth do all three.
+- Policy precision runs **0.452–0.457** against a **0.460** base rate, lift
+  0.98–0.99×, every interval containing the base rate.
 - Harness status: **`NO_SKILL`**.
-- At the operating threshold the detector flags 14 of 537 trajectories and
-  catches 2 of 205 failures. A random flagger at the same rate catches 5.
+- At the operating threshold the detector flags 328 of 584 trajectories and
+  catches 162 of 289 failures. A random flagger at the same rate catches 162.
 
-This is an unsolved problem and we treat it as one. The feature ships disabled.
-We will not enable an escalation policy that cannot beat knowing which task it
-is.
+So the honest verdict is the unsatisfying one: **we cannot yet tell.** This
+evaluation can only resolve a detector at AUROC ≥ 0.57, and the raw features
+hint at ≈ 0.54 — inside the blind spot. Nearly doubling the scored corpus (546
+→ 791) did not move that limit at all: the runs cluster on 160 distinct
+challenges rather than 143, so the effective sample barely grew. Settling it
+needs roughly four times the distinct challenges (160 → ~640); more runs per
+existing challenge buy almost nothing, because the clustering already inflates
+variance 2.4×. The feature ships disabled until then.
 
 ### Two caveats that make it harder than it looks
 
-**A data gap.** 253 of 799 trajectories never went through per-step outcome
-stamping, so the recurrence trigger structurally could not fire on them. Three
-models (`kimi-k2.5`, `qwen3.7-plus`, `zai-glm-5.2`, 191 trajectories, 24% of the
-corpus) carry no per-step outcomes at all. Stamping coverage tracks capture date
-and capture date correlates with model, so model and coverage are confounded on
-this corpus. Counting the unstamped runs plus those that were stamped but
-captured nothing, about 325 trajectories are re-stampable offline at zero API
-cost; that work is queued.
+**A data gap, now closed.** 253 of 799 trajectories once carried no per-step
+outcomes, so the recurrence trigger structurally could not fire on them — and
+three models (`kimi-k2.5`, `qwen3.7-plus`, `zai-glm-5.2`) sat at zero coverage
+entirely. Because stamping coverage tracked capture date and capture date
+correlates with model, model and coverage were confounded. Those runs have since
+been re-stamped offline by container replay at zero API cost. All six models now
+report **100% capture coverage**, and 791 of 799 trajectories are scored; the 8
+that remain hold no captured step diffs to replay, so nothing can recover them.
+The confound is gone — and, as the section above records, closing it did not
+change the verdict.
 
 **The value is not identified.** Our logging policy never escalates, so
 P(escalate) = 0 and the overlap condition that every off-policy estimator
@@ -457,10 +486,15 @@ and they are not a random sample.
 **[exploration_replay.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/exploration_replay.png)**
 — the shipped exploration policy replayed exactly against the recorded matrix, no
 live calls. Read the boxed paired difference, not the overlapping marginal
-intervals: pass −2.6% [−3.8, −1.4], cost +$0.0021 per task, 1.65× the
-exploration-off bill. The outcome matrix is static, so an exploratory pull can
-never improve a later decision. This measures exploration's cost with its
-learning benefit set to zero, which is the pessimistic half of the ledger.
+intervals: pass −2.6% [−3.8, −1.4], cost +$0.0021 per task, 1.27× the
+exploration-off bill (worst seed 1.38×). The outcome matrix is static, so an
+exploratory pull can never improve a later decision. This measures exploration's
+cost with its learning benefit set to zero, which is the pessimistic half of the
+ledger. The overhead is paired over the 137 tasks both arms scored: the
+exploit-only arm drops 26 cells as unscorable and every one of them is
+`qwen3.7-plus`, a model outside this dense slice, so the two arms do not cover
+the same tasks and a ratio of their raw totals would have compared different
+task sets. We published 1.65× from that unpaired ratio; it was ~30% too high.
 
 **[embedding_compare.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/embedding_compare.png)**
 — general-purpose (arctic) against code-specific (jina) neighbourhoods. The two
@@ -479,20 +513,29 @@ bar pools whatever arm mix that model ran.
 **[permutation_null.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/permutation_null.png)**
 — the headline null. Grey is the incremental-AUROC statistic recomputed under
 shuffled outcome labels with the whole fitting pipeline re-run per shuffle;
-dashed lines bound the central 95%. For the detector to be doing anything, the
-red line must sit clearly right of the upper dashed line. It sits in the middle.
-Observed −0.0005, null 95% [−0.112, +0.117], p = 0.333; at that depth the figure
-reports prior-only AUROC 0.883 and prefix-only 0.485. A point estimate above 0.5
-is not skill on its own. The null is the gate.
+dashed lines bound the central 95%. Labels are shuffled **inside each challenge**,
+so every challenge keeps its outcome multiset and the two arms share the same
+prior; only the prefix's contribution is nulled. For the detector to be doing
+anything, the red line must sit clearly right of the upper dashed line. At the
+best depth, 20 decisions, it sits just past it: observed +0.076, null 95%
+[+0.036, +0.070], p = 0.015 — where the increment is `combined − max(prior, 0.5)`,
+floored because the honest prior-only AUROC here is 0.449, *below* chance. The
+leaked leave-one-out prior (0.846) is still printed on the panel and is
+explicitly **not** the baseline. Read it against the bootstrap interval before
+calling it signal: resampling whole challenges puts the increment at
+[−0.014, +0.145], across zero, so the point estimate is a property of this
+particular set of challenges.
 
 **[roc_curve.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/roc_curve.png)**
-— the out-of-fold risk score, AUROC 0.485 over 537 trajectories of which 205
-failed. The grey band is the label-permutation null. Look for the curve leaving
-that band toward the top-left. It does not; observed AUROC sits inside
-[0.408, 0.548], p = 0.413. Auxiliary to the PR view.
+— the out-of-fold risk score, AUROC 0.543 over the 584 trajectories that reach 20
+decisions, of which 289 failed. The grey band is the label-permutation null. Look
+for the curve leaving that band toward the top-left. It clears it narrowly —
+null band [0.471, 0.534], p = 0.005 — which is what makes the bootstrap interval,
+not this figure, the binding constraint. At 5 decisions the same score reads
+0.428, *below* chance. Auxiliary to the PR view.
 
 **[pr_curve.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/pr_curve.png)**
-— precision against recall, AUPRC 0.351 against a prevalence of 0.382. Look for
+— precision against recall, AUPRC 0.529 against a prevalence of 0.495. Look for
 the curve well above the dashed prevalence line. It hugs it. AUPRC alone does not
 say whether the model beats the router's t=0 task prior; the permutation-null
 figure is where that is answered.
@@ -500,20 +543,20 @@ figure is where that is answered.
 **[confusion_matrix.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/confusion_matrix.png)**
 — counts at the operating threshold, each cell printed beside what a random
 flagger at the same flag rate would produce. Want top-left and bottom-right well
-above their bracketed counterparts. At a flag rate of 0.026 the detector catches
-2 of 205 failures where random catches 5. One arbitrary operating point, not a
-sweep.
+above their bracketed counterparts. At a flag rate of 0.562 the detector catches
+162 of 289 failures where random catches 162 — level with random. One arbitrary
+operating point, not a sweep.
 
 **[sweep_table.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/sweep_table.png)**
 — the policy sweep over `escalate_after_n`. Read P(fail | fired) against the base
 rate column: an interval containing the base rate is a configuration with no
-measured value. All three do. Best is 0.375 [0.332, 0.419] against 0.381. The
+measured value. All three do. Best is 0.457 [0.421, 0.495] against 0.460. The
 other two knobs were measured inert on this corpus and are pinned, not swept.
 
 **[trajectory_outcomes.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/trajectory_outcomes.png)**
 — failure rate among runs the policy escalated against runs it left alone. Want
 the escalated bar clearly above both the base rate and the other bar. It is
-below: 0.371 fired against 0.412 not fired, base rate 0.381, intervals
+below: 0.452 fired against 0.489 not fired, base rate 0.460, intervals
 overlapping. This is association only. No stored trajectory contains an
 escalation that actually happened, so the figure cannot say what escalating would
 have **changed**.
@@ -522,16 +565,15 @@ have **changed**.
 — decisions between the first escalation and the end of the run, split by how the
 run ended. Want the failed distribution shifted away from the resolved one, which
 would mean escalating earlier on doomed runs. They overlap; median lead time is
-23 for failed and 22 for resolved. Lead time is measured backwards from the end,
+31 for failed and 25 for resolved. Lead time is measured backwards from the end,
 so it is an offline diagnostic an online detector cannot use.
 
 **[failure_capture_coverage.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/failure_capture_coverage.png)**
-— the data gap, per model. Each bar is the share of that model's trajectories
-that went through per-step verified-outcome stamping. Want every bar at 1.0.
-Three models sit at zero (191 trajectories, 24% of the corpus), so the recurrence
-trigger is structurally dead on them and they are excluded from the risk model.
-Coverage tracks capture date and capture date correlates with model, so the two
-cannot be separated on this corpus.
+— the closed data gap, per model. Each bar is the share of that model's
+trajectories that went through per-step verified-outcome stamping. Want every bar
+at 1.0. All six now are: the three models that previously sat at zero were
+re-stamped by offline container replay, so coverage no longer tracks capture date
+and model is no longer confounded with it.
 
 ## Where this leaves the project
 
@@ -541,9 +583,10 @@ subset, and better routing models (bigram and linear, calibrated classifiers,
 better selection rules) evaluated against the same nulls.
 
 Escalation: the evaluation is now honest enough to detect success, and it detects
-none. The queued work is offline re-stamping of the ~325 recoverable
-trajectories, then ε-greedy randomisation with logged propensities so the value
-question becomes identified at all.
+none. The offline re-stamping is done — coverage is complete and the verdict did
+not move — so the remaining work is more distinct challenges, and ε-greedy
+randomisation with logged propensities so the value question becomes identified
+at all.
 
 Related reading: [Benchmark](benchmark.md) for how the harness works,
 [Benchmark design](benchmark-design.md) for why it is built this way, and

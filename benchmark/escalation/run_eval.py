@@ -124,6 +124,7 @@ def _status(report_cells: Sequence[PolicyCell], depths: Sequence[DepthReport]) -
             _STATUS_OK,
             f"prefix risk model clears its permutation null at depth {best.depth}: "
             f"incremental AUROC {best.incremental_auroc:+.3f} over the t=0 task prior "
+            f"floored at chance "
             f"(null 97.5th pct {best.null_incremental.ci_high:+.3f}, "
             f"p={best.null_incremental.p_value:.3f})",
         )
@@ -131,15 +132,69 @@ def _status(report_cells: Sequence[PolicyCell], depths: Sequence[DepthReport]) -
 
 
 def _no_skill_reason(depths: Sequence[DepthReport]) -> str:
-    """State which half of the gate failed, with the number, at the depth that came closest."""
+    """Name the skill conditions that actually failed, with their numbers, at the closest depth."""
     if not depths:
         return "no depth was estimable — the corpus cannot support a grouped-CV fit"
     best = max(depths, key=lambda d: d.incremental_auroc)
+    conditions = _skill_conditions(best)
+    failures = [clause for met, clause in conditions if not met]
+    if not failures:
+        # Unreachable while this enumeration mirrors `DepthReport.has_skill`. Say so loudly rather
+        # than printing a confident sentence about a condition nobody checked.
+        return (
+            f"no depth has skill, but depth {best.depth} meets every enumerated condition — "
+            "the reported conditions have drifted from the gate; treat this run as unexplained"
+        )
     return (
-        f"no depth clears its permutation null; best is depth {best.depth} with incremental "
-        f"AUROC {best.incremental_auroc:+.3f} (null 95% "
-        f"[{best.null_incremental.ci_low:+.3f}, {best.null_incremental.ci_high:+.3f}], "
-        f"p={best.null_incremental.p_value:.3f}) — no usable signal"
+        f"no depth satisfies all {len(conditions)} skill conditions; at depth {best.depth} "
+        + "; ".join(failures)
+        + _cleared_increment_caveat(best)
+    )
+
+
+def _skill_conditions(depth: DepthReport) -> list[tuple[bool, str]]:
+    """Every `DepthReport.has_skill` condition, paired with the clause reporting its failure."""
+    # Built as one list so the count in the message and the clauses cannot drift apart; keep this
+    # in lockstep with `has_skill` — reporting a condition nobody checks is the bug this replaced.
+    return [
+        (len(set(depth.scores)) > 1, "the prefix score is constant, so it ranks nothing"),
+        (
+            depth.null_prefix.beats_null,
+            f"the prefix-only score does not clear its own permutation null "
+            f"({depth.auroc_prefix:.3f}, null 95% [{depth.null_prefix.ci_low:.3f}, "
+            f"{depth.null_prefix.ci_high:.3f}], p={depth.null_prefix.p_value:.3f})",
+        ),
+        (
+            depth.null_incremental.beats_null,
+            f"the incremental AUROC does not clear its permutation null "
+            f"({depth.incremental_auroc:+.3f}, null 95% [{depth.null_incremental.ci_low:+.3f}, "
+            f"{depth.null_incremental.ci_high:+.3f}], p={depth.null_incremental.p_value:.3f})",
+        ),
+        (
+            depth.ci_incremental[0] > 0.0,
+            f"the paired bootstrap over challenges puts the increment's 95% interval across zero "
+            f"([{depth.ci_incremental[0]:+.3f}, {depth.ci_incremental[1]:+.3f}])",
+        ),
+    ]
+
+
+def _cleared_increment_caveat(depth: DepthReport) -> str:
+    """The case a reader will misread: the increment clears its null, the gate still refuses."""
+    if not depth.null_incremental.beats_null:
+        return ""
+    cleared = (
+        f" — the incremental AUROC DOES clear its own null ({depth.incremental_auroc:+.3f}, "
+        f"null 95% [{depth.null_incremental.ci_low:+.3f}, {depth.null_incremental.ci_high:+.3f}], "
+        f"p={depth.null_incremental.p_value:.3f}), but "
+    )
+    if not depth.null_prefix.beats_null:
+        return cleared + (
+            "a prefix score that cannot clear its own null carries no discrimination to add, so "
+            "that clearance reflects the t=0 prior it is measured against, not prefix evidence"
+        )
+    return cleared + (
+        "it is not stable across resampled challenges, so the point estimate is a property of "
+        "this particular set of challenges rather than of the prefix features"
     )
 
 
@@ -296,13 +351,15 @@ def _save_prefix_plots(depth: DepthReport, out_dir: Path, run: Annotations) -> N
         plots.ROC_CURVE_SPEC,
         lambda ax: _merge(plots.roc_curve(scores, labels, depth.null_prefix, ax), detail, run),
     )
+    # Derived from the scores, not hardcoded: a fixed 0.5 cut on a calibrated probability whose
+    # base rate is ~0.38 is unreachable, so the grid degenerated to "almost nothing is flagged".
+    threshold = metrics.operating_threshold(scores, labels)
+    confusion = metrics.detection_metrics(scores, labels, threshold=threshold).confusion
     _render(
         out_dir / "confusion_matrix.png",
         plots.CONFUSION_MATRIX_SPEC,
         lambda ax: _merge(
-            plots.confusion_matrix_plot(metrics.detection_metrics(scores, labels).confusion, ax),
-            detail,
-            run,
+            plots.confusion_matrix_plot(confusion, ax, threshold=threshold), detail, run
         ),
     )
     _render(
@@ -310,7 +367,9 @@ def _save_prefix_plots(depth: DepthReport, out_dir: Path, run: Annotations) -> N
         plots.PERMUTATION_NULL_SPEC,
         lambda ax: _merge(
             plots.permutation_null_plot(
-                depth.null_incremental, ax, label="incremental AUROC over the t=0 task prior"
+                depth.null_incremental,
+                ax,
+                label="incremental AUROC over the t=0 task prior floored at chance",
             ),
             detail,
             run,
@@ -322,9 +381,12 @@ def _depth_note(depth: DepthReport) -> str:
     """The one line that stops a reader mistaking raw discrimination for incremental value."""
     return (
         f"prefix depth {depth.depth} decisions, {depth.n_rows} trajectories over "
-        f"{depth.n_groups} challenges; AUROC prior-only={depth.auroc_prior:.3f}, "
-        f"prefix-only={depth.auroc_prefix:.3f}, combined={depth.auroc_combined:.3f}, "
-        f"incremental={depth.incremental_auroc:+.3f}"
+        f"{depth.n_groups} challenges; AUROC prior-only={depth.auroc_prior:.3f} (deployable, "
+        f"train-fold estimate; the leave-one-out prior that reads same-challenge test labels "
+        f"scores {depth.auroc_prior_leaked:.3f} and is NOT the baseline here), "
+        f"prefix-only={depth.auroc_prefix:.3f} (fold-honest {depth.auroc_prefix_folded:.3f}), "
+        f"combined={depth.auroc_combined:.3f}, incremental={depth.incremental_auroc:+.3f} "
+        f"over max(prior, 0.5)={depth.prior_comparator:.3f}"
     )
 
 
@@ -347,12 +409,13 @@ def _print_summary(report: EvalReport) -> None:
             f"{c.base_failure_rate:>6.3f} {c.lift:>5.2f}x{marker}"
         )
     print(  # noqa: T201
-        f"\n{'depth':>5} {'n':>5} {'prior':>7} {'prefix':>7} {'combined':>9} "
+        f"\n{'depth':>5} {'n':>5} {'prior':>7} {'leaked':>7} {'prefix':>7} {'combined':>9} "
         f"{'incr':>7} {'null p':>7}"
     )
     for d in report.depth_reports:
         print(  # noqa: T201
-            f"{d.depth:>5} {d.n_rows:>5} {d.auroc_prior:>7.3f} {d.auroc_prefix:>7.3f} "
+            f"{d.depth:>5} {d.n_rows:>5} {d.auroc_prior:>7.3f} "
+            f"{d.auroc_prior_leaked:>7.3f} {d.auroc_prefix:>7.3f} "
             f"{d.auroc_combined:>9.3f} {d.incremental_auroc:>+7.3f} "
             f"{d.null_incremental.p_value:>7.3f}"
         )

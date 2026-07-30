@@ -202,9 +202,13 @@ def test_collect_argv_passes_through_flags() -> None:
 
 
 def test_unstamped_skips_already_stamped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # ONE predicate, shared with the eval (`features.is_stamped`). The old test here was
+    # `any(step.failing_check_id)`, which re-queued a fully replayed run forever whenever no step
+    # in it had failed — while the eval scored that same run as stamped. `clean.jsonl` is that run.
     class _Step:
-        def __init__(self, fid: str | None) -> None:
+        def __init__(self, fid: str | None, *, confirmed: bool) -> None:
             self.failing_check_id = fid
+            self.confirmed = confirmed
 
     class _Header:
         trajectory_id = "t"
@@ -216,18 +220,18 @@ def test_unstamped_skips_already_stamped(monkeypatch: pytest.MonkeyPatch, tmp_pa
         def __init__(self, steps: list[_Step]) -> None:
             self.steps = steps
 
-    stamped = tmp_path / "stamped.jsonl"
-    fresh = tmp_path / "fresh.jsonl"
-    stamped.write_text("{}")
-    fresh.write_text("{}")
+    bodies = {
+        "stamped.jsonl": [_Step("check-x", confirmed=True), _Step(None, confirmed=True)],
+        "clean.jsonl": [_Step(None, confirmed=True), _Step(None, confirmed=True)],
+        # Only the terminal step is confirmed: the replay never ran on the prefix.
+        "fresh.jsonl": [_Step(None, confirmed=False), _Step(None, confirmed=True)],
+    }
+    for name in bodies:
+        (tmp_path / name).write_text("{}")
 
-    def fake_load(path: Path) -> _Traj:
-        return _Traj([_Step("check-x")]) if path.name == "stamped.jsonl" else _Traj([_Step(None)])
-
-    monkeypatch.setattr(schema, "load_jsonl", fake_load)
+    monkeypatch.setattr(schema, "load_jsonl", lambda path: _Traj(bodies[path.name]))
     pending = pipeline._unstamped_trajectories(tmp_path)
-    names = [p.name for _, _, p in pending]
-    assert names == ["fresh.jsonl"]
+    assert [p.name for _, _, p in pending] == ["fresh.jsonl"]
 
 
 class TestStandaloneFigureFreshness:
