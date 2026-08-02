@@ -25,7 +25,7 @@ from benchmark.routing import impute, plot_style, summary
 from benchmark.routing.impute import ImputedMatrix
 from benchmark.routing.metrics import _reward
 from benchmark.routing.plot_style import RawResults, row_real_cost, usd
-from benchmark.routing.strategies import Strategy
+from benchmark.routing.strategies import Strategy, routing_text
 from benchmark.routing.strategies.oracle import OracleRewardAware
 
 # Strategies that read realised outcomes. They are upper bounds, never routers: a
@@ -2377,9 +2377,10 @@ _CHOSEN_ARM_SPEC = FigureSpec(
     ),
     notes=(
         "Strategy-conditioned: one routed cell per task, not per-model data.",
-        "On the runs to date this cloud is flat — the embedding difficulty signal measured near "
-        "chance on agentic coding. Treat any slope you do see as a finding to verify, not as "
-        "confirmation.",
+        "On the runs to date this cloud is flat — the router's embedding channel measured near "
+        "chance, but it was fed a ~106-char identifier label, not the problem statement, so that "
+        "is a coverage gap rather than a result about task embeddings. Treat any slope you do "
+        "see as a finding to verify, not as confirmation.",
     ),
     limitations=(
         "solve-breadth is confounded by uneven coverage — a task with fewer sampled cells "
@@ -2554,20 +2555,24 @@ def plot_chosen_arm_vs_difficulty(
 
 _EMBEDDING_MAP_SPEC = FigureSpec(
     reading=(
-        "Each point is one task, placed by the first two principal components of its REAL jina "
-        "prompt embedding — the same encoder the router ships. The axis labels give how much of "
-        "the embedding variance each component explains. Colour is the task's measured p_solve on "
-        "a fixed 0-1 scale: dark = few models solved it, bright = most did. If difficulty were "
-        "separable in embedding space, dark and bright points would form distinct regions."
+        "Each point is one task, placed by the first two principal components of the REAL jina "
+        "vector the router stores for it — the same encoder the router ships. WHAT WAS ENCODED "
+        "is the task's `description`: a ~106-character `<repo>@<commit12> - resolve "
+        "<test-node-id>` identifier label, because `problem_statement` is absent from all 500 "
+        "committed tasks. The axis labels give how much of the embedding variance each component "
+        "explains. Colour is the task's measured p_solve on a fixed 0-1 scale: dark = few models "
+        "solved it, bright = most did."
     ),
     goal=(
-        "Look for separated dark and bright regions. On the runs to date none appear, which is "
-        "the finding: prompt embeddings alone did not predict task difficulty here. Treat any "
-        "structure you do see as something to verify, not as confirmation."
+        "Look for separated dark and bright regions. None appear, so difficulty is not "
+        "recoverable FROM AN IDENTIFIER LABEL. That is all this figure can say: the task text "
+        "was never encoded, so it is not evidence about whether prompt embeddings can separate "
+        "difficulty. Treat any structure you do see as something to verify, not as confirmation."
     ),
     definitions=(
         ("p_solve", "fraction of the models measured on a task that passed it"),
         ("PC1 / PC2", "the two directions of largest variance in the embedding cloud"),
+        ("description", "the identifier label above — the string actually handed to the encoder"),
     ),
     notes=(
         "Embeddings come from the shipped jina-embeddings-v2-base-code encoder, never a TF-IDF "
@@ -2577,6 +2582,9 @@ _EMBEDDING_MAP_SPEC = FigureSpec(
     limitations=(
         "PCA is linear and unsupervised: structure that is nonlinear, or that lives in later "
         "components, is invisible here — so absence of clusters is suggestive, not conclusive.",
+        "The input channel is an identifier, not the task. A null here is a COVERAGE GAP, not a "
+        "falsification of embedding-based routing — the experiment that would test that has not "
+        "been run. Do not quote this figure as 'difficulty is not embedding-separable'.",
     ),
 )
 
@@ -2597,7 +2605,7 @@ def _embedding_map_annotations(
             "are not equally well evidenced."
         )
     if dropped:
-        limits.append(f"{dropped} task(s) have no description and are dropped from this map.")
+        limits.append(f"{dropped} task(s) have no routing text and are dropped from this map.")
     return Annotations(notes=tuple(notes), limitations=tuple(limits))
 
 
@@ -2615,8 +2623,8 @@ def _variance_limit(explained: np.ndarray) -> tuple[str, ...]:
 def plot_embedding_routing_map(
     matrix: dict, out_dir: Path, model_colors: dict[str, str], k: int = 10
 ) -> Path | None:
-    """N6 — PCA of the REAL jina prompt embeddings, coloured by each task's measured
-    p_solve: does task difficulty cluster in the shipped embedding space? (~no here).
+    """N6 — PCA of the REAL jina vectors the router stores, coloured by measured p_solve.
+    Encodes the ~106-char identifier label, so a null is a coverage gap, not a falsification.
     """
     _ = (model_colors, k)  # coloured by continuous p_solve now, not per-model arms
     try:
@@ -2628,7 +2636,7 @@ def plot_embedding_routing_map(
 
     results = matrix.get("results", {})
     tasks = matrix.get("tasks", {})
-    task_ids = [t for t in sorted(results.keys()) if t in tasks and tasks[t].get("description")]
+    task_ids = [t for t in sorted(results.keys()) if t in tasks and routing_text(t, tasks[t]) != t]
     if len(task_ids) < 3:
         return None
 
@@ -2641,7 +2649,7 @@ def plot_embedding_routing_map(
         p_solve.append(float(np.mean(passes)) if passes else 0.0)
         denominators.append(len(passes))
 
-    embeddings = np.asarray(_embed_texts([tasks[tid]["description"] for tid in task_ids]))
+    embeddings = np.asarray(_embed_texts([routing_text(tid, tasks[tid]) for tid in task_ids]))
     # random_state pins the randomized SVD solver ('auto' picks it at 768-d input), so the
     # committed figure is byte-reproducible run-to-run instead of re-churning git on every
     # regeneration. Same fix, same reason, as viz_knn's PCA scatter.
@@ -2666,9 +2674,10 @@ def plot_embedding_routing_map(
     ax.set_xlabel(f"PC1 ({explained[0] * 100:.1f}% variance)")
     ax.set_ylabel(f"PC2 ({explained[1] * 100:.1f}% variance)")
     ax.set_title(
-        "Does task difficulty cluster in the REAL jina embedding space?\n"
+        "Does task difficulty cluster in the vectors the router actually stores?\n"
         "PCA of the shipped jina-embeddings-v2-base-code vectors, coloured by measured p_solve\n"
-        "— hard (dark) and easy (bright) tasks intermix ⇒ difficulty is ~not embedding-separable",
+        "— hard (dark) and easy (bright) intermix; the encoded text is a ~106-char identifier\n"
+        "label, NOT the problem statement ⇒ a coverage gap, not a result about task embeddings",
         fontsize=9,
     )
     fig.tight_layout()
@@ -3554,8 +3563,12 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         if problem:
             print(f"Refusing to report: {problem}", file=sys.stderr)
             return
-        # Write a human-readable copy to reports/ (gitignored) — never committed.
-        summary.write_summary_csv(results, out_dir / "strategy_summary.csv")
+        # Write a human-readable copy to reports/ (gitignored) — never committed. Every row is
+        # stamped with the SHIPPED selection path's instrument verdict; the figures' gate
+        # certifies `select_from_rates`, which is a different rule.
+        table = summary.certified_table(results)
+        print(table.admissibility.reason)
+        summary.write_summary_csv(table, out_dir / "strategy_summary.csv")
         source = "results.csv (derived in-memory)"
 
     if not results:

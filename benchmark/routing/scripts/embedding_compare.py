@@ -19,6 +19,7 @@ from sklearn.metrics.pairwise import cosine_similarity  # noqa: E402
 from benchmark import config, plot_frame  # noqa: E402
 from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
 from benchmark.routing import plot_style, summary  # noqa: E402
+from benchmark.routing.strategies import routing_text  # noqa: E402
 from benchmark.routing.strategies.knn import _embed_texts  # noqa: E402
 from shunt.router.embedder import Embedder  # noqa: E402
 
@@ -142,7 +143,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         )
         return
 
-    task_descs = [matrix["tasks"][tid]["description"] for tid in task_ids]
+    task_descs = [routing_text(tid, matrix["tasks"][tid]) for tid in task_ids]
     results_map = matrix["results"]
 
     print(f"Loaded {len(task_ids)} tasks from {matrix_path}")

@@ -39,9 +39,14 @@ tasks and would bias the baseline (see [Deciding the kill-gate on partial fronti
 The sole challenge source is **SWE-bench Verified** — real GitHub bug-fix tasks
 with human-verified test sets. Each task is a minimal spec under
 `benchmark/challenges/swebench_verified/{instance_id}.json` carrying the upstream
-`repo`, `base_commit`, `version`, `FAIL_TO_PASS` / `PASS_TO_PASS` test sets, and a
-pinned `dataset_revision`. Repo and patch content are pulled on demand by the
-official harness — nothing is vendored.
+`repo`, `base_commit`, `version`, `FAIL_TO_PASS` / `PASS_TO_PASS` test sets, a
+`difficulty_stratum`, an `image_ref`, and a pinned `dataset_revision`. Repo and
+patch content are pulled on demand by the official harness — nothing is vendored.
+The `problem_statement` handed to the agent is fetched from the dataset at run time
+rather than stored in the spec. The spec format has a slot to mirror it for routing,
+and `routing_text()` prefers it, but no committed spec carries the key (0 of 500) — so
+the routing strategies embed the `description` label instead
+([Results](results.md#routing-results)).
 
 The challenge suite is the full **500-instance** SWE-bench Verified set across 12
 repos, spanning a spread of difficulty strata, each with a verified prebuilt
@@ -111,9 +116,43 @@ It composes five existing stages in order and prints one consolidated summary:
    per image (~sample_size tasks to Docker Hub), which rate-limits (429) on the swebench
    namespace and can defeat GHCR pre-staging.
 2. **stamp** — `offline_replay` derives real per-step outcomes for the *newly collected*
-   trajectories only (already-stamped ones are skipped), timeout-bounded per trajectory
-   by `--replay-timeout` (default 120s). Skipped entirely on a simulated (non-`--live`)
-   run — there are no new live trajectories.
+   trajectories, timeout-bounded per trajectory by `--replay-timeout` (default 3600s) and, inside
+   that, per container command (30 min): a step diff can introduce an infinite loop, so an
+   expired command is killed, its container reaped, and the step recorded as infra — never a red.
+   Trajectories replay in parallel, `--stamp-workers` at a time (default: host cores minus two,
+   capped at 6 — each replay is a container that pins roughly one core, and the cap is memory: a
+   whole test file per worker OOMs before it saturates the CPU). The unit of parallelism is the
+   **instance**, never the trajectory: an instance's
+   trajectories always replay in one worker, so its admissibility gate is measured once and the
+   rest hit the cached verdict. Every write to the shared corpus files (`manifest.json`,
+   `admissibility.json`, `stamp_ledger.json`, the trajectories) is atomic and serialised, and the
+   trajectory write plus the manifest rebuild are one transaction — so a parallel run leaves the
+   corpus byte-identical to what a serial one produces. The stage prints a per-trajectory
+   completion line, tags every replay's own output with its trajectory id, and emits a heartbeat
+   (done / left / failed / rejected, plus the in-flight trajectories and their ages) so a stall is
+   distinguishable from slow progress.
+   A step's outcome is the **SWE-bench grade**, not the test file's exit code: the run's log
+   goes through SWE-bench's own per-test log parser and only `FAIL_TO_PASS ∪ PASS_TO_PASS`
+   counts, so a test the file happens to fail that the grader excluded from both lists cannot
+   turn a step red. Each instance first clears a two-sided admissibility gate adjudicated the
+   same way (the gold patch must classify SUCCESS and the fixless base must classify FAILURE);
+   an instance that fails it has every per-step stamp **cleared** from its trajectories and the
+   rejection recorded in `admissibility.json`. Where a rejection has been diagnosed as a defect of
+   the replay itself rather than a property of the instance, that record also carries a
+   `known_artifact` note explaining the defect and why it was left unfixed — so an exclusion is
+   readable from the data, not only from the code. `admissibility.json` is therefore a record of
+   the instances the replay **reached**, not a roster of the corpus: the gate runs inside the
+   replay, after the per-step diffs are loaded, so an instance whose every trajectory failed that
+   load has no entry at all. Count its entries against the corpus's instances before reading it
+   as complete — a missing id means "never gated", which is not the same as "gated and passed".
+   That verdict is cached per instance, keyed on the dataset revision, image, test command,
+   selectors, the F2P/P2P lists and the replay source
+   itself, so editing any of them re-measures rather than reusing. A replay that times out or
+   exits non-zero **fails the stage** — it is never silently skipped, and a trajectory whose
+   per-step diffs are missing from the local scratch fails loudly rather than being reported
+   done (only a trajectory whose header records `snapshot_steps: 0` — it captured none, so it
+   can never be replayed anywhere — is cleared instead). Skipped entirely on a simulated
+   (non-`--live`) run — there are no new live trajectories.
 3. **evaluate** — `escalation.run_eval` scores the escalation detector (metrics + plots).
 4. **report** — `routing.report` regenerates the routing plots plus
    `capability_evidence.json`, `coverage_table.csv`, and `strategy_summary.csv`.
@@ -129,9 +168,15 @@ check, the band count, and the total real cost, followed by a per-stage ran/fail
 ledger. A stage that fails never corrupts collected data or aborts the rest — the
 ledger records which stages ran.
 
-Flags: `--no-report` runs only collect; `--from {collect,stamp,evaluate,report}` starts
-at a later stage (so a failed report never forces re-collection); `--replay-timeout`
-bounds each stamp. Every stage prints a `=== [pipeline] stage: <name> ===` banner so a
+Flags: `--no-report` runs only collect; `--from {collect,stamp,evaluate,report,figures}`
+starts at a later stage (so a failed report never forces re-collection); `--replay-timeout`
+bounds each stamp and `--stamp-workers` sets how many replay in parallel; `--restamp`
+re-replays already-stamped trajectories (the full-corpus rebuild — without it the stamp stage
+only picks up unstamped ones). Both modes resume from
+`stamp_ledger.json`, which records the replay-source digest each trajectory was last
+completed under, so an interrupted rebuild does not start over and a source change
+re-queues everything. Resume is per trajectory and unaffected by the worker count: a killed
+parallel run restarts only what had not finished. Every stage prints a `=== [pipeline] stage: <name> ===` banner so a
 supervising monitor can tell collection from reporting.
 
 The four modules below stay independently runnable as **advanced / debug** entrypoints
@@ -273,6 +318,96 @@ gates a supervised run before you scale spend. Each reconciliation appends one r
 an append-only ledger. Omit `--billed` to skip the tracked-vs-billed leg and run only
 the cross-check and hole scan.
 
+## Re-running the benchmark without API spend
+
+Most of what you'd want to change — a threshold, a policy, a feature — costs seconds to
+re-score, because the verified outcomes are already on disk. Re-deriving those outcomes costs
+the better part of a day of container time. The two get confused, so keep them apart.
+
+### "Backtest" means three different things
+
+| What you're doing | Needs | Cost |
+|---|---|---|
+| **Re-score a policy** over the stamped corpus | nothing but the corpus | seconds |
+| **Re-replay trajectories** to re-derive verified outcomes (`--restamp`) | `make state-import`, Docker + the SWE-bench images, HF dataset access | hours |
+| **Evaluate a new model** | live inference | real API spend — *cannot be done offline* |
+
+Re-scoring is the loop you iterate in. `make escalation-eval` over the 799-trajectory
+escalation corpus, with its default 200-permutation nulls, takes **~90 s** — no containers, no
+requests. [Routing evaluation](#routing-evaluation) below is the same idea for routing
+strategies over `results.csv`.
+
+Re-replaying is what `--restamp` does, and you only need it when the *instrument* changes —
+the classifier, the grader, the admissibility adjudicator. Old stamps came from a different
+instrument, so they aren't comparable to new ones.
+
+Re-replaying reads the per-step code captures that the live run recorded. Those live in a
+gitignored scratch, so on a fresh checkout you restore them first with `make state-import`
+(committed as ~1.7 MB of deterministic per-trajectory archives). Run **`make replay-inputs`**
+before you start: it lists every input this checkout still lacks — the captures, the ~100 GB of
+instance images, the gold patch rows fetched from the HF dataset — and exits non-zero rather than
+letting a partial run produce numbers that quietly differ.
+
+Evaluating a new model has no offline path. A model with no trajectories has no steps to
+replay and nothing to re-score; its outcomes have to be collected live first. The offline
+corpus lets you re-score **policies** over **existing** model runs — that is its whole scope.
+
+### What a re-replay costs
+
+Measured on the 799-trajectory / 166-instance / 29,422-step escalation corpus, from rebuild
+logs covering 76% of the steps. Six workers on a 16-core, 15.9 GB host with every image
+already pulled.
+
+| Unit | Median | Aggregate mean |
+|---|---:|---:|
+| Per step | 3.5 s | 12.7 s |
+| Per trajectory (~37 steps) | 118 s | 495 s |
+| Per challenge (~4.8 trajectories) | ~13 min | ~38 min |
+| Whole corpus | — | **~104 worker-hours ⇒ ~18 h wall at 6 workers** |
+
+The mean runs roughly 3–4× the median at every level, and that is the shape of the data rather
+than noise. Rates vary ~30× by repository — 2.1 s/step on `astropy`, 57.7 s/step on `psf` — and
+a handful of instances dominate: **under 2% of trajectories consume 18% of the total time**, all
+of them from four challenges whose test suites run for over an hour. Plan with the aggregate mean;
+debug with the median. (The per-challenge median comes from the challenges a partial pass
+covers, and the scheduler runs the largest first, so it reads high for a typical challenge —
+per step is the number that transfers.)
+
+Two knobs move the total. `--replay-timeout` (default 3600s) decides how much of that tail
+gets counted rather than abandoned — raising it to 7200s rescued most of the timeouts but
+lengthened the run. `--stamp-workers` sets the parallelism; the six workers above were busy 95%
+of the wall clock, so **wall time ≈ worker-hours ÷ (workers × 0.95)** on a host that is not
+memory-starved. That estimate has a floor: an instance's trajectories run serially in one worker,
+and the longest instance here totals ~8 h on its own, so past roughly a dozen workers the extra
+parallelism buys nothing.
+
+Read the total as a **lower bound**. Ten trajectories are recorded at their timeout cap rather
+than their true duration, and the measured passes re-used admissibility verdicts from an earlier
+pass — a genuinely cold run, or any run after the replay source changes, pays every instance's
+two gate legs again.
+
+Per model, if you only want to re-replay one model's runs:
+
+| Model | Trajectories | Steps | Worker-hours |
+|---|---:|---:|---:|
+| deepseek-v4-flash | 268 | 11,602 | 39 |
+| gpt-5-mini | 284 | 6,775 | 26 |
+| kimi-k2.5 | 105 | 4,739 | 18 |
+| qwen3.7-plus | 60 | 3,023 | 9 |
+| kimi-k3 | 56 | 2,036 | 7 |
+| zai-glm-5.2 | 26 | 1,247 | 4 |
+
+Trajectory count is a bad proxy for cost: `gpt-5-mini` has the most trajectories and 23% of
+the steps, `deepseek-v4-flash` fewer trajectories and 39%, because its runs are longer. A
+single-model pass also loses the admissibility-gate amortisation — it touches nearly as many
+instances but puts only one trajectory in each, so most instances pay their two gate legs
+(median ~76 s, occasionally far worse on network-dependent instances) for a single trajectory
+instead of spreading them over 4.8.
+
+**These are host numbers, not portable ones.** Replay time is dominated by container test
+execution, so it tracks your disk and memory pressure as much as your clock speed. Measure
+your own host before planning around them.
+
 ## Routing evaluation
 
 The routing evaluator is a backtest over the outcome cache. Install the harness
@@ -301,6 +436,57 @@ Metrics per strategy:
 | CumReg_ci_lower / CumReg_ci_upper | 95% bootstrap CI on CumReg |
 | rAcc | Fraction of tasks where strategy picked the same model as the oracle |
 | Pareto | True if no other strategy has higher AvgPerf% AND lower TotalCost |
+| instrument_admissible / instrument_verdict | The two-sided instrument verdict for the SHIPPED selection path, stamped on every row (see [instrument validity](#is-the-router-measuring-anything-instrument-validity)) |
+
+### Is the router measuring anything? (instrument validity)
+
+A permutation null answers *"could chance have produced this number?"*. It cannot answer the
+question that comes first: *"is this pipeline computing anything about the task text at all?"*
+A router whose front end embeds the wrong field — or embeds nothing — produces an observation
+and a null that agree perfectly, and reports "no signal" forever.
+
+```bash
+python3 -m benchmark.routing.instrument_control   # exit 0 = admissible, 1 = not
+```
+
+This plants a known-learnable signal in the task text and hands it to the pipeline at the
+**front**, upstream of the text selection and the embedder, so a broken front end fails it. Two
+legs must both hold: the assembled pipeline recovers the planted signal well above chance, and
+the same pipeline collapses back to chance once the outcomes are shuffled. The planted signal is
+deliberately independent of which repository a task comes from, so a pipeline that recovers only
+the repository name scores at chance and is rejected.
+
+The transfer-curve and cross-repo figures carry the verdict in their footer and cannot be built
+without it. **A "no signal" result from a pipeline that has not cleared both legs is a gap in
+coverage, not a finding** — it says nothing about whether routing signal exists.
+
+Clearing the control is a floor, not a ceiling: it shows the pipeline can carry a strong,
+explicit signal end to end. It does not show the pipeline is sensitive enough to resolve a weak
+one.
+
+### How weak a signal could this suite resolve? (minimum detectable effect)
+
+```bash
+python3 -m benchmark.routing.sensitivity   # prints; writes nothing
+```
+
+This answers the question the control cannot. It re-assigns the real outcome rows to the real
+tasks so that a controlled fraction of them line up with a direction in the real embedding
+space, sweeps that fraction downward, and reports the smallest effect the null test still flags
+at 80% power — as an interval, not a point. Re-assignment leaves every model's marginal pass
+rate untouched, so the permutation null does not move and the floor is directly comparable to
+the null it interprets.
+
+The floor is reported as the AUROC a perfect reader of the planted signal would achieve at
+separating "the cheapest model suffices" from "escalation is needed" — the same unit the
+escalation results use. It is reported under **both** splits (the ungrouped one the figures use,
+in which a held-out task's own repository siblings sit in its index, and a repo-grouped one) and
+under **both** k-rules (the configured `k` and the transfer figure's selection-corrected
+best-over-*k*), because those configurations do not have the same sensitivity.
+
+**A null from a configuration whose floor sits above any plausible effect bounds your
+resolution, not the idea.** See [Results](results.md#how-weak-a-routing-signal-could-this-suite-have-seen)
+for what this suite's floor turned out to be.
 
 ### Every figure explains itself
 
@@ -393,7 +579,10 @@ Scored offline, the embedding-based routing strategies split by workload:
 - On the **agentic-coding** tasks this benchmark targets, the embedding-based
   difficulty signal did not clear the viability bar for cost-at-equal-quality
   relative to fixed-frontier-with-caching. Ranking hard tasks from easy ones off the
-  prompt embedding came out near chance. The router is wired into the live proxy
+  prompt embedding came out near chance — but that was measured while the strategies
+  embedded the short `description` label rather than the task's `problem_statement`,
+  so it is a coverage gap pending re-measurement, not a settled null
+  ([Results](results.md#routing-results)). The router is wired into the live proxy
   (it decides the first turn), outcomes are recorded automatically at session close
   (via off-wire test re-execution when configured), and the learning loop is live.
   On this particular workload, the embedding signal is not presently strong enough

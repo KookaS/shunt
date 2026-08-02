@@ -24,6 +24,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from benchmark import config, plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
 from benchmark.routing import plot_style, summary
+from benchmark.routing.strategies import routing_text
 from benchmark.routing.strategies.knn import _embed_texts
 
 matplotlib.use("Agg")
@@ -344,7 +345,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         )
         return
 
-    task_descs = [matrix["tasks"][tid]["description"] for tid in task_ids]
+    task_descs = [routing_text(tid, matrix["tasks"][tid]) for tid in task_ids]
     results_map = matrix["results"]
 
     print(f"Loaded {len(task_ids)} tasks from {matrix_path}")

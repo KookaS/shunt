@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from shunt.router.escalation import (
@@ -26,7 +27,8 @@ if TYPE_CHECKING:
 #
 # SCOPE OF PARITY (read before trusting the rank rung). This replay measures the escalation policy
 # IN ISOLATION, holding routing constant at this fixed context. Parity with the live engine is
-# guaranteed for (i) the failure-log lifecycle (append / clear-on-success / retire-on-escalation)
+# guaranteed for (i) the failure-log lifecycle — append, clear on a VERIFIED PASS only (an
+# unstamped or infra/unknown step is a no-op, as it is live), retire-on-escalation —
 # and (ii) the EFFORT rung, which the engine persists per task AND resets to the default on a
 # verified success (mirrored here), so effort parity holds even across a success boundary. The RANK
 # rung is NOT engine-faithful: here the runner climbs a persistent monotone rank counter that
@@ -34,6 +36,28 @@ if TYPE_CHECKING:
 # whereas the engine re-seeds rank from the base routing pick each decision (no persistent rank
 # ladder) and re-escalates indefinitely. Treat the rank stream as an abstract isolation upper
 # bound. The detector metric (run_eval) reads only the FIRST-flag prefix, so it stays faithful.
+#
+# (iii) CADENCE is NOT engine-faithful either, and it is the widest of the gaps. This replay feeds
+# the runner one event PER STEP: `replay_config` loops over `traj.steps` and calls
+# `EscalationRunner.step` once per StepView — instrumented, an 8-step trajectory produces 8 calls.
+# Live, an event is produced once PER CLOSED SESSION: `CaptureCoordinator.capture` runs the
+# off-wire verifier once for a closed session and reaches `record_outcome` at most once per
+# capture. Every trajectory in `data/live/` is a single session (799 files, 799 distinct
+# trajectory ids, median 31 steps, longest 247), so at the live cadence a whole trajectory
+# contributes exactly ONE event — and the shipped `escalate_after_n=2` could never fire on this
+# corpus at all. What the sweep measures is recurrence across the steps within one session, which
+# is not the quantity the shipped rule counts. It is not repairable on this data: a
+# session-cadence replay needs trajectories spanning several sessions and none of these do. Any
+# `escalate_after_n` result read off this sweep describes a per-step policy production does not run.
+#
+# (iv) The FLAKE GUARD is not exercised at all. `counts_as_failure` drops any event with
+# `confirmed=False` — a failure that did not reproduce on re-run. Offline,
+# `normalize.mini_swe_agent.stamp_step` hardcodes `confirmed=True`, ignoring
+# `VerifierResult.confirmed`; and `benchmark/runner/offline_replay.replay_step` runs each step's
+# test directives exactly once, so there is no second execution a genuine `confirmed` could
+# come from. Every replayed event therefore satisfies the guard by construction. Its effect is
+# UNMEASURED, not measured-as-zero. `confirmed` cannot be decoupled here in passing: it doubles as
+# the stamped-ness marker that `features.is_stamped` and `verified_outcome` below both read.
 _PERMISSIVE_CONTEXT = EscalationContext(
     current_rank_index=0,
     max_rank_index=3,
@@ -90,13 +114,38 @@ class SweepResult:
     points: list[SweepPoint]
 
 
-def _step_failure_event(step: StepView) -> FailureEvent | None:
-    """The FailureEvent a step contributes, via the SHARED constructor, or None if not a failure.
+class VerifiedOutcome(StrEnum):
+    """Whether a step carries a verified outcome at all, and which one."""
 
-    Success steps and dedup-less steps contribute nothing — mirroring the live path, which only
-    logs confirmed failures that carry a failing-check id.
+    PASS = "pass"
+    FAIL = "fail"
+    NONE = "none"  # the verified-outcome stage never labelled this step
+
+
+def verified_outcome(step: StepView) -> VerifiedOutcome:
+    """The tri-state the live capture path gates on — `success: bool` alone cannot express it."""
+    # Live, `CaptureCoordinator` reaches `record_outcome` only for a verifier outcome in
+    # {success, weak_success, failure}; an `unknown`/infra red never gets there, so the failure log
+    # is untouched. Offline, BOTH the unstamped step (`success=True` is the parser default) and the
+    # infra step (`success = outcome != "failure"`) carry `success=True`, and feeding either to
+    # `observe` as a pass would clear a window the live engine keeps. Keyed on `confirmed` — the
+    # same stamped-ness marker `features.is_stamped` reads — and on `is_infra_failure`, which
+    # `parse_test_outcome` sets only for `unknown`, the one outcome that is non-labellable while
+    # leaving `success` true.
+    if not step.success:
+        return VerifiedOutcome.FAIL  # a red is never a parser default: the stage ran
+    if step.confirmed and not step.is_infra_failure:
+        return VerifiedOutcome.PASS
+    return VerifiedOutcome.NONE
+
+
+def _step_failure_event(step: StepView) -> FailureEvent | None:
+    """The FailureEvent a verified failure contributes, via the SHARED constructor, or None.
+
+    A failure with no failing-check id contributes nothing — mirroring the live path, which
+    returns early when `dedup_key is None` rather than logging an unkeyed event.
     """
-    if step.success or step.failing_check_id is None:
+    if step.failing_check_id is None:
         return None
     return failure_event_from_outcome(
         decision_index=step.decision_index,
@@ -129,9 +178,13 @@ def replay_config(
     directives: list[EscalationAction] = []
     first_escalation: int | None = None
     for step in traj.steps:
+        outcome = verified_outcome(step)
+        # A step with NO verified outcome is fed as (success=False, event=None), which `observe`
+        # treats as a no-op — exactly the live path, where a non-labellable verifier outcome never
+        # reaches `record_outcome` and leaves the failure log alone. Only a verified pass clears.
         directive = runner.step(
-            success=step.success,
-            event=_step_failure_event(step),
+            success=outcome is VerifiedOutcome.PASS,
+            event=_step_failure_event(step) if outcome is VerifiedOutcome.FAIL else None,
             current_index=step.decision_index,
             config=cfg,
             loop_health_alarm=context.loop_health_alarm,
@@ -164,6 +217,8 @@ __all__ = [
     "ReplayDecision",
     "SweepPoint",
     "SweepResult",
+    "VerifiedOutcome",
     "replay_config",
     "sweep",
+    "verified_outcome",
 ]

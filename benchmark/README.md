@@ -13,10 +13,84 @@ Treat the current numbers as a **pilot, not a verdict.** They come from a small,
 
 **Why more samples:** to make a defensible claim (tight CIs, a routable subset large enough to measure, robustness to pass@1 noise), run the full 500-task suite (already materialised) with ≥2 samples at escalation-boundary decisions. For a **fixed manifest**, the nested run order (`runner/sampling.py`) makes each step up in `sample_size` *add* tasks rather than reshuffle, so earlier `results.csv` cells are reused, not re-spent (see the caveat below — regenerating the manifest can move the order).
 
+## What this harness offers offline — a checklist
+
+Live data is collected **once**; everything after that should run from the committed corpus, on
+any machine, with no API keys. Each line is a capability with the status it has **today**,
+checked against the code — not a roadmap. **YES** holds · **PARTLY** holds with a caveat that
+changes how you read the result · **NO** does not hold.
+
+- **YES — replay a collected run in a container.** `runner/offline_replay.py` rebuilds each
+  captured step inside that instance's prebuilt SWE-bench image and re-derives its verified
+  outcome through SWE-bench's own grader. No model call, no spend. Cost is measured rather than
+  guessed (~3.5 s median per step; ~104 worker-hours for the full 799-trajectory corpus) — see
+  *What a re-replay costs* in [`docs/benchmark.md`](../docs/benchmark.md). Not to be confused with
+  `benchmark/Dockerfile` + `compose.yaml`, which containerise the **harness itself** for a
+  simulated `run_matrix`.
+- **PARTLY — from a fresh clone, once you supply what git cannot hold.** Replay reads the per-step
+  `git diff HEAD` captures from `runner/artifacts/step_snapshots/`, which is **gitignored**
+  (`step_snapshots.SNAPSHOT_ROOT`; ~74 MB / 792 trajectories on the collecting host), and a
+  checkout without them raises `SnapshotsMissingError` — deliberately, since filesystem absence
+  cannot be told from "this run captured nothing". `runner/snapshot_archive.py` closes that half:
+  `make state-export` packs the captures into `escalation/data/live/state/` as one deterministic
+  `.tar.gz` per trajectory (34 105 506 B of diffs → 1 647 548 B on disk, ~1.5 MB in a packfile;
+  plain git, not LFS), and `make state-import` restores them byte-identically on any checkout.
+  **Two inputs remain outside git and always will:** the instance images (~100 GB) and the gold
+  `patch`/`test_patch` rows, which `offline_replay._dataset_row` fetches from the HF dataset at
+  replay time *without* pinning `swebench_specs.DATASET_REVISION`. `make replay-inputs` enumerates
+  every one of them and exits non-zero — a partial reproduction that silently produces different
+  numbers is worse than a refusal. So a clone can re-score policies unconditionally, and re-derive
+  outcomes once it has Docker, the images, and HF access.
+- **YES — backtest a policy over the corpus.** The loop you actually iterate in.
+  `make escalation-eval` re-scores the escalation detector over all 799 trajectories in ~90 s;
+  `benchmark.routing.run_eval` does the same for routing strategies over `results.csv`. No
+  containers, no requests. Train/eval splits are offline too: escalation uses grouped CV
+  (`prefix_eval`, grouped by challenge so no instance straddles a fold), routing has a
+  deterministic hash-thresholded holdout (`runner/calibration.py`) and a held-out kNN sweep.
+- **PARTLY — backtest one model's runs.** The data separates per model, and the cost of doing so
+  is tabulated per model in [`docs/benchmark.md`](../docs/benchmark.md), but neither evaluator
+  has a `--model` selector. You do it by feeding a filtered input: `offline_replay` takes one
+  trajectory id at a time, `escalation.run_eval` takes a `--live-dir`, `routing.run_eval` takes a
+  self-contained `--matrix`. Workable, not first-class. A single-model re-replay is also the
+  worst case for cost — it touches nearly as many instances but puts one trajectory in each, so
+  most instances pay their admissibility gate for a single trajectory instead of ~4.8.
+- **NO — evaluate a model that has never run.** Impossible offline, and not a gap that can be
+  closed with more container time: a model with no trajectories has no steps to replay and no
+  cells to look up. Adding a model to the comparison is a live collection pass.
+- **PARTLY — evaluate routing offline.** Mechanically fine (`routing/run_eval.py` reads only
+  cached cells and flags a decision needing an uncached one instead of guessing). **But the input
+  is degraded:** `problem_statement` is absent from all 500 specs under
+  `challenges/swebench_verified/` and from all 500 `tasks` entries in
+  `routing/data/challenges.json`, so `strategies.routing_text()` falls back to `description` — a
+  ~106-character `<repo>@<commit12> — resolve <test-node-id>` label. The embedding channel is fed an
+  identifier, not the task. Every embedding-based number is pending re-measurement on a manifest
+  that carries the statement; the zero-ML strategies are unaffected.
+- **PARTLY — evaluate escalation offline.** `make escalation-eval` scores the detector over the
+  stamped corpus with permutation nulls. Its report carries a `deployability` verdict, currently
+  **OFFLINE-ONLY UPPER BOUND**: 2 of the 5 features (`infra_rate`, `max_action_repeat_rate`) read
+  fields that do not exist at the production decision point, and the eval scores one decision per
+  step where production decides once per session (`escalation/deployability.py`). The number is
+  real; it bounds a policy production does not run.
+- **PARTLY — all benchmark data in git.** Tracked: `routing/results.csv`, the 500 instance
+  specs, `routing/data/challenges.json`, the 799 trajectory JSONL files with their per-step
+  stamps, `manifest.json`, `admissibility.json`, `stamp_ledger.json`, and the report PNGs.
+  Untracked: the per-step diffs above, the ~100 GB image set, and the HF dataset rows. Everything
+  needed to **re-score** is in git; what is needed to **re-derive** is not.
+- **YES — flag a model the collection has not covered.** `benchmark.model_coverage` (`make
+  model-coverage`) enumerates the models in `benchmark.yaml`'s `models:` list, not the models the
+  data happens to contain, and exits nonzero when one of them is `ABSENT` (no data) or `THIN`
+  (below the floor its analysis needs). Both floors are the ones already pinned elsewhere:
+  `capability_rank.K` routing cells, below which a model's capability rank is a price prior rather
+  than a measurement, and `prefix_eval.MIN_ROWS` trajectories admissible at the shallowest
+  evaluated depth. Add a model and the check says so on the next run. On the current corpus
+  `zai-glm-5.2` and `kimi-k3` are already `THIN` on escalation.
+
 ## Layout
 
 ```
 benchmark/
+  admissibility.py             # Instrument-validity adjudicator (positive control + destroyed-signal null)
+  model_coverage.py            # Per-model corpus coverage — flags enabled models the collection missed
   challenges/                  # Individual challenge files
     swebench_verified/         # SWE-bench Verified instance SPECS (the sole source, runnable)
   runner/
@@ -37,6 +111,7 @@ benchmark/
       oracle.py                # Perfect-information upper bound
       fixed.py                 # Fixed-model baselines
     run_eval.py                # Evaluate all strategies against a matrix
+    instrument_control.py      # Positive control + destroyed-signal null for the routing pipeline
     metrics.py                 # Metric definitions (cost, quality, trade-offs)
     report.py                  # Comparison tables and plots (derived from results.csv)
     scripts/                   # Analysis + figure producers (read results.csv, write reports/)
@@ -61,6 +136,12 @@ tracked; the derived `strategy_summary.csv` is not) — there is a **single comm
 ## Run
 
 ```sh
+# Is the routing pipeline measuring anything? Plants a known-learnable signal in the task
+# text and asks the assembled Embedder -> neighbourhood -> selection path to recover it, then
+# destroys the signal and asks it to collapse to chance. Exits non-zero when it does not clear
+# both legs — no routing verdict is quotable until it does.
+python3 -m benchmark.routing.instrument_control
+
 # Evaluate strategies against the cached matrix (writes parameterized CSV to artifacts/)
 python3 -m benchmark.routing.run_eval
 
@@ -77,6 +158,11 @@ python3 -m benchmark.runner.run_matrix --strategy full
 
 # Integrity gate: hashes match, no removed challenges, versions current, no drift
 python3 -m benchmark.runner.check_integrity --check-derived
+
+# Coverage gate: does every model in `benchmark.yaml` have enough collected data to be
+# evaluated? Exits nonzero on a model that is ABSENT or THIN — the signal that a live
+# collection is incomplete rather than finished. Reads committed data only.
+python3 -m benchmark.model_coverage
 ```
 
 ### Scaling the suite / cost-safe partial runs
@@ -146,18 +232,31 @@ parsing. Needs Docker + the `benchmark` extra: `pip install -e '.[dev,benchmark]
 Each task is a small **spec** under `challenges/swebench_verified/<instance_id>.json`
 holding only what's needed to run + identify it: `instance_id, repo, base_commit,
 version, difficulty_stratum, FAIL_TO_PASS, PASS_TO_PASS, image_ref, dataset_revision`.
-`dataset_revision` pins the HF dataset commit the fields were pulled from — the
-spec's provenance. The repo snapshot, environment, and patches are **pulled on
+`dataset_revision` pins the HF dataset commit the fields were pulled from — the spec's
+provenance. `swebench_specs.py` also writes a `problem_statement` — the upstream issue
+text, the same string the harness hands the agent — so that routing embeds the task
+rather than the `description` label; it is excluded from the spec content hash (it adds
+no execution identity), so backfilling it stales no cached result cell. **The 500
+committed specs predate that field. The key is absent entirely — not present-but-empty —
+and so is every `tasks` entry in `routing/data/challenges.json`, so
+`strategies.routing_text()` falls back to `description` on 500/500 tasks** (a
+~106-character `<repo>@<commit12> — resolve <test-node-id>` label). The repo snapshot,
+environment, and patches are **pulled on
 demand** from the HF dataset (`princeton-nlp/SWE-bench_Verified`) and the prebuilt
 instance image — no repos are copied into the tree. The suite is the full **500
 Verified instances** across 12 repos (django, sympy, sphinx, matplotlib,
 scikit-learn, astropy, xarray, pytest, pylint, requests, seaborn, flask), each
 with a verified prebuilt `swebench/sweb.eval.x86_64.*` image and a spread of
 difficulty strata; live runs cover a nested partial subset (`sample_size`).
-Materialise specs by id:
+Materialise specs by id. This writes **spec files only** — it does not touch
+`routing/data/challenges.json`, and routing reads only that manifest, so backfilling specs
+alone still leaves `routing_text()` falling back to `description` on every task. Rebuilding
+the manifest is the second half of the fix: `build_challenges` (above) re-materialises all
+500 specs from the pinned revision *and* rewrites the manifest in one pass.
 
 ```sh
 python -m benchmark.runner.swebench_specs astropy__astropy-7166 psf__requests-1142 …
+python -m benchmark.runner.build_challenges   # then rebuild the manifest routing reads
 ```
 
 ### Gold-patch smoke ($0, no API keys)

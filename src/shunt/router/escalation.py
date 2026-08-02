@@ -10,8 +10,13 @@ from __future__ import annotations
 import random
 from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
+from typing import Final
 
 from shunt.proxy.redaction import redact_secrets
+
+# The ladder vocabulary, defined once. `EscalationPolicy` (the router.yaml schema) validates
+# against this same tuple, so the two entry points cannot drift apart.
+ESCALATION_LADDERS: Final[tuple[str, ...]] = ("effort_then_rank", "rank_only")
 
 
 class EscalationAction(StrEnum):
@@ -52,6 +57,24 @@ class EscalationConfig:
     # can be re-derived after the fact. None ⇒ the caller draws and records one.
     exploration_seed: int | None = None
 
+    def __post_init__(self) -> None:
+        """Reject an out-of-range knob at construction (mirrors the ``EscalationPolicy`` schema)."""
+        # Only router.yaml goes through the pydantic schema; a benchmark grid constructs this
+        # dataclass DIRECTLY, where an unknown ladder silently degraded to rank_only, an epsilon
+        # above 1 wrote an invalid probability into the OPE log, and n=0 escalated off zero
+        # countable failures. Validating here makes every entry point equally strict.
+        if self.escalate_after_n <= 0:
+            raise ValueError(f"escalate_after_n must be > 0, got {self.escalate_after_n}")
+        if self.stale_window <= 0:
+            raise ValueError(f"stale_window must be > 0, got {self.stale_window}")
+        if not 0.0 <= self.exploration_epsilon < 1.0:
+            raise ValueError(
+                f"exploration_epsilon must be in [0.0, 1.0), got {self.exploration_epsilon}"
+            )
+        if self.ladder not in ESCALATION_LADDERS:
+            joined = ", ".join(ESCALATION_LADDERS)
+            raise ValueError(f"unknown ladder {self.ladder!r}; allowed: {joined}")
+
 
 @dataclass(frozen=True)
 class FailureEvent:
@@ -69,6 +92,15 @@ class FailureEvent:
     # pytest/jest/go failure is exit 1/101, never the hook contract's 2). Defaults False so a
     # non-blocking event (lint, infra) never counts toward escalation.
     blocking: bool = False
+
+    def persistable(self) -> dict[str, object]:
+        """The projection that may be stored — `dedup_key` scrubbed like a committable id."""
+        # `dedup_key` IS a failing-check id (a parametrized test id can embed a secret) and the
+        # escalation snapshot lands in PLAINTEXT sqlite `router_state`, so it is redacted here.
+        # Redaction is deterministic, so a recurring key still groups after a restart.
+        out: dict[str, object] = asdict(self)
+        out["dedup_key"] = redact_secrets(self.dedup_key)
+        return out
 
 
 @dataclass(frozen=True)
@@ -117,9 +149,11 @@ class ExplorationRecord:
         """The projection that may be stored — `checkpoint_id` scrubbed like a committable id."""
         # `checkpoint_id` IS a normalized failing-check id, the one field here carrying arbitrary
         # text (a parametrized test id can embed a secret), so it is redacted on the way out
-        # exactly as `StepRecord.committable` does. Every consumer — the sqlite
-        # `decision_provenance` column and the OPE export read back off it — is downstream of
-        # this one seam, so redacting here covers them all.
+        # exactly as `StepRecord.committable` does. This seam covers the sqlite
+        # `decision_provenance` column and the OPE export read back off it — and ONLY those.
+        # A failing-check id reaches persistence and logs through other paths too
+        # (`FailureEvent.persistable`, `StepRecord.committable`, `redact_record`, the rerun-flake
+        # log line); each redacts at its own seam, because none of them routes through here.
         out: dict[str, object] = asdict(self)
         out["checkpoint_id"] = redact_secrets(self.checkpoint_id)
         return out
@@ -420,6 +454,7 @@ class EscalationRunner:
 
 
 __all__ = [
+    "ESCALATION_LADDERS",
     "EscalationAction",
     "EscalationConfig",
     "EscalationContext",

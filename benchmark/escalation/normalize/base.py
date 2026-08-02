@@ -85,12 +85,17 @@ def build_trajectory(
         redacted=bool(meta.get("redacted", False)),
         content_sha256=schema.content_sha256(steps),
         n_steps=len(steps),
+        snapshot_steps=_opt_int(meta.get("snapshot_steps")),
     )
     return Trajectory(header=header, steps=steps)
 
 
 def _opt_str(value: object) -> str | None:
     return None if value is None else str(value)
+
+
+def _opt_int(value: object) -> int | None:
+    return None if value is None else int(str(value))
 
 
 def first_token(text: str) -> tuple[str, str | None]:

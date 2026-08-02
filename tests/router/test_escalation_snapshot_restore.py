@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from shunt.models.config import ModelConfig, ReasoningArm, ReasoningConfig
-from shunt.router.engine import RouterEngine
+from shunt.router.engine import RouterEngine, task_state_key
 from shunt.router.escalation import EscalationConfig
 
 
@@ -139,7 +139,7 @@ def test_effort_arm_survives_snapshot_restore_and_resumes_the_ladder() -> None:
 
     state = eng.snapshot_escalation_state()
     assert "effort_arm" in state  # the per-task arm mapping is serialized
-    assert state["effort_arm"] == {"repoA": "mid"}
+    assert state["effort_arm"] == {task_state_key("repoA"): "mid"}
 
     fresh = _engine()  # a restarted process
     fresh.restore_escalation_state(state)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import hnswlib
@@ -14,7 +15,7 @@ from shunt.router.embedder import Embedder
 from shunt.router.engine import RouterEngine
 from shunt.router.selection import NeighborResult, SelectionRule
 
-from . import Strategy
+from . import Strategy, routing_text
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -174,13 +175,22 @@ class _DummySessionManager:
 class _LookupEmbedder:
     """Precomputed embeddings keyed by prompt text, computed on demand for uncached texts."""
 
-    def __init__(self, lookup: dict[str, np.ndarray]) -> None:
+    def __init__(
+        self,
+        lookup: dict[str, np.ndarray],
+        embed_texts: Callable[[list[str]], np.ndarray] | None = None,
+    ) -> None:
         self._lookup = lookup
+        self._embed_texts = embed_texts
 
     def embed(self, text: str) -> np.ndarray:
         cached = self._lookup.get(text)
         if cached is None:
-            cached = _embed_texts([text])[0]
+            # Resolved at CALL time, never bound at construction: the module-level `_embed_texts`
+            # is what tests monkeypatch, and a default captured in the signature would silently
+            # ignore that and reach for the real 600MB ONNX load.
+            embed = _embed_texts if self._embed_texts is None else self._embed_texts
+            cached = np.asarray(embed([text]), dtype=np.float32)[0]
             self._lookup[text] = cached
         return cached
 
@@ -199,10 +209,17 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
         k: int = 20,
         success_rate_threshold: float = 0.7,
         min_samples: int = 3,
+        embed_texts: Callable[[list[str]], np.ndarray] | None = None,
     ):
         self._k = k
         self._success_rate_threshold = success_rate_threshold
         self._min_samples = min_samples
+        # None means the shipped embedder, resolved at CALL time so a monkeypatched module-level
+        # `_embed_texts` still wins. The seam exists for `instrument_control`, which builds one
+        # strategy per permutation draw over a corpus whose TEXT never changes — without it the
+        # validity control would run hundreds of real ONNX passes over the same strings. Nothing
+        # downstream of the vectors differs.
+        self._embed_texts = embed_texts
 
         # Lazy-initialized state
         self._task_ids: list[str] | None = None
@@ -228,7 +245,7 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
         assert self._engine is not None
         model_name, _reason, _provenance = self._engine.decide(
             session_id=task_id,
-            prompt_text=task_meta.get("description", task_id),
+            prompt_text=routing_text(task_id, task_meta),
         )
         return model_name
 
@@ -240,9 +257,10 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
         self._task_ids = task_ids
         self._pricing = _model_pricing(matrix)
 
-        # Embed all task descriptions
-        descriptions = [matrix["tasks"].get(tid, {}).get("description", tid) for tid in task_ids]
-        self._embeddings = _embed_texts(descriptions)
+        # Embed each task's routing text (problem statement, else the short description)
+        texts = [routing_text(tid, matrix["tasks"].get(tid, {})) for tid in task_ids]
+        embed = _embed_texts if self._embed_texts is None else self._embed_texts
+        self._embeddings = np.asarray(embed(texts), dtype=np.float32)
 
         # Build HNSW index over ALL embeddings (index holds everything;
         # self-exclusion is handled at query time)
@@ -270,8 +288,8 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
         )
 
         # Precomputed embedding lookup so the engine never re-embeds
-        lookup = dict(zip(descriptions, list(self._embeddings), strict=True))
-        embedder = _LookupEmbedder(lookup)
+        lookup = dict(zip(texts, list(self._embeddings), strict=True))
+        embedder = _LookupEmbedder(lookup, self._embed_texts)
 
         self._engine = RouterEngine(
             model_pool=model_pool,

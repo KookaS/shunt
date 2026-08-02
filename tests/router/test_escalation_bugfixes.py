@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 import numpy as np
 
 from shunt.capture.coordinator import CaptureCoordinator, WorkDirResolver
-from shunt.router.engine import RouterEngine
+from shunt.router.engine import RouterEngine, task_state_key
 from shunt.router.escalation import EscalationConfig
 from shunt.session import Session
 from shunt.verifiers.base import VerifierResult
@@ -234,7 +234,7 @@ def test_escalation_state_round_trips() -> None:
     eng.decide("s1", "task")
     _fail(eng)  # one accrued failure for repoA
     state = eng.snapshot_escalation_state()
-    assert state["failure_log"]["repoA"]  # the log serialized
+    assert state["failure_log"][task_state_key("repoA")]  # the log serialized
 
     restored = _engine()
     restored.restore_escalation_state(state)

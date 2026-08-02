@@ -36,10 +36,16 @@ outcomes, pick the cheapest model that succeeded) offline before shipping it.
 On QA and reasoning-style workloads the embedding difficulty signal carries and
 there is routing headroom. On the agentic-coding workload we actually target it
 did **not** clear our viability bar: ranking hard tasks from easy ones off the
-prompt embedding came out near chance. We publish that because it scopes the
-project — it does not kill the cache-safe proxy or the verify-and-escalate path,
-which does not depend on that signal, but it means we do not claim live
-coding-task routing we cannot yet back with evidence.
+prompt embedding came out near chance.
+
+That number is weaker evidence than it looks, and we would rather say so than
+bank it. The embedder was handed a 106-character identifier instead of the task's
+problem statement — still true of every committed task — and the suite's smallest
+detectable effect sits far above any published difficulty detector. So on coding
+work the question is open, not settled ([Results](results.md#routing-results)).
+Either way we do not claim live coding-task routing we cannot back with evidence,
+and neither the cache-safe proxy nor the verify-and-escalate path depends on that
+signal.
 
 ## What runs today
 
@@ -140,6 +146,7 @@ trust rules: [Feedback](feedback.md).
 - [Architecture](architecture.md) — what runs live vs what's waiting for the learning loop
 - [Configuration](configuration.md) — add provider keys and register models
 - [Feedback](feedback.md) — how outcomes are captured (auto + manual) and learned from
+- [The routing model](routing.md) — what the session's model choice reads, how it decides, and where it stops
 - [Error detection & auto-escalation](escalation.md) — how a verified failure is detected and, on repeat, escalates a rung (opt-in)
 - [Results](results.md) — every measured routing and escalation number, with its caveats
 - [Research log](research-log.md) — published ideas we tested, and what held
@@ -150,8 +157,9 @@ trust rules: [Feedback](feedback.md).
 ## Status
 
 Pre-alpha. The core hypothesis — cheap-first routing beats always-frontier at
-equal quality on agentic coding — is unproven and, on the coding workload, the
-embedding difficulty signal did not clear the bar. The make-or-break gate has
+equal quality on agentic coding — is unproven, and the embedding difficulty
+signal has not cleared the bar on coding work (on an instrument that cannot yet
+resolve it either way — see above). The make-or-break gate has
 been tested offline on SWE-bench Verified; **it has not been passed** (see
 [Results](results.md#why-we-still-do-not-call-the-gate-passed)). The router does not ship unless and until this gate clears on a real workflow.
 

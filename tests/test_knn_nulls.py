@@ -9,11 +9,18 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from benchmark.admissibility import admissibility_verdict
 from benchmark.routing.scripts import knn_nulls as kn
 
 # Fewer permutations than the 200 the figures use — these assert shape and direction,
 # not a published band.
 _PERM = 60
+
+# Both result objects REQUIRE the instrument-validity verdict, so every construction here has
+# to state one. These tests exercise the null models on synthetic similarity matrices — the
+# front end is not in scope — so they pass a stub. The real control runs against the real
+# embedder in tests/test_instrument_control.py.
+_STUB_GATE = admissibility_verdict(1.0, 0.5, chance_level=0.5, chance_band=0.1)
 
 
 class TestBaseRates:
@@ -178,13 +185,17 @@ class TestTransferAndCrossRepo:
 
     def test_memorisation_ceiling_is_at_least_leave_one_out(self):
         sims, pass_mat = self._fixture()
-        curve = kn.transfer_curve(sims, pass_mat, ["a", "b", "c"], [5, 10], 0.6, n_perm=_PERM)
+        curve = kn.transfer_curve(
+            sims, pass_mat, ["a", "b", "c"], [5, 10], 0.6, admissibility=_STUB_GATE, n_perm=_PERM
+        )
         for ceiling, loo in zip(curve.memorisation, curve.loo, strict=True):
             assert ceiling >= loo - 1e-9
 
     def test_random_outcomes_land_inside_the_null(self):
         sims, pass_mat = self._fixture()
-        curve = kn.transfer_curve(sims, pass_mat, ["a", "b", "c"], [10], 0.6, n_perm=_PERM)
+        curve = kn.transfer_curve(
+            sims, pass_mat, ["a", "b", "c"], [10], 0.6, admissibility=_STUB_GATE, n_perm=_PERM
+        )
         band = kn.Band(
             mean=curve.null_mean[0],
             sd=1.0,
@@ -196,7 +207,9 @@ class TestTransferAndCrossRepo:
 
     def test_best_constant_is_the_best_column_mean(self):
         sims, pass_mat = self._fixture()
-        curve = kn.transfer_curve(sims, pass_mat, ["a", "b", "c"], [10], 0.6, n_perm=_PERM)
+        curve = kn.transfer_curve(
+            sims, pass_mat, ["a", "b", "c"], [10], 0.6, admissibility=_STUB_GATE, n_perm=_PERM
+        )
         assert curve.best_constant == pytest.approx(pass_mat.mean(axis=0).max())
         assert curve.best_constant_model == ["a", "b", "c"][int(np.argmax(pass_mat.mean(axis=0)))]
 
@@ -208,7 +221,14 @@ class TestTransferAndCrossRepo:
         sims, pass_mat = self._fixture(n=60)
         task_ids = [f"org__repo{i % 3}-{i}" for i in range(60)]
         cross = kn.cross_repo_transfer(
-            sims, pass_mat, task_ids, k=5, threshold=0.6, min_tasks=8, n_perm=_PERM
+            sims,
+            pass_mat,
+            task_ids,
+            k=5,
+            threshold=0.6,
+            admissibility=_STUB_GATE,
+            min_tasks=8,
+            n_perm=_PERM,
         )
         assert len(cross.repos) == 3
         assert cross.grid.shape == (3, 3)
@@ -219,7 +239,14 @@ class TestTransferAndCrossRepo:
         # repo2 gets only 4 tasks; the rest split between repo0/repo1.
         task_ids = [f"org__repo{2 if i < 4 else i % 2}-{i}" for i in range(60)]
         cross = kn.cross_repo_transfer(
-            sims, pass_mat, task_ids, k=5, threshold=0.6, min_tasks=8, n_perm=_PERM
+            sims,
+            pass_mat,
+            task_ids,
+            k=5,
+            threshold=0.6,
+            admissibility=_STUB_GATE,
+            min_tasks=8,
+            n_perm=_PERM,
         )
         assert "org/repo2" not in cross.repos
 
@@ -265,6 +292,7 @@ class TestDegenerateNullReportsZeroZ:
         from benchmark.routing.scripts import plot_knn_nulls
 
         curve = kn.TransferCurve(
+            admissibility=_STUB_GATE,
             ks=(40,),
             loo=(0.7740,),
             memorisation=(0.7740,),
@@ -278,7 +306,7 @@ class TestDegenerateNullReportsZeroZ:
             n_tasks=177,
             n_perm=200,
         )
-        note = plot_knn_nulls._verdict(curve.loo[0], curve.band_at(0), "the pass rate")
+        note = plot_knn_nulls._verdict(curve.loo[0], curve.band_at(0), "the pass rate", _STUB_GATE)
         assert "NULL RESULT" in note
         assert "z=+0.00" in note
 
@@ -295,14 +323,18 @@ class TestSelectionCorrectedNull:
     def test_max_null_is_at_least_every_per_k_band(self):
         sims, pass_mat = self._fixture()
         ks = [2, 5, 10, 20]
-        curve = kn.transfer_curve(sims, pass_mat, ["a", "b", "c"], ks, 0.6, n_perm=_PERM)
+        curve = kn.transfer_curve(
+            sims, pass_mat, ["a", "b", "c"], ks, 0.6, admissibility=_STUB_GATE, n_perm=_PERM
+        )
         # A max over k can only be >= any single k's upper bound, so the corrected band is
         # never more permissive than the uncorrected one it replaces.
         assert curve.max_null.hi >= max(curve.null_hi) - 1e-12
 
     def test_null_sd_is_exact_not_reconstructed(self):
         sims, pass_mat = self._fixture()
-        curve = kn.transfer_curve(sims, pass_mat, ["a", "b", "c"], [5, 10], 0.6, n_perm=_PERM)
+        curve = kn.transfer_curve(
+            sims, pass_mat, ["a", "b", "c"], [5, 10], 0.6, admissibility=_STUB_GATE, n_perm=_PERM
+        )
         for i in range(len(curve.ks)):
             band = curve.band_at(i)
             assert band.sd == curve.null_sd[i]
@@ -312,7 +344,9 @@ class TestSelectionCorrectedNull:
 
     def test_band_at_round_trips_the_stored_percentiles(self):
         sims, pass_mat = self._fixture()
-        curve = kn.transfer_curve(sims, pass_mat, ["a", "b", "c"], [10], 0.6, n_perm=_PERM)
+        curve = kn.transfer_curve(
+            sims, pass_mat, ["a", "b", "c"], [10], 0.6, admissibility=_STUB_GATE, n_perm=_PERM
+        )
         band = curve.band_at(0)
         assert (band.lo, band.hi, band.mean) == (
             curve.null_lo[0],
@@ -333,7 +367,14 @@ class TestCrossRepoGuards:
         # render it as "BELOW the null band", which is worse than failing.
         with pytest.raises(ValueError, match="at least 2 repos"):
             kn.cross_repo_transfer(
-                emb @ emb.T, pass_mat, task_ids, k=5, threshold=0.6, min_tasks=8, n_perm=_PERM
+                emb @ emb.T,
+                pass_mat,
+                task_ids,
+                k=5,
+                threshold=0.6,
+                admissibility=_STUB_GATE,
+                min_tasks=8,
+                n_perm=_PERM,
             )
 
 

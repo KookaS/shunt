@@ -7,26 +7,16 @@ from __future__ import annotations
 import hnswlib
 import numpy as np
 
-from . import Strategy
+from . import Strategy, routing_text
 from ._cascade_common import cheapest_priced_model, frontier_model, model_pricing
 
-# ---------------------------------------------------------------------------
-# Lazy fastembed loader
-# ---------------------------------------------------------------------------
-_EMBEDDER = None
-
-
-def _get_embedder():
-    global _EMBEDDER  # noqa: PLW0603, SH001 (lazy embedder singleton; loaded once on first use)
-    if _EMBEDDER is None:
-        from fastembed import TextEmbedding
-
-        _EMBEDDER = TextEmbedding(model_name="jinaai/jina-embeddings-v2-base-code")
-    return _EMBEDDER
-
-
-def _embed_texts(texts: list[str]) -> np.ndarray:
-    return np.array(list(_get_embedder().embed(texts)), dtype=np.float32)
+# `_embed_texts` reaches the SHIPPED Embedder through the one loader the rest of the
+# routing family shares (same precedent as tier_classifier). A local `TextEmbedding(...)`
+# here hardcoded the model name past `load_embedding_config()`, so flipping
+# `embedding.yaml`'s active row (or SHUNT_EMBEDDER_MODEL) would silently score kNN and
+# kNN-cascade in two different embedding spaces; it also skipped the durable cache_dir,
+# the 4000-char clip, `fingerprint()`, and the SHUNT_DISALLOW_REAL_EMBEDDER test wall.
+from .knn import _embed_texts
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +154,7 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
         assert self._pricing is not None
         assert self._task_ids is not None
 
-        description = task_meta.get("description", task_id)
-        query_emb = _embed_texts([description])
+        query_emb = _embed_texts([routing_text(task_id, task_meta)])
 
         k_search = min(self._k + 1, len(self._task_ids))
         labels, distances = self._index.knn_query(query_emb.reshape(1, -1), k_search)
@@ -191,14 +180,14 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
         )
 
     def _build(self, matrix: dict) -> None:
-        """Build HNSW index over all task descriptions."""
+        """Build HNSW index over every task's routing text."""
         task_ids = sorted(matrix.get("results", {}).keys())
         self._task_ids = task_ids
         self._pricing = model_pricing(matrix)
 
-        # Embed all task descriptions
-        descriptions = [matrix["tasks"].get(tid, {}).get("description", tid) for tid in task_ids]
-        self._embeddings = _embed_texts(descriptions)
+        # Embed each task's routing text (problem statement, else the short description)
+        texts = [routing_text(tid, matrix["tasks"].get(tid, {})) for tid in task_ids]
+        self._embeddings = _embed_texts(texts)
 
         # Build HNSW index
         dim = self._embeddings.shape[1]

@@ -66,6 +66,53 @@ def test_manifest_cross_check_clean_and_orphan(tmp_path) -> None:
     assert any(f.rule == "manifest.orphan" for f in findings)
 
 
+def test_a_flipped_eval_label_contradicts_the_manifest(tmp_path) -> None:
+    # `terminal_resolved` is the eval's y and rides the HEADER, which the content hash does not
+    # commit to — so before the manifest recorded it, flipping the label produced 0 errors.
+    from dataclasses import replace
+
+    traj = _clean_trajectory("a")
+    _write(tmp_path, traj)
+    (tmp_path / authenticity.MANIFEST_NAME).write_text(json.dumps(authenticity.manifest(tmp_path)))
+    flipped = replace(traj, header=replace(traj.header, terminal_resolved=True))
+    schema.dump_jsonl(flipped, tmp_path / "a.jsonl")  # rehashed, internally consistent, relabelled
+    assert errors(authenticity.verify_trajectory(schema.load_jsonl(tmp_path / "a.jsonl"))) == []
+    findings = errors(authenticity.verify_manifest(tmp_path))
+    assert any(f.rule == "manifest.label_mismatch" for f in findings)
+
+
+def test_a_manifest_without_the_label_is_warned_not_silently_passed(tmp_path) -> None:
+    # A manifest written before the binding cannot check the label. Saying so is the difference
+    # between "checked" and "not checked but quiet" — the second is how the gap survived.
+    _write(tmp_path, _clean_trajectory("a"))
+    legacy = authenticity.manifest(tmp_path)
+    del legacy["trajectories"]["a"]["terminal_resolved"]  # type: ignore[index]
+    (tmp_path / authenticity.MANIFEST_NAME).write_text(json.dumps(legacy))
+    findings = authenticity.verify_manifest(tmp_path)
+    assert any(f.rule == "manifest.unbound_label" for f in findings)
+    assert errors(findings) == []  # a coverage gap is a WARN, not a corruption ERROR
+
+
+def test_layer1_passes_a_coherent_fabrication_and_the_module_says_so(tmp_path) -> None:
+    # The documented ceiling, pinned as behaviour so nobody cites this module as proof of
+    # genuineness: rewriting every step consistently and rehashing produces NO findings.
+    fabricated = make_trajectory(
+        [make_step(step_index=i, decision_index=i, success=True) for i in range(20)],
+        trajectory_id="fabricated",
+    )
+    _write(tmp_path, fabricated)
+    (tmp_path / authenticity.MANIFEST_NAME).write_text(json.dumps(authenticity.manifest(tmp_path)))
+    assert errors(authenticity.verify_manifest(tmp_path)) == []
+    assert "WHAT IT DOES NOT DETECT" in (authenticity.__doc__ or "") + _module_header()
+
+
+def _module_header() -> str:
+    """The comment block under the docstring, where this module states its ceiling."""
+    from pathlib import Path
+
+    return Path(authenticity.__file__).read_text(encoding="utf-8")
+
+
 def test_manifest_hash_mismatch_is_error(tmp_path) -> None:
     _write(tmp_path, _clean_trajectory("a"))
     man = authenticity.manifest(tmp_path)

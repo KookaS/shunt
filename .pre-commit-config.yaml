@@ -86,6 +86,17 @@ repos:
         entry: python tools/lint/check_plot_frame.py
         language: system
         types: [python]
+      # SH008 makes the "real-only embeddings" rule structural instead of prose:
+      # fastembed may be constructed ONLY in src/shunt/router/embedder.py (so the
+      # model name, cache dir, char clip, fingerprint and test wall cannot be
+      # bypassed), and proxy vectorizers (TF-IDF/hashing/count) are banned outside
+      # tests. Same always_run rationale as SH004-SH006. BLOCKING.
+      - id: sh008-embedder-isolation
+        name: SH008 real embeddings only (no raw fastembed, no proxy vectorizers)
+        entry: python tools/lint/check_embedder_isolation.py
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: validate-benchmark-config
         name: validate benchmark benchmark.yaml
         # Run as a module from the repo root (pre-commit's cwd) so `from benchmark

@@ -1,0 +1,112 @@
+# Secret-scanning config for Shunt.
+#
+# Gitleaks resolves this file automatically (precedence: --config, $GITLEAKS_CONFIG,
+# then <target>/.gitleaks.toml), so the pinned pre-commit hook picks it up with no
+# extra wiring.
+#
+# `useDefault = true` keeps the ENTIRE upstream ruleset. Nothing below removes,
+# relaxes, or reprioritises a rule; the only addition is one rule-scoped allowlist,
+# and it is deliberately narrow. Do not add a `[allowlist]` (global) block with
+# `paths` here: the global allowlist has no `condition` field, so it is OR-only and
+# a path entry there would silence EVERY rule for the whole file — the exact
+# blanket exemption that lets a real credential land unnoticed later.
+[extend]
+useDefault = true
+
+# `gate_key` (benchmark/runner/replay_admissibility.py) is the two-sided replay
+# admissibility gate's CACHE KEY: sha256 over a sorted JSON payload of the subject
+# (dataset revision, image ref, test command, test selectors, FAIL_TO_PASS /
+# PASS_TO_PASS) plus the instrument source digest. It is a content fingerprint
+# recomputable from public inputs, never a credential.
+#
+# It trips `generic-api-key` purely on the name: the rule keys off the substring
+# `key`, and a 64-char hex digest clears its 3.5 entropy floor. The sibling field
+# `content_sha256` in other artifacts does not fire, which is the tell that this is
+# a naming coincidence rather than a secret.
+#
+# The allowlist below is bound on THREE axes at once via `condition = "AND"`
+# (gitleaks evaluates AND as: every populated criterion must match), so it admits
+# this one known-safe shape and nothing else:
+#   1. paths       — only this one generated artifact
+#   2. regexTarget = "match" + the literal field name `gate_key`
+#   3. a bare lowercase-hex value, anchored at both ends (a sha256 digest, nothing else)
+# A real provider key fails (2) and (3); a 64-hex value under any other field name
+# fails (2); a `gate_key` in any other file fails (1). Verified by break-test: with
+# this config in place, OpenAI / AWS / Slack / GitHub-PAT keys and bare-hex
+# `private_key` / `twilio_auth_key` planted in this same file are all still reported,
+# and every default rule still fires (no rule is lost to `useDefault`).
+#
+# The Anthropic gap that used to be noted here is now closed by the rule at the bottom of this
+# file; it is an ADDITION to the upstream ruleset, unrelated to this exemption.
+#
+# Why the digest is `{10,64}"?$` rather than a flat `[0-9a-f]{64}"$`: gitleaks scans
+# a file in fixed 10,000-byte chunks (`chunkSize` in detect/detect.go) and matches
+# per chunk, so a boundary can land INSIDE an occurrence. This is not hypothetical —
+# a boundary at byte 60000 of this very file cut a digest to 37 chars:
+#   - tail cut: `gate_key": "<partial hex>` with no closing quote -> hence `"?$` and
+#     {10,64} ({10,...} because the upstream rule cannot emit a secret shorter than 10)
+# A tail cut keeps the full `gate_key` head, so the anchored name below still matches
+# it — and that is the common case (~54 of every 10000 byte-offsets per occurrence).
+# A flat {64}"$ would pass today and fail on the next regeneration, since regenerating
+# the artifact moves every offset.
+#
+# A HEAD cut is deliberately NOT accommodated. It leaves only a SUFFIX of the field
+# name (`ate_key`, `te_key`, `e_key`, `_key`), and a suffix DOES NOT IDENTIFY THE
+# FIELD: the identical truncation turns `private_key`, `api_key`, `secret_key` and
+# `signing_key` into those very same suffixes. Allowing them was measured to silence
+# a bare-hex `private_key` (cuts 7-10), `api_key` (cut 6), `secret_key` (cut 9) and
+# `signing_key` (cut 10) inside this path — a SILENT miss on exactly the field names
+# real credentials use. `ate_key` even matches priv-ATE_KEY. So the allowlist binds
+# the WHOLE field name and nothing less; a head-cut `gate_key` instead goes loudly
+# red (~4 of every 10000 offsets per occurrence), and a scanner that fails noisily on
+# a benign value is recoverable where one that passes silently on a credential is not.
+# This matters concretely rather than theoretically because `_raw_records`
+# deliberately carries through records this module cannot parse, so the file is NOT
+# guaranteed to contain only the writer's own schema.
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "sha256 admissibility-gate cache keys (not credentials) in the replay gate's generated record"
+  condition = "AND"
+  paths = ['''^benchmark/escalation/data/live/admissibility\.json$''']
+  regexTarget = "match"
+  regexes = ['''^gate_key": "[0-9a-f]{10,64}"?$''']
+
+# A GAP IN THE UPSTREAM RULESET, not a relaxation of it — the only rule here that ADDS coverage.
+# gitleaks v8.21.2 ships no Anthropic rule, and `generic-api-key` does not reach the shape either:
+# a planted `sk-ant-api03-…` and a planted `sk-ant-admin01-…` are BOTH reported by neither, so the
+# default config misses an Anthropic credential outright while catching the OpenAI key beside it
+# (measured, by planting all three and scanning). Shunt terminates `ANTHROPIC_BASE_URL` traffic and
+# holds Anthropic keys in the request path, so this is a live hole in the secure-by-default posture
+# rather than a hypothetical one.
+#
+# WHAT THE PATTERN BINDS, AND WHY IT IS NOT PINNED TO ONE FAMILY. Every documented Anthropic
+# credential is `sk-ant-` + a lowercase family + a two-digit version + `-` + a long body: `api03`
+# (API), `admin01` (Admin API), `oat01` / `sid01` (OAuth, session). Pinning the literal families —
+# or the exact 93-character body a later upstream rule settled on — would make this rule SILENTLY
+# miss the next family or a re-sized body, which is the failure mode the head-cut discussion above
+# rejects. So family and version are matched structurally and the body carries a floor, not a
+# length.
+#
+# THE VERSION SEGMENT IS REQUIRED ON PURPOSE. `sk-ant-` on its own already appears in this repo's
+# redaction and schema fixtures (`tests/proxy/test_redaction_coverage.py`,
+# `tests/escalation/test_schema.py`), which assemble deliberately fake tokens. Demanding
+# `<family><NN>-` before the body keeps them out BY CONSTRUCTION rather than by a length threshold
+# they happen to sit under today — the same reasoning that binds the `gate_key` allowlist to a
+# whole field name instead of a suffix.
+#
+# NO ENTROPY FLOOR, DELIBERATELY. A key-shaped placeholder with a low-entropy body
+# (`sk-ant-api03-XXXX…`) will fire. That is the intended direction, and it is this file's standing
+# trade: a scanner that fails noisily on a benign value is recoverable where one that passes
+# silently on a credential is not.
+#
+# The chunk-boundary caveat above applies here too and cannot be closed from a rule — a key cut
+# across a 10 000-byte boundary loses either its prefix or its body. The body floor is 24 rather
+# than the full ~95 so that a TAIL cut still fires; a head cut loses `sk-ant-` and is unmatchable,
+# exactly as a head-cut field name is.
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic key (sk-ant-<family><version>-…) — no such rule in the v8.21.2 default set"
+regex = '''sk-ant-[a-z]{2,12}[0-9]{2}-[A-Za-z0-9_-]{24,}'''
+keywords = ["sk-ant-"]

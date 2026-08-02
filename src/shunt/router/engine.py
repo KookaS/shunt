@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
+import re
 import secrets
 import threading
 from collections.abc import Callable
-from dataclasses import asdict
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Final, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     import numpy as np
@@ -105,6 +106,109 @@ def _void_exploration(provenance: dict[str, Any]) -> dict[str, Any]:
         "randomized": False,
     }
     return {**provenance, "escalation_exploration": voided}
+
+
+# Every field a persisted FailureEvent must carry to be restorable. `blocking` is required on
+# purpose: it is the gate `counts_as_failure` reads, and a payload that predates it cannot be
+# reconstructed — defaulting False would silently downgrade real capability failures to
+# non-counting on restart, and defaulting True would over-count the infra events the log also
+# holds. So a legacy payload is discarded (below), not guessed at.
+_FAILURE_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
+    {"decision_index", "dedup_key", "exit_code", "success", "confirmed", "blocking"}
+)
+
+
+def _failure_event_from_payload(raw: object) -> FailureEvent:
+    """Rebuild one persisted FailureEvent, coercing types and rejecting a foreign schema."""
+    # Extra keys are ignored (a forward-schema snapshot must not abort router boot); missing or
+    # un-coercible ones raise, and the caller degrades the whole log to empty.
+    if not isinstance(raw, dict):
+        raise TypeError(f"failure event is not an object: {type(raw).__name__}")
+    missing = _FAILURE_EVENT_FIELDS - raw.keys()
+    if missing:
+        raise ValueError(f"failure event missing field(s): {sorted(missing)}")
+    return FailureEvent(
+        decision_index=int(raw["decision_index"]),
+        dedup_key=str(raw["dedup_key"]),
+        exit_code=int(raw["exit_code"]),
+        success=bool(raw["success"]),
+        confirmed=bool(raw["confirmed"]),
+        blocking=bool(raw["blocking"]),
+    )
+
+
+def _restore_failure_log(raw_log: dict[str, Any]) -> dict[str, list[FailureEvent]]:
+    """Decode a persisted failure log; any malformed entry degrades the WHOLE log to empty."""
+    # All-or-nothing on purpose: a half-decoded window yields a wrong recurrence count, whereas an
+    # empty one only delays an escalation and self-heals within `stale_window` decisions. This
+    # path runs at router boot (proxy/server.py), so it must never raise.
+    try:
+        return {
+            str(key): [_failure_event_from_payload(e) for e in _as_list(events)]
+            for key, events in raw_log.items()
+        }
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            "escalation: persisted failure log is unreadable (%s) — starting with an empty "
+            "window; accrued recurrence counts are lost, escalation resumes from zero",
+            exc,
+        )
+        return {}
+
+
+def _as_list(events: object) -> list[Any]:
+    """The persisted per-task event list, or a TypeError the caller degrades on."""
+    if not isinstance(events, list):
+        raise TypeError(f"failure log entry is not a list: {type(events).__name__}")
+    return events
+
+
+# The escalation maps are keyed by THIS digest, never by the raw task key. The raw key is the
+# resolved work_dir — an operator path, which can embed a credential (`/home/a/sk-.../repo`) — and
+# `snapshot_escalation_state` serializes those keys verbatim into PLAINTEXT sqlite `router_state`.
+# A digest and not `redact_secrets`, for two reasons the redaction primitive cannot satisfy:
+#   * identity — a redacted key is a DIFFERENT string, so the restored entry would be unreachable
+#     from the live `_task_key()` and the accrued window would be silently lost on every restart;
+#   * collisions — the shape net fires on ordinary repo names (`api-gateway-service-v2` and `-v3`
+#     both reduce to `<redacted>`), so redacted keys would MERGE two repos' escalation state and
+#     escalate one repo on another's failures. That is a worse bug than the leak.
+# sha256 is stable across processes, so the snapshot still round-trips exactly. 16 hex chars
+# matches the repo's existing deterministic-token convention (`capture.coordinator._run_signature`).
+_STATE_KEY_LEN: Final[int] = 16
+_STATE_KEY_RE: Final[re.Pattern[str]] = re.compile(rf"[0-9a-f]{{{_STATE_KEY_LEN}}}")
+
+
+def task_state_key(task_key: str) -> str:
+    """The non-reversible digest the escalation state maps — and the snapshot — are keyed by."""
+    return hashlib.sha256(task_key.encode("utf-8")).hexdigest()[:_STATE_KEY_LEN]
+
+
+def _state_keyed(raw: dict[str, Any], field: str) -> dict[str, Any]:
+    """Keep only the entries stored under a real task-state key; drop anything else."""
+    # A foreign key is unreachable anyway (every lookup goes through `task_state_key`), and
+    # carrying one would re-serialize it — raw path, secret and all — on the NEXT snapshot. So a
+    # pre-digest blob is dropped here rather than laundered forward.
+    kept = {k: v for k, v in raw.items() if _STATE_KEY_RE.fullmatch(str(k))}
+    dropped = len(raw) - len(kept)
+    if dropped:
+        logger.warning(
+            "escalation: dropped %d %s entr(ies) not stored under a task-state key; that state "
+            "is unreachable and resumes from zero",
+            dropped,
+            field,
+        )
+    return kept
+
+
+def _restore_int_map(raw: dict[str, Any]) -> dict[str, int]:
+    """Coerce a persisted str→int counter map, dropping entries that will not coerce."""
+    out: dict[str, int] = {}
+    for key, value in raw.items():
+        try:
+            out[str(key)] = int(value)
+        except (TypeError, ValueError):
+            logger.warning("escalation: dropping uncoercible decision_index for %r", key)
+    return out
 
 
 class RouterEngine:
@@ -504,8 +608,13 @@ class RouterEngine:
             return {}
         with self._lock:
             return {
+                # `persistable()`, not `asdict()`: this snapshot lands in PLAINTEXT sqlite
+                # `router_state`, and a dedup_key is a failing-check id that can embed a secret.
+                # The KEYS are safe for the same reason by construction — they are already
+                # `task_state_key` digests, never the operator work_dir (see that helper).
                 "failure_log": {
-                    key: [asdict(e) for e in events] for key, events in self._failure_log.items()
+                    key: [e.persistable() for e in events]
+                    for key, events in self._failure_log.items()
                 },
                 "decision_index": dict(self._task_decision_index),
                 "effort_arm": dict(self._task_effort_arm),
@@ -520,13 +629,15 @@ class RouterEngine:
         raw_effort = state.get("effort_arm")
         with self._lock:
             if isinstance(raw_log, dict):
-                self._failure_log = {
-                    key: [FailureEvent(**e) for e in events] for key, events in raw_log.items()
-                }
+                self._failure_log = _restore_failure_log(_state_keyed(raw_log, "failure_log"))
             if isinstance(raw_index, dict):
-                self._task_decision_index = {k: int(v) for k, v in raw_index.items()}
+                self._task_decision_index = _restore_int_map(
+                    _state_keyed(raw_index, "decision_index")
+                )
             if isinstance(raw_effort, dict):
-                self._task_effort_arm = {str(k): str(v) for k, v in raw_effort.items()}
+                self._task_effort_arm = {
+                    str(k): str(v) for k, v in _state_keyed(raw_effort, "effort_arm").items()
+                }
 
     def _task_key(self, session_id: str) -> str | None:
         """The escalation task identity — the resolved REPO (work_dir), or None to skip."""
@@ -541,7 +652,9 @@ class RouterEngine:
         if session is None:
             return None
         key = self._task_key_resolver(session)
-        return key if isinstance(key, str) and key else None
+        # Digested at ingress, so the raw work_dir never enters engine state and cannot reach the
+        # plaintext snapshot. `record_outcome` digests the same raw key, so both sides still agree.
+        return task_state_key(key) if isinstance(key, str) and key else None
 
     def _finalize_decision(
         self, session_id: str, model_name: str, reason: str, provenance: dict[str, Any]
@@ -781,6 +894,9 @@ class RouterEngine:
         """Append a verified failure (or clear on success) for *task_key*'s escalation log."""
         if self._escalation is None or not self._escalation.enabled or task_key is None:
             return
+        # The capture side hands over the RAW work_dir; digest it here so this path keys the same
+        # state as decide()'s `_task_key`, and so no operator path reaches the plaintext snapshot.
+        task_key = task_state_key(task_key)
         with self._lock:
             if success:
                 # A verified suite pass retires the task's failures AND its effort escalation —

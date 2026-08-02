@@ -20,6 +20,31 @@ every off-policy estimator needs fails and the estimate is UNDEFINED, not merely
 # NOT a fitted model: this module is instrumentation, and a trained outcome model is a
 # separate decision with its own validation burden. MAGIC-style blending toward a richer model
 # component is the next rung, not this module's job.
+#
+# THREE THINGS THIS MODULE LEARNED THE HARD WAY, all of which read as certainty when wrong:
+#
+#   THE CLUSTER IS THE SESSION, NOT THE CHECKPOINT. The reward is a SESSION-level outcome — every
+#   decision inside one session shares one verified grade — so a session is one observation. This
+#   clustered on `checkpoint_id` (the failing-test id) instead, which both SPLITS one session
+#   across clusters and MERGES different sessions that happened to hit the same test. A probe of
+#   60 decisions from a SINGLE session touching 5 keys cleared the 5-cluster floor and reported
+#   `identified` off what is really one observation. The unit is now `session_id`, carried
+#   through from `OutcomeStore.escalation_exploration_rows`.
+#
+#   A ZERO-WIDTH INTERVAL IS NOT A CERTAIN ONE. Probes returned dr=0.0 ci=(0.0, 0.0) and dr=1.0
+#   ci=(1.0, 1.0) with `identified`. That is the exact failure `_MIN_CLUSTERS` exists to prevent,
+#   dressed as its opposite: every bootstrap resample landed on the same value because the rows
+#   carry no variation, which is NO evidence, not perfect evidence. A degenerate interval now
+#   refuses.
+#
+#   `qhat` IS CROSS-FITTED. Fitting the per-arm means on the same rows the DR correction then
+#   scores makes the residual optimistically small and the interval too tight. `qhat` for a row is
+#   now fitted on the OTHER cluster folds only.
+#
+# WHAT IS STILL NOT ANSWERED BY V ALONE. V(always_escalate) is a level, not a comparison: "does
+# escalating help" is V(escalate) - V(hold). The contrast against the target's complement is
+# therefore reported alongside every estimate (`contrast_*`), paired on the same rows and
+# bootstrapped over the same clusters. Read the contrast, not the level.
 
 from __future__ import annotations
 
@@ -53,6 +78,9 @@ _MIN_PER_ARM: Final[int] = 5
 _MIN_CLUSTERS: Final[int] = 5
 _MIN_PROPENSITY: Final[float] = 0.01
 _PROPENSITY_TOLERANCE: Final[float] = 1e-9
+# Cross-fitting folds for `qhat`. Five, so it can never demand more clusters than `_MIN_CLUSTERS`
+# already requires — a fold with no rows of an arm falls back to that arm's global mean.
+_N_FOLDS: Final[int] = 5
 
 
 @dataclass(frozen=True)
@@ -65,6 +93,12 @@ class ExplorationLogRow:
     reward: float | None
     randomized: bool
     features: dict[str, float] = field(default_factory=dict)
+    # The correlated unit. The reward is the SESSION's verified outcome, so every decision in one
+    # session is one observation; `checkpoint_id` (a failing-test id) is neither necessary nor
+    # sufficient for independence. Empty means the log carried no session — an offline fixture,
+    # never `OutcomeStore` output — and `_cluster_key` then degrades to the checkpoint rather than
+    # collapsing every such row into one giant cluster.
+    session_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -81,18 +115,37 @@ class PolicyValueEstimate:
     ci_low: float | None = None
     ci_high: float | None = None
     max_weight: float = 0.0
-    n_clusters: int = 0  # the bootstrap unit — correlated decisions share one
+    n_clusters: int = 0  # the bootstrap unit — one SESSION, not one checkpoint
     n_clipped: int = 0  # weights the clip actually bound (max_weight alone cannot say)
+    # V(target) - V(complement of target): the decision question. A level cannot answer it, and
+    # reporting only the level is what let "escalation helps" be inferred from a number that never
+    # compared anything. Paired per decision, bootstrapped over the same clusters.
+    contrast_estimate: float | None = None
+    contrast_ci_low: float | None = None
+    contrast_ci_high: float | None = None
 
     @property
     def identified(self) -> bool:
         return self.status == IDENTIFIED
+
+    @property
+    def contrast_excludes_zero(self) -> bool:
+        """True iff the escalate-minus-hold interval sits wholly on one side of zero."""
+        if self.contrast_ci_low is None or self.contrast_ci_high is None:
+            return False
+        return self.contrast_ci_low > 0.0 or self.contrast_ci_high < 0.0
 
 
 def always_escalate(row: ExplorationLogRow) -> float:
     """Target policy: escalate at every flagged checkpoint (P(escalate) = 1)."""
     del row
     return 1.0
+
+
+def never_escalate(row: ExplorationLogRow) -> float:
+    """The hold-everything comparator — the other half of "does escalating help"."""
+    del row
+    return 0.0
 
 
 def rows_from_records(records: Iterable[Mapping[str, object]]) -> list[ExplorationLogRow]:
@@ -149,6 +202,9 @@ def _row_from_record(record: Mapping[str, object]) -> ExplorationLogRow:
         reward=_reward_of(record),
         randomized=_is_randomized(propensity, _as_float(record.get("epsilon"))),
         features=features,
+        # `OutcomeStore._exploration_row` has always returned this; the estimator dropped it on
+        # the floor and then clustered on the wrong thing. It is the reward's own unit.
+        session_id=str(record.get("session_id", "")),
     )
 
 
@@ -173,11 +229,12 @@ def _overlap_failure(rows: Sequence[ExplorationLogRow], min_per_arm: int) -> str
             f"too little evidence: {escalated} escalate / {held} hold decisions, "
             f"below the {min_per_arm}-per-arm floor — arm existence is not identification"
         )
-    n_clusters = len({r.checkpoint_id for r in rows})
+    n_clusters = len({_cluster_key(r) for r in rows})
     if n_clusters < _MIN_CLUSTERS:
         return (
-            f"too few independent checkpoints: {n_clusters} — decisions on one checkpoint are "
-            f"correlated, so this is not {len(rows)} observations and no interval is honest"
+            f"too few independent sessions: {n_clusters} — every decision in one session shares "
+            f"that session's verified outcome, so this is not {len(rows)} observations and no "
+            f"interval is honest"
         )
     weakest = min(r.propensity for r in rows)
     if weakest < _MIN_PROPENSITY:
@@ -186,6 +243,11 @@ def _overlap_failure(rows: Sequence[ExplorationLogRow], min_per_arm: int) -> str
             f"the {_MIN_PROPENSITY} floor — its inverse would dominate every other term"
         )
     return None
+
+
+def _cluster_key(row: ExplorationLogRow) -> str:
+    """The row's independent unit: its session, or its checkpoint on a log that carries none."""
+    return row.session_id or row.checkpoint_id
 
 
 def _direct_method(rows: Sequence[ExplorationLogRow]) -> dict[bool, float]:
@@ -197,17 +259,34 @@ def _direct_method(rows: Sequence[ExplorationLogRow]) -> dict[bool, float]:
     return means
 
 
+def _crossfit_qhat(rows: Sequence[ExplorationLogRow]) -> list[dict[bool, float]]:
+    """Each row's qhat, fitted on the OTHER cluster folds — never on the row's own fold."""
+    # In-sample fitting makes the DR residual `r_i - qhat(x_i, a_i)` optimistically small: the
+    # mean it is measured against was computed FROM r_i. The bias is small here (qhat is two
+    # scalars) but it is real and it always points the same way — a tighter interval — so it is
+    # removed rather than caveated. Folds are assigned by CLUSTER, not by row, or the row's own
+    # session would leak into its training half through its siblings.
+    keys = sorted({_cluster_key(r) for r in rows})
+    fold_of_key = {key: index % _N_FOLDS for index, key in enumerate(keys)}
+    folds = [fold_of_key[_cluster_key(r)] for r in rows]
+    fitted = {
+        fold: _direct_method([r for r, f in zip(rows, folds, strict=True) if f != fold])
+        for fold in set(folds)
+    }
+    return [fitted[f] for f in folds]
+
+
 def _dr_terms(
     rows: Sequence[ExplorationLogRow],
     target: Callable[[ExplorationLogRow], float],
     weight_clip: float,
 ) -> tuple[list[float], float, int]:
     """The per-decision DR contributions, the largest weight used, and how many were clipped."""
-    qhat = _direct_method(rows)
+    qhats = _crossfit_qhat(rows)
     terms: list[float] = []
     max_weight = 0.0
     n_clipped = 0
-    for row in rows:
+    for row, qhat in zip(rows, qhats, strict=True):
         p_escalate = min(max(target(row), 0.0), 1.0)
         baseline = p_escalate * qhat[True] + (1.0 - p_escalate) * qhat[False]
         target_prob = p_escalate if row.escalated else 1.0 - p_escalate
@@ -221,10 +300,10 @@ def _dr_terms(
 
 
 def _clusters(rows: Sequence[ExplorationLogRow], terms: Sequence[float]) -> list[list[float]]:
-    """Group DR terms by checkpoint — the correlated unit, and so the bootstrap unit."""
+    """Group DR terms by SESSION — the correlated unit, and so the bootstrap unit."""
     grouped: dict[str, list[float]] = {}
     for row, term in zip(rows, terms, strict=True):
-        grouped.setdefault(row.checkpoint_id, []).append(term)
+        grouped.setdefault(_cluster_key(row), []).append(term)
     return list(grouped.values())
 
 
@@ -266,6 +345,23 @@ def estimate_policy_value(
     terms, max_weight, n_clipped = _dr_terms(usable, target, weight_clip)
     clusters = _clusters(usable, terms)
     low, high = _bootstrap_ci(clusters, bootstrap_draws, bootstrap_seed)
+    if high <= low:
+        # Every resample landed on the same number. That is no evidence, not perfect evidence, and
+        # printing (0.0, 0.0) beside `identified` reads as the certainty this module exists to
+        # refuse. Measured on probe logs returning dr=0.0 ci=(0.0, 0.0) and dr=1.0 ci=(1.0, 1.0).
+        return PolicyValueEstimate(
+            status=NOT_IDENTIFIED,
+            reason=(
+                f"degenerate interval: {len(clusters)} clusters produced a zero-width "
+                f"{int(_CI_MASS * 100)}% bootstrap band at {low:.4f} — the rows carry no "
+                "variation to resample, so this is no evidence rather than a certain value"
+            ),
+            n_clusters=len(clusters),
+            **counts,
+        )
+    contrast, contrast_low, contrast_high = _contrast(
+        usable, target, weight_clip, bootstrap_draws, bootstrap_seed
+    )
     return PolicyValueEstimate(
         status=IDENTIFIED,
         reason=f"both arms realized under logged propensities ({int(_CI_MASS * 100)}% interval)",
@@ -275,8 +371,30 @@ def estimate_policy_value(
         max_weight=max_weight,
         n_clusters=len(clusters),
         n_clipped=n_clipped,
+        contrast_estimate=contrast,
+        contrast_ci_low=contrast_low,
+        contrast_ci_high=contrast_high,
         **counts,
     )
+
+
+def _contrast(
+    rows: Sequence[ExplorationLogRow],
+    target: Callable[[ExplorationLogRow], float],
+    weight_clip: float,
+    bootstrap_draws: int,
+    bootstrap_seed: int,
+) -> tuple[float, float, float]:
+    """V(target) - V(its complement), paired per decision, bootstrapped over the clusters."""
+    # The level V(always_escalate) cannot answer "does escalation help" — that needs a comparison,
+    # and a reader given only a level will supply the missing comparator themselves (usually zero,
+    # which is not the alternative). The difference is taken PER DECISION on the same rows, so the
+    # bootstrap sees the variance of the difference rather than the sum of two variances.
+    target_terms, _, _ = _dr_terms(rows, target, weight_clip)
+    hold_terms, _, _ = _dr_terms(rows, lambda row: 1.0 - target(row), weight_clip)
+    diffs = [t - h for t, h in zip(target_terms, hold_terms, strict=True)]
+    low, high = _bootstrap_ci(_clusters(rows, diffs), bootstrap_draws, bootstrap_seed)
+    return statistics.fmean(diffs), low, high
 
 
 __all__ = [
@@ -286,5 +404,6 @@ __all__ = [
     "PolicyValueEstimate",
     "always_escalate",
     "estimate_policy_value",
+    "never_escalate",
     "rows_from_records",
 ]

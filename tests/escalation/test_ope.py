@@ -300,6 +300,119 @@ def test_the_interval_is_bootstrapped_over_clusters_not_correlated_decisions() -
     assert (clustered.ci_high - clustered.ci_low) > 2 * (unclustered.ci_high - unclustered.ci_low)
 
 
+def test_one_session_across_many_checkpoints_is_not_five_observations() -> None:
+    # The clustering probe that exposed the wrong unit: 60 decisions from ONE session touching 5
+    # failing-test ids cleared the 5-cluster floor and reported `identified`. The reward is the
+    # SESSION's verified outcome, so all 60 share one grade — that is one observation, not five.
+    rng = random.Random(11)
+    rows = [
+        ExplorationLogRow(
+            checkpoint_id=f"pkg::test_{i % 5}",
+            escalated=rng.random() >= 0.3,
+            propensity=0.7,
+            reward=1.0,
+            randomized=True,
+            features={},
+            session_id="one-session",
+        )
+        for i in range(60)
+    ]
+    result = estimate_policy_value(rows, always_escalate)
+    assert result.status == NOT_IDENTIFIED
+    assert "sessions" in result.reason
+    assert result.dr_estimate is None
+
+
+def test_the_cluster_unit_is_the_session_not_the_checkpoint() -> None:
+    # Two sessions that happen to hit the SAME failing test are two observations, and one session
+    # that hits many tests is still one. Clustering on checkpoint_id got both backwards.
+    rows = [
+        ExplorationLogRow(
+            checkpoint_id="pkg::shared",
+            escalated=i % 2 == 0,
+            propensity=0.7 if i % 2 == 0 else 0.3,
+            reward=float(i % 3 == 0),
+            randomized=True,
+            features={},
+            session_id=f"s{i // 4}",
+        )
+        for i in range(80)
+    ]
+    result = estimate_policy_value(rows, always_escalate)
+    assert result.n_clusters == 20  # 80 decisions / 4 per session, NOT 1 shared checkpoint
+
+
+def test_a_zero_width_interval_is_refused_rather_than_reported_as_certainty() -> None:
+    # dr=1.0 with ci=(1.0, 1.0) used to print beside `identified`. Every resample landing on the
+    # same value is NO evidence — the rows carry no variation — not perfect evidence.
+    rows = [
+        ExplorationLogRow(
+            checkpoint_id=f"c{i}",
+            escalated=i % 2 == 0,
+            propensity=0.5,
+            reward=1.0,  # every reward identical -> every bootstrap draw identical
+            randomized=True,
+            features={},
+            session_id=f"s{i}",
+        )
+        for i in range(40)
+    ]
+    result = estimate_policy_value(rows, always_escalate)
+    assert result.status == NOT_IDENTIFIED
+    assert "degenerate interval" in result.reason
+    assert result.dr_estimate is None
+    assert result.ci_low is None and result.ci_high is None
+
+
+def test_qhat_is_cross_fitted_so_a_row_never_scores_against_its_own_mean() -> None:
+    from benchmark.escalation.ope import _crossfit_qhat, _direct_method
+
+    # One session carries the only successes. Fitted in-sample, its qhat[True] would be dragged
+    # up by its own rewards; cross-fitted, its fold sees only the other sessions' zeros.
+    rows = [
+        ExplorationLogRow(f"c{i}", True, 0.7, float(i < 10), True, {}, f"s{i // 10}")
+        for i in range(50)
+    ]
+    in_sample = _direct_method(rows)
+    fitted = _crossfit_qhat(rows)
+    assert in_sample[True] == pytest.approx(0.2)
+    assert fitted[0][True] == pytest.approx(0.0)  # row 0's own session is held out
+
+
+def test_the_contrast_answers_does_escalating_help_not_just_what_is_v() -> None:
+    # V(always_escalate) alone is a level. The planted log pays 0.7 for escalating and 0.3 for
+    # holding, so the contrast must recover ~+0.4 with an interval that excludes zero.
+    result = estimate_policy_value(_randomized_log(n=3000), always_escalate)
+    assert result.contrast_estimate is not None
+    assert result.contrast_estimate == pytest.approx(0.4, abs=0.08)
+    assert result.contrast_excludes_zero
+
+
+def test_a_refused_estimate_reports_no_contrast_either() -> None:
+    # The refusal must not leak a comparison the same logs cannot support.
+    rows = [_row(escalated=True, propensity=1.0, reward=1.0, randomized=False) for _ in range(50)]
+    result = estimate_policy_value(rows, always_escalate)
+    assert result.status == NOT_IDENTIFIED
+    assert result.contrast_estimate is None
+    assert not result.contrast_excludes_zero
+
+
+def test_rows_from_records_carries_the_session_id_through() -> None:
+    rows = rows_from_records(
+        [
+            {
+                "session_id": "sess-1",
+                "checkpoint_id": "pkg::t",
+                "action": "hold",
+                "propensity": 0.3,
+                "epsilon": 0.3,
+                "outcome": "failure",
+            }
+        ]
+    )
+    assert rows[0].session_id == "sess-1"
+
+
 def test_clipping_is_reported_when_it_actually_binds() -> None:
     rows = _randomized_log(epsilon=0.02, n=800, seed=3)
     result = estimate_policy_value(rows, lambda row: 0.0, weight_clip=5.0)

@@ -27,6 +27,7 @@ import matplotlib
 from benchmark import plot_frame
 from benchmark.escalation import (
     datasets,
+    deployability,
     features,
     metrics,
     plots,
@@ -35,6 +36,10 @@ from benchmark.escalation import (
     replay,
 )
 from benchmark.escalation.authenticity import errors, verify_trajectory
+
+# The class is imported directly because `EvalReport.deployability` is the field name a reader
+# looks for in the JSON, and a field cannot be annotated with the module it shadows.
+from benchmark.escalation.deployability import Cadence, Deployability
 from benchmark.escalation.ope import (
     PolicyValueEstimate,
     estimate_policy_value,
@@ -42,6 +47,7 @@ from benchmark.escalation.ope import (
 )
 from benchmark.escalation.schema import Trajectory, load_jsonl
 from benchmark.plot_frame import Annotations, FigureSpec
+from shunt.router.policy import load_router_policy, packaged_policy_path
 
 matplotlib.use("Agg")
 
@@ -59,9 +65,26 @@ _DPI: Final[int] = 150
 _STATUS_OK = "OK"
 _STATUS_INSUFFICIENT = "INSUFFICIENT_DATA"
 _STATUS_NO_SKILL = "NO_SKILL"
+# A corpus that fails its own Layer-1 authenticity recompute is not a corpus with a weak result;
+# it is a corpus whose numbers describe something other than what the harness recorded. It gates
+# ahead of every skill verdict.
+_STATUS_UNVERIFIED = "AUTHENTICITY_FAILED"
+
+
+def _shipped_escalation() -> tuple[int, int, str]:
+    """The escalation knobs the product actually ships, read from the PACKAGED router.yaml."""
+    # Read, never restated. A literal here is a second source of truth that drifts silently: this
+    # module claimed `escalate_after_n=2` was "the shipped configuration" while saying nothing
+    # about `stale_window`, and the swept grid pinned 5 against the shipped 10. The packaged path
+    # is used explicitly rather than `load_router_policy()`, whose lookup would prefer a local
+    # $SHUNT_CONFIG_DIR override — the claim is about what SHIPS, not what this box runs.
+    escalation = load_router_policy(packaged_policy_path()).escalation
+    return escalation.escalate_after_n, escalation.stale_window, escalation.ladder
+
+
 # The configuration the product ships; the sweep must report it even when another cell scores
 # better, so a quiet default change can never hide inside an "argmax" line.
-SHIPPED_ESCALATE_AFTER_N: Final[int] = 2
+SHIPPED_ESCALATE_AFTER_N, SHIPPED_STALE_WINDOW, SHIPPED_LADDER = _shipped_escalation()
 
 
 @dataclass(frozen=True)
@@ -77,6 +100,10 @@ class EvalReport:
     policy_cells: list[PolicyCell]
     depth_reports: list[DepthReport]
     coverage: list[ModelCoverage]
+    # REQUIRED, deliberately not defaulted: a skill verdict says whether a signal is there, and
+    # this says whether that signal is one production could act on. A default would let a report
+    # be built — and its numbers quoted — without anyone stating which of the two it is.
+    deployability: Deployability
     notes: list[str] = field(default_factory=list)
     # The off-policy escalation-value estimate, present only when a real exploration log was
     # supplied. None means "not asked", NOT "no effect" — the two must stay distinguishable.
@@ -85,8 +112,15 @@ class EvalReport:
     @property
     def headline_cell(self) -> PolicyCell | None:
         """The shipped configuration — the one the product actually runs, never an argmax."""
-        shipped = [c for c in self.policy_cells if c.escalate_after_n == SHIPPED_ESCALATE_AFTER_N]
-        return shipped[0] if shipped else (self.policy_cells[0] if self.policy_cells else None)
+        # Matched on ALL THREE knobs. Matching `escalate_after_n` alone made the claim false in
+        # general: the swept grid pins stale_window=5 where the product ships 10, and the two are
+        # not interchangeable — `_in_window` admits at most `stale_window` events, so at n=20 with
+        # stale_window=10 the policy can NEVER fire. That they scored alike on this corpus is a
+        # property of this corpus, not of the knobs. There is no fallback to `policy_cells[0]`
+        # either: labelling an arbitrary cell "shipped" is worse than reporting none, and
+        # `evaluate` guarantees the shipped point is in the grid so the None branch means a
+        # hand-built report, not a routine run.
+        return next((c for c in self.policy_cells if _is_shipped(c)), None)
 
     @property
     def best_depth(self) -> DepthReport | None:
@@ -98,6 +132,9 @@ class EvalReport:
         return {
             "status": self.status,
             "reason": self.reason,
+            # Beside `status`, not buried: `status` says whether a signal was found, this says
+            # whether the thing that found it is a policy production could run.
+            "deployability": self.deployability.to_dict(),
             "n_trajectories": self.n_trajectories,
             "n_stamped": self.n_stamped,
             "n_multistep": self.n_multistep,
@@ -113,20 +150,60 @@ class EvalReport:
         }
 
 
-def _status(report_cells: Sequence[PolicyCell], depths: Sequence[DepthReport]) -> tuple[str, str]:
-    """Gate on the permutation null: only a result outside its own null band may report OK."""
+def _is_shipped(cell: PolicyCell) -> bool:
+    """Whether a swept cell IS the shipped configuration, on every knob the product sets."""
+    return (
+        cell.escalate_after_n == SHIPPED_ESCALATE_AFTER_N
+        and cell.stale_window == SHIPPED_STALE_WINDOW
+        and cell.ladder == SHIPPED_LADDER
+    )
+
+
+def shipped_grid_point() -> replay.GridPoint:
+    """The swept cell that IS the shipped configuration."""
+    return replay.GridPoint(SHIPPED_ESCALATE_AFTER_N, SHIPPED_STALE_WINDOW, SHIPPED_LADDER)
+
+
+def _with_shipped(grid: Sequence[replay.GridPoint]) -> list[replay.GridPoint]:
+    """The requested grid, guaranteed to contain the shipped configuration."""
+    # This is what makes the mismatch impossible rather than merely detected: if the registered
+    # grid pins knobs that differ from what ships, the shipped cell is APPENDED and measured too.
+    # The alternative — reporting no headline — hides the shipped default from its own report.
+    point = shipped_grid_point()
+    return list(grid) if point in grid else [*grid, point]
+
+
+def _status(
+    report_cells: Sequence[PolicyCell], depths: Sequence[DepthReport], authenticity_errors: int = 0
+) -> tuple[str, str]:
+    """Gate on Layer-1 authenticity first, then on the permutation null."""
+    if authenticity_errors:
+        # This was computed and then never read: a corpus with hash or derived-field mismatches
+        # still printed OK/NO_SKILL, so the one gate that says "these rows are not what was
+        # recorded" could not affect the verdict it was collected for.
+        return (
+            _STATUS_UNVERIFIED,
+            f"{authenticity_errors} Layer-1 authenticity error(s) on the corpus — recomputed "
+            "content hashes or derived fields disagree with what the files declare. No skill "
+            "verdict is issued off rows that fail their own integrity recompute.",
+        )
     if not report_cells and not depths:
         return _STATUS_INSUFFICIENT, "no trajectory reached a scorable depth — nothing to measure"
+    # This "any depth clears" rule is WHY the nulls read below are the family-wise ones: taking the
+    # best of three depths at a nominal 2.5% each is a max over three tests. `gate_null_incremental`
+    # is that max's distribution, so its 97.5th percentile is the family-wise critical value and its
+    # p-value is already adjusted. See `prefix_eval`'s module header.
     skilled = [d for d in depths if d.has_skill]
     if skilled:
         best = max(skilled, key=lambda d: d.incremental_auroc)
         return (
             _STATUS_OK,
-            f"prefix risk model clears its permutation null at depth {best.depth}: "
+            f"prefix risk model clears its family-wise permutation null at depth {best.depth}: "
             f"incremental AUROC {best.incremental_auroc:+.3f} over the t=0 task prior "
             f"floored at chance "
-            f"(null 97.5th pct {best.null_incremental.ci_high:+.3f}, "
-            f"p={best.null_incremental.p_value:.3f})",
+            f"(family-wise null 97.5th pct {best.gate_null_incremental.ci_high:+.3f}, "
+            f"adjusted p={best.gate_null_incremental.p_value:.3f} "
+            f"over {len(depths)} reported depth(s))",
         )
     return _STATUS_NO_SKILL, _no_skill_reason(depths)
 
@@ -156,19 +233,26 @@ def _skill_conditions(depth: DepthReport) -> list[tuple[bool, str]]:
     """Every `DepthReport.has_skill` condition, paired with the clause reporting its failure."""
     # Built as one list so the count in the message and the clauses cannot drift apart; keep this
     # in lockstep with `has_skill` — reporting a condition nobody checks is the bug this replaced.
+    # The two null clauses quote `gate_null_*` — the FAMILY-WISE band the gate actually applies —
+    # so the sentence and the verdict cannot disagree. Quoting the uncorrected per-depth null here
+    # while gating on the corrected one is the "reported a condition nobody checked" defect above,
+    # wearing a different hat.
     return [
         (len(set(depth.scores)) > 1, "the prefix score is constant, so it ranks nothing"),
         (
-            depth.null_prefix.beats_null,
-            f"the prefix-only score does not clear its own permutation null "
-            f"({depth.auroc_prefix:.3f}, null 95% [{depth.null_prefix.ci_low:.3f}, "
-            f"{depth.null_prefix.ci_high:.3f}], p={depth.null_prefix.p_value:.3f})",
+            depth.gate_null_prefix.beats_null,
+            f"the prefix-only score does not clear its family-wise permutation null "
+            f"({depth.auroc_prefix:.3f}, null 95% [{depth.gate_null_prefix.ci_low:.3f}, "
+            f"{depth.gate_null_prefix.ci_high:.3f}], adjusted p="
+            f"{depth.gate_null_prefix.p_value:.3f})",
         ),
         (
-            depth.null_incremental.beats_null,
-            f"the incremental AUROC does not clear its permutation null "
-            f"({depth.incremental_auroc:+.3f}, null 95% [{depth.null_incremental.ci_low:+.3f}, "
-            f"{depth.null_incremental.ci_high:+.3f}], p={depth.null_incremental.p_value:.3f})",
+            depth.gate_null_incremental.beats_null,
+            f"the incremental AUROC does not clear its family-wise permutation null "
+            f"({depth.incremental_auroc:+.3f}, null 95% "
+            f"[{depth.gate_null_incremental.ci_low:+.3f}, "
+            f"{depth.gate_null_incremental.ci_high:+.3f}], adjusted p="
+            f"{depth.gate_null_incremental.p_value:.3f})",
         ),
         (
             depth.ci_incremental[0] > 0.0,
@@ -180,14 +264,15 @@ def _skill_conditions(depth: DepthReport) -> list[tuple[bool, str]]:
 
 def _cleared_increment_caveat(depth: DepthReport) -> str:
     """The case a reader will misread: the increment clears its null, the gate still refuses."""
-    if not depth.null_incremental.beats_null:
+    null = depth.gate_null_incremental
+    if not null.beats_null:
         return ""
     cleared = (
-        f" — the incremental AUROC DOES clear its own null ({depth.incremental_auroc:+.3f}, "
-        f"null 95% [{depth.null_incremental.ci_low:+.3f}, {depth.null_incremental.ci_high:+.3f}], "
-        f"p={depth.null_incremental.p_value:.3f}), but "
+        f" — the incremental AUROC DOES clear its own family-wise null "
+        f"({depth.incremental_auroc:+.3f}, null 95% [{null.ci_low:+.3f}, {null.ci_high:+.3f}], "
+        f"adjusted p={null.p_value:.3f}), but "
     )
-    if not depth.null_prefix.beats_null:
+    if not depth.gate_null_prefix.beats_null:
         return cleared + (
             "a prefix score that cannot clear its own null carries no discrimination to add, so "
             "that clearance reflects the t=0 prior it is measured against, not prefix evidence"
@@ -207,21 +292,28 @@ def evaluate(
     exploration_rows: Sequence[Mapping[str, object]] | None = None,
 ) -> EvalReport:
     """Score the shipped policy and the prefix risk model, then gate on the permutation null."""
+    # `stamped` is still computed here for the census (`n_stamped`), the policy half and the
+    # coverage note. `prefix_eval` re-applies the same filter inside `corpus_census` — that is not
+    # redundancy to be tidied away: the gate must live where a direct `evaluate_depth` caller
+    # cannot skip it, and filtering an already-filtered corpus is idempotent, so this path's
+    # numbers are unchanged (`n_excluded_unstamped` reads 0 here and 8 on the raw 799).
     stamped = [t for t in trajectories if features.is_stamped(t)]
     multistep = [t for t in trajectories if not datasets.is_degenerate(t)]
-    policy_cells = policy_eval.evaluate(stamped, list(grid), n_permutations=n_permutations)
+    policy_cells = policy_eval.evaluate(stamped, _with_shipped(grid), n_permutations=n_permutations)
     depth_reports = prefix_eval.evaluate(stamped, depths, n_permutations=n_permutations)
-    status, reason = _status(policy_cells, depth_reports)
+    authenticity_errors = sum(len(errors(verify_trajectory(t))) for t in trajectories)
+    status, reason = _status(policy_cells, depth_reports, authenticity_errors)
     return EvalReport(
         status=status,
         reason=reason,
         n_trajectories=len(trajectories),
         n_stamped=len(stamped),
         n_multistep=len(multistep),
-        authenticity_errors=sum(len(errors(verify_trajectory(t))) for t in trajectories),
+        authenticity_errors=authenticity_errors,
         policy_cells=policy_cells,
         depth_reports=depth_reports,
         coverage=features.model_coverage(trajectories),
+        deployability=_deployability(stamped),
         notes=_corpus_notes(trajectories, stamped, policy_cells),
         # Only ever computed from a REAL exploration log. Trajectories carry no propensity
         # (the committable whitelist has no `action`/`propensity`), so deriving rows from them
@@ -232,6 +324,20 @@ def evaluate(
             else estimate_policy_value(rows_from_records(exploration_rows))
         ),
     )
+
+
+def _deployability(stamped: Sequence[Trajectory]) -> Deployability:
+    """Gate this run's scored feature set against what a production decision actually holds."""
+    # `unfilled` is MEASURED over the corpus that was actually scored, never assumed: a field
+    # production has is only a mismatch if no record fills it, and that is a property of the
+    # corpus on disk, which a rebuild can change.
+    unfilled = deployability.unfilled_context_fields(
+        step for traj in stamped for step in features.scorable_steps(traj)
+    )
+    # `Cadence.STEP`: both halves score a decision point at a step boundary — the policy replay
+    # walks every step, and the prefix model reads a prefix at step depth d. Production decides
+    # once per session, so this is the cadence gap, declared rather than inferred.
+    return deployability.assess(features.FEATURE_NAMES, Cadence.STEP, unfilled=unfilled)
 
 
 def _corpus_notes(
@@ -255,15 +361,20 @@ def _corpus_notes(
 
 def _default_gap_note(cells: Sequence[PolicyCell]) -> list[str]:
     """Flag — never silently apply — a swept configuration that beats the shipped default."""
-    shipped = next((c for c in cells if c.escalate_after_n == SHIPPED_ESCALATE_AFTER_N), None)
-    if shipped is None or not cells:
+    shipped = next((c for c in cells if _is_shipped(c)), None)
+    # A cell that never fired has NO precision, so it is excluded from the ranking rather than
+    # ranked at a fabricated 0.0 (see `PolicyCell.precision`).
+    scored = [c for c in cells if c.precision is not None]
+    if shipped is None or shipped.precision is None or not scored:
         return []
-    best = max(cells, key=lambda c: c.precision)
-    if best.escalate_after_n == shipped.escalate_after_n:
+    best = max(scored, key=lambda c: c.precision or 0.0)
+    if _is_shipped(best):
         return []
     return [
-        f"escalate_after_n={best.escalate_after_n} reaches P(fail|fired)={best.precision:.3f} "
-        f"against the SHIPPED default n={shipped.escalate_after_n}'s {shipped.precision:.3f}. "
+        f"escalate_after_n={best.escalate_after_n} (stale_window={best.stale_window}) reaches "
+        f"P(fail|fired)={best.precision:.3f} against the SHIPPED default "
+        f"n={shipped.escalate_after_n}/stale_window={shipped.stale_window}'s "
+        f"{shipped.precision:.3f}. "
         "The shipped default is unchanged here: this is a measurement, and the intervals "
         f"([{best.precision_ci[0]:.3f}, {best.precision_ci[1]:.3f}] vs "
         f"[{shipped.precision_ci[0]:.3f}, {shipped.precision_ci[1]:.3f}]) must be read before "
@@ -278,6 +389,8 @@ def _run_annotations(report: EvalReport) -> Annotations:
         limitations.append(f"NO USABLE SIGNAL — {report.reason}.")
     if report.status == _STATUS_INSUFFICIENT:
         limitations.append(f"INSUFFICIENT DATA — {report.reason}.")
+    if report.status == _STATUS_UNVERIFIED:
+        limitations.append(f"CORPUS FAILED ITS INTEGRITY CHECK — {report.reason}.")
     dropped = report.n_trajectories - report.n_stamped
     if dropped:
         limitations.append(
@@ -285,7 +398,12 @@ def _run_annotations(report: EvalReport) -> Annotations:
             "and are excluded from this figure."
         )
     return Annotations(
-        notes=(f"{report.n_stamped} scored trajectories, status={report.status}",),
+        notes=(
+            f"{report.n_stamped} scored trajectories, status={report.status}",
+            # On EVERY figure, whatever it plots: a reader who takes a number off a plot must see
+            # which question it answers without going back to the JSON.
+            f"{report.deployability.label} — {report.deployability.reason}",
+        ),
         limitations=tuple(limitations),
     )
 
@@ -315,24 +433,24 @@ def _save_plots(report: EvalReport, out_dir: Path) -> None:
 
 
 def _save_policy_plots(report: EvalReport, out_dir: Path, run: Annotations) -> None:
-    """The shipped policy's trajectory-level figures (sweep table, outcome bars, lead time)."""
+    """The shipped policy's trajectory-level figures (sweep table, outcome bars)."""
     cells = report.policy_cells
     cell = report.headline_cell
-    assert cell is not None  # noqa: S101 (guarded by the caller's `if report.policy_cells`)
     _render(
         out_dir / "sweep_table.png",
         plots.SWEEP_TABLE_SPEC,
         lambda ax: _merge(plots.sweep_table(cells, ax), run),
     )
+    if cell is None:
+        # Only reachable on a hand-built report: `evaluate` guarantees the shipped cell exists.
+        # The per-cell figures are SKIPPED rather than drawn off an arbitrary cell — a figure
+        # titled with the shipped default that plots a different configuration is the defect.
+        logger.error("no swept cell matches the shipped configuration; per-cell figures skipped")
+        return
     _render(
         out_dir / "trajectory_outcomes.png",
         plots.OUTCOME_BARS_SPEC,
         lambda ax: _merge(plots.outcome_bars(cell, ax), run),
-    )
-    _render(
-        out_dir / "lead_time_by_outcome.png",
-        plots.LEAD_TIME_SPEC,
-        lambda ax: _merge(plots.lead_time_by_outcome(cell, ax), run),
     )
 
 
@@ -344,32 +462,43 @@ def _save_prefix_plots(depth: DepthReport, out_dir: Path, run: Annotations) -> N
     _render(
         out_dir / "pr_curve.png",
         plots.PR_CURVE_SPEC,
-        lambda ax: _merge(plots.pr_curve(scores, labels, ax), detail, run),
+        # The MEASURED AUPRC null, not prevalence: prevalence is the no-skill average precision for
+        # exchangeable rows, and these cluster by challenge with the pipeline refit per shuffle.
+        lambda ax: _merge(plots.pr_curve(scores, labels, depth.null_auprc, ax), detail, run),
     )
     _render(
         out_dir / "roc_curve.png",
         plots.ROC_CURVE_SPEC,
         lambda ax: _merge(plots.roc_curve(scores, labels, depth.null_prefix, ax), detail, run),
     )
-    # Derived from the scores, not hardcoded: a fixed 0.5 cut on a calibrated probability whose
-    # base rate is ~0.38 is unreachable, so the grid degenerated to "almost nothing is flagged".
+    # Derived from the scores, never a literal: the score is a calibrated probability, so a cut
+    # pinned away from the corpus's own failure rate degenerates to flagging almost nothing (or
+    # almost everything) and the grid stops describing the detector. `flag_budget` is the number of
+    # flags that derivation INTENDED to spend; the figure compares it against what the cut actually
+    # admits, because a tie block at the cut is taken whole by `score >= threshold`.
     threshold = metrics.operating_threshold(scores, labels)
+    budget = metrics.flag_budget(scores, labels)
     confusion = metrics.detection_metrics(scores, labels, threshold=threshold).confusion
     _render(
         out_dir / "confusion_matrix.png",
         plots.CONFUSION_MATRIX_SPEC,
         lambda ax: _merge(
-            plots.confusion_matrix_plot(confusion, ax, threshold=threshold), detail, run
+            plots.confusion_matrix_plot(confusion, ax, threshold=threshold, flag_budget=budget),
+            detail,
+            run,
         ),
     )
     _render(
         out_dir / "permutation_null.png",
         plots.PERMUTATION_NULL_SPEC,
         lambda ax: _merge(
+            # The FAMILY-WISE null, because that is the band the verdict is read off. Drawing the
+            # uncorrected per-depth null under a figure whose caption reports the gate's decision
+            # would put a wider claim beside a narrower band.
             plots.permutation_null_plot(
-                depth.null_incremental,
+                depth.gate_null_incremental,
                 ax,
-                label="incremental AUROC over the t=0 task prior floored at chance",
+                label="incremental AUROC over the t=0 prior (family-wise null across depths)",
             ),
             detail,
             run,
@@ -398,34 +527,67 @@ def _render(path: Path, spec: FigureSpec, draw: Callable[[Axes], Annotations]) -
 def _print_summary(report: EvalReport) -> None:
     """Print the policy sweep and the prefix-model table to stdout."""
     print(f"\nstatus: {report.status} — {report.reason}")  # noqa: T201
+    # Immediately under the status, because the two are read together: `status` is about signal,
+    # this is about scope, and a skill verdict quoted without it is quoted as if deployable.
     print(  # noqa: T201
-        f"\n{'n':>3} {'esc':>5} {'P(fail|fired)':>14} {'95% CI':>18} {'base':>6} {'lift':>6}"
+        f"deployability: {report.deployability.label} — {report.deployability.reason}"
+    )
+    print(  # noqa: T201
+        f"\n{'n':>3} {'sw':>3} {'esc':>5} {'P(fail|fired)':>14} {'95% CI':>18} "
+        f"{'base':>6} {'lift':>6}"
     )
     for c in report.policy_cells:
-        marker = "  <- shipped default" if c.escalate_after_n == SHIPPED_ESCALATE_AFTER_N else ""
+        marker = "  <- shipped default" if _is_shipped(c) else ""
+        precision = "n/a" if c.precision is None else f"{c.precision:.3f}"
+        lift = "n/a" if c.lift is None else f"{c.lift:.2f}x"
         print(  # noqa: T201
-            f"{c.escalate_after_n:>3} {c.n_escalated:>5} {c.precision:>14.3f} "
+            f"{c.escalate_after_n:>3} {c.stale_window:>3} {c.n_escalated:>5} {precision:>14} "
             f"{f'[{c.precision_ci[0]:.3f}, {c.precision_ci[1]:.3f}]':>18} "
-            f"{c.base_failure_rate:>6.3f} {c.lift:>5.2f}x{marker}"
+            f"{c.base_failure_rate:>6.3f} {lift:>6}{marker}"
         )
+    # Both p-values, side by side: `raw p` is this depth's own null and gates nothing, `fw p` is
+    # the family-wise adjusted p the verdict is read off. Printing only the first is how a max over
+    # three depths came to be quoted as if it were one test.
     print(  # noqa: T201
         f"\n{'depth':>5} {'n':>5} {'prior':>7} {'leaked':>7} {'prefix':>7} {'combined':>9} "
-        f"{'incr':>7} {'null p':>7}"
+        f"{'incr':>7} {'raw p':>7} {'fw p':>7}"
     )
     for d in report.depth_reports:
         print(  # noqa: T201
             f"{d.depth:>5} {d.n_rows:>5} {d.auroc_prior:>7.3f} "
             f"{d.auroc_prior_leaked:>7.3f} {d.auroc_prefix:>7.3f} "
             f"{d.auroc_combined:>9.3f} {d.incremental_auroc:>+7.3f} "
-            f"{d.null_incremental.p_value:>7.3f}"
+            f"{d.null_incremental.p_value:>7.3f} {d.gate_null_incremental.p_value:>7.3f}"
         )
     if report.policy_value is not None:
         # Printed even (especially) when it refuses: a visible `not_identified` is the point —
         # it says the escalation policy's value is UNMEASURED, not that it is zero.
         pv = report.policy_value
         print(f"\nescalation OPE: {pv.status} — {pv.reason}")  # noqa: T201
+        if pv.contrast_estimate is not None:
+            # The CONTRAST, not the level, is the answer to "does escalating help" — printed on
+            # its own line so a reader cannot mistake V(always_escalate) for a comparison.
+            verdict = "" if pv.contrast_excludes_zero else " — interval spans 0, no measured effect"
+            print(  # noqa: T201
+                f"escalation OPE contrast V(escalate) - V(hold): {pv.contrast_estimate:+.4f} "
+                f"[{pv.contrast_ci_low:+.4f}, {pv.contrast_ci_high:+.4f}]{verdict}"
+            )
     for note in report.notes:
         print(f"\nNOTE: {note}", file=sys.stderr)  # noqa: T201
+
+
+def _permutations(raw: str) -> int:
+    """argparse type: a draw count at or above the floor the null estimator requires."""
+    # Below the floor `metrics.permutation_null` raises deep inside the pipeline, so
+    # `--permutations 100` printed a ValueError traceback instead of a usage error — a CLI
+    # contract enforced by a crash. The floor is checked where the argument is parsed.
+    value = int(raw)
+    if value < metrics.MIN_PERMUTATIONS:
+        raise argparse.ArgumentTypeError(
+            f"must be >= {metrics.MIN_PERMUTATIONS} (metrics.MIN_PERMUTATIONS): a null estimated "
+            f"off fewer draws has a 97.5th percentile that is itself noise; got {value}"
+        )
+    return value
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -442,9 +604,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plots-dir", type=Path, default=here.parent / "reports")
     parser.add_argument(
         "--permutations",
-        type=int,
+        type=_permutations,
         default=metrics.MIN_PERMUTATIONS,
-        help="Label shuffles behind every null band (the skill gate reads this).",
+        help=(
+            f"Label shuffles behind every null band (the skill gate reads this). "
+            f"Minimum {metrics.MIN_PERMUTATIONS}."
+        ),
     )
     parser.add_argument(
         "--depths",

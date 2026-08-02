@@ -2,11 +2,11 @@
 distinct paths (the RouterEngine and `replay.replay_config`).
 """
 
-# Parity is real and asserted for the failure-log lifecycle (append / clear-on-success /
-# retire-on-escalation) AND the EFFORT rung (the engine persists effort via its per-task effort
-# arm and resets it to the default on a verified success, mirrored by the runner — so effort
-# parity holds even across a success boundary). It is NOT real for the RANK rung: the replay
-# climbs a persistent monotone abstract rank
+# Parity is real and asserted for the failure-log lifecycle (append / clear on a VERIFIED PASS
+# only, an unstamped or infra step being a no-op / retire-on-escalation) AND the EFFORT rung (the
+# engine persists effort via its per-task effort arm and resets it to the default on a verified
+# success, mirrored by the runner — so effort parity holds even across a success boundary). It is
+# NOT real for the RANK rung: the replay climbs a persistent monotone abstract rank
 # counter that saturates at a ceiling, while the engine re-seeds rank from the base routing pick
 # each decision (no persistent rank ladder) and re-escalates indefinitely. The rank stream is an
 # isolation-model upper bound, not an engine reproduction; the tests below assert both the real
@@ -15,12 +15,14 @@ distinct paths (the RouterEngine and `replay.replay_config`).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 import numpy as np
 
 from benchmark.escalation import replay
 from benchmark.escalation.replay import GridPoint
+from benchmark.escalation.schema import StepView
 from shunt.models.config import ModelConfig, ReasoningArm, ReasoningConfig
 from shunt.router.engine import RouterEngine
 from shunt.router.escalation import EscalationAction, EscalationConfig, EscalationContext
@@ -134,19 +136,30 @@ def _engine_action(reason: str, prov: dict[str, Any]) -> EscalationAction:
     )
 
 
-def _live_stream_outcomes(successes: list[bool]) -> list[EscalationAction]:
-    """Drive the real engine over an arbitrary success/failure pattern (True = verified pass)."""
+class _Outcome(StrEnum):
+    """The four step shapes the live plane actually produces, not just pass/fail."""
+
+    PASS = "pass"
+    FAIL = "fail"
+    UNVERIFIED = "unverified"  # the per-step stamping stage never ran on this step
+    INFRA = "infra"  # verifier said `unknown` + is_infra_failure — not a labellable outcome
+
+
+def _live_stream_outcomes(outcomes: list[_Outcome]) -> list[EscalationAction]:
+    """Drive the real engine over an arbitrary outcome pattern."""
     # The engine decides, then records outcome i; its decision at turn i sees outcomes 0..i-1, so
     # the directive AFTER the first outcome is what the offline replay (observe-then-decide)
-    # reproduces. Failures share one dedup key; a success records a non-failure (clears the window).
+    # reproduces. Failures share one dedup key; a pass records a non-failure (clears the window).
+    # UNVERIFIED/INFRA record NOTHING: `CaptureCoordinator` gates on `_LABELLABLE`, so a step with
+    # no verified outcome never reaches `record_outcome` and the failure log is untouched.
     eng = _engine()
     actions: list[EscalationAction] = []
-    n = len(successes)
+    n = len(outcomes)
     for i in range(n + 1):
         _model, reason, prov = eng.decide(f"s{i}", "task")
         actions.append(_engine_action(reason, prov))
-        if i < n:
-            ok = successes[i]
+        if i < n and outcomes[i] in (_Outcome.PASS, _Outcome.FAIL):
+            ok = outcomes[i] is _Outcome.PASS
             eng.record_outcome(
                 downshift=False,
                 success=ok,
@@ -159,35 +172,45 @@ def _live_stream_outcomes(successes: list[bool]) -> list[EscalationAction]:
     return actions[1:]  # drop the pre-outcome decide; align with the observe-then-decide replay
 
 
-def _offline_stream_outcomes(successes: list[bool]) -> list[EscalationAction]:
-    """Drive the real replay over the equivalent trajectory, matched ceilings."""
-    steps = [
-        make_step(
-            step_index=i,
-            decision_index=i,
-            success=successes[i],
-            failing_check_id=None if successes[i] else _KEY,
+def _step_for(index: int, outcome: _Outcome) -> StepView:
+    """The StepView the normalizers write for each outcome shape (committed-field shapes only)."""
+    if outcome is _Outcome.FAIL:
+        return make_step(
+            step_index=index, decision_index=index, success=False, failing_check_id=_KEY
         )
-        for i in range(len(successes))
-    ]
-    traj = make_trajectory(steps)
+    if outcome is _Outcome.UNVERIFIED:  # `base.make_step` defaults: success=True, confirmed=False
+        return make_step(step_index=index, decision_index=index, success=True, confirmed=False)
+    if outcome is _Outcome.INFRA:  # `stamp_step` on outcome="unknown": success=True, infra=True
+        return make_step(
+            step_index=index, decision_index=index, success=True, is_infra_failure=True
+        )
+    return make_step(step_index=index, decision_index=index, success=True)
+
+
+def _offline_stream_outcomes(
+    outcomes: list[_Outcome], *, stale_window: int = 10
+) -> list[EscalationAction]:
+    """Drive the real replay over the equivalent trajectory, matched ceilings."""
+    traj = make_trajectory([_step_for(i, o) for i, o in enumerate(outcomes)])
     ctx = EscalationContext(
         current_rank_index=0,
         max_rank_index=3,  # abstract isolation ceiling (was len(TIER_ORDER) - 1)
         current_effort_index=0,
         max_effort_index=2,  # qwen's 3-arm ladder → effort ceiling index 2
     )
-    return replay.replay_config(traj, GridPoint(2, 10).to_config(), context=ctx).directives
+    return replay.replay_config(
+        traj, GridPoint(2, stale_window).to_config(), context=ctx
+    ).directives
 
 
 def _live_stream(n_failures: int) -> list[EscalationAction]:
     """Drive the real engine over `n_failures` same-key failures (no interleaved success)."""
-    return _live_stream_outcomes([False] * n_failures)
+    return _live_stream_outcomes([_Outcome.FAIL] * n_failures)
 
 
 def _offline_stream(n_failures: int) -> list[EscalationAction]:
     """Drive the real replay over `n_failures` same-key failures (no interleaved success)."""
-    return _offline_stream_outcomes([False] * n_failures)
+    return _offline_stream_outcomes([_Outcome.FAIL] * n_failures)
 
 
 def test_live_and_offline_directive_streams_match() -> None:
@@ -249,12 +272,51 @@ def test_effort_parity_holds_across_a_verified_success() -> None:
     # cleared only the log on success and left effort at the ceiling, so the streams diverged at
     # the first post-success escalation (offline raise_tier vs the engine's raise_effort). Drive
     # F F F F S F F F F through the REAL engine and the REAL replay and assert they still agree.
-    outcomes = [False, False, False, False, True, False, False, False, False]
+    f, p = _Outcome.FAIL, _Outcome.PASS
+    outcomes = [f, f, f, f, p, f, f, f, f]
     live = _live_stream_outcomes(outcomes)
     offline = _offline_stream_outcomes(outcomes)
     assert live == offline
     # index 6 = first escalation after the success: effort reset ⇒ raise_effort, NOT raise_tier.
     assert offline[6] is EscalationAction.RAISE_EFFORT
+
+
+# --- F1 regression: the two step shapes that carry `success=True` for non-pass reasons ---
+
+
+def test_parity_holds_across_an_unverified_gap() -> None:
+    # F1: an unstamped step is `success=True` by PARSER DEFAULT. Live it produces no capture event
+    # at all (`CaptureCoordinator` gates on `_LABELLABLE`), so the window survives the gap and the
+    # second same-key failure fires. Pre-fix the replay read that default as a verified pass, wiped
+    # the window, and held forever — so it could only ever fire on STRICTLY CONSECUTIVE failures.
+    outcomes = [_Outcome.FAIL, _Outcome.UNVERIFIED, _Outcome.FAIL]
+    live = _live_stream_outcomes(outcomes)
+    offline = _offline_stream_outcomes(outcomes)
+    assert live == offline
+    assert offline[2] is EscalationAction.RAISE_EFFORT
+
+
+def test_parity_holds_across_an_infra_red() -> None:
+    # F1, second shape: `stamp_step` sets `success = outcome != "failure"`, so an `unknown` +
+    # is_infra_failure step lands as success=True (1112 such steps sit in the committed corpus).
+    # Live that outcome is not labellable and never reaches `record_outcome`, so it must be a no-op
+    # on the failure log — NOT the window-clearing verified pass the pre-fix replay treated it as.
+    outcomes = [_Outcome.FAIL, _Outcome.INFRA, _Outcome.FAIL]
+    live = _live_stream_outcomes(outcomes)
+    offline = _offline_stream_outcomes(outcomes)
+    assert live == offline
+    assert offline[2] is EscalationAction.RAISE_EFFORT
+
+
+def test_stale_window_is_observable_in_the_replay() -> None:
+    # The knob must have teeth: two same-key failures separated by 4 unverified steps recur 5
+    # decisions apart, so window=1 retires the first before the second arrives and window=1000
+    # keeps it. Pre-fix EVERY window behaved identically (the replay cleared the counter on the
+    # gap itself), which is what made the sweep's inertness look like a corpus property.
+    gap = [_Outcome.UNVERIFIED] * 4
+    outcomes = [_Outcome.FAIL, *gap, _Outcome.FAIL]
+    assert _offline_stream_outcomes(outcomes, stale_window=1)[5] is EscalationAction.HOLD
+    assert _offline_stream_outcomes(outcomes, stale_window=1000)[5] is EscalationAction.RAISE_EFFORT
 
 
 def _first_flag(stream: list[EscalationAction]) -> int | None:

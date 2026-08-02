@@ -59,7 +59,16 @@ UNKNOWN_VERSION: Final[str] = "unknown"
 # Selection-only metadata, never part of a challenge's identity: excluded from the
 # spec hash so re-stratifying difficulty can't stale cached cells. Both spellings —
 # the sampling manifest reader (order_from_manifest) accepts either.
-_HASH_EXCLUDED_KEYS: Final[frozenset[str]] = frozenset({"difficulty_stratum", "difficulty"})
+# ``problem_statement`` is excluded for a COST reason, not an identity one. It is a
+# routing-only mirror of the issue text ``infer.py`` fetches from HF at run time, and that
+# fetch is NOT pinned — it passes no ``revision=``; only ``build_challenges`` does — so the
+# spec field is a convenience copy for routing, not the harness's source. The exclusion is
+# still right on cell identity (repo/base_commit/version/F2P/P2P/image_ref/dataset_revision
+# are what a model runs, and those ARE hashed); the reason it must stay excluded is that
+# hashing it would stale every paid cell the day the 500 specs are backfilled with it.
+_HASH_EXCLUDED_KEYS: Final[frozenset[str]] = frozenset(
+    {"difficulty_stratum", "difficulty", "problem_statement"}
+)
 
 
 def canonical_content(challenge: dict[str, object]) -> str:

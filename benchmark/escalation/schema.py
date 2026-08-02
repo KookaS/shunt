@@ -10,6 +10,7 @@ import json
 from dataclasses import asdict, dataclass, fields, replace
 from typing import TYPE_CHECKING, Final
 
+from benchmark import corpus_lock
 from shunt.proxy.redaction import redact_secrets
 from shunt.router.escalation import derive_blocking
 
@@ -24,12 +25,26 @@ SCHEMA_VERSION: Final[str] = "1"
 # field on the way out of the live plane.
 _REDACTED_COMMITTABLE_FIELDS: Final[frozenset[str]] = frozenset({"failing_check_id"})
 
-# The behaviour-only field whitelist (the ONLY fields that may cross from the live
-# plane into a committable file). It is the verified-outcome core plus the numeric
-# behaviour signals — every field that carries no prose, no args, no observation
-# text, hence no possible secret. The free-text fields (metadata/observation/action/
-# args/result) are deliberately absent: they stay in the encrypted live plane and
-# never reach a committed file.
+# The behaviour-only field whitelist: the verified-outcome core plus the numeric behaviour
+# signals — no prose, no args, no observation text.
+#
+# READ THIS BEFORE TRUSTING THE NAME. The whitelist is not enforced anywhere on the write path.
+# `dump_jsonl` below serializes the whole `asdict(step)`; `committable_projection`, the only
+# function that applies this set, has no caller outside the tests. The shipped corpus is
+# therefore an unprojected one: all 799 trajectories under `benchmark/escalation/data/live/`
+# are git-tracked, declare `plane="committable"` in their header, and carry `metadata`,
+# `observation`, `action`, `args` and `result` on their steps — 29 422 steps, every one with a
+# non-empty `action` and `args`, 28 638 with a non-empty `result`, the longest of them 11 046
+# characters. Treat this set as the whitelist a projected export WOULD use, not as a description
+# of the bytes on disk.
+#
+# The defence that does run on that corpus is `_scrub_free_text` in `dump_jsonl`: every free-text
+# field passes the secret redactor before the bytes are written, and the header hash is
+# recomputed over the scrubbed payload. It fires — 654 `<redacted>` markers across 35 committed
+# files. A credential sweep of the corpus (OpenAI/Anthropic/AWS/GitHub/Slack/Google/Stripe key
+# shapes, PEM private-key blocks, JWTs, bearer headers, dotenv assignment lines, provider env-var
+# names) returned zero hits; the residual disclosure is upstream repository content — container
+# paths under `/root/`, and one provider-issued `tool_call_id` per step.
 COMMITTABLE_FIELDS: Final[frozenset[str]] = frozenset(
     {
         # verified-outcome core
@@ -59,7 +74,8 @@ class StepView:
     step_index: int
     decision_index: int
     parent_step_index: int | None
-    # PrefixGuard-7 (free text — never committable off the live plane)
+    # PrefixGuard-7 free text. `COMMITTABLE_FIELDS` excludes these, but nothing enforces that on
+    # the write path, so they ARE present in every committed trajectory — see that comment.
     metadata: dict[str, str]
     observation: str
     action: str
@@ -106,6 +122,13 @@ class TrajectoryHeader:
     redacted: bool
     content_sha256: str
     n_steps: int
+    # How many per-step diffs the LIVE run captured, recorded at capture time. It is committed
+    # because the diffs themselves are not: they live in a gitignored scratch, so filesystem
+    # presence cannot tell "this run captured nothing and is unreplayable for ever" from "this
+    # checkout lacks the scratch". Only this field can, and only it may authorise clearing a
+    # trajectory's stamps (see `offline_replay.clear_unreplayable`). None = provenance unknown,
+    # which is treated as "may be replayable elsewhere", never as an excuse to clear.
+    snapshot_steps: int | None = None
 
 
 @dataclass(frozen=True)
@@ -141,7 +164,11 @@ def recompute_blocking(step: StepView) -> bool:
 
 
 def committable_projection(step: StepView) -> dict[str, object]:
-    """The behaviour-only subset of a StepView that may be committed (free text redacted)."""
+    """The behaviour-only subset of a StepView, free text redacted — UNUSED on the write path.
+
+    Nothing in `benchmark/` or `src/` calls this; `dump_jsonl` writes every field instead. It is
+    a specification with test coverage and no enforcement, so the committed corpus is unprojected.
+    """
     out: dict[str, object] = {}
     for name in _STEP_FIELD_NAMES:
         if name not in COMMITTABLE_FIELDS:
@@ -178,11 +205,13 @@ def _scrub_free_text(step: StepView) -> StepView:
 
 
 def dump_jsonl(traj: Trajectory, path: Path) -> None:
-    """Write the header then one StepView per line (JSONL), free-text scrubbed.
+    """Write the header then one StepView per line (JSONL), EVERY field, free-text scrubbed.
 
     The header hash commits to the *scrubbed* payload actually written, so a trajectory
     whose secrets were redacted on the way to disk still passes its own Layer-1 check.
     """
+    # `asdict`, not `committable_projection` — no write path calls that, so redaction rather than
+    # field selection is the only defence running here. See the COMMITTABLE_FIELDS comment above.
     steps = [_scrub_free_text(s) for s in traj.steps]
     scrubbed_hash = content_sha256(steps)
     header = traj.header
@@ -191,7 +220,11 @@ def dump_jsonl(traj: Trajectory, path: Path) -> None:
         header = replace(header, content_sha256=scrubbed_hash, redacted=True)
     lines = [json.dumps(asdict(header), sort_keys=True, ensure_ascii=True)]
     lines.extend(json.dumps(asdict(s), sort_keys=True, ensure_ascii=True) for s in steps)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Atomic, because the parallel stamping stage has a second worker rebuilding `manifest.json`
+    # from every *.jsonl in this directory at the same time: a plain `write_text` let that reader
+    # see a truncated file (measured — `IndexError`/`Unterminated string` on a real 2-process
+    # probe), and a `kill -9` mid-write left a truncated trajectory on disk.
+    corpus_lock.atomic_write_text(path, "\n".join(lines) + "\n")
 
 
 def load_jsonl(path: Path) -> Trajectory:

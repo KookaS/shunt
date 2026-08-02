@@ -6,11 +6,13 @@
 
 from __future__ import annotations
 
-from benchmark.escalation import run_eval
+from benchmark.escalation import features, replay, run_eval
 from benchmark.escalation.normalize.mini_swe_agent import (
     MiniSweAgentParser,
     restamp_trajectory,
     stamp_step,
+    unstamp_step,
+    unstamp_trajectory,
 )
 from benchmark.escalation.replay import GridPoint
 from shunt.verifiers.parse import parse_test_outcome
@@ -103,6 +105,86 @@ def test_restamp_preserves_terminal_and_updates_hash() -> None:
     assert restamped.steps[0].dedup_key == _KEY
     assert restamped.steps[-1].success is True  # terminal authority
     assert restamped.header.content_sha256 != base.header.content_sha256  # hash re-derived
+
+
+# ── unstamp_trajectory: the admissibility gate's un-stamp path ────────────────
+#
+# A rejected instance used to be SKIPPED, which left the trajectory exactly as the defective
+# replay had stamped it — astropy-8872 came out of a rebuild byte-identical, 100% blocking on
+# exit-4, 284 fabricated steps intact. Clearing has to be an active write.
+
+
+def _stamped(index: int) -> object:
+    """A step carrying the full fabricated stamp set the pre-fix replay wrote."""
+    return make_step(
+        step_index=index,
+        success=False,
+        confirmed=True,
+        failing_check_id="hash:deadbeefdeadbeef",
+        exit_code=4,
+        observation=f"obs-{index}",
+        action=f"act-{index}",
+        args=f"args-{index}",
+        result=f"res-{index}",
+    )
+
+
+def test_unstamp_step_clears_exactly_the_stamped_fields() -> None:
+    cleared = unstamp_step(_stamped(0))
+    assert cleared.confirmed is False
+    assert cleared.exit_code is None
+    assert cleared.failing_check_id is None
+    assert cleared.dedup_key is None
+    assert cleared.blocking is False
+    assert cleared.is_infra_failure is False
+    # `success=True` is load-bearing: a cleared step left at False reads as a verified FAIL.
+    assert cleared.success is True
+
+
+def test_unstamp_step_preserves_everything_that_is_not_a_stamp() -> None:
+    original = _stamped(2)
+    cleared = unstamp_step(original)
+    for field in (
+        "step_index",
+        "decision_index",
+        "observation",
+        "action",
+        "args",
+        "result",
+        "tool",
+        "metadata",
+        "model",
+        "reasoning_effort",
+        "rank_index",
+        "effort_index",
+    ):
+        assert getattr(cleared, field) == getattr(original, field), field
+
+
+def test_a_cleared_step_routes_to_excluded_and_none() -> None:
+    # The two predicates the eval actually reads. Both must say "never observed".
+    traj = unstamp_trajectory(make_trajectory([_stamped(i) for i in range(3)]))
+    assert features.is_stamped(traj) is False
+    assert all(replay.verified_outcome(s) is replay.VerifiedOutcome.NONE for s in traj.steps[:-1])
+
+
+def test_unstamp_trajectory_is_idempotent() -> None:
+    # A rebuild re-visits a rejected instance on every run; clearing twice must be a no-op, or
+    # the content hash churns and the manifest reports a false integrity mismatch.
+    once = unstamp_trajectory(make_trajectory([_stamped(i) for i in range(3)]))
+    twice = unstamp_trajectory(once)
+    assert twice == once
+
+
+def test_unstamp_keeps_the_terminal_harness_grade() -> None:
+    # The terminal label comes from the SWE-bench GRADER, a different instrument the replay
+    # admissibility gate says nothing about — dropping it would discard a real measurement.
+    traj = unstamp_trajectory(
+        make_trajectory([_stamped(i) for i in range(3)], terminal_resolved=True)
+    )
+    assert traj.steps[-1].confirmed is True
+    assert traj.steps[-1].success is True
+    assert traj.steps[-1].exit_code is None  # but the replay's exit code is still cleared
 
 
 # ── the Phase-1 goal: a recurring dedup_key makes the trigger fire ────────────

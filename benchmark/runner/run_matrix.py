@@ -893,7 +893,9 @@ def refresh_summary(matrix: dict, tasks: list[str]) -> None:
         seed=bm.get("seed", 42),
     )
     out = Path(__file__).resolve().parent.parent / "routing" / "reports" / "strategy_summary.csv"
-    summary.write_summary_csv(rows, out)
+    table = summary.certified_table(rows)
+    print(table.admissibility.reason)
+    summary.write_summary_csv(table, out)
     print(f"Refreshed strategy summary -> {out}")
 
 

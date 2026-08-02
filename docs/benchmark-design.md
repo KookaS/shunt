@@ -240,8 +240,8 @@ A **censored** cell (`stop_reason ∈ {step_limit, wall_limit, abandoned}`) is t
   complete-all-fail — so it is excluded from analysis rather than counted as unsolvable. (A
   censored cell may still be *imputed* from a genuine observation on the same task under
   monotonicity — e.g. a weaker model passed, so the stronger censored cell is imputed pass.)
-  This correctly **reduces** the complete-challenge count; on the current data 7 challenges
-  (169 → 162 complete) revert to incomplete once censoring is respected.
+  This correctly **reduces** the complete-challenge count; on the current data 15 challenges
+  (192 → 177 complete) revert to incomplete once censoring is respected.
 - **Kill-gate / summary quality.** A censored cell is excluded from the pass-rate denominator
   (marked unscorable), so it never counts as a clean `pass=False` that understates a model's
   quality. Cost for censored cells is already excluded from the cost model (above).

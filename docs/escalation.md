@@ -17,6 +17,68 @@ immediately — but you turn it on deliberately, once you have a verified-outcom
 signal for it to act on. The config knobs are in
 [Configuration → Auto-escalate on repeated verified failure](configuration.md#auto-escalate-on-repeated-verified-failure).
 
+Its sibling is [the routing model](routing.md), which picks the model *before* any
+evidence about the task exists. This one acts only *after* a verified outcome.
+
+## The shape of it
+
+Two stages, and only the first one does any pattern matching.
+
+**Stage one turns a test run into a verdict and an identity.** A subprocess runs your
+repo's suite off the wire; the exit code decides first, and regexes over the combined
+stdout and stderr decide the rest — whether tests genuinely ran and failed, whether
+this was an environment error rather than a capability one, and what to call the
+failure. That name is the **dedup key**: the first test node id the runner printed,
+or a hash of the failure detail with the volatile parts stripped out.
+
+**Stage two is arithmetic.** No regex, no model, no learned weights: count how many
+confirmed, non-infrastructural failures share each dedup key inside a window of
+recent decisions, and fire when one key reaches the threshold. Distinct keys never
+add together.
+
+```mermaid
+flowchart TD
+  IN["Input: a closed session, with a work_dir configured<br/>(never the model's own claim)"] --> P1
+
+  subgraph PRE["Pre-processing — off-wire verification"]
+    P1["Auto-detect the runner from repo files:<br/>pytest · jest/vitest · go test · cargo test"]
+    P1 --> P2["Run it; capture stdout + stderr and the exit code"]
+    P2 --> P3["Classify — exit code first, then regex:<br/>success · capability failure · infra/unknown"]
+    P3 --> P4["Re-run a failure to confirm it reproduces;<br/>abstain if it does not (flake guard)"]
+    P4 --> P5["Derive the dedup key: first test node id,<br/>else a hash of the normalised detail"]
+  end
+
+  P5 --> EV["One failure event per closed session:<br/>dedup key · decision index · confirmed · blocking"]
+
+  subgraph MODEL["Model — a counting rule"]
+    EV --> M1{"Enabled, and no<br/>routing-collapse alarm?"}
+    M1 -->|no| H1["HOLD"]
+    M1 -->|yes| M2["Keep events inside stale_window decisions"]
+    M2 --> M3["Count confirmed, blocking failures per key;<br/>keys never aggregate"]
+    M3 --> M4{"One key reached<br/>escalate_after_n?"}
+    M4 -->|no| H2["HOLD"]
+    M4 -->|yes| M5["Flagged: pick the next rung —<br/>effort if there is headroom, else rank"]
+  end
+
+  subgraph POST["Post-processing"]
+    M5 --> Q1["Optional ε-greedy: withhold with probability ε,<br/>and log the propensity"]
+    Q1 --> Q2["Apply: raise the reasoning arm on the same model,<br/>or step to the first healthy higher-rank model"]
+    Q2 --> Q3["Retire the acted-on window;<br/>mark the turn non-policy"]
+  end
+
+  Q3 --> OUT["Output: a directive for the NEXT session boundary"]
+```
+
+**One verified outcome per session, not per step.** This is the single fact most
+easily got wrong about the live path. The verifier runs at session close, so the
+router records at most one failure event per closed session — not one per tool call,
+not one per agent action. With the shipped `escalate_after_n: 2`, escalation
+therefore needs **two sessions** on the same repo failing the *same* check inside the
+window. It does not watch an attempt unfold and intervene inside it. The offline eval
+in `benchmark/escalation/` replays one event per *step*, which is a different and
+more frequent cadence; that gap is spelled out under
+[what the sweep does not establish](#two-things-this-sweep-does-not-establish).
+
 ## Detection — what counts as a failure
 
 Escalation acts on **verified** failures only. A model's own claim that "the tests
@@ -39,11 +101,25 @@ non-model producer: your test suite, re-run off the wire.
   fixes a missing dependency. Shunt classifies these as environment failures and they
   **never count toward escalation**. Only a genuine capability failure — the code ran
   and the assertions failed — is escalation-eligible.
+
+  One caveat, for anyone measuring with this flag rather than just running on it: across the
+  ten repositories in `benchmark/escalation/data/live/` the environment-failure rate spans
+  13.2% (pylint) to 0.20% (matplotlib) — a 64× spread — while barely moving with model or
+  reasoning effort. Do not read that as a property of the repositories. It is driven
+  substantially by **individual broken instances**: 175 of pylint's 176 infra-flagged steps
+  come from one instance. So any number computed from this flag, the `infra_rate` prefix
+  feature included, can be encoding which instances a split happened to contain rather than
+  anything the agent did. Do not read one as behavioural without controlling for instance and
+  repository.
 - **A stable failure identity.** Each confirmed failure gets a **dedup key**: the
   failing test's node id where the runner prints one (`path::Test::case`), or a
   normalized hash of the failure detail otherwise — with timings, hex addresses,
-  temp paths and timestamps stripped, so the *same* recurring failure hashes to the
-  same key run to run. That key is what lets Shunt tell "the same problem again" from
+  temp paths, timestamps, randomized run seeds (a runner that prints its own
+  `random seed:` / `PYTHONHASHSEED`), subprocess pids, and pytest's `--durations`
+  block stripped, so the *same* recurring failure hashes to the same key run to run.
+  The durations block is dropped whole rather than value-normalized: it is sorted by
+  time, so run-to-run jitter permutes the lines and normalizing only the numbers still
+  leaves the key random. That key is what lets Shunt tell "the same problem again" from
   "a different failure."
 
 Human feedback (`shunt flag <id> bad`) is the other verified source and carries the
@@ -73,6 +149,35 @@ recurs:
 Escalation is keyed per **task** (the repo / `work_dir`), so a repeated failure in one
 project never escalates routing for another.
 
+### The sameness premise is untested, and this corpus cannot test it
+
+"The same failure twice means the model is stuck" is a design assumption. The obvious way to
+check it is to compare runs that repeat one failing-check id against runs that hit several.
+That comparison is not available today. The stored trajectories in
+`benchmark/escalation/data/live/` carry per-step outcomes stamped by re-running each
+instance's target tests, and in three repositories that stamping is broken in ways that
+manufacture precisely the buckets such a comparison would use:
+
+- **django fabricates a single key per instance.** Its `FAIL_TO_PASS` ids have the form
+  `test_x (module.Class.test_x)`; the runner cannot address them, every step errors out, and
+  the failure detail hashes to a per-instance constant. All 108 django keys are opaque hashes,
+  not one is a real node id, and 3,266 of 3,412 django steps are stamped blocking-red whatever
+  the agent did. Those runs dominate the single-key group — 99 of its 537 members.
+- **sympy fabricates passes.** Its ids cannot address `bin/test`, so no test is selected, the
+  command exits 0, and the step is stamped a verified success. 80 of the 98 runs carrying no
+  failing-check id at all are sympy.
+- **sphinx-doc keys are 98.8% opaque hashes** rather than node ids, and it supplies 70 of the
+  156 runs with two or more distinct ids.
+
+A split on distinct-key count therefore sorts trajectories largely by which repository they
+came from, through three unrelated stamping defects. Any lift it shows is about the harness,
+not the agent — which is why this page reports no such number.
+
+**The question is open.** Whether same-key recurrence, key diversity, or neither predicts
+failure cannot be settled until the corpus is re-stamped with keys that address the tests they
+name. Until then treat the same-key rule as an untested design assumption: not evidence-backed,
+and not refuted either.
+
 ## The ladder — effort first, then rank
 
 The default ladder is `effort_then_rank`, and it climbs **one rung per step, never
@@ -88,6 +193,16 @@ straight to the top**:
    arm, not mid-ladder.
 3. **Hold at the top.** At the ceiling (top rank, top arm) escalation holds rather than
    thrashing.
+
+**A rank step buys price, not measured capability.** Rank is a model's position in the
+registry, and the registry is ordered by price — which is not a capability ordering. On
+Shunt's own benchmark that ordering inverts: the cheapest enabled model out-scores several
+models priced well above it, so stepping one rank up can *lower* the pass rate on your
+workload. The measured per-model table is in
+[Results → How to read this page](results.md#how-to-read-this-page); check it against your
+own registry before you trust the ladder. The effort rung has no such problem — it is the
+same model at a higher reasoning arm — which is why `effort_then_rank` is the default and
+why `rank_only` deserves the more careful look.
 
 Set `ladder: rank_only` to skip the effort rung and step ranks directly. The effort
 rung needs a model that declares [reasoning arms](configuration.md#reasoning-effort-optional);
@@ -111,6 +226,36 @@ a model without them has no effort headroom and steps rank immediately.
   snapshotted, so a restart resumes where it left off rather than forgetting a
   half-climbed ladder.
 
+## Why it is built this way
+
+The design is mostly a series of refusals, and each one is worth knowing before you
+rely on it.
+
+- **The signal comes from a process the model does not control.** A model grading its
+  own work is the cheapest verifier available and the least trustworthy. Re-running
+  your suite off the wire costs one subprocess per session and buys a label the agent
+  cannot talk its way out of.
+- **Counting, not scoring.** A learned risk model would need a corpus of labelled
+  failures to train on — the thing this loop is still collecting — and would have to be
+  trusted before it could be checked. A count has one parameter you can read off the
+  config. This is the simplest rule that could work, picked so its failure modes stay
+  legible; it is not the end state.
+- **Recurrence, because a first failure is ordinary.** Fail, read the traceback, fix:
+  that is the loop working. Escalating there spends frontier money on a model that was
+  about to succeed anyway. A second *identical* failure is the first evidence that
+  reading the traceback did not help.
+- **Two failure classes are excluded because no larger model repairs them.** An
+  unreproducible failure is a flake; a missing dependency is a broken environment.
+  Escalating on either buys a pricier model for a problem that was never about
+  capability.
+- **One rung at a time, effort before rank.** The cheapest intervention that could
+  plausibly work goes first, and the effort rung keeps the same model — so it does not
+  cost you the prompt cache. Jumping straight to the top would be simpler to implement
+  and would spend the most on the least evidence.
+- **At the boundary, never inside a turn.** A mid-conversation switch forces a
+  full-price re-read of the cached context. Any escalation that could only pay off by
+  breaking the cache is not worth having, so the directive waits for the next session.
+
 ## Limitations — read before enabling
 
 Be honest with yourself about where this does nothing:
@@ -125,6 +270,24 @@ Be honest with yourself about where this does nothing:
 - **No tests, no signal — the vibecode case.** A repo with no test suite produces no
   verified outcome, so auto-escalation does nothing there. It cannot escalate on a
   signal that does not exist.
+- **It needs repeats across sessions, not within one.** Because the verifier runs at
+  session close, a session that fails the same check twenty times internally still
+  contributes one event. Escalation is a between-session mechanism; nothing here
+  rescues a single attempt that is going badly while it is going badly.
+- **A runner with unstable output can never accumulate recurrence.** When no test
+  node id is printed, the key is a hash of the failure detail, and the normalizers
+  strip only the volatility we have enumerated — timings, addresses, temp paths,
+  timestamps, seeds, pids, duration blocks. A runner that prints some *other*
+  per-run-varying string hashes to a fresh key every time, so the same failure never
+  looks like a recurrence. The field stays populated, which is what makes this quiet:
+  it looks like it is working.
+- **It grades nothing.** This is a counting rule, not a risk model. Every confirmed
+  blocking failure counts exactly one; there is no severity, no confidence, and no
+  score you can threshold differently. A trivial assertion and a total collapse are
+  the same event to it.
+- **SWE tasks only.** The verified signal is a repository's own test suite. Work with
+  no runnable check — analysis, prose, a spreadsheet — produces nothing for this
+  mechanism to act on.
 - **The effort rung needs reasoning arms.** A model that declares none skips straight
   to a rank step; there is no effort headroom to climb.
 - **Runs where Shunt sits beside your code.** The off-wire re-run needs the repo *and*
@@ -240,9 +403,12 @@ has **two independent blocks**, because they answer different questions:
 **1. The policy, graded per trajectory.** The shipped recurrence policy is replayed over each
 stored run and asked the question the product actually asks: given it fired, is this run more
 likely to fail? One row is one trajectory (not one prefix), `n_escalated` is per configuration,
-and every rate carries a 95% Wilson interval next to the corpus base failure rate. Read
-`P(fail | fired)` against `base`: an interval containing the base rate is a configuration with
-no measured value, and an interval below it means firing predicts *success*.
+and every rate carries a 95% **challenge-level bootstrap** interval next to the corpus base
+failure rate. The bootstrap resamples whole challenges rather than rows, because runs on one
+challenge are correlated and a row-level interval is too narrow; the fired and not-fired arms
+are estimated from the same resamples, so the two are comparable. Read `P(fail | fired)`
+against `base`: an interval containing the base rate is a configuration with no measured
+value, and an interval below it means firing predicts *success*.
 
 **2. A prefix risk model, graded against the null.** A continuous risk score — the probability
 this run ends unresolved — is fit from prefix-only features at fixed decision depths and
@@ -257,6 +423,32 @@ evaluated out-of-fold. Three numbers are reported and only the last one is meani
   decides whether escalation is worth anything.** Everything else overstates it. The comparator
   is floored at chance so an anti-predictive prior cannot be beaten into an apparent finding.
 
+### Two things this sweep does not establish
+
+**It does not measure the cadence the product runs.** Live, a verified outcome is produced
+once per **closed session**: the off-wire verifier runs at the session boundary and the router
+records at most one failure event per capture. The offline replay emits one event per **step**
+— it walks a stored trajectory and asks the escalation runner for a directive at every
+decision, so an 8-step run yields 8 events. Every trajectory in
+`benchmark/escalation/data/live/` is a single session: 799 files, 799 distinct ids, median 31
+steps. At the live cadence each would contribute exactly **one** event, and the shipped
+`escalate_after_n: 2` could not fire even once on the whole corpus. So what the sweep measures
+is recurrence *within* one session's steps, which is not the quantity the shipped rule counts.
+Any `escalate_after_n` result it reports — including a cell it flags as better than the
+default — describes a per-step policy Shunt does not run.
+
+That gap is a property of the data, not a bug awaiting a patch. A session-cadence replay needs
+trajectories spanning several sessions; none of these do. Closing it takes new collection, not
+new code.
+
+**It does not exercise the flake guard.** The live trigger discards any failure that did not
+reproduce on re-run (`confirmed=False`). Offline, the stamping stage sets `confirmed=True` on
+every step it touches, and the container replay runs each step's target tests exactly once —
+there is no second execution a genuine confirmation could come from. Every replayed event
+satisfies the guard by construction. Its effect on the policy is therefore **unmeasured**, not
+measured and found to be nil. Read every sweep result as the policy's behaviour with the flake
+guard switched off.
+
 What the rest of the report means:
 
 - **`status` is gated by a permutation null, not by a point estimate.** The status is `OK`
@@ -268,6 +460,16 @@ What the rest of the report means:
   `NO_SKILL` (with the number and the p-value in the reason) or `INSUFFICIENT_DATA`, and
   every figure states it in red under the plot. A point estimate above 0.5 is never treated
   as skill on its own.
+- **`deployability` says whether the number is one you could ship.** `status` answers "is there
+  a signal"; this answers "is the thing that found it a policy the router could run". It is
+  mechanical, not editorial: every scored feature is checked against the fields a live
+  escalation decision actually receives — the windowed failure log plus the ladder position —
+  and the cadence the eval scored is checked against the one the router runs, a single decision
+  per session. On the current corpus the verdict is `OFFLINE-ONLY UPPER BOUND`, because
+  `infra_rate` and `max_action_repeat_rate` read step fields the live decision never sees and
+  the sweep scores step boundaries. The label is printed under `status`, carried in the JSON as
+  `deployability`, and stamped on every figure footer, so a result cannot be quoted as
+  deployable by omission.
 - **Two structural anti-leak rules.** Features are read at a **fixed absolute depth**, never a
   fraction of the run — a fraction needs the total length, which is future information. And
   the **terminal step is excluded**, because the harness verdict is stamped onto it. Both are
@@ -282,22 +484,24 @@ What the rest of the report means:
   as a diagnostic contrast rather than the baseline. Because that honest prior scores *below*
   chance on this corpus, the increment is measured against `max(prior, 0.5)` — an
   anti-predictive baseline must not be beatable into an apparent finding.
-- **The sweep varies `escalate_after_n` only.** `stale_window` and `ladder` are pinned at their
-  defaults because both were measured inert on the current corpus: the full 12-cell grid
-  collapsed to 2 distinct score vectors. `escalate_after_n=1` is swept alongside the shipped
-  default of 2 so the two are always reported side by side; the report **flags** a better cell
-  in its notes and never changes the shipped default.
+- **The sweep varies `escalate_after_n` only.** `stale_window` is pinned because 602 of 613
+  firings occur at step_index ≤ 1 (two strictly adjacent same-key failures), making windows ≥ 2
+  unable to discriminate. (The knob IS observable at the 1↔2 boundary, but the current default is
+  appropriate.) `ladder` collapsed to 2 distinct score vectors. `escalate_after_n=1` is swept
+  alongside the shipped default of 2; the report **flags** a better cell and never changes the
+  shipped default.
 - **Runs with no per-step verified outcomes are excluded and counted.** A trajectory the
   stamping stage never processed carries parser defaults, not evidence; including it would feed
   the model a collection-date proxy. The exclusion count appears in the JSON and in every
   figure footer.
-- **Figures.** PR curve, ROC (both tie-collapsed, so the drawn area equals the reported
-  statistic, with the permutation null band shaded), the confusion matrix with a
-  random-at-the-same-flag-rate baseline in each cell, the permutation-null histogram, lead time
-  split by terminal outcome, the sweep as an interval table, trajectory outcomes against the
-  base rate, and failure-capture coverage per model. Each carries a footer — what the axes are,
-  what to look for, what the jargon means, and the honest limits — so a figure pasted elsewhere
-  is still readable on its own.
+- **Figures.** PR curve and ROC (both tie-collapsed, so the drawn area equals the reported
+  statistic, and both drawn against the MEASURED permutation null rather than against
+  prevalence or the 0.5 diagonal — the pipeline is refit per shuffle, so its no-information
+  score is measured, not assumed), the confusion matrix with a random-at-the-same-flag-rate
+  baseline and excess in each cell, the family-wise permutation-null histogram, the sweep as an
+  interval table, trajectory outcomes against the base rate, and failure-capture coverage per
+  model. Each carries a footer — what the axes are, what to look for, what the jargon means, and
+  the honest limits — so a figure pasted elsewhere is still readable on its own.
 
 **The harness runs on captured multi-step trajectories only.** The recurrence trigger cannot
 fire on a length-1 stream, and a prefix model needs a prefix, so the eval reads
@@ -321,5 +525,14 @@ When enabled it needs the `capture` extra (`pip install 'shunt-router[capture]'`
 encryption key in `SHUNT_ESCALATION_KEY` (never commit it). Every free-text field is
 **redacted** of secrets and then **encrypted at rest** before anything is written; capture
 happens off the wire at the session boundary, never mid-turn, and never changes a routing
-decision. The captured files stay **local and git-ignored** — only behaviour-only,
-prose-free fields are ever eligible to be shared into a committable dataset.
+decision. The captured files stay **local and git-ignored**.
+
+**Before you share any of it, read this.** A behaviour-only field whitelist
+(`COMMITTABLE_FIELDS`, in `benchmark/escalation/schema.py`) names the fields that are
+*eligible* to be published — the verified-outcome core and the numeric signals, no prose. But
+nothing enforces it on the write path: the serializer writes every field, free text included,
+and the projection function that applies the whitelist has no caller outside the tests. That
+is what the trajectories shipped in this repo are — full `action`, `args` and `result` text on
+every step, secret-redacted but not field-filtered. Redaction is the defence that actually
+runs. If you publish your own capture, project it yourself; do not assume the whitelist did it
+for you.

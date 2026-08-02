@@ -473,3 +473,30 @@ def test_reraise_classified_redacts_secret_in_message() -> None:
     message = str(excinfo.value)
     assert secret not in message
     assert "<redacted>" in message
+
+
+def test_capture_records_the_snapshot_count_the_run_actually_produced(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    # The producer half of the unreplayable-trajectory guard. If the recorder never attached,
+    # `patch.snapshots` is empty and the committed header must say 0 — the offline replay reads
+    # that to tell "captured nothing, ever" from "this checkout lacks the gitignored scratch".
+    from benchmark.escalation import live_capture, schema
+
+    real = live_capture.capture_live_trajectory
+    monkeypatch.setattr(
+        live_capture,
+        "capture_live_trajectory",
+        lambda *a, **kw: real(*a, **{**kw, "out_dir": tmp_path}),
+    )
+    messages = [
+        {"role": "assistant", "content": "ls", "extra": {"actions": [{"command": "ls"}]}},
+        {"role": "tool", "content": "out", "extra": {"returncode": 0}},
+    ]
+    patch = infer.AgentPatch(
+        patch="d", in_tok=0, out_tok=0, calls=0, cost=0.0, messages=messages, snapshots={}
+    )
+    infer._capture_escalation_trajectory(patch, "repo__repo-1", "m", "default", resolved=False)
+
+    written = next(tmp_path.glob("*.jsonl"))
+    assert schema.load_jsonl(written).header.snapshot_steps == 0

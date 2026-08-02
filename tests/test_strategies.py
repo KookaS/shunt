@@ -651,3 +651,197 @@ class TestSplitMachineryRemoved:
             kNNStrategy(test_split=0.2)  # type: ignore[call-arg]
         with pytest.raises(TypeError):
             kNNCascadeStrategy(seed=1)  # type: ignore[call-arg]
+
+
+class TestRouterEmbedsTheProblemStatement:
+    """The router must embed the task the agent is given, not the repo@commit label."""
+
+    # ``infer.py`` hands the agent ``instance["problem_statement"]``; every strategy used to
+    # embed ``description`` (62% test node-id, 14% repo name, 12% a random commit prefix), so
+    # the kNN neighbourhood was computed over filenames rather than task content.
+
+    STATEMENT_1 = "TimeDelta serialisation silently drops sub-second precision on load."
+    STATEMENT_2 = "Autodoc renders an inherited attribute twice when the base is aliased."
+    LABEL_1 = "astropy/astropy@d16bfe05a744 - resolve tests/test_x.py::test_y"
+    LABEL_2 = "sphinx-doc/sphinx@60775ec4c4ea - resolve tests/test_a.py::test_b"
+
+    def _matrix(self, *, with_statements: bool) -> dict:
+        tasks = {
+            "t1": {"description": self.LABEL_1},
+            "t2": {"description": self.LABEL_2},
+        }
+        if with_statements:
+            tasks["t1"]["problem_statement"] = self.STATEMENT_1
+            tasks["t2"]["problem_statement"] = self.STATEMENT_2
+        return {
+            "models": {"deepseek-v4-flash": {"input_price": 0.1, "output_price": 0.1}},
+            "tasks": tasks,
+            "results": {
+                "t1": {"deepseek-v4-flash": {"pass": True, "cost": 0.1}},
+                "t2": {"deepseek-v4-flash": {"pass": True, "cost": 0.1}},
+            },
+        }
+
+    def _capture(self, monkeypatch, module) -> list[str]:
+        """Record every text handed to the embedder; never loads a real model."""
+        import numpy as np
+
+        seen: list[str] = []
+
+        def fake(texts: list[str]) -> np.ndarray:
+            seen.extend(texts)
+            return np.eye(len(texts), 4, dtype=np.float32)
+
+        monkeypatch.setattr(module, "_embed_texts", fake)
+        return seen
+
+    # -- the seam itself -------------------------------------------------
+    def test_routing_text_prefers_the_problem_statement(self):
+        from benchmark.routing.strategies import routing_text
+
+        meta = {"description": self.LABEL_1, "problem_statement": self.STATEMENT_1}
+        assert routing_text("t1", meta) == self.STATEMENT_1
+
+    def test_routing_text_falls_back_to_the_description(self):
+        from benchmark.routing.strategies import routing_text
+
+        assert routing_text("t1", {"description": self.LABEL_1}) == self.LABEL_1
+        # A key present but blank is "absent" — a backfill gap must not embed "".
+        assert routing_text("t1", {"description": self.LABEL_1, "problem_statement": " "})
+
+    def test_routing_text_falls_back_to_the_task_id(self):
+        from benchmark.routing.strategies import routing_text
+
+        assert routing_text("t1", {}) == "t1"
+
+    # -- each embedding consumer ----------------------------------------
+    def test_knn_embeds_the_problem_statement(self, monkeypatch):
+        from benchmark.routing.strategies import knn
+
+        seen = self._capture(monkeypatch, knn)
+        knn.kNNStrategy()._build(self._matrix(with_statements=True))
+        assert seen == [self.STATEMENT_1, self.STATEMENT_2]
+
+    def test_knn_falls_back_to_the_description_without_a_statement(self, monkeypatch):
+        from benchmark.routing.strategies import knn
+
+        seen = self._capture(monkeypatch, knn)
+        knn.kNNStrategy()._build(self._matrix(with_statements=False))
+        assert seen == [self.LABEL_1, self.LABEL_2]
+
+    def test_knn_select_queries_with_the_build_time_text(self, monkeypatch):
+        from benchmark.routing.strategies import knn
+
+        seen = self._capture(monkeypatch, knn)
+        matrix = self._matrix(with_statements=True)
+        strategy = knn.kNNStrategy()
+        strategy.select("t1", matrix["tasks"]["t1"], matrix)
+        # The engine embeds through the precomputed lookup, so a query text that matches the
+        # build-time text costs no extra embed call. A drift back to `description` would miss
+        # the lookup and append the label here.
+        assert seen == [self.STATEMENT_1, self.STATEMENT_2]
+
+    def test_knn_cascade_embeds_the_problem_statement(self, monkeypatch):
+        from benchmark.routing.strategies import knn_cascade
+
+        seen = self._capture(monkeypatch, knn_cascade)
+        matrix = self._matrix(with_statements=True)
+        knn_cascade.kNNCascadeStrategy().select("t1", matrix["tasks"]["t1"], matrix)
+        assert seen == [self.STATEMENT_1, self.STATEMENT_2, self.STATEMENT_1]
+
+    def test_knn_cascade_falls_back_to_the_description_without_a_statement(self, monkeypatch):
+        from benchmark.routing.strategies import knn_cascade
+
+        seen = self._capture(monkeypatch, knn_cascade)
+        matrix = self._matrix(with_statements=False)
+        knn_cascade.kNNCascadeStrategy().select("t1", matrix["tasks"]["t1"], matrix)
+        assert seen == [self.LABEL_1, self.LABEL_2, self.LABEL_1]
+
+    def test_tier_classifier_embeds_the_problem_statement(self, monkeypatch):
+        from benchmark.routing.strategies import tier_classifier
+
+        seen = self._capture(monkeypatch, tier_classifier)
+        matrix = self._matrix(with_statements=True)
+        tier_classifier.TierClassifier().select("t1", matrix["tasks"]["t1"], matrix)
+        assert seen == [self.STATEMENT_1, self.STATEMENT_2, self.STATEMENT_1]
+
+    def test_tier_classifier_falls_back_to_the_description_without_a_statement(self, monkeypatch):
+        from benchmark.routing.strategies import tier_classifier
+
+        seen = self._capture(monkeypatch, tier_classifier)
+        matrix = self._matrix(with_statements=False)
+        tier_classifier.TierClassifier().select("t1", matrix["tasks"]["t1"], matrix)
+        assert seen == [self.LABEL_1, self.LABEL_2, self.LABEL_1]
+
+
+class TestProblemStatementIsCommittedData:
+    """The routing text must be persisted real dataset text, not fetched at embed time."""
+
+    def test_spec_roundtrips_the_problem_statement(self):
+        from benchmark.runner import swebench_specs
+
+        spec = swebench_specs.spec_from_dataset_row(
+            {
+                "instance_id": "psf__requests-1142",
+                "repo": "psf/requests",
+                "base_commit": "abc123def456789",
+                "version": "1.0",
+                "difficulty": "<15 min fix",
+                "FAIL_TO_PASS": '["tests/test_x.py::test_y"]',
+                "PASS_TO_PASS": "[]",
+                "problem_statement": "requests sets Content-Length on GET",
+            }
+        )
+        assert spec.problem_statement == "requests sets Content-Length on GET"
+        assert spec.to_dict()["problem_statement"] == "requests sets Content-Length on GET"
+        assert swebench_specs.spec_from_dict(spec.to_dict()) == spec
+
+    def test_a_spec_written_before_the_field_still_loads(self):
+        from benchmark.runner import swebench_specs
+
+        legacy = {
+            "instance_id": "psf__requests-1142",
+            "repo": "psf/requests",
+            "base_commit": "abc123def456789",
+            "version": "1.0",
+            "difficulty_stratum": "easy",
+            "FAIL_TO_PASS": ["tests/test_x.py::test_y"],
+            "PASS_TO_PASS": [],
+            "image_ref": "swebench/sweb.eval.x86_64.psf_1776_requests-1142:latest",
+            "dataset_revision": swebench_specs.DATASET_REVISION,
+        }
+        assert swebench_specs.spec_from_dict(legacy).problem_statement == ""
+
+    def test_the_manifest_task_entry_carries_the_statement(self):
+        from benchmark.runner import build_challenges, swebench_specs
+
+        spec = swebench_specs.SwebenchSpec(
+            instance_id="psf__requests-1142",
+            repo="psf/requests",
+            base_commit="abc123def456789",
+            version="1.0",
+            difficulty_stratum="easy",
+            fail_to_pass=["tests/test_x.py::test_y"],
+            pass_to_pass=[],
+            image_ref="swebench/sweb.eval.x86_64.psf_1776_requests-1142:latest",
+            dataset_revision=swebench_specs.DATASET_REVISION,
+            problem_statement="requests sets Content-Length on GET",
+        )
+        entry = build_challenges._task_entry(spec)
+        assert entry["problem_statement"] == "requests sets Content-Length on GET"
+
+    def test_the_statement_is_not_part_of_a_spec_content_hash(self):
+        from benchmark.routing import integrity
+
+        base = {
+            "instance_id": "psf__requests-1142",
+            "repo": "psf/requests",
+            "base_commit": "abc123def456789",
+            "dataset_revision": "c104f840",
+        }
+        # Backfilling 500 specs must not stale a single PAID results.csv cell: the statement
+        # is a routing-only mirror of text the harness fetches from HF at run time — unpinned,
+        # since only build_challenges passes a revision — so it adds no execution identity.
+        assert integrity.hash_content(base) == integrity.hash_content(
+            {**base, "problem_statement": "requests sets Content-Length on GET"}
+        )

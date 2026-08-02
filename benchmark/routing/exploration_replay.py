@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 import hnswlib
 import numpy as np
 
+from benchmark.routing.strategies import routing_text
 from benchmark.routing.strategies.knn import (
     _BUNDLED_MODEL_CONFIG,
     MatrixOutcomeIndex,
@@ -193,14 +194,14 @@ def restrict_matrix(matrix: dict, tasks: Sequence[str], models: Sequence[str]) -
 # ---------------------------------------------------------------------------
 def _build_index(matrix: dict) -> tuple[list[str], list[str], np.ndarray, hnswlib.Index]:
     tasks = sorted(matrix["results"])
-    descriptions = [matrix.get("tasks", {}).get(t, {}).get("description", t) for t in tasks]
-    embeddings = _embed_texts(descriptions)
+    texts = [routing_text(t, matrix.get("tasks", {}).get(t, {})) for t in tasks]
+    embeddings = _embed_texts(texts)
     index = hnswlib.Index(space="cosine", dim=embeddings.shape[1])
     index.init_index(max_elements=len(tasks), ef_construction=100, M=16)
     # num_threads=1 pins the neighbour graph so a replay is bit-reproducible.
     index.add_items(embeddings, np.arange(len(tasks)), num_threads=1)
     index.set_ef(50)
-    return tasks, descriptions, embeddings, index
+    return tasks, texts, embeddings, index
 
 
 def build_engine(
@@ -214,7 +215,7 @@ def build_engine(
     Returns the engine and the ExplorationBudget instance (None when exploration is off)
     so the caller can read the realized explore/exploit spend split afterwards.
     """
-    tasks, descriptions, embeddings, index = _build_index(matrix)
+    tasks, texts, embeddings, index = _build_index(matrix)
     outcome_index = MatrixOutcomeIndex(
         task_ids=tasks, embeddings=embeddings, index=index, matrix=matrix
     )
@@ -231,7 +232,7 @@ def build_engine(
         model_pool=ModelPool(_BUNDLED_MODEL_CONFIG),
         session_manager=_DummySessionManager(),
         outcome_index=outcome_index,
-        embedder=_LookupEmbedder(dict(zip(descriptions, list(embeddings), strict=True))),
+        embedder=_LookupEmbedder(dict(zip(texts, list(embeddings), strict=True))),
         selection_rule=SelectionRule(
             min_success_rate=knn.success_rate_threshold, min_samples=knn.min_samples
         ),
@@ -274,8 +275,8 @@ def replay(
     decisions: list[Decision] = []
     missing: list[tuple[str, str]] = []
     for task in tasks:
-        description = matrix.get("tasks", {}).get(task, {}).get("description", task)
-        model, reason, _prov = engine.decide(session_id=task, prompt_text=description)
+        text = routing_text(task, matrix.get("tasks", {}).get(task, {}))
+        model, reason, _prov = engine.decide(session_id=task, prompt_text=text)
         cell = matrix["results"].get(task, {}).get(model)
         if cell is None:
             # Never impute: the policy left the dense slice, so this decision is unscorable.

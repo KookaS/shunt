@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from shunt.router.engine import RouterEngine
+from shunt.router.engine import RouterEngine, task_state_key
 from shunt.router.escalation import EscalationConfig
 from shunt.router.selection import NeighborResult
 
@@ -157,7 +157,7 @@ def test_record_outcome_does_not_mutate_the_served_decision_mid_turn() -> None:
     assert _fail(eng) is None
     state = eng.snapshot_escalation_state()
     assert state["effort_arm"] == {}  # no mid-turn effort switch was applied
-    assert len(state["failure_log"]["repoA"]) == 2  # the reds were only queued
+    assert len(state["failure_log"][task_state_key("repoA")]) == 2  # the reds were only queued
 
 
 def test_no_reescalation_off_already_consumed_reds() -> None:

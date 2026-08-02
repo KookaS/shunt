@@ -25,6 +25,7 @@ so it stays correct as the codebase grows.
 | **The docs map** — every doc, in order | `mkdocs.yml` (`nav:`) and `docs/index.md` (Contents) |
 | How the pieces fit at runtime | `docs/architecture.md` |
 | The feedback / learning loop (Context → Action → Feedback) | `docs/feedback.md` |
+| How the two models decide (routing · escalation) | `docs/routing.md` · `docs/escalation.md` |
 | Configure providers, models, the router, the embedder | `docs/configuration.md` + `src/shunt/config/{models,router,embedding}.yaml` |
 | Add a provider or model | `examples/providers/README.md` — registry is `src/shunt/config/models.yaml`, **models rank by price (row order not semantic)** |
 | Hook up a tool (Claude Code, opencode, aider, n8n, …) | `examples/integrations/README.md` + the shared handshake harness (`tests/integrations/`) |
@@ -32,6 +33,7 @@ so it stays correct as the codebase grows.
 | Add a routing strategy | `benchmark/routing/strategies/_template.py` — copy it, don't invent structure |
 | The exact lint / type ceilings | `pyproject.toml` (the one manifest) |
 | The custom AST gates (`SH0xx`) | `tools/lint/` |
+| Secret scanning rules (gitleaks allowlist) | `.gitleaks.toml` |
 
 New area? Add a row here pointing at its entrypoint — never restate what the
 entrypoint already says.

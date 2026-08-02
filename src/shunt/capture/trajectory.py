@@ -81,6 +81,9 @@ class StepRecord:
 
 def redact_record(record: StepRecord) -> StepRecord:
     """Redact every free-text field (and metadata values) of a captured step."""
+    # `failing_check_id` is included: it is nominally a behaviour field, but a parametrized test
+    # id carries arbitrary text and can embed a secret, so "every free-text field" must mean it
+    # too. `committable()` redacts it independently — this is the defense-in-depth copy.
     metadata = {k: redact_secrets(v) for k, v in record.metadata.items()}
     return replace(
         record,
@@ -89,6 +92,9 @@ def redact_record(record: StepRecord) -> StepRecord:
         action=redact_secrets(record.action),
         args=redact_secrets(record.args) if record.args is not None else None,
         result=redact_secrets(record.result),
+        failing_check_id=(
+            redact_secrets(record.failing_check_id) if record.failing_check_id is not None else None
+        ),
     )
 
 

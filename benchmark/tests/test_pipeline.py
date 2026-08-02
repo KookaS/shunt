@@ -7,13 +7,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
+import threading
+import time
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Final
 
 import pytest
 
 from benchmark import config, pipeline
 from benchmark.escalation import schema
+from benchmark.runner import replay_admissibility
 
 # Captured before the autouse fixture below stubs the module attribute out.
 _REAL_WRITE_MANIFEST = pipeline.write_figure_manifest
@@ -33,6 +39,8 @@ def _args(**over: object) -> argparse.Namespace:
         "no_report": False,
         "start_from": pipeline.COLLECT,
         "replay_timeout": 5.0,
+        "restamp": False,
+        "stamp_workers": 1,
     }
     base.update(over)
     return argparse.Namespace(**base)
@@ -91,12 +99,12 @@ def stub(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
 
 
 def test_stages_dispatch_in_order_when_live(
-    stub: _Recorder, monkeypatch: pytest.MonkeyPatch
+    stub: _Recorder, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
         pipeline,
-        "_unstamped_trajectories",
-        lambda *a, **k: [("traj1", "inst1", Path("x/traj1.jsonl"))],
+        "pending_trajectories",
+        lambda *a, **k: [("traj1", "inst1", tmp_path / "traj1.jsonl")],
     )
     result = pipeline.run_pipeline(_args(live=True))
     mods = stub.modules
@@ -139,22 +147,26 @@ def test_simulated_run_skips_stamp(stub: _Recorder) -> None:
     assert result.outcomes[pipeline.REPORT] == "ran"
 
 
-def test_stamp_timeout_is_caught_and_pipeline_continues(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_stamp_timeout_fails_the_stage_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A timed-out replay leaves the trajectory carrying whatever it was stamped with BEFORE, so
+    # swallowing it (the old `skipping straggler` warning) is how fabricated outcomes survive a
+    # rebuild that reports success. The stage now fails; isolation still lets report/figures run.
     rec = _Recorder(raise_for={pipeline.OFFLINE_REPLAY: subprocess.TimeoutExpired("cmd", 5.0)})
     monkeypatch.setattr(pipeline, "run_module", rec)
     monkeypatch.setattr(config, "load", lambda *a, **k: {})
     monkeypatch.setattr(pipeline, "_capability_lines", lambda: ("m1", 1, "OK"))
     monkeypatch.setattr(pipeline, "_real_cost", lambda: 0.0)
+    reaped: list[str] = []
+    monkeypatch.setattr(pipeline, "_reap_replay_container", reaped.append)
     monkeypatch.setattr(
         pipeline,
-        "_unstamped_trajectories",
+        "pending_trajectories",
         lambda *a, **k: [("traj1", "inst1", Path("x/traj1.jsonl"))],
     )
     result = pipeline.run_pipeline(_args(live=True))
-    # The straggler is skipped inside stamp, so the stage itself still "ran" and report follows.
-    assert result.outcomes[pipeline.STAMP] == "ran"
+    assert result.outcomes[pipeline.STAMP] == "failed"
+    assert result.returncode == 1
+    assert reaped == ["traj1"]  # the timed-out replay's container is not left running
     assert pipeline.ROUTING_REPORT in rec.modules
 
 
@@ -201,37 +213,202 @@ def test_collect_argv_passes_through_flags() -> None:
     assert argv[argv.index("--strategy") + 1] == "ladder"
 
 
-def test_unstamped_skips_already_stamped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+class _Step:
+    def __init__(self, fid: str | None, *, confirmed: bool) -> None:
+        self.failing_check_id = fid
+        self.confirmed = confirmed
+
+
+class _Traj:
+    def __init__(self, name: str, steps: list[_Step]) -> None:
+        self.header = SimpleNamespace(trajectory_id=name, instance_id="inst")
+        self.steps = steps
+
+
+_BODIES: Final[dict[str, list[_Step]]] = {
+    "stamped.jsonl": [_Step("check-x", confirmed=True), _Step(None, confirmed=True)],
+    "clean.jsonl": [_Step(None, confirmed=True), _Step(None, confirmed=True)],
+    # Only the terminal step is confirmed: the replay never ran on the prefix.
+    "fresh.jsonl": [_Step(None, confirmed=False), _Step(None, confirmed=True)],
+}
+
+
+def _live_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    for name in _BODIES:
+        (tmp_path / name).write_text("{}")
+    monkeypatch.setattr(schema, "load_jsonl", lambda path: _Traj(path.name, _BODIES[path.name]))
+    return tmp_path
+
+
+def test_pending_skips_already_stamped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # ONE predicate, shared with the eval (`features.is_stamped`). The old test here was
     # `any(step.failing_check_id)`, which re-queued a fully replayed run forever whenever no step
     # in it had failed — while the eval scored that same run as stamped. `clean.jsonl` is that run.
-    class _Step:
-        def __init__(self, fid: str | None, *, confirmed: bool) -> None:
-            self.failing_check_id = fid
-            self.confirmed = confirmed
-
-    class _Header:
-        trajectory_id = "t"
-        instance_id = "inst"
-
-    class _Traj:
-        header = _Header()
-
-        def __init__(self, steps: list[_Step]) -> None:
-            self.steps = steps
-
-    bodies = {
-        "stamped.jsonl": [_Step("check-x", confirmed=True), _Step(None, confirmed=True)],
-        "clean.jsonl": [_Step(None, confirmed=True), _Step(None, confirmed=True)],
-        # Only the terminal step is confirmed: the replay never ran on the prefix.
-        "fresh.jsonl": [_Step(None, confirmed=False), _Step(None, confirmed=True)],
-    }
-    for name in bodies:
-        (tmp_path / name).write_text("{}")
-
-    monkeypatch.setattr(schema, "load_jsonl", lambda path: _Traj(bodies[path.name]))
-    pending = pipeline._unstamped_trajectories(tmp_path)
+    live = _live_dir(monkeypatch, tmp_path)
+    pending = pipeline.pending_trajectories(live)
     assert [p.name for _, _, p in pending] == ["fresh.jsonl"]
+
+
+def test_restamp_queues_every_trajectory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # `--from stamp` alone cannot drive a rebuild: every committed trajectory is already stamped,
+    # so the default predicate makes the stage a no-op on the corpus it is meant to regenerate.
+    live = _live_dir(monkeypatch, tmp_path)
+    pending = pipeline.pending_trajectories(live, restamp=True)
+    assert sorted(p.name for _, _, p in pending) == sorted(_BODIES)
+
+
+def test_ledger_entry_under_the_current_instrument_is_not_requeued(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The resume point, and the ONE thing that tells a gate-CLEARED trajectory apart from one the
+    # stamping stage never reached: both are unstamped on disk, by design.
+    live = _live_dir(monkeypatch, tmp_path)
+    pipeline.record_stamped(live, "fresh.jsonl", replay_admissibility.instrument_digest())
+    assert pipeline.pending_trajectories(live) == []
+    assert [p.name for _, _, p in pipeline.pending_trajectories(live, restamp=True)] == [
+        "clean.jsonl",
+        "stamped.jsonl",
+    ]
+
+
+def test_default_replay_timeout_clears_the_slowest_measured_trajectory() -> None:
+    # One measured sympy trajectory took 1 271 s. At the old 120 s default the stage logged
+    # `skipping straggler` and dropped exactly the biggest trajectories, silently.
+    assert pipeline.DEFAULT_REPLAY_TIMEOUT >= 1271.0
+
+
+def test_a_ledger_from_a_different_instrument_is_ignored(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A stale ledger must never mark work done: the digest changes with the replay source, so an
+    # instrument edit re-queues everything instead of silently keeping the old outcomes.
+    live = _live_dir(monkeypatch, tmp_path)
+    pipeline.record_stamped(live, "fresh.jsonl", "an-older-instrument")
+    assert [p.name for _, _, p in pipeline.pending_trajectories(live)] == ["fresh.jsonl"]
+
+
+class TestParallelStamping:
+    """The stamp stage fans out over instances. These pin what the fan-out must not change."""
+
+    def test_default_workers_leave_the_host_headroom_and_stay_under_the_memory_cap(self) -> None:
+        # Each replay is a container running a test file — roughly one core — and the measured
+        # penalty for oversubscribing CPU is ~2x, so a too-high default is actively harmful.
+        workers = pipeline.default_stamp_workers()
+        assert 1 <= workers <= pipeline._MAX_STAMP_WORKERS
+        assert workers <= max(1, (os.cpu_count() or 1) - pipeline._RESERVED_CORES)
+
+    def test_an_instance_is_never_split_across_workers(self) -> None:
+        # THE CORRECTNESS REASON FOR GROUPING. The admissibility gate is per INSTANCE and costs
+        # two container test runs; its verdict is cached. Two workers on two trajectories of one
+        # instance both miss that cache, both run the gate, and — the legs being real test runs —
+        # CAN disagree, leaving some of the instance's trajectories stamped and the rest cleared.
+        pending = [(f"t{i}", f"inst-{i % 3}", Path(f"t{i}.jsonl")) for i in range(9)]
+        groups = pipeline.group_by_instance(pending)
+        assert sorted(len(g) for g in groups) == [3, 3, 3]
+        for group in groups:
+            assert len({instance for _, instance, _ in group}) == 1
+        assert sum(len(g) for g in groups) == len(pending)
+
+    def test_the_longest_instance_is_scheduled_first(self) -> None:
+        # An 11-trajectory unit picked up last is a tail that idles every other worker.
+        pending = [("a1", "a", Path("a1"))]
+        pending += [(f"b{i}", "b", Path(f"b{i}")) for i in range(4)]
+        assert [len(g) for g in pipeline.group_by_instance(pending)] == [4, 1]
+
+    def test_every_trajectory_is_replayed_exactly_once_and_only_successes_are_ledgered(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        seen: list[str] = []
+        seen_lock = threading.Lock()
+
+        def fake(module: str, argv: list[str], **_k: object) -> subprocess.CompletedProcess[str]:
+            with seen_lock:
+                seen.append(argv[0])
+            rc = 1 if argv[0] == "t-bad" else 0
+            return subprocess.CompletedProcess([module], rc, stdout="done", stderr="")
+
+        monkeypatch.setattr(pipeline, "run_module", fake)
+        pending = [(f"t{i}", f"inst-{i % 4}", tmp_path / f"t{i}.jsonl") for i in range(12)]
+        pending.append(("t-bad", "inst-bad", tmp_path / "t-bad.jsonl"))
+        failures = pipeline.run_stamp_stage(
+            pending, live_dir=tmp_path, workers=4, replay_timeout=5.0, heartbeat_s=1000.0
+        )
+        assert sorted(seen) == sorted(t for t, _, _ in pending)
+        assert len(failures) == 1 and "t-bad" in failures[0]
+        # A replay that exited non-zero must NOT be ledgered: the ledger is the resume point, and
+        # marking a failed trajectory done is how it keeps its pre-rebuild stamps for ever.
+        ledger = pipeline.load_stamp_ledger(tmp_path)
+        assert "t-bad" not in ledger
+        assert len(ledger) == 12
+
+    def test_the_workers_actually_overlap(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Without this the whole change could be a no-op that still passes every other test here.
+        peak, live = 0, 0
+        counter_lock = threading.Lock()
+
+        def fake(module: str, argv: list[str], **_k: object) -> subprocess.CompletedProcess[str]:
+            nonlocal peak, live
+            with counter_lock:
+                live += 1
+                peak = max(peak, live)
+            time.sleep(0.15)
+            with counter_lock:
+                live -= 1
+            return subprocess.CompletedProcess([module], 0, stdout="", stderr="")
+
+        monkeypatch.setattr(pipeline, "run_module", fake)
+        pending = [(f"t{i}", f"inst-{i}", tmp_path / f"t{i}.jsonl") for i in range(8)]
+        pipeline.run_stamp_stage(
+            pending, live_dir=tmp_path, workers=4, replay_timeout=5.0, heartbeat_s=1000.0
+        )
+        assert peak >= 2
+
+    def test_a_resumed_run_redoes_only_what_the_ledger_does_not_have(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Resume under parallelism: the ledger written by N workers must still let the next run
+        # skip completed trajectories and redo only the unfinished ones.
+        digest = replay_admissibility.instrument_digest()
+        live = _live_dir(monkeypatch, tmp_path)
+        replayed: list[str] = []
+
+        def fake(module: str, argv: list[str], **_k: object) -> subprocess.CompletedProcess[str]:
+            replayed.append(argv[0])
+            return subprocess.CompletedProcess([module], 0, stdout="", stderr="")
+
+        monkeypatch.setattr(pipeline, "run_module", fake)
+        pipeline.record_stamped(live, "clean.jsonl", digest)
+        pending = pipeline.pending_trajectories(live, restamp=True)
+        pipeline.run_stamp_stage(
+            pending, live_dir=live, workers=4, replay_timeout=5.0, heartbeat_s=1000.0
+        )
+        assert sorted(replayed) == ["fresh.jsonl", "stamped.jsonl"]
+        assert sorted(pipeline.load_stamp_ledger(live)) == sorted(_BODIES)
+        assert pipeline.pending_trajectories(live, restamp=True) == []
+
+    def test_the_heartbeat_makes_a_stall_distinguishable_from_slow_progress(
+        self, tmp_path: Path
+    ) -> None:
+        # A supervisor must not have to infer "hung" from the absence of output: the in-flight
+        # trajectories are named with their age, so a 40-minute replay is visible as one.
+        progress = pipeline._StampProgress(total=3, live_dir=tmp_path)
+        progress.begin("t-slow")
+        progress.finish("t-done", None)
+        line = progress.heartbeat()
+        assert "1/3 done" in line and "2 left" in line
+        assert "1 in flight" in line and "t-slow" in line
+        assert "instances rejected" in line and "last failure: none" in line
+
+    def test_a_childs_output_is_tagged_with_the_trajectory_it_came_from(self) -> None:
+        # N children share one pipe; untagged lines cannot be attributed, and a gate verdict that
+        # cannot be attributed to a trajectory makes a multi-hour rebuild undiagnosable.
+        block = pipeline._child_block("traj-9", "restamped x", b"INFO admissibility: ADMISSIBLE")
+        assert block.splitlines() == [
+            "  [traj-9] INFO admissibility: ADMISSIBLE",
+            "  [traj-9] restamped x",
+        ]
 
 
 class TestStandaloneFigureFreshness:

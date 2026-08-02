@@ -24,6 +24,7 @@ from benchmark import config, plot_frame  # noqa: E402
 from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
 from benchmark.routing import plot_style, summary  # noqa: E402
 from benchmark.routing.scripts import knn_nulls  # noqa: E402
+from benchmark.routing.strategies import routing_text  # noqa: E402
 from benchmark.routing.strategies.knn import _embed_texts  # noqa: E402
 
 # Cheapest-above-threshold cutoff, matching the shipped KnnPolicy.success_rate_threshold
@@ -73,23 +74,26 @@ _DESCRIPTIVE_SPEC = FigureSpec(
 
 _PCA_SPEC = FigureSpec(
     reading=(
-        "Each dot is one task, placed by the two leading principal components of its REAL "
-        "768-d jina prompt embedding; the axis labels carry the share of variance each "
-        "component explains. COLOUR is how many enabled models solve that task — a measured "
-        "difficulty scale, not a router output. MARKER SHAPE is the model the proxy kNN "
-        "router picks for it."
+        "Each dot is one task, placed by the two leading principal components of the REAL "
+        "768-d jina vector the router stores for it; the axis labels carry the share of "
+        "variance each component explains. WHAT WAS ENCODED is the task's `description`: a "
+        "~106-character `<repo>@<commit12> - resolve <test-node-id>` identifier label, because "
+        "`problem_statement` is absent from all 500 committed tasks. COLOUR is how many enabled "
+        "models solve that task — a measured difficulty scale, not a router output. MARKER "
+        "SHAPE is the model the proxy kNN router picks for it."
     ),
     goal=(
-        "Compare the two channels: colour varies across the cloud, so difficulty IS visible "
-        "in embedding space. Look for the router's marker shapes tracking that colour "
-        "structure. One marker shape covering the whole cloud means the router ignores the "
-        "structure the embedding exposes — which is what a constant function looks like, and "
-        "what this figure currently shows."
+        "Compare the two channels: colour varies across the cloud, so difficulty varies among "
+        "these tasks. Look for the router's marker shapes tracking that colour structure. One "
+        "marker shape covering the whole cloud means the router's output is very nearly a "
+        "constant, which is what this figure currently shows. It does NOT show that difficulty "
+        "is unavailable to an embedder — an identifier label was encoded, not the task."
     ),
     definitions=(
         ("PC1 / PC2", "the two directions of largest spread in the embedding space"),
         ("solved-by count", "number of enabled models whose patch passed that task, 0 to 6"),
         ("kNN router", "picks the cheapest model whose neighbourhood pass-rate clears the cut"),
+        ("description", "the identifier label above — the string actually handed to the encoder"),
     ),
     limitations=(
         "This is a 2-D shadow of a 768-d space: dots that overlap here may be far apart in "
@@ -99,6 +103,9 @@ _PCA_SPEC = FigureSpec(
         "Visible geometry belongs to the EMBEDDING, not to the router — a router built on "
         "shuffled outcomes would produce the same point cloud. See knn_transfer_curve.png "
         "for the null comparison that can actually separate the two.",
+        "The input channel is an identifier, not the task, so nothing here bounds what an "
+        "embedding of the problem statement could resolve. A null is a COVERAGE GAP, not a "
+        "falsification.",
     ),
 )
 
@@ -224,8 +231,8 @@ def build_feature_vectors(results, models_order):
 def build_task_embeddings(matrix, task_ids):
     """Real normalized jina prompt embeddings (unit vectors), aligned to ``task_ids``."""
     tasks = matrix.get("tasks", {})
-    descs = [tasks.get(tid, {}).get("description", tid) for tid in task_ids]
-    emb = np.asarray(_embed_texts(descs), dtype=np.float64)
+    texts = [routing_text(tid, tasks.get(tid, {})) for tid in task_ids]
+    emb = np.asarray(_embed_texts(texts), dtype=np.float64)
     norms = np.linalg.norm(emb, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return emb / norms
@@ -951,8 +958,9 @@ def main(config_path: str = "benchmark/benchmark.yaml"):
     ax.set_xlabel(f"PC1 ({explained[0] * 100:.1f}% of variance)")
     ax.set_ylabel(f"PC2 ({explained[1] * 100:.1f}% of variance)")
     ax.set_title(
-        "Prompt-embedding space (REAL jina) — measured difficulty vs what the router does\n"
-        "colour = how many models solve the task (varies) · shape = the router's pick",
+        "Stored-embedding space (REAL jina) — measured difficulty vs what the router does\n"
+        "colour = how many models solve the task (varies) · shape = the router's pick\n"
+        "encoded text is a ~106-char identifier label, NOT the problem statement",
         fontsize=12,
     )
     ax.grid(True, alpha=0.25)
@@ -970,7 +978,9 @@ def main(config_path: str = "benchmark/benchmark.yaml"):
         f"({max(zip(counts, unique, strict=True))[1]}), so marker shape is very nearly a "
         f"constant — any apparent 'clustering' by shape is the majority class, not a decision.",
         f"Colour spans {int(solved_by.min())}-{int(solved_by.max())} models solving a task, so "
-        f"the difficulty the router is failing to track is genuinely present in this space.",
+        f"the difficulty the router is failing to track is genuinely present IN THE OUTCOMES. "
+        f"Whether it is present in the encoded text is untested here — the encoder was handed "
+        f"an identifier label, not the problem statement.",
     ]
     if never:
         pca_notes.append(

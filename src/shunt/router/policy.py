@@ -12,7 +12,7 @@ from typing import Final
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from shunt.models.config import strict_yaml_load
-from shunt.router.escalation import EscalationConfig
+from shunt.router.escalation import ESCALATION_LADDERS, EscalationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +80,8 @@ class EscalationPolicy(BaseModel):
 
     @model_validator(mode="after")
     def _check_ladder(self) -> EscalationPolicy:
-        allowed = ("effort_then_rank", "rank_only")
-        if self.ladder not in allowed:
-            joined = ", ".join(allowed)
+        if self.ladder not in ESCALATION_LADDERS:
+            joined = ", ".join(ESCALATION_LADDERS)
             raise ValueError(f"unknown escalation.ladder {self.ladder!r}; allowed: {joined}")
         return self
 

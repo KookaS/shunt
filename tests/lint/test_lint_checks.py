@@ -176,3 +176,58 @@ def test_sh006_catches_calibration_importing_escalation(tmp_path: Path) -> None:
 def test_sh006_allows_escalation_importing_routing(tmp_path: Path) -> None:
     f = _bench_file(tmp_path, "escalation/uses_spine.py", "from benchmark.routing import metrics\n")
     assert _run("check_import_direction.py", str(f)) == 0
+
+
+# --- SH008: real embeddings only -------------------------------------------------
+# The real-only embedding rule was 100% prose-enforced until this gate existed, and a
+# raw `TextEmbedding(model_name=...)` in benchmark/routing/strategies/knn_cascade.py
+# lived on the kill-gate path for exactly that reason. These tests are the wall's wall:
+# delete the gate and they go red.
+
+
+def test_sh008_catches_raw_fastembed_import_in_benchmark(tmp_path: Path) -> None:
+    f = _bench_file(tmp_path, "routing/strategies/raw.py", "from fastembed import TextEmbedding\n")
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_catches_plain_fastembed_module_import(tmp_path: Path) -> None:
+    f = _bench_file(tmp_path, "routing/raw2.py", "import fastembed\n")
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_exempts_the_shipped_embedder_module(tmp_path: Path) -> None:
+    f = _src_shunt_file(tmp_path, "router/embedder.py", "from fastembed import TextEmbedding\n")
+    assert _run("check_embedder_isolation.py", str(f)) == 0
+
+
+def test_sh008_catches_tfidf_vectorizer(tmp_path: Path) -> None:
+    f = _bench_file(
+        tmp_path,
+        "routing/proxy.py",
+        "from sklearn.feature_extraction.text import TfidfVectorizer\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_catches_a_vectorizer_reexported_from_elsewhere(tmp_path: Path) -> None:
+    # The name is banned, not just the sklearn path — a re-export must not be a back door.
+    f = _bench_file(tmp_path, "routing/proxy2.py", "from myshim import HashingVectorizer\n")
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_ignores_tests(tmp_path: Path) -> None:
+    f = tmp_path / "tests" / "test_fake.py"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("from fastembed import TextEmbedding\nfrom x import CountVectorizer\n")
+    assert _run("check_embedder_isolation.py", str(f)) == 0
+
+
+def test_sh008_passes_the_shipped_embedder_indirection(tmp_path: Path) -> None:
+    f = _bench_file(tmp_path, "routing/clean.py", "from shunt.router.embedder import Embedder\n")
+    assert _run("check_embedder_isolation.py", str(f)) == 0
+
+
+def test_sh008_default_tree_is_clean() -> None:
+    # The default scan IS the coverage (the hook passes no filenames), and this is the
+    # assertion that knn_cascade.py's raw TextEmbedding stays gone.
+    assert _run("check_embedder_isolation.py") == 0

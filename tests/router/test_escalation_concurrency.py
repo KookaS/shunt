@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from shunt.router.engine import RouterEngine
+from shunt.router.engine import RouterEngine, task_state_key
 from shunt.router.escalation import EscalationConfig
 
 
@@ -106,7 +106,7 @@ def test_concurrent_same_key_failures_all_accrue_no_lost_update() -> None:
     with ThreadPoolExecutor(max_workers=16) as pool:
         list(pool.map(lambda _i: _fail(eng), range(n)))
 
-    log = eng.snapshot_escalation_state()["failure_log"]["repoA"]
+    log = eng.snapshot_escalation_state()["failure_log"][task_state_key("repoA")]
     assert len(log) == n  # every concurrent append landed exactly once
 
 
@@ -121,4 +121,5 @@ def test_concurrent_decides_escalate_at_most_once_for_the_same_evidence() -> Non
 
     escalated = [reason for _m, reason, _prov in results if reason == "auto_escalation"]
     assert len(escalated) == 1  # the first decision retires the window; the rest see none
-    assert eng.snapshot_escalation_state()["failure_log"].get("repoA", []) == []
+    log = eng.snapshot_escalation_state()["failure_log"]
+    assert log.get(task_state_key("repoA"), []) == []

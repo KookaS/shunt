@@ -17,6 +17,8 @@ routing/
     knn_cascade.py            # kNN-informed verify-and-escalate
   exploration_replay.py       # Direct-Method replay of the SHIPPED exploration policy on the dense slice
   run_eval.py                 # Evaluate all strategies
+  instrument_control.py       # Positive control + destroyed-signal null (both selection rules)
+  sensitivity.py              # Minimum detectable effect — how weak a signal the corpus can see
   metrics.py                  # Metric definitions
   report.py                   # Comparison tables and plots (derived from results.csv)
   scripts/                    # Analysis + figure producers (all read results.csv, write reports/)
@@ -49,6 +51,76 @@ the rows, so the scatter and the summary table cannot disagree (they once differ
 every point, the worst by 174% on cost). Generate the summary first — `python -m
 benchmark.routing.report` — or the script exits with that instruction; it also refuses
 to vouch for a summary older than `results.csv`.
+
+## Instrument validity (`instrument_control.py`) — run this before quoting anything
+
+The permutation nulls in `scripts/knn_nulls.py` answer *"could chance have produced this
+number?"*. They cannot answer the prior question, *"is this pipeline computing anything about
+the task text at all?"* — a front end that embeds the wrong field, or embeds nothing, produces
+an observation and a null that agree perfectly and report `NULL RESULT` forever.
+
+`instrument_control.py` answers that one. It builds a small corpus whose task text carries a
+known-learnable signal, hands it to the pipeline at the **front** (`matrix["tasks"]`, upstream of
+`routing_text` and the embedder), and requires two things:
+
+- **positive control** — the assembled pipeline recovers the planted signal, scoring clearly
+  above chance;
+- **destroyed-signal null** — the same pipeline, with the outcomes permuted, collapses back to
+  chance.
+
+The planted signal is deliberately **orthogonal to repository identity**: every repository
+contributes equally to both outcome classes, so a pipeline that recovers only the repo name out
+of the label scores at chance and is rejected. `repo_identity_positive_score` re-scores the same
+corpus with labels re-aligned onto the repo and is reported as a diagnostic contrast, never as
+part of the verdict — dead on the planted signal but high there means the front end propagates
+repository identity and nothing finer.
+
+Two rules decide, so the control has **two legs** over that one planted corpus:
+
+| Leg | Rule under test | What it certifies |
+|---|---|---|
+| `run_control` | `knn_nulls.select_from_rates` | the transfer-curve and cross-repo **figures** |
+| `run_strategy_control` | `kNNStrategy` → `RouterEngine.decide` → `SelectionRule` | `reports/strategy_summary.csv`, the table the kill-gate comparison reads |
+
+Clearing one certifies nothing about the other: `select_from_rates` documents three named
+divergences from the shipped rule (weighting, `min_samples`, the fallback branch). The strategy
+leg hands the engine its whole ranked pool, so `SelectionRule._escalate` can never land on an arm
+the corpus has no cell for — it refuses loudly rather than scoring the remainder.
+
+```sh
+python3 -m benchmark.routing.instrument_control              # both legs; exit 0 = admissible
+python3 -m benchmark.routing.instrument_control --leg strategy
+```
+
+`TransferCurve`, `CrossRepo` and `summary.StrategyTable` all take the verdict as a **required,
+non-defaulted** field, so no figure and no summary row can be produced — and no verdict quoted —
+without stating whether the instrument that produced it has cleared both legs. Every row
+`write_summary_csv` emits carries `instrument_admissible` and `instrument_verdict`. An instrument
+that has not cleared them is a coverage-gap, not a falsification: a negative result from it says
+nothing about routing.
+
+## How weak a signal could this corpus see? (`sensitivity.py`)
+
+A passed positive control licenses one claim: the committed `NULL RESULT` is a null on an
+instrument **proven to detect something — at the strength probed**. The planted signal is far
+larger than any plausible real routing signal, so whether the null means "nothing is there" or
+"something is there, below our floor" is a separate question.
+
+`sensitivity.py` answers it. It re-assigns the **real** outcome rows to the **real** tasks so
+that a fraction `rho` of them line up with a direction in the real embedding space, sweeps `rho`
+downward, and reports the smallest effect the published test still flags at 80% power — as an
+interval, not a point. Because planting only re-assigns rows, the permutation null is unchanged,
+so the bar the planted signal must clear is the published analysis's own bar.
+
+`rho` converts to a portable unit: a perfect reader of the planted signal separates
+cheap-sufficient from escalation-needed tasks at an AUROC of one half plus half of `rho`. The
+sweep reports both, over both splits (the published ungrouped one, which leaks same-repo
+siblings into a held-out task's index, and a repo-grouped one), both k-rules (the config `k` and
+the figure's selection-corrected best-over-k), and both plantable geometries.
+
+```sh
+python3 -m benchmark.routing.sensitivity          # prints; writes nothing
+```
 
 ## Model registry (`src/shunt/config/models.yaml`) — the cost + routing source of truth
 
@@ -247,6 +319,7 @@ docker compose -f benchmark/compose.yaml run --rm benchmark  # simulated loop + 
 | CumReg_ci_lower / CumReg_ci_upper | 95% bootstrap CI on CumReg |
 | rAcc | Fraction of tasks where strategy picked same model as oracle |
 | Pareto | True if strategy is on the Pareto frontier (no other strategy has higher AvgPerf% AND lower TotalCost) |
+| instrument_admissible / instrument_verdict | The two-sided instrument verdict for the SHIPPED selection path (`run_strategy_control`), stamped on every row |
 
 ## Baselines
 
@@ -278,7 +351,10 @@ spec → image → ephemeral-container run flow and the gold-smoke / `--live` co
 
 The canonical index is `benchmark/routing/data/challenges.json`:
 - `challenges` — lightweight index (id, source, language, difficulty)
-- `tasks` — metadata dict (id → description, repo, base_commit, difficulty, spec path)
+- `tasks` — metadata dict (id → description, repo, base_commit, difficulty, spec
+  path). `routing_text()` prefers `problem_statement`, but no committed entry carries
+  it (0 of 500), so every strategy currently embeds the `description` label
+  (`<repo>@<commit12> - resolve <test-id>`, median 106 characters)
 - top-level `source`, `source_dataset`, `dataset_revision` — the HF provenance
 
 Model pricing and per-model outcomes are kept **out** of challenges.json to

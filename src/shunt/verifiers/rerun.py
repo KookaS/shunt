@@ -11,9 +11,16 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 
+from shunt.proxy.redaction import redact_secrets
+
 from .base import Verifier, VerifierResult
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_check_id(check_id: str | None) -> str | None:
+    """Redact a failing-check id before it reaches a log record."""
+    return redact_secrets(check_id) if check_id is not None else None
 
 
 class RerunConfirmingVerifier(Verifier):
@@ -35,7 +42,9 @@ class RerunConfirmingVerifier(Verifier):
                     "treating as flake, abstaining",
                     attempt,
                     self._reruns,
-                    first.failing_check_id,
+                    # A parametrized test id can embed a secret, and the application log is the
+                    # least access-controlled sink it reaches — scrub it like every other seam.
+                    _safe_check_id(first.failing_check_id),
                     again.outcome,
                 )
                 return VerifierResult(

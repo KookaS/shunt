@@ -33,6 +33,11 @@ data/
 # The escalation detector's curated input dir is tracked too (same rationale as routing/data/).
 !benchmark/escalation/data/
 !benchmark/escalation/data/**
+# ...except the parallel stamping stage's plumbing inside it: the inter-process lock file and
+# the sibling temps that `corpus_lock.atomic_write_text` renames from. Transient by
+# construction — a `git add -A` mid-rebuild must not sweep them into the public repo.
+benchmark/escalation/data/**/.corpus.lock
+benchmark/escalation/data/**/*.tmp
 index/
 
 # Live full-content trajectory capture — encrypted, LOCAL only, NEVER committed. Belt-and-

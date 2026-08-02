@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from shunt.models.config import ModelConfig, ReasoningArm, ReasoningConfig
-from shunt.router.engine import RouterEngine
+from shunt.router.engine import RouterEngine, task_state_key
 from shunt.router.escalation import EscalationConfig
 
 
@@ -157,7 +157,7 @@ def test_tier_step_resets_the_effort_arm() -> None:
     _fail(eng)
     _m1, _r1, prov1 = eng.decide("s2", "task")
     assert prov1["escalated_reasoning_arm"] == "high"  # qwen effort at the top arm
-    assert eng._task_effort_arm.get("repoA") == "high"
+    assert eng._task_effort_arm.get(task_state_key("repoA")) == "high"
 
     _fail(eng)
     eng.decide("s3", "task")
@@ -165,7 +165,8 @@ def test_tier_step_resets_the_effort_arm() -> None:
     m2, r2, _prov2 = eng.decide("s4", "task")
     assert m2 == "glm"  # ladder exhausted → rank step
     assert r2 == "auto_escalation"
-    assert "repoA" not in eng._task_effort_arm  # the stale qwen arm was cleared on the rank step
+    # the stale qwen arm was cleared on the rank step
+    assert task_state_key("repoA") not in eng._task_effort_arm
 
 
 def test_model_without_arms_steps_tier_directly() -> None:

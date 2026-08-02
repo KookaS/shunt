@@ -23,6 +23,13 @@ MIN_PERMUTATIONS = 200
 Statistic = Callable[[Sequence[float], Sequence[bool]], float]
 
 
+def _require_finite(scores: Sequence[float]) -> None:
+    """Reject NaN/inf scores, naming the first offending index so the caller can trace it."""
+    for index, score in enumerate(scores):
+        if not math.isfinite(score):
+            raise ValueError(f"score at index {index} is not finite ({score!r}); cannot rank it")
+
+
 def prevalence(labels: Sequence[bool]) -> float:
     """The positive rate — the no-skill AUPRC baseline drawn on every PR figure."""
     return sum(labels) / len(labels) if labels else 0.0
@@ -66,6 +73,12 @@ def auroc(scores: Sequence[float], labels: Sequence[bool]) -> float:
     negatives = len(labels) - positives
     if positives == 0 or negatives == 0:
         return 0.5
+    # A NaN pivot used to HANG this function, not mis-score it: the tie scan below advances while
+    # `scores[order[run]] == scores[order[index]]`, and `nan == nan` is False, so `run` never leaves
+    # `index`, `index = run` is a no-op, and the outer loop spins forever. A non-finite score means
+    # an upstream model emitted garbage; failing loudly is the only honest answer, and it is checked
+    # here rather than at every call site because this is the one place the invariant is required.
+    _require_finite(scores)
     # Rank-sum (average ranks for ties) → AUC = (rank_sum_pos - n_pos*(n_pos+1)/2) / (n_pos*n_neg).
     order = sorted(range(len(scores)), key=lambda i: scores[i])
     ranks = [0.0] * len(scores)
@@ -82,23 +95,38 @@ def auroc(scores: Sequence[float], labels: Sequence[bool]) -> float:
     return (rank_sum_pos - positives * (positives + 1) / 2.0) / (positives * negatives)
 
 
+def flag_budget(
+    scores: Sequence[float], labels: Sequence[bool], *, flag_rate: float | None = None
+) -> int:
+    """How many runs the operating threshold is MEANT to flag: `flag_rate` x n (base rate)."""
+    # The INTENDED budget, which is not the same as what the cut actually admits.
+    # `operating_threshold` returns a score and every consumer flags `score >= cut`, so a block of
+    # rows tied with the cut is taken whole and the realised flag count can exceed this number. The
+    # confusion figure reports that gap, and it can only do so honestly if the intended count has
+    # ONE source — here — rather than being re-derived beside the threshold it came from.
+    if not scores:
+        return 0
+    rate = prevalence(labels) if flag_rate is None else flag_rate
+    if rate <= 0.0:
+        return 0
+    return max(1, min(len(scores), round(min(rate, 1.0) * len(scores))))
+
+
 def operating_threshold(
     scores: Sequence[float], labels: Sequence[bool], *, flag_rate: float | None = None
 ) -> float:
     """The score cut that flags `flag_rate` of runs — the corpus base rate by default."""
-    # DERIVED, never hardcoded. A fixed 0.5 used to stand here and was unreachable: the score is a
-    # calibrated probability, so on a corpus with a ~0.38 base rate it centres near 0.38 and almost
-    # nothing crosses 0.5 (2 true positives against 203 false negatives — prevalence read as a bug).
-    # Spending a flag budget equal to prevalence is the break-even point: at that budget a no-skill
-    # flagger reaches exactly base-rate precision, so any excess is real ranking skill.
+    # DERIVED, never hardcoded. A fixed 0.5 used to stand here and was unreachable on the corpus of
+    # the day: the score is a calibrated probability, so its centre tracks the corpus base rate and
+    # a cut placed away from that rate degenerates (measured then: 2 true positives against 203
+    # false negatives). Spending a flag budget equal to prevalence is the break-even point: at that
+    # budget a no-skill flagger reaches exactly base-rate precision, so any excess is ranking skill.
     if not scores:
         return 0.0
-    rate = prevalence(labels) if flag_rate is None else flag_rate
-    if rate <= 0.0:
+    budget = flag_budget(scores, labels, flag_rate=flag_rate)
+    if budget == 0:
         return math.inf
-    ordered = sorted(scores, reverse=True)
-    k = max(1, min(len(ordered), round(min(rate, 1.0) * len(ordered))))
-    return ordered[k - 1]
+    return sorted(scores, reverse=True)[budget - 1]
 
 
 def detection_metrics(
@@ -209,7 +237,13 @@ def permutation_null(
     """Summarise `draws` (statistics under permuted labels) around the `observed` value."""
     n = len(draws)
     if n < MIN_PERMUTATIONS:
-        raise ValueError(f"permutation null needs >= {MIN_PERMUTATIONS} draws, got {n}")
+        # Actionable because the usual way to hit this is a CLI `--permutations` below the floor,
+        # several frames above here: name the knob and the value it has to clear.
+        raise ValueError(
+            f"permutation null needs >= {MIN_PERMUTATIONS} draws "
+            f"(metrics.MIN_PERMUTATIONS), got {n} — "
+            f"raise --permutations to at least {MIN_PERMUTATIONS}"
+        )
     mean = sum(draws) / n
     sd = math.sqrt(sum((d - mean) ** 2 for d in draws) / (n - 1))
     ordered = sorted(draws)
@@ -320,6 +354,7 @@ __all__ = [
     "auroc",
     "bootstrap_ci",
     "detection_metrics",
+    "flag_budget",
     "grouped_bootstrap_ci",
     "grouped_resamples",
     "operating_threshold",

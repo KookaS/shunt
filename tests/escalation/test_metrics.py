@@ -51,6 +51,23 @@ def test_auroc_is_chance_when_one_class_absent() -> None:
     assert metrics.auroc([0.1, 0.9, 0.3], [True, True, True]) == 0.5
 
 
+def test_auroc_rejects_a_non_finite_score_instead_of_hanging() -> None:
+    # THE DEFECT THIS PINS. `auroc` used to HANG — not mis-score — on a NaN. Its tie scan advances
+    # while `scores[order[run]] == scores[order[index]]`; `nan == nan` is False, so `run` never
+    # left `index`, `index = run` was a no-op, and the outer loop spun forever (a probe on
+    # `auroc([nan, 1., 2., 3.], [True, False, True, False])` exited 124, timed out). A hang burns a
+    # whole run for zero data and gives no traceback to read; a raise is diagnosable in one line.
+    with pytest.raises(ValueError, match="not finite"):
+        metrics.auroc([float("nan"), 1.0, 2.0, 3.0], [True, False, True, False])
+    with pytest.raises(ValueError, match="not finite"):
+        metrics.auroc([float("inf"), 1.0, 2.0, 3.0], [True, False, True, False])
+    # The index of the first offender is named, so a 800-row score vector is traceable.
+    with pytest.raises(ValueError, match="index 2"):
+        metrics.auroc([0.1, 0.2, float("nan"), 0.4], [True, False, True, False])
+    # A degenerate label vector short-circuits to chance before the scan, and stays that way.
+    assert metrics.auroc([float("nan"), 1.0], [True, True]) == 0.5
+
+
 def test_prevalence_is_the_positive_rate() -> None:
     assert metrics.prevalence([True, False, False, False]) == pytest.approx(0.25)
     assert metrics.prevalence([]) == 0.0
@@ -168,6 +185,16 @@ def test_permutation_null_keeps_pure_noise_inside_the_band() -> None:
 def test_permutation_null_refuses_too_few_draws() -> None:
     with pytest.raises(ValueError, match="permutation null needs"):
         metrics.permutation_null(0.9, [0.5] * 10)
+
+
+def test_the_too_few_draws_error_names_the_knob_that_causes_it() -> None:
+    # The realistic way to hit this is a CLI `--permutations` below the floor, several frames up
+    # from here, so the message has to say which knob to turn and to what — a bare "needs >= 200"
+    # leaves the reader to find the floor. `MIN_PERMUTATIONS` is exported for the same reason: an
+    # argument parser can read the floor off the module instead of hardcoding a second copy.
+    assert "MIN_PERMUTATIONS" in metrics.__all__
+    with pytest.raises(ValueError, match=r"--permutations to at least 200"):
+        metrics.permutation_null(0.9, [0.5] * (metrics.MIN_PERMUTATIONS - 1))
 
 
 def test_permutation_p_value_can_never_be_zero() -> None:

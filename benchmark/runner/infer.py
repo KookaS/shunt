@@ -581,7 +581,14 @@ def _capture_escalation_trajectory(
         from benchmark.runner.step_snapshots import write_snapshots  # noqa: PLC0415
 
         capture_live_trajectory(
-            patch.messages, instance_id=instance_id, model=model, arm=arm, resolved=resolved
+            patch.messages,
+            instance_id=instance_id,
+            model=model,
+            arm=arm,
+            resolved=resolved,
+            # Recorded even (especially) when it is 0 — that is the committed proof the offline
+            # replay needs to tell "captured nothing" from "this checkout lacks the scratch".
+            snapshot_steps=len(patch.snapshots),
         )
         if patch.snapshots:
             # Persist per-step diffs to the gitignored scratch keyed the SAME way as the trajectory

@@ -61,7 +61,11 @@ def make_step(  # noqa: PLR0913 (test builder — many optional knobs by design)
 
 
 def make_trajectory(
-    steps: list[StepView], *, trajectory_id: str = "t1", terminal_resolved: bool = False
+    steps: list[StepView],
+    *,
+    trajectory_id: str = "t1",
+    terminal_resolved: bool = False,
+    snapshot_steps: int | None = None,
 ) -> Trajectory:
     """Wrap steps in a header with a recomputed content hash and n_steps."""
     header = TrajectoryHeader(
@@ -77,6 +81,7 @@ def make_trajectory(
         redacted=False,
         content_sha256=schema.content_sha256(steps),
         n_steps=len(steps),
+        snapshot_steps=snapshot_steps,
     )
     return Trajectory(header=header, steps=steps)
 
@@ -110,7 +115,9 @@ def make_depth_report(  # noqa: PLR0913 (test builder — many optional knobs by
     return DepthReport(
         depth=depth,
         n_rows=len(scores),
-        n_excluded_short=0,
+        n_excluded_unstamped=0,
+        n_excluded_too_short=0,
+        n_excluded_by_margin=0,
         n_groups=len(scores),
         base_rate=0.5,
         auroc_prior=0.6,

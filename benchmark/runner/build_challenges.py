@@ -43,6 +43,10 @@ def _dataset_rows() -> list[dict[str, object]]:
 
 def _description(spec: SwebenchSpec) -> str:
     """``<repo>@<base_commit[:12]> — resolve <fail_to_pass[0]>`` (em-dash, U+2014)."""
+    # A LABEL, not the task: 62% test node-id, 14% repo name, 12% a random commit prefix.
+    # Routing PREFERS `problem_statement` and falls back here when it is absent — which is
+    # every task in the committed manifest, so today this label is what the router actually
+    # embeds (see strategies/routing_text).
     target = spec.fail_to_pass[0] if spec.fail_to_pass else ""
     return f"{spec.repo}@{spec.base_commit[:12]} — resolve {target}"
 
@@ -62,6 +66,12 @@ def _task_entry(spec: SwebenchSpec) -> dict[str, object]:
     stratum = spec.difficulty_stratum
     entry: dict[str, object] = {
         "description": _description(spec),
+        # The text the AGENT is given (infer.py: ``instance["problem_statement"]``), carried so
+        # that once this manifest is rebuilt the router embeds the same task it is routing. The
+        # committed manifest predates the field and omits it entirely, so that alignment is the
+        # intent of this line, not yet a property of the shipped data. Carried in the manifest
+        # because routing/ must not import runner/ to read the spec files.
+        "problem_statement": spec.problem_statement,
         "language": "python",
         "tags": ["swebench-verified", stratum],
         "repo": spec.repo,

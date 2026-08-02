@@ -134,6 +134,44 @@ def stamp_step(step: StepView, outcome: VerifierResult) -> StepView:
     return replace(stamped, blocking=schema.recompute_blocking(stamped))
 
 
+def unstamp_step(step: StepView) -> StepView:
+    """Undo `stamp_step`: clear every replay-written field, preserve everything else."""
+    # The cleared set is exactly what `stamp_step` writes, restored to the parser defaults from
+    # `normalize.base.make_step`. `success=True` + `confirmed=False` is what routes the step to
+    # `VerifiedOutcome.NONE` and out of `features.is_stamped`; a cleared step with `success=False`
+    # would instead read as a verified FAIL. Action / args / observation / result / metadata /
+    # identifiers are untouched — they are the agent's behaviour, not the instrument's verdict.
+    cleared = replace(
+        step,
+        success=True,
+        failing_check_id=None,
+        exit_code=None,
+        is_infra_failure=False,
+        confirmed=False,
+    )
+    cleared = replace(cleared, dedup_key=schema.normalize_dedup_key(cleared.failing_check_id))
+    return replace(cleared, blocking=schema.recompute_blocking(cleared))
+
+
+def unstamp_trajectory(traj: Trajectory) -> Trajectory:
+    """Strip every per-step replay stamp; the terminal harness grade is re-asserted, not dropped."""
+    # Called when the instance-level admissibility gate REJECTS an instance. Skipping the write
+    # (the original behaviour) left a rejected instance's stale stamps in place, so a rebuild
+    # returned astropy-8872 byte-identical to its defective committed form — 284 fabricated steps
+    # surviving as if measured. Clearing is idempotent: `unstamp_step` is a constant assignment
+    # and `_stamp_terminal` re-derives from the header, so re-running yields identical bytes.
+    #
+    # The terminal step is NOT cleared to nothing: its `confirmed` comes from the SWE-bench
+    # grading harness (`header.terminal_resolved`), a different instrument that this gate says
+    # nothing about. Its `exit_code` IS cleared — `_stamp_terminal` never wrote that, so any value
+    # there is a leftover from the per-step replay this gate just invalidated.
+    steps = [unstamp_step(s) for s in traj.steps]
+    if steps:
+        steps[-1] = _stamp_terminal(steps[-1], traj.header.terminal_resolved)
+    header = replace(traj.header, content_sha256=schema.content_sha256(steps), n_steps=len(steps))
+    return schema.Trajectory(header=header, steps=steps)
+
+
 def restamp_trajectory(traj: Trajectory, step_outcomes: Mapping[int, VerifierResult]) -> Trajectory:
     """Apply offline per-step outcomes to a parsed trajectory (terminal stays authoritative)."""
     # The committed plane holds StepViews (raw messages are gone), so an offline replay restamps
@@ -149,4 +187,10 @@ def restamp_trajectory(traj: Trajectory, step_outcomes: Mapping[int, VerifierRes
     return schema.Trajectory(header=header, steps=steps)
 
 
-__all__ = ["MiniSweAgentParser", "restamp_trajectory", "stamp_step"]
+__all__ = [
+    "MiniSweAgentParser",
+    "restamp_trajectory",
+    "stamp_step",
+    "unstamp_step",
+    "unstamp_trajectory",
+]

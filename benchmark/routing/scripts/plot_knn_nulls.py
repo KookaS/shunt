@@ -19,8 +19,12 @@ import numpy as np  # noqa: E402
 from matplotlib.patches import Rectangle  # noqa: E402
 
 from benchmark import config, plot_frame  # noqa: E402
+from benchmark.admissibility import AdmissibilityResult  # noqa: E402
 from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
 from benchmark.routing import summary  # noqa: E402
+from benchmark.routing.instrument_control import (  # noqa: E402
+    routing_instrument_admissibility,
+)
 from benchmark.routing.scripts import knn_nulls, viz_knn  # noqa: E402
 
 _INK = "#22252a"
@@ -58,6 +62,10 @@ _TRANSFER_SPEC = FigureSpec(
         "alone supports. The COMPARISON between them is the readable part, not the level.",
         "One workload (SWE-bench-style tasks over 12 repositories); transfer to a different "
         "task distribution is not evidence this figure can give.",
+        "'Description' is literal: the encoded string is the ~106-char `<repo>@<commit12> - "
+        "resolve <test-node-id>` identifier label, because `problem_statement` is absent from "
+        "all 500 committed tasks. Blue inside the band is a COVERAGE GAP for embedding-based "
+        "routing, not a falsification of it.",
     ),
 )
 
@@ -86,8 +94,25 @@ _CROSS_REPO_SPEC = FigureSpec(
 )
 
 
-def _verdict(observed: float, band: knn_nulls.Band, what: str) -> str:
+def _verdict(
+    observed: float, band: knn_nulls.Band, what: str, admissibility: AdmissibilityResult
+) -> str:
     """State the null comparison plainly — including, especially, when it is negative."""
+    # An inadmissible instrument has not been shown to recover a signal that IS there, so neither
+    # direction of the null comparison is a finding: "above the band" could be manufactured and
+    # "inside the band" is a coverage-gap, not a falsification. The banner is prepended rather
+    # than the number suppressed, because the number is still the honest record of what ran.
+    comparison = _null_comparison(observed, band, what)
+    if not admissibility.admissible:
+        return (
+            f"NOT QUOTABLE — {admissibility.headline} Until the instrument clears both controls "
+            f"the following is a coverage-gap, not a result. {comparison}"
+        )
+    return comparison
+
+
+def _null_comparison(observed: float, band: knn_nulls.Band, what: str) -> str:
+    """The observation against its permutation band, with the direction named."""
     if band.contains(observed):
         return (
             f"NULL RESULT: {what} is {observed:.4f}, INSIDE the shuffled-outcome null band "
@@ -177,12 +202,19 @@ def plot_transfer_curve(curve: knn_nulls.TransferCurve, out_path: Path) -> Path:
     # assumption that runs ~12% small on this discrete statistic, inflating z upward).
     gap = curve.loo[best_i] - curve.best_constant
     notes = [
+        curve.admissibility.reason,
         _verdict(
             curve.loo[best_i],
             curve.max_null,
             f"the best-over-k leave-one-out pass rate (k={best_k}, selection-corrected)",
+            curve.admissibility,
         ),
-        _verdict(curve.loo[best_i], curve.band_at(best_i), f"the same value at its own k={best_k}"),
+        _verdict(
+            curve.loo[best_i],
+            curve.band_at(best_i),
+            f"the same value at its own k={best_k}",
+            curve.admissibility,
+        ),
         f"Against the best constant policy (always {curve.best_constant_model}) the router is "
         f"{gap:+.4f} — a router that cannot beat one fixed model is not routing.",
         f"Memorisation reference at k={best_k} is {curve.memorisation[best_i]:.4f}; the "
@@ -239,12 +271,16 @@ def plot_cross_repo(cross: knn_nulls.CrossRepo, k: int, out_path: Path) -> Path:
     fig.tight_layout()
 
     notes = [
+        cross.admissibility.reason,
         f"Same-repo (diagonal) mean {cross.diagonal_mean:.4f} vs cross-repo (off-diagonal) mean "
         f"{cross.off_diagonal_mean:.4f} — a {cross.advantage:+.4f} diagonal advantage. A "
         "positive gap is repo-local memorisation; a gap near zero means the diagonal carries "
         "no extra information.",
         _verdict(
-            cross.advantage, cross.null, "the diagonal advantage (same-repo minus cross-repo)"
+            cross.advantage,
+            cross.null,
+            "the diagonal advantage (same-repo minus cross-repo)",
+            cross.admissibility,
         ),
         "Read a uniformly bright or uniformly dull COLUMN as an index-size artefact rather "
         "than as skill: a small index gives every model the same thin neighbourhood, so the "
@@ -295,6 +331,15 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     threshold = float(config.knn_params().get("success_rate_threshold", 0.6))
     k_cfg = int(config.knn_params().get("k", 10))
 
+    # BEFORE either figure: does this pipeline recover a signal it is KNOWN to contain? Run at
+    # the same k and threshold the figures use, because a control run at other settings certifies
+    # an instrument nobody is quoting.
+    # Deliberately NOT tied to `--permutations`: that flag exists to make a figure cheap to
+    # re-render, and a control whose band was estimated from a handful of draws would certify
+    # nothing. The control is small enough (160 short texts) that the full count is free.
+    admissibility = routing_instrument_admissibility(k=k_cfg, threshold=threshold)
+    print(admissibility.reason)
+
     emb = viz_knn.build_task_embeddings(matrix, task_ids)
     sims = emb @ emb.T
     pass_mat = _pass_matrix(results, task_ids, models_by_price)
@@ -305,13 +350,25 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     ks = [k for k in (2, 5, 10, 20, 40, 80, len(task_ids) - 1) if 1 <= k <= len(task_ids) - 1]
     ks = sorted(set(ks))
     curve = knn_nulls.transfer_curve(
-        sims, pass_mat, models_by_price, ks, threshold, n_perm=args.permutations
+        sims,
+        pass_mat,
+        models_by_price,
+        ks,
+        threshold,
+        admissibility=admissibility,
+        n_perm=args.permutations,
     )
     plot_transfer_curve(curve, out_dir / "knn_transfer_curve.png")
     print("Saved knn_transfer_curve.png")
 
     cross = knn_nulls.cross_repo_transfer(
-        sims, pass_mat, task_ids, k_cfg, threshold, n_perm=args.permutations
+        sims,
+        pass_mat,
+        task_ids,
+        k_cfg,
+        threshold,
+        admissibility=admissibility,
+        n_perm=args.permutations,
     )
     plot_cross_repo(cross, k_cfg, out_dir / "knn_cross_repo_transfer.png")
     print("Saved knn_cross_repo_transfer.png")

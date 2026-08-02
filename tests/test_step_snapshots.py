@@ -7,6 +7,7 @@ from pathlib import Path
 
 from benchmark.runner.step_snapshots import (
     DIFF_COMMAND,
+    TESTBED,
     StepSnapshotRecorder,
     read_snapshots,
     write_snapshots,
@@ -25,6 +26,43 @@ def test_recorder_captures_the_diff_keyed_by_step() -> None:
     rec.capture(1)
     assert calls == [DIFF_COMMAND, DIFF_COMMAND]
     assert rec.snapshots == {0: "diff --git a/x b/x\n+changed", 1: "diff --git a/x b/x\n+changed"}
+
+
+def test_the_capture_command_sees_staged_work_not_just_unstaged(tmp_path: Path) -> None:
+    """Positive control for the capture command, against a REAL git repo (no container)."""
+    # A bare ``git diff`` is worktree-vs-index, so an agent's ``git add`` erases its own work
+    # from the capture: the offline replay then rebuilds a tree the agent never had and the
+    # FAIL_TO_PASS tests fail for a reason the agent did not cause. That defect cost the
+    # 2026-07 corpus 1 897 empty-capture steps and 62 partial ones, so this is asserted on
+    # behaviour, not on the string.
+    # REVERT PROBE: drop ``HEAD`` from ``DIFF_COMMAND`` and ``alpha.py`` vanishes from the capture.
+    import subprocess  # noqa: PLC0415
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)  # noqa: S603, S607
+
+    git("init", "-q")
+    git("config", "user.email", "t@e.st")
+    git("config", "user.name", "t")
+    # Distinct stems on purpose: "staged.py" is a SUBSTRING of "unstaged.py", so naming them that
+    # way makes the assertion below pass even when the staged half is missing from the capture.
+    for name in ("alpha.py", "beta.py"):
+        (tmp_path / name).write_text("original\n")
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    for name in ("alpha.py", "beta.py"):
+        (tmp_path / name).write_text("agent edit\n")
+    git("add", "alpha.py")  # the exact move that used to blind the instrument
+
+    def exec_fn(command: str) -> str:
+        proc = subprocess.run(command, shell=True, capture_output=True, text=True, check=False)  # noqa: S602
+        return proc.stdout
+
+    rec = StepSnapshotRecorder(exec_fn, DIFF_COMMAND.replace(TESTBED, str(tmp_path)))
+    rec.capture(0)
+    captured = rec.snapshots[0]
+    assert "alpha.py" in captured, "STAGED work must still be visible to the capture"
+    assert "beta.py" in captured, "unstaged work must still be visible to the capture"
 
 
 def test_recorder_swallows_exec_errors() -> None:

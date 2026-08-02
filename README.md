@@ -150,8 +150,8 @@ Conflating them makes every number ambiguous, so we keep them apart throughout.
 | | **Routing model** | **Escalation model** |
 |---|---|---|
 | Question | Which (model, effort) should *start* this task? | Is this attempt going to fail — escalate *now*? |
-| When | Once, at the task boundary, before any tokens are spent | Mid-task, at decision boundaries |
-| Input | The task text, embedded | The running trajectory: discussion, tool use, verified check results |
+| When | Once, at the task boundary, before any tokens are spent | At the next boundary, once a verified outcome exists — live, one per closed session |
+| Input | The task text, embedded | Verified failing-check ids from re-running your tests off the wire |
 | Learns from | Task outcome, pass/fail | Whether this attempt ultimately failed |
 | Today | k-nearest-neighbours over task embeddings | A recurrence rule over verified failing-check ids |
 | Status | **No measurable signal over the base rate yet** | **First attempt, not working — `NO_SKILL`** |
@@ -162,6 +162,73 @@ The escalation model is a **first attempt**, inspired by the published
 good performance, and it ships **disabled**. We reproduced that paper and
 withdrew our citation of it; the write-up is in the
 [research log](docs/research-log.md).
+
+### Both pipelines, end to end
+
+```mermaid
+flowchart LR
+  subgraph R["Routing model — once, on the first turn"]
+    direction LR
+    R1["Task text"] --> R2["drop system role,<br/>clip, embed"] --> R3["kNN over verified<br/>outcomes"] --> R4["cheapest model above<br/>the success bar"] --> R5["one model,<br/>locked to the session"]
+  end
+  subgraph E["Escalation model — at session close"]
+    direction LR
+    E1["The repo's<br/>test suite"] --> E2["run off the wire,<br/>classify, confirm,<br/>key the failure"] --> E3["same key seen N times<br/>in the window?"] --> E4["raise reasoning effort,<br/>else raise rank"] --> E5["directive for the<br/>next boundary"]
+  end
+```
+
+**The routing model** reads the first turn's `user` and `tool` text — the system
+prompt is dropped, it would swamp the clip window — clips it, and embeds it with a
+CPU-only fastembed model. That vector queries an HNSW index of past sessions whose
+outcomes you verified. Each neighbour is weighted by its verification confidence and
+its closeness; models are then scored on weighted success rate, and the **cheapest
+one clearing the success bar with enough samples** wins. Below the bar it falls
+through to the cheapest model it has no history for, which is why an under-informed
+router looks a lot like `always_cheap`. Until enough verified outcomes accumulate it
+cold-starts to a fixed cheap model. The pick is then **locked to the session** — that
+lock is the cache-safety guarantee. Depth: [docs/routing.md](docs/routing.md).
+
+**The escalation model** is two stages, and only the first involves pattern matching.
+At session close Shunt re-runs *your* repo's suite off the wire — pytest, jest,
+`go test`, `cargo test`, auto-detected — and classifies the result by exit code
+first, then by regex over the output: did tests really run and fail, or was this an
+environment error? A genuine failure is re-run to confirm it is not a flake, then
+given a **dedup key**: the failing test's node id, or a hash of the detail with
+timings, addresses, temp paths and seeds stripped. Stage two is plain counting. When
+the *same* key reaches `escalate_after_n` confirmed, non-infrastructural failures
+inside a window of recent decisions, the router raises the current model's reasoning
+effort — same model, so the prompt cache survives — and only steps to a pricier model
+once that ladder is exhausted. Different failures never add up; a passing suite wipes
+the slate. Depth: [docs/escalation.md](docs/escalation.md).
+
+**One verified outcome per session, not per step.** The verifier runs at session
+close, so escalation sees at most one failure event per session — never one per tool
+call. With the shipped threshold that means two *sessions* failing the same check.
+It does not watch an attempt unfold and step in mid-flight.
+
+### Where they stop
+
+- The routing model rests on ranking task difficulty from a prompt embedding, and on
+  agentic coding that signal has not cleared our bar. The proxy and cache-safety do
+  not depend on it; the kNN decision does.
+- An empty neighbourhood and a confident one produce the same-looking response. Only
+  `shunt explain` tells them apart.
+- Escalation is inert without a repo it can test, and inert on a repo with no tests.
+- Escalation grades nothing — it counts. Every confirmed failure weighs the same, so
+  a trivial assertion and a total collapse are one event each.
+- A test runner whose output varies run to run in a way our normalisers do not strip
+  yields a fresh key every time, so recurrence never accumulates. The field still
+  looks populated, which is what makes it quiet.
+- Neither model adapts mid-session. The model is locked; a directive applies to the
+  next boundary.
+
+### Scope: SWE tasks today
+
+Both models handle **software-engineering work only**. The routing corpus is coding
+tasks, and escalation's only verified signal is a repository's own test suite. Point
+Shunt at a notebook, a market analysis, or a piece of prose and it still proxies and
+forwards — but the routing decision has no evidence behind it and nothing grades the
+result afterwards.
 
 ### Rank and cost are different orderings
 
@@ -218,6 +285,11 @@ still says what it can and cannot support.
 
 <br>
 
+**Read all five with one caveat.** Every embedding-based reading below was
+computed while the router embedded a 106-character identifier label rather than
+the task's problem statement. They describe the shipped pipeline as it stands;
+they are not results about embeddings. See *Three claims we retracted* below.
+
 **1. The kill-gate figure.** Left panel: every strategy's cost against its pass
 rate, with Always-Frontier's own confidence band drawn as the "equal quality"
 zone. Right panel: the same contest restricted to the 84 tasks where both
@@ -246,14 +318,15 @@ projected cell is filled as a pass.
 against *k*, with three reference lines: pure memorisation, the best single
 always-one-model policy, and a shuffled-outcome null band. *Look for:* the blue
 line above the grey band and above the green line. It is inside the band at every
-*k* — the router scores what chance scores.
+*k* — on this corpus the router scores what chance scores.
 
 ![kNN transfer curve](benchmark/routing/reports/knn_transfer_curve.png)
 
-**5. Why.** A 2-D PCA of the real jina prompt embeddings the router ships, each
-task coloured by its measured `p_solve`. *Look for:* hard and easy tasks
-separating. They don't — difficulty intermixes across the embedding space, which
-is the near-chance signal above, seen directly.
+**5. Why it behaves that way.** A 2-D PCA of the jina vectors the router actually
+stores, each task coloured by its measured `p_solve`. *Look for:* hard and easy
+tasks separating. They don't. Note what was encoded, though: the 106-character
+label, not the problem statement. So this shows difficulty is not recoverable
+from an identifier — not that it is unrecoverable from the task.
 
 ![Embedding routing map](benchmark/routing/reports/embedding_routing_map.png)
 
@@ -262,7 +335,7 @@ is the near-chance signal above, seen directly.
 ### Escalation
 
 <details>
-<summary><b>Five plots that carry the escalation story</b> (click to expand)</summary>
+<summary><b>Four plots that carry the escalation story</b> (click to expand)</summary>
 
 <br>
 
@@ -271,23 +344,31 @@ statistic recomputed under randomly shuffled outcome labels, with the whole
 fitting pipeline re-run per shuffle, and labels shuffled *inside* each challenge
 so both arms keep the same prior; dashed lines bound the null's central 95%.
 *How to read it:* for the detector to be doing anything, the red line must sit
-clearly right of the upper dashed line. It sits just past it (+0.076, p = 0.015)
-— but resampling whole challenges puts that increment at [−0.014, +0.145],
-across zero, so the harness still returns `NO_SKILL`.
+clearly right of the upper dashed line. Under the corrected methodology using
+StratifiedGroupKFold to avoid fold-prevalence accounting artifacts, the
+incremental signal is not measurable — resampling whole challenges puts the
+increment at approximately zero, so the harness returns `NO_SKILL`. (An earlier
+evaluation reported +0.076 here, but that figure was inflated by the same
+between-fold base-rate artifact that contaminated the prior column; see the
+retraction section below.)
 
 ![Escalation permutation null](benchmark/escalation/reports/permutation_null.png)
 
 **2. The question the product actually asks.** Of the runs the policy escalated,
 how many failed — against the runs it left alone, and against the corpus base
-rate. *Look for:* the escalated bar clearly above the base-rate line. Both
-intervals overlap and both contain the base rate (lift 0.98×).
+rate. *Look for:* the escalated bar clearly above the base-rate line. On this
+corpus the policy escalates every scored run, so there is no left-alone arm and
+the escalated rate is the base rate by construction (lift 1.00×).
 
 ![Outcome by escalation](benchmark/escalation/reports/trajectory_outcomes.png)
 
 **3. Ranking quality.** The ROC curve for the detector's score against the
-corrected causal label. *Look for:* a curve bowing toward the top-left. At the
-best depth it barely leaves the diagonal (AUROC 0.543); five decisions in it sits
-*below* it (0.428).
+corrected causal label. *Look for:* a curve leaving the grey permutation-null
+band toward the top-left. The reference is that band and the dashed line at its
+**measured** centre — not the faint 0.5 diagonal. The whole pipeline is refit on
+every label shuffle, so its no-information AUROC is something the harness
+measures rather than assumes; the legend prints the value it came to. The curve
+stays inside the band.
 
 ![Escalation ROC](benchmark/escalation/reports/roc_curve.png)
 
@@ -298,13 +379,6 @@ dead on them; offline container replay re-stamped those runs at zero API cost.
 Closing the gap did not change the verdict.
 
 ![Failure capture coverage](benchmark/escalation/reports/failure_capture_coverage.png)
-
-**5. Is it early enough to matter?** Lead time between the first escalation and
-the end of the run, split by how the run actually ended. *Look for:* the failed
-distribution shifted right of the resolved one — escalating earlier on runs that
-go on to fail. They overlap.
-
-![Lead time by outcome](benchmark/escalation/reports/lead_time_by_outcome.png)
 
 </details>
 
@@ -356,9 +430,9 @@ Three things we will not let you take away from that table:
 We would rather publish that than keep selling the model. **We do not claim the
 make-or-break gate is passed.**
 
-### Two claims we retracted after auditing our own benchmark
+### Three claims we retracted after auditing our own benchmark
 
-An audit of every committed figure found that two conclusions we were about to
+An audit of every committed figure found that three conclusions we were about to
 sell you were **measurement artifacts**. We are leaving this section in the
 README rather than quietly fixing it, because how a project handles its own bad
 results is the only evidence you have about the rest of its numbers.
@@ -369,32 +443,57 @@ repo slug, a truncated commit hash and a test path. No problem statement, no
 code, nothing about difficulty. 61% of each task's twenty nearest neighbours
 shared its repo, against a 10% chance rate: it was behaving as a path detector.
 So *"prompt embeddings cannot separate task difficulty"* had never actually been
-tested. The signal is demonstrably there — task identity accounts for 43% of
-outcome variance (ICC 0.427), and SWE-bench's crude three-level human difficulty
-tag recovers r = +0.287 where our 768-dimension embedding recovers r = −0.05.
+tested. It still has not been. `routing_text()` now prefers `problem_statement`,
+but that key is absent from all 500 committed tasks, so the embedder receives the
+106-character label on every one of them.
 
-**We re-ran it on the real problem statements, and the result held.** Feeding the
-genuine SWE-bench issue text (median 1,572 characters instead of 106) to the same
-shipped embedder moves nothing: R² goes −0.072 → **−0.061**, r goes −0.052 →
-**−0.026** with a confidence interval straddling zero, and the same-repo
-neighbour rate barely shifts, 61% → 58%. Adding the failing test names does not
-help, and neither does lifting the 4,000-character clip that silently truncates
-10.7% of statements — that made it marginally *worse*. Every per-model
-neighbourhood purity lift sits within ±0.03 of chance, and every AUC interval
-covers 0.50.
+There is task-level structure for it to find. Task identity accounts for about
+43% of outcome variance (ICC 0.427), and SWE-bench's crude three-level human
+difficulty tag recovers r = +0.29 leave-one-out, +0.27 under repo-grouped CV,
+where the 768-dimension embedding recovers −0.05. Neither of those is a text
+measurement — one is a variance ceiling, the other a curated human label — so
+they bound what a predictor could reach; they do not show the signal is in the
+prompt. The tag itself ships in the corpus, but the analysis that produced those
+two correlations does not, so read them as an indication of where the headroom
+sits rather than as a committed result. We keep them because this is the one
+positive result here that survived repo-grouped cross-validation, and cutting it
+would leave a tidier record than the evidence supports.
 
-So the conclusion stands, but it is worth being precise about what it is. It is
-not "embeddings are useless." It is: **on this benchmark, with this embedder, at
-n = 177, nearest neighbours in prompt space carry no recoverable signal about
-which model will solve a task** — with an honest detection floor of |r| = 0.21,
-below which we could not have seen an effect anyway. Meanwhile a three-level
-human difficulty tag clears r = +0.27 on the same data, and survives grouped
-cross-validation. The cheap categorical label beats the 768-dimension vector.
+**We tried it on the real problem statements, and we cannot yet close the
+question.** In an off-corpus one-off pass, whose figures the committed corpus
+does not carry, feeding the genuine SWE-bench issue text (median 1,572 characters
+instead of 106) to the same shipped embedder moved almost nothing: R² −0.072 →
+−0.061, r −0.052 → −0.026 with a confidence interval straddling zero,
+same-repo neighbour rate 61% → 58%. Adding the failing test names did not help,
+and neither did lifting the 4,000-character clip that truncates 10.7% of
+statements.
 
-There is a blunter way to say it. Across every variant, the learned router sent
-172–175 of 177 tasks to the cheapest model, landed on *exactly* the always-cheap
-pass rate, and cost more doing it — $1.58–1.78 against $1.36. That is not a
-router. It is a routing tax.
+We used to report that as the falsification holding. **It is not one.** Nothing
+in this repository reproduces it — the corpus still carries no problem
+statements, so the only channel the committed code can measure is the label. And
+the suite is too blunt to settle the question either way:
+
+```sh
+python3 -m benchmark.routing.sensitivity
+```
+
+puts the weakest effect this test can detect at 80% power at **AUROC ≈ 0.88** —
+the most sensitive of the eight configurations it sweeps, which is a minimum over
+those eight and not a bound. The selection rule the transfer figure actually
+quotes is worse still: in three of its four cells even a perfect signal fails to
+clear 80% power at all, and the fourth needs AUROC 0.94. Published
+task-difficulty detectors sit near 0.62. An instrument whose best cell sits 0.26
+AUROC above the best anyone has demonstrated, reporting that it found nothing, is
+reporting its own floor.
+
+So the position is neither "embeddings separate task difficulty" nor "they
+cannot". On this corpus **the question is open and currently unmeasurable**, and
+that is a third thing. What the numbers below do describe, accurately, is what
+our shipped router does when handed a 106-character label: across every variant
+it sent 172–175 of 177 tasks to the cheapest model, landed on *exactly* the
+always-cheap pass rate, and cost more doing it — $1.58–1.78 against $1.36. That
+is not a router. It is a routing tax. What it is not is a result about
+embeddings.
 
 **Our escalation baseline was reading the test labels.** The comparison gave each
 run the leave-one-out failure rate of *its own instance's other runs*, while the
@@ -419,13 +518,34 @@ skill. Measured against `max(prior, 0.5)`, as it always should have been, the
 headline increment at 5 decisions falls from **+0.144 to +0.061** — 57% of it was
 the broken comparator. What remains does not clear the corrected null.
 
+**Our escalation baseline was reading the fold identity.** The prior column,
+`prior_from_splits`, gives every test row its train-fold base rate. Under the old
+GroupKFold, that value is the exact arithmetic complement of the fold's own test
+prevalence (measured corr = −1.0000 at every depth). The prior thus acted as a
+fold-identity proxy: it added zero within-fold discrimination
+(within-fold Spearman = 1.000000) while shifting the pooled AUROC. The
+incremental headline at depth 20 was published as +0.076, p = 0.015. But six
+columns of pure Gaussian noise over the real challenge group structure produced
+E[incremental] = +0.042 at depth 20, with a maximum of +0.080 across 8 seeds —
+the published +0.076 was *smaller* than what pure noise produced. StratifiedGroupKFold
+now collapses the fold-prevalence spread from 0.141 to 0.011, and a null-corpus
+regression test pins E[incremental] ~ 0. The pre-existing positive-control
+fixture was structurally immune (one failed and one resolved run per challenge
+makes every fold base rate exactly 0.5), which is why it never caught the defect.
+A label-substitution positive control tested the real six features against model
+identity (cheap vs frontier): AUROC 0.497/0.525/0.538 at depths 5/10/20, versus
+0.428/0.491/0.543 against the real failure label — both measured before the
+state-capture audit marked unverifiable steps as unmeasured. That the shipped
+features cannot distinguish model identity — a fact unambiguously present in
+trajectory patterns — shows the gate was a null generator, not an instrument.
+
 So we are withdrawing *"the escalation model does not work"* and replacing it
 with something less satisfying and more accurate: **we cannot yet tell.** This
-evaluation could only ever have detected a detector at AUROC ≥ 0.57. The raw
-features hint at ≈ 0.54 — squarely inside the blind spot. Resolving it needs
-roughly four times the distinct challenges (160 → ~640); more runs per existing
+evaluation could only ever have detected a detector at AUROC ≥ 0.59. The raw
+features hint at ≈ 0.52 — squarely inside the blind spot. Resolving it needs
+roughly four times the distinct challenges (152 → ~640); more runs per existing
 challenge buy almost nothing, because the clustering already inflates variance
-2.4×.
+~3×.
 
 **What survives all of it:** the cascade result. Price-Cascade at $20.46 against
 Always-Frontier's $87.04 is untouched by every defect above — it uses no model,
@@ -450,9 +570,18 @@ Where the work goes next, in priority order.
   randomisation at flagged checkpoints with logged propensities fixes it.
 - **More routing algorithms.** kNN is the first, not a commitment. Bigram and
   linear models, calibrated classifiers, better selection rules.
-- **More distinct challenges.** Offline re-stamping is done — 791 of 799
-  trajectories are now scored — but they cluster on only 160 challenges, and that
-  clustering, not the trajectory count, is what caps what the eval can resolve.
+- **More distinct challenges.** Offline re-stamping is done — 727 of 799
+  trajectories carry verified per-step outcomes — but they cluster on only 152
+  challenges, and that clustering, not the trajectory count, is what caps what
+  the eval can resolve.
+- **Domains beyond software engineering.** Both models are scoped to SWE tasks
+  because that is where the verifier is free: the repo's own tests. The direction is
+  data science and ML work next — a notebook that runs, a metric that moves — and
+  then non-engineering work such as business analysis and literature, where the check
+  is a spreadsheet rule or a rubric a person signs off. Each domain needs its own
+  dataset, its own verifier, and its own honest evaluation, which is what
+  divide-and-conquer above is for. Nothing here is scheduled, and none of it starts
+  before the SWE case holds up.
 - **CLI / UI** to monitor and manage Shunt, low-level work on the hot path,
   mid-session model adaptation, and an enterprise suite (audit, RBAC, monitoring).
 
@@ -464,7 +593,7 @@ Early is the best time to shape this. Concretely, here is what helps most:
   with the data.
 - 🚨 **Ideas on the escalation model.** The genuinely unsolved one. What signal in
   an agent's trajectory actually predicts failure early enough to be worth acting
-  on? We have 791 labelled trajectories and a harness that will tell you honestly
+  on? We have 727 labelled trajectories and a harness that will tell you honestly
   whether your idea works. Rules, n-grams, embeddings, small classifiers, fusion
   of several weak signals — open to anything.
 - 🧠 **Ideas on the routing model.** kNN is a starting point. If you have reason to

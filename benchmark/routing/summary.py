@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import csv
 import random
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 from benchmark import config
+from benchmark.admissibility import AdmissibilityResult
 from benchmark.routing.impute import ImputedMatrix, complete_matrix, is_non_observation
 from benchmark.routing.metrics import (
     bootstrap_ci,
@@ -33,6 +35,12 @@ SUMMARY_FIELDS: Final[tuple[str, ...]] = (
     "CumReg_ci_upper",
     "rAcc",
     "Pareto",
+    # Every published row carries the verdict on the instrument that produced it. A reader who
+    # greps ONE line still sees whether the routing pipeline behind it has been shown to recover
+    # a signal it is known to contain — which is the difference between "kNN scored 78.53%" and
+    # "kNN scored 78.53% on an instrument never shown to measure anything".
+    "instrument_admissible",
+    "instrument_verdict",
 )
 # Columns that are deterministic given the matrix (no bootstrap, no strategy-set
 # dependency) — what the drift check compares.
@@ -203,11 +211,64 @@ def _strategy_row(  # noqa: PLR0913
     }
 
 
-def write_summary_csv(rows: list[dict], path: Path) -> None:
-    """Write summary rows to ``path`` using the canonical field order."""
+@dataclass(frozen=True)
+class StrategyTable:
+    """Summary rows plus the verdict on the instrument that produced them."""
+
+    # REQUIRED and FIRST, with no default, for the same reason `knn_nulls.TransferCurve` carries
+    # one: the strategy table is the artifact the kill-gate comparison is read off, and it can now
+    # only exist once the caller has stated whether the SHIPPED selection path
+    # (`kNNStrategy` -> `RouterEngine.decide` -> `SelectionRule`) recovers a signal it is known to
+    # contain and collapses to chance when that signal is destroyed. A defaulted field would have
+    # let every existing call site keep compiling and keep publishing, which is precisely how the
+    # gate went unwired the first time. The figures' gate does NOT cover this path: it certifies
+    # `select_from_rates`, which documents three named divergences from the shipped rule. Build
+    # the verdict with `instrument_control.strategy_instrument_admissibility`.
+    admissibility: AdmissibilityResult
+    rows: tuple[dict, ...]
+
+
+def certified_table(
+    rows: list[dict],
+    *,
+    k: int | None = None,
+    threshold: float | None = None,
+    min_samples: int | None = None,
+) -> StrategyTable:
+    """Pair ``rows`` with the shipped-path instrument verdict AT THE SAME kNN parameters.
+
+    Defaults come from ``config.knn_params()``; pass overrides when the caller did.
+    """
+    # The parameters matter: a control run at other settings certifies an instrument nobody is
+    # quoting, which is why they are threaded through rather than read from config unconditionally.
+    from benchmark.routing.instrument_control import strategy_instrument_admissibility
+
+    params = config.knn_params()
+    return StrategyTable(
+        admissibility=strategy_instrument_admissibility(
+            k=int(params.get("k", 20)) if k is None else int(k),
+            threshold=(
+                float(params.get("success_rate_threshold", 0.6))
+                if threshold is None
+                else float(threshold)
+            ),
+            min_samples=(
+                int(params.get("min_samples", 3)) if min_samples is None else int(min_samples)
+            ),
+        ),
+        rows=tuple(rows),
+    )
+
+
+def write_summary_csv(table: StrategyTable, path: Path) -> None:
+    """Write the strategy table to ``path``, stamping every row with the instrument verdict."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    stamp = {
+        "instrument_admissible": table.admissibility.admissible,
+        "instrument_verdict": table.admissibility.headline,
+    }
     with path.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(SUMMARY_FIELDS))
         w.writeheader()
-        for row in rows:
-            w.writerow({k: row.get(k, "") for k in SUMMARY_FIELDS})
+        for row in table.rows:
+            w.writerow({k: {**row, **stamp}.get(k, "") for k in SUMMARY_FIELDS})

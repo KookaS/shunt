@@ -12,7 +12,7 @@ import hnswlib
 
 from benchmark import config
 
-from . import Strategy
+from . import Strategy, routing_text
 from .knn import _build_index, _embed_texts
 
 _FALLBACK_MODEL = "deepseek-v4-flash"
@@ -73,7 +73,7 @@ class TierClassifier(Strategy):
 
     def _neighbors(self, task_id: str, task_meta: dict) -> list[str]:
         assert self._index is not None and self._task_ids is not None
-        emb = _embed_texts([task_meta.get("description", task_id)])
+        emb = _embed_texts([routing_text(task_id, task_meta)])
         k_search = min(self._k + 1, len(self._task_ids))
         labels, distances = self._index.knn_query(emb.reshape(1, -1), k_search)
         out: list[str] = []
@@ -88,6 +88,6 @@ class TierClassifier(Strategy):
     def _build(self, matrix: dict) -> None:
         task_ids = sorted(matrix.get("results", {}).keys())
         self._task_ids = task_ids
-        descriptions = [matrix["tasks"].get(tid, {}).get("description", tid) for tid in task_ids]
-        self._index = _build_index(_embed_texts(descriptions))
+        texts = [routing_text(tid, matrix["tasks"].get(tid, {})) for tid in task_ids]
+        self._index = _build_index(_embed_texts(texts))
         self._ready = True

@@ -1,6 +1,6 @@
 """Per-step code snapshots for offline verified-outcome replay (Mechanism B)."""
 
-# During a live agent run we capture a cheap per-step ``git diff`` of the agent's checkout
+# During a live agent run we capture a cheap per-step ``git diff HEAD`` of the agent's checkout
 # (~1s/step, observe-only) and persist it to a local, gitignored scratch keyed by trajectory +
 # step. An offline pass later replays each snapshot in a rebuilt container to derive the real
 # per-step outcome — zero added model spend, re-runnable.
@@ -16,11 +16,24 @@ if TYPE_CHECKING:
 
 _LOG = logging.getLogger(__name__)
 
-# The agent works in /testbed (a git checkout at the instance base_commit). A plain diff is
+# The agent works in /testbed (a git checkout at the instance base_commit). Reading a diff is
 # non-mutating (observe-only): it never stages, so it cannot alter the agent's index or the
 # patch it submits. New (untracked) files are not captured — a documented Mechanism-B limit.
 TESTBED: Final[str] = "/testbed"
-DIFF_COMMAND: Final[str] = f"git -C {TESTBED} diff"
+
+# `HEAD`, NOT a bare `git diff`. A bare `git diff` is worktree-vs-INDEX, so the moment an agent
+# runs `git add` its work leaves the capture while staying on disk: the capture collapses to 0
+# bytes (or, once the agent edits something else, to a NON-EMPTY but incomplete diff), the offline
+# replay rebuilds a tree the agent never had, and the FAIL_TO_PASS tests fail for a reason the
+# agent did not cause. That is not hypothetical — it is the defect `state_capture_audit` exists to
+# clean up after, and it cost the 2026-07 corpus 1 897 empty-capture steps plus 62 partial ones.
+# `git diff HEAD` is worktree-vs-HEAD, so staged and unstaged edits are both captured.
+#
+# WHAT THIS STILL DOES NOT CATCH, deliberately: an agent that COMMITS moves HEAD, and the delta
+# ends up behind it. Capturing that needs the instance's base_commit, which this recorder is not
+# given — see the module note in `state_capture_audit`. Untracked files remain uncaptured too;
+# `git add -N` would fix that but mutates the index, which observe-only forbids.
+DIFF_COMMAND: Final[str] = f"git -C {TESTBED} diff HEAD"
 
 # Local, gitignored scratch (mirrors benchmark/routing/artifacts/): snapshots are ephemeral
 # session output, never committed data.
@@ -29,7 +42,7 @@ _STEP_GLOB: Final[str] = "step_*.diff"
 
 
 class StepSnapshotRecorder:
-    """Capture a per-step ``git diff`` via an injected in-container exec callable (observe-only)."""
+    """Capture a per-step ``git diff HEAD`` via an injected exec callable (observe-only)."""
 
     def __init__(self, exec_fn: Callable[[str], str], diff_command: str = DIFF_COMMAND) -> None:
         # exec_fn runs a shell command inside the agent's container and returns its stdout. For

@@ -445,7 +445,14 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         _print_frontier_gate(gate)
 
     out_file = _results_file(output_dir, args.knn_k, args.knn_success_rate, args.knn_min_samples)
-    summary.write_summary_csv(rows, out_file)
+    table = summary.certified_table(
+        rows,
+        k=args.knn_k,
+        threshold=args.knn_success_rate,
+        min_samples=args.knn_min_samples,
+    )
+    print(f"\n{table.admissibility.reason}")
+    summary.write_summary_csv(table, out_file)
 
     print(f"\nResults written to {out_file}")
     print(f"  k={args.knn_k}, sr={args.knn_success_rate}, ms={args.knn_min_samples}")

@@ -37,6 +37,7 @@ nav:
   - Architecture: architecture.md
   - Configuration: configuration.md
   - Feedback: feedback.md
+  - The routing model: routing.md
   - Error detection & auto-escalation: escalation.md
   - Results: results.md
   - Research log: research-log.md

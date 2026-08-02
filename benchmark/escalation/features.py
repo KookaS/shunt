@@ -9,9 +9,44 @@
 #    0.970 on it while a perfect task-oracle capped at 0.757. At fixed depth every row's prefix is
 #    the same length, so "how far into the run am I" carries no variance and cannot be learned.
 #
-# 2. NO TERMINAL STEP. `_stamp_terminal` writes the harness verdict onto the last step, so any
-#    feature that can see step n-1 reads the label verbatim (AUROC 1.00 including it, 0.56
-#    excluding). The prefix is clipped to `n_steps - 1` before `depth` is applied.
+# 2. NO TERMINAL STEP, AND NO APPROACH TO IT. `_stamp_terminal` writes the harness verdict onto the
+#    last step, so any feature that can see step n-1 reads the label verbatim (AUROC 1.00 including
+#    it, 0.56 excluding). `scorable_steps` clips that one step, and this rule used to stop there and
+#    read as complete. It was not. Clipping ONE step bounds the leak only while the prefix stays
+#    SHORT RELATIVE TO THE RUN, and the admission test was merely `len(steps) >= depth` — so at
+#    depth 40 a 41-step run was admitted with its prefix ending one step short of the verdict, and
+#    grouped-OOF AUROC there read 0.770 against 0.608 once 20 steps were withheld.
+#
+#    The channel is NOT the stamp: only `steps[-1]` carries it. It is that a per-step verified
+#    outcome is the SAME MEASUREMENT as the terminal grade, taken on a workspace the agent has
+#    barely changed since — so proximity to termination makes a step's `success` a near-copy of the
+#    label. Measured on the 216 runs with >= 45 scorable steps (a FIXED population, so the decay is
+#    not a selection artifact): AUROC of one step's `success` against the final grade holds a
+#    plateau of 0.77-0.79 for every step within 10 of the end, decays through 0.652 at distance 18
+#    and 0.607 at 21, and first becomes statistically indistinguishable from that population's own
+#    far-field floor (0.554, the mean over distances 30-42) at distance 23 — challenge-level
+#    bootstrap, 400 resamples, the excess CI first including 0 at 23 and staying flat out to 42.
+#    `MIN_WITHHELD` is that distance minus one: a trajectory qualifies at `depth` only if at least
+#    22 non-terminal steps remain UNREAD after the prefix, which puts the last step a feature may
+#    read at distance 23 and out of the bleed.
+#
+#    Said WITHOUT the overclaim the old wording made: this bounds the proximity channel to the
+#    corpus's own noise floor; it does not drive it to zero, and no margin could. The residual at
+#    distance 23+ is ~0.554 on long runs, and that is run-level difficulty rather than the verdict —
+#    a hard task fails from its first step. The margin is ABSOLUTE, never a fraction of the run, for
+#    rule 1's reason: a proportional margin is a function of `n_steps` and would smuggle future
+#    length back in through the admission test itself.
+#
+#    THE PRICE, stated rather than hidden. The rule is a filter on real rows, and the reported
+#    depths pay for it — MORE the deeper they go. Admission needs `depth + MIN_WITHHELD` scorable
+#    steps, so the cut at depth d is the share of runs that reach d and then fail to survive
+#    another 22, and the run-length distribution thins as d rises: the margin discards a larger
+#    fraction of an already smaller pool. Measured on the REBUILT corpus (727 stamped runs,
+#    2026-08-02): depth 5 falls 727 -> 414 rows (152 -> 116 challenges), depth 10 717 -> 344
+#    (151 -> 102), and depth 20 532 -> 228 (136 -> 78) — cuts of 43%, 52% and 57%. That is the
+#    cost of not scoring a leak. Every depth still clears `prefix_eval.MIN_ROWS` (40). The six
+#    counts are properties of this corpus and will move on the next rebuild; what does not move
+#    is that the cut rises with depth, which is the claim.
 #
 # FIELD CENSUS (do not add features on fields outside this list).
 # POPULATED: success, blocking, is_infra_failure, confirmed, status, action, tool, exit_code.
@@ -45,10 +80,53 @@ if TYPE_CHECKING:
     from benchmark.escalation.schema import StepView, Trajectory
 
 # The prefix depths the eval reports at, in decisions. Absolute, not fractional (rule 1).
+#
+# THIS CONSTANT DECIDES THE SIGN OF THE PUBLISHED VERDICT, so five words were not enough. It used to
+# carry only the line above, and the ladder itself went unjustified while `run_eval._status` read
+# these three depths as the whole family it declares skill from.
+#
+# WHY A x2 LADDER FROM 5. Five decisions is roughly the earliest point an escalation router could
+# act on and still save anything — below it the prefix is one or two commands and there is nothing
+# to summarise; a router that only decides after 40 turns has already paid for the run it was
+# supposed to divert. Doubling (5, 10, 20) spans that usable window on a log scale rather than
+# oversampling one neighbourhood, which is what a linear 5/10/15 would do. The ladder is a
+# reporting choice about where a router could act, made independently of what the numbers say.
+#
+# THEY WERE NOT CHOSEN BY OUTCOME. The tuple was introduced whole and has never been edited (git
+# history), and none of the three is a local maximum of any reported statistic — a result-maximiser
+# on this corpus would have picked 24/33/42, not 5/10/20. The defect this comment repairs is that
+# a load-bearing choice was undocumented, not that it was gamed.
+#
+# THE CEILING, AND WHY THERE IS ONE. Do not raise these depths to chase a bigger incremental AUROC.
+# Admission at depth d requires `len(scorable) >= d + MIN_WITHHELD`, so a deeper depth does not
+# score the same runs more deeply — it SELECTS a different, shorter-lived population. Run length is
+# outcome-correlated (a task the agent solves quickly is a task it solves), so raising the depth
+# raises the admitted failure rate, and a rising incremental at depth measures that selection
+# rather than prefix evidence. `MIN_WITHHELD` bounds the PROXIMITY channel (rule 2 above); it does
+# nothing about this SELECTION channel, which is a property of the admission test itself.
+#
+# MECHANISM FIRST, NUMBERS SECOND. The corpus HAS SINCE BEEN REBUILT — the pre-rebuild one carried
+# fabricated per-step outcomes on roughly 30% of it — so the two halves below have different
+# vintages and are labelled rather than merged:
+#   RE-MEASURED on the rebuilt corpus (2026-08-02, 727 stamped runs): over a depth-2..45 sweep the
+#   admitted base rate rises from 0.475 to 0.700 — with a one-point dip here and there, so rising
+#   but not strictly monotone — while n collapses from 461 rows to 70. The selection channel
+#   survived the rebuild essentially unchanged (it read 0.507 -> 0.694 and 503 -> 72 before).
+#   NOT re-measured, still the 2026-07-31 PRE-REBUILD figure: the incremental AUROC — negative at
+#   every reported depth — first turned positive at depth 31 and reached +0.18 at depth 42. Had
+#   this tuple been (30, 40, 45) the harness would have published a positive incremental at every
+#   depth it reports. Read it as the shape of the risk, not as a current measurement.
+# `tests/escalation/test_features.py` turns the ceiling into a checkable bound rather than a
+# warning: every reported depth's admitted base rate must stay within a stated tolerance of the
+# corpus base rate, which is the selection channel measured directly.
 DEFAULT_DEPTHS: Final[tuple[int, ...]] = (5, 10, 20)
 
-# The tail window for the recency features — short enough to differ from the whole-prefix rate.
-_RECENT: Final[int] = 3
+# Non-terminal steps that must remain UNREAD after the prefix for a trajectory to qualify (rule 2).
+# A module constant, deliberately not a parameter with a default: a caller that could pass its own
+# margin could silently re-admit the leaked rows, and the whole point of the rule is that it is not
+# bypassable from the call site. `extract_features` is the only admission gate, and `build_rows`
+# reaches every row through it.
+MIN_WITHHELD: Final[int] = 22
 
 # ALSO DROPPED, for the same reason: `error_status_rate` (share of prefix steps with
 # `status != "ok"`). The normalizer assigns `status` and `success` together, so it is a FOURTH
@@ -70,25 +148,39 @@ _RECENT: Final[int] = 3
 #     `max_action_repeat_rate` is kept because repetition is the construct escalation is about
 #     (an agent thrashing on one command); the variety reading adds no rank at the shallow depths.
 #
-# NOT dropped, but disclosed: `fail_rate` and `recent_fail_rate` correlate at r = +0.9988 at depth
-# 5 (the recency window is 3 of the 5 prefix steps, so it is mostly the same steps). The dependence
-# is near, not exact — the design keeps full rank with both — so removing one would be a judgement
-# call on a real column rather than the arithmetic removal the two above are. It shrinks with depth
-# as the window becomes a smaller share of the prefix.
+# AND ONE MORE, dropped by rule 2 rather than by arithmetic: `recent_fail_rate` (the failure rate
+# over the last 3 prefix steps). It was previously kept and merely disclosed as correlating with
+# `fail_rate` at r = +0.9988 at depth 5, on the stated grounds that "the design keeps full rank with
+# both". That grounds was itself an artifact of the leak. Measured: at depth 5 the two columns are
+# not merely correlated but EXACTLY EQUAL on 787 of 791 trajectories, and the four rows that made
+# the design full-rank are the four SHORTEST runs in the corpus — 7, 9, 10 and 11 scorable steps,
+# i.e. prefixes ending 2 to 6 steps from the verdict. The depth-5 rank guard was being satisfied
+# only by the leakiest rows there are; once `MIN_WITHHELD` excludes them the equality is 452 of 452
+# and the design is rank-deficient. No window width repairs it: on runs long enough to qualify, the
+# opening 5 steps are homogeneous, so every sub-window of them equals the whole.
+#
+# It is also the channel the leak travelled down. Permutation importance at depth 40 put
+# `recent_fail_rate` at +0.1368 dAUROC against +0.0122 for `fail_rate` — an order of magnitude
+# above every other column, because the recency window is the part of the prefix nearest the end.
+# Removing it costs almost nothing once the margin is in: at depth 10 the grouped-OOF AUROC moves
+# 0.4082 -> 0.4054 and at depth 20 0.3601 -> 0.3533. It carries genuine rank at depths 10 and 20
+# (it differs from `fail_rate` on 96/781 and 130/584 rows), so this is a real column being given
+# up — not a free arithmetic removal like the two above — and it is given up because a design that
+# is rank-deficient at a reported depth cannot be fitted honestly at that depth.
 #
 # With both in, the design matrix ranked 7 of 8 at depths 5 and 10, so the "each column carries
 # signal no other carries" claim below was false and the eval was fitting a rank-deficient design.
 # `tests/escalation/test_features.py` now gates on the RANK of [features | intercept] over the real
 # corpus, not on pairwise inequality, which affine dependence passes by construction.
 
-# Six columns, each carrying rank no other column already carries — see the census above for the
-# six removed as aliases of `fail_rate`, as affine combinations, or as a coverage artifact.
+# Five columns, each carrying rank no other column already carries at EVERY reported depth — see
+# the census above for the seven removed as aliases of `fail_rate`, as affine combinations, as a
+# coverage artifact, or (`recent_fail_rate`) as the leak's conduit and a depth-5 duplicate.
 FEATURE_NAMES: Final[tuple[str, ...]] = (
     "fail_rate",
     "infra_rate",
     "distinct_check_id_rate",
     "max_key_repeat_rate",
-    "recent_fail_rate",
     "max_action_repeat_rate",
 )
 
@@ -125,8 +217,10 @@ def extract_features(traj: Trajectory, depth: int) -> tuple[float, ...] | None:
     Returning None (rather than padding) keeps the unit honest: a trajectory that never reached
     the decision depth was not observed there, and imputing it would invent data.
     """
+    # `depth + MIN_WITHHELD`, not `depth`: reaching the depth is necessary but not sufficient. The
+    # run must also still have somewhere to go, or the prefix is reading the outcome (rule 2).
     steps = scorable_steps(traj)
-    if len(steps) < depth:
+    if len(steps) < depth + MIN_WITHHELD:
         return None
     return _features(steps[:depth])
 
@@ -136,13 +230,11 @@ def _features(steps: Sequence[StepView]) -> tuple[float, ...]:
     n = len(steps)
     keys = [s.failing_check_id for s in steps if s.failing_check_id is not None]
     actions = Counter(s.action for s in steps)
-    recent = steps[-_RECENT:]
     return (
         _rate(sum(not s.success for s in steps), n),
         _rate(sum(s.is_infra_failure for s in steps), n),
         _rate(len(set(keys)), n),
         _rate(max(Counter(keys).values()) if keys else 0, n),
-        _rate(sum(not s.success for s in recent), len(recent)),
         _rate(max(actions.values()), n),
     )
 
@@ -163,7 +255,7 @@ def group_of(traj: Trajectory) -> str:
 
 
 def build_rows(trajectories: Sequence[Trajectory], depth: int) -> list[EvalRow]:
-    """One EvalRow per trajectory that reached `depth` non-terminal decisions."""
+    """One EvalRow per trajectory that reached `depth` decisions with room still left to run."""
     rows: list[EvalRow] = []
     for traj in trajectories:
         features = extract_features(traj, depth)
@@ -237,6 +329,7 @@ def _coverage(model: str, trajs: Sequence[Trajectory]) -> ModelCoverage:
 __all__ = [
     "DEFAULT_DEPTHS",
     "FEATURE_NAMES",
+    "MIN_WITHHELD",
     "EvalRow",
     "ModelCoverage",
     "build_rows",

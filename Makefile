@@ -7,6 +7,13 @@
 #   make benchmark-live Run the live outcome matrix (spends real budget — supervise it)
 #   make offline-replay Derive real per-step outcomes from captured diffs (no spend)
 #   make escalation-eval Score the escalation detector offline (no spend)
+#   make model-coverage Flag enabled models the live collection has not covered (no spend)
+#   make state-capture-check Prove no corpus step is stamped from a state that was never captured
+#   make state-capture-mark  Mark those steps unmeasured + write the audit record (rewrites the corpus)
+#   make state-export   Commit the per-step state capture (~1.7 MB) so a clone can re-derive
+#   make state-import   Restore that capture into the local scratch on a fresh clone
+#   make state-verify   Prove the committed state capture restores to what its index binds
+#   make replay-inputs  List every replay input this checkout still lacks (fails if any)
 #   make routing-report Regenerate the routing backtest plots/report (no spend)
 #   make benchmark-figures Regenerate the standalone routing figures + their manifest (no spend)
 #   make check-figures  Prove the committed standalone figures are not stale (seconds, no spend)
@@ -22,7 +29,7 @@
 # cell with `No module named 'minisweagent'`. Pass extra flags via ARGS=…, e.g.
 # `make benchmark-live ARGS="--live --max-cost 2"`.
 
-.PHONY: docs docs-build stop help benchmark benchmark-live offline-replay escalation-eval routing-report benchmark-figures check-figures reconcile-cost
+.PHONY: docs docs-build stop help benchmark benchmark-live offline-replay escalation-eval model-coverage state-capture-check state-capture-mark state-export state-import state-verify replay-inputs routing-report benchmark-figures check-figures reconcile-cost
 .DEFAULT_GOAL := help
 
 DOCS_REQS := docs/requirements.txt
@@ -38,6 +45,13 @@ help:
 	@echo "make benchmark-live  Run the live outcome matrix (ARGS=\"--live --max-cost 2\")"
 	@echo "make offline-replay  Derive real per-step outcomes from captured diffs (no spend)"
 	@echo "make escalation-eval Score the escalation detector offline (no spend)"
+	@echo "make model-coverage  Flag enabled models the live collection has not covered"
+	@echo "make state-capture-check Prove no step is stamped from a state that was never captured"
+	@echo "make state-capture-mark  Mark those steps unmeasured + write the audit record"
+	@echo "make state-export    Commit the per-step state capture (~1.7 MB) for off-host replay"
+	@echo "make state-import    Restore that capture into the local scratch (fresh clone)"
+	@echo "make state-verify    Prove the committed capture restores to what its index binds"
+	@echo "make replay-inputs   List every replay input this checkout lacks (fails if any)"
 	@echo "make routing-report  Regenerate the routing backtest report (no spend)"
 	@echo "make benchmark-figures Regenerate the standalone routing figures + manifest (no spend)"
 	@echo "make check-figures   Verify the committed standalone figures are current (seconds)"
@@ -76,6 +90,44 @@ offline-replay:
 
 escalation-eval:
 	$(BENCH) benchmark.escalation.run_eval $(ARGS)
+
+# Reads the committed corpora only. Exits nonzero when a model listed in `models:` has too little
+# collected data to be evaluated — the signal that a live collection is incomplete, not finished.
+model-coverage:
+	$(BENCH) benchmark.model_coverage $(ARGS)
+
+# The state-capture gate. The 2026-07 corpus was captured with a bare `git diff`, which cannot see
+# staged/stashed/committed work: a step whose capture collapsed to 0 bytes replays against a
+# pristine base, and one that merely LOST its staged half replays against a tree the agent never
+# had — both stamped a failure that was never measured. The gate marks both classes
+# (`empty_after_nonempty`, `partial_stage_loss`). `-check` is read-only and exits non-zero on any
+# such step; `-mark` renders them unmeasured and writes the committed audit record. The forward fix
+# for the staging half is `step_snapshots.DIFF_COMMAND` = `git diff HEAD`. No Docker, no spend.
+state-capture-check:
+	$(BENCH) benchmark.runner.state_capture_audit $(ARGS)
+
+state-capture-mark:
+	$(BENCH) benchmark.runner.state_capture_audit --apply $(ARGS)
+
+# The committed state plane. `offline_replay` derives every per-step outcome from the gitignored
+# per-step diffs, so without these a clone can re-score a policy but cannot re-derive an outcome
+# (`SnapshotsMissingError`). Measured: 34 105 506 B of diffs -> 792 archives, 1 647 548 B on disk,
+# ~1.5 MB in a packfile — plain git, deliberately NOT LFS (LFS stores each object whole, no delta).
+# `-export` is idempotent on CONTENT, so a re-run on a host with a different zlib cannot churn the
+# tree. `-verify` is the no-Docker, no-network guard. `replay-inputs` lists what is STILL missing —
+# the instance images and the HF gold rows are not committable, and it says so rather than
+# half-running.
+state-export:
+	$(BENCH) benchmark.runner.snapshot_archive export $(ARGS)
+
+state-import:
+	$(BENCH) benchmark.runner.snapshot_archive import $(ARGS)
+
+state-verify:
+	$(BENCH) benchmark.runner.snapshot_archive verify $(ARGS)
+
+replay-inputs:
+	$(BENCH) benchmark.runner.snapshot_archive requirements $(ARGS)
 
 routing-report:
 	$(BENCH) benchmark.routing.report $(ARGS)

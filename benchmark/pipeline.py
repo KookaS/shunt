@@ -18,17 +18,22 @@ import csv
 import hashlib
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
-from benchmark import config
+from benchmark import config, corpus_lock
 from benchmark.escalation import features, schema
 from benchmark.escalation.live_capture import LIVE_DIR
+from benchmark.runner import replay_admissibility
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +50,17 @@ ESCALATION_EVAL = "benchmark.escalation.run_eval"
 ROUTING_REPORT = "benchmark.routing.report"
 ROUTING_EVAL = "benchmark.routing.run_eval"
 
-DEFAULT_REPLAY_TIMEOUT = 120.0
+# One measured sympy trajectory took 1 271 s to replay, so the old 120 s ceiling silently
+# dropped exactly the slowest (and largest) trajectories — the stage logged `skipping straggler`
+# and reported success. An hour is above every trajectory measured so far; a run that still
+# exceeds it is now a LOUD stage failure rather than a skip (see `stage_stamp`).
+DEFAULT_REPLAY_TIMEOUT = 3600.0
+
+# Per-trajectory record of which replay instrument last completed it. Two jobs, one file:
+# it is the resume point for an interrupted rebuild, and it is what tells a trajectory the
+# admissibility gate CLEARED apart from one the stamping stage never reached — both look
+# identical on disk (`confirmed=False`, `exit_code=None`) by design.
+STAMP_LEDGER_NAME = "stamp_ledger.json"
 _ROUTING_REPORTS_DIR = Path("benchmark/routing/reports")
 _ESCALATION_PLOTS_DIR = Path("benchmark/escalation/reports")
 
@@ -122,51 +137,315 @@ def stage_collect(args: argparse.Namespace, _state: PipelineState) -> None:
         raise StageError(f"{RUN_MATRIX} exited {result.returncode}")
 
 
-def _unstamped_trajectories(live_dir: Path = LIVE_DIR) -> list[tuple[str, str, Path]]:
-    """Live trajectories the stamping stage still owes — `features.is_stamped` is the ONE test."""
-    # This used to test `any(step.failing_check_id)`, which diverged from the eval's predicate: a
-    # fully replayed run in which no step ever failed carries no check id, so the eval scored it
-    # while this queued it for replay forever. One predicate, both call sites. `features` imports
-    # nothing heavier than the stdlib, so sharing it keeps this cheap path cheap.
+def load_stamp_ledger(live_dir: Path = LIVE_DIR) -> dict[str, str]:
+    """trajectory_id -> the instrument digest that last completed it (empty when absent/bad)."""
+    path = live_dir / STAMP_LEDGER_NAME
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        logger.warning("stamp: unreadable %s — treating every trajectory as pending", path)
+        return {}
+    return {str(k): str(v) for k, v in payload.items()}
+
+
+def record_stamped(live_dir: Path, trajectory_id: str, digest: str) -> None:
+    """Mark *trajectory_id* done under *digest* so an interrupted rebuild resumes where it left."""
+    # Read-modify-write on the resume point, called from every worker thread as its replay lands.
+    # Under the lock and through an atomic write, so a lost update cannot silently re-queue an
+    # already-completed trajectory and a kill mid-write cannot truncate the ledger (which
+    # `load_stamp_ledger` would then read as "nothing is done" — a full 137 h restart).
+    with corpus_lock.corpus_lock(live_dir):
+        ledger = load_stamp_ledger(live_dir)
+        ledger[trajectory_id] = digest
+        corpus_lock.atomic_write_text(
+            live_dir / STAMP_LEDGER_NAME, json.dumps(ledger, indent=2, sort_keys=True) + "\n"
+        )
+
+
+def pending_trajectories(
+    live_dir: Path = LIVE_DIR, *, restamp: bool = False
+) -> list[tuple[str, str, Path]]:
+    """Live trajectories the stamping stage still owes, under the CURRENT replay instrument."""
+    # Two predicates, and both are needed.
+    #
+    # `features.is_stamped` is the eval's own test, so the default queue matches what the eval
+    # will actually score. (It used to be `any(step.failing_check_id)`, which diverged: a fully
+    # replayed run in which no step ever failed carries no check id, so the eval scored it while
+    # this queued it forever.) But it is one-way: a trajectory the admissibility gate CLEARED is
+    # unstamped by construction, so on its own `is_stamped` would re-queue every rejected
+    # instance on every run, for ever.
+    #
+    # The ledger closes that, and is also the only thing that can drive a full rebuild:
+    # `--restamp` deliberately ignores `is_stamped` (every committed trajectory is already
+    # stamped, which is why `--from stamp` was a no-op on the corpus) and leans on the ledger
+    # alone, so an interrupted 20–90 h rebuild resumes instead of restarting.
     pending: list[tuple[str, str, Path]] = []
     if not live_dir.exists():
         return pending
+    ledger = load_stamp_ledger(live_dir)
+    digest = replay_admissibility.instrument_digest()
     for path in sorted(live_dir.glob("*.jsonl")):
         try:
             traj = schema.load_jsonl(path)
         except (OSError, ValueError, KeyError) as exc:
             logger.warning("stamp: skipping unreadable %s (%s)", path, exc)
             continue
-        if features.is_stamped(traj):
+        trajectory_id = traj.header.trajectory_id
+        if ledger.get(trajectory_id) == digest:
+            continue  # this instrument already finished it (stamped, or cleared as inadmissible)
+        if not restamp and features.is_stamped(traj):
             continue
         instance_id = traj.header.instance_id
         if not instance_id:
             logger.warning("stamp: skipping %s (no instance_id in header)", path)
             continue
-        pending.append((traj.header.trajectory_id, instance_id, path))
+        pending.append((trajectory_id, instance_id, path))
     return pending
 
 
-def stage_stamp(args: argparse.Namespace, _state: PipelineState) -> None:
-    """Restamp only the still-unstamped live trajectories, timeout-bounded per trajectory."""
-    pending = _unstamped_trajectories()
-    if not pending:
-        print("  stamp: no unstamped trajectories to replay")  # noqa: T201
-        return
-    for trajectory_id, instance_id, path in pending:
-        argv = [trajectory_id, "--instance-id", instance_id, "--jsonl", str(path)]
-        try:
-            result = run_module(OFFLINE_REPLAY, argv, timeout=args.replay_timeout)
-        except subprocess.TimeoutExpired:
-            logger.warning(
-                "stamp: %s exceeded %ss — skipping straggler", trajectory_id, args.replay_timeout
+def _reap_replay_container(trajectory_id: str) -> None:
+    """Kill the container a timed-out replay left behind (the child dies, the container lives)."""
+    subprocess.run(
+        ["docker", "rm", "-f", f"shunt-replay-{trajectory_id}"], capture_output=True, check=False
+    )
+
+
+# HOW MANY REPLAYS RUN AT ONCE. Each one is a container executing an instance's test file, which
+# pins roughly one core, so the ceiling is CPU, not I/O — and oversubscribing costs about 2x, so
+# a too-high number is not merely neutral. Two cores are held back for the parent, the docker
+# daemon and the host.
+#
+# THE CAP IS MEMORY, NOT CPU, and that is why it is well below the core count. The heavy instance
+# families (sympy, matplotlib, sphinx, django) run whole test FILES, in the hundreds-of-MB-to-GB
+# range each, against ~9.6 GB available on a 15.9 GB host — so the core-derived number (14 here)
+# would OOM long before it saturated the CPU, and an OOM-killed container is an infra failure that
+# costs the trajectory rather than merely slowing it. Six leaves clear headroom while still
+# turning a measured ~137 h serial rebuild into roughly a day. Raise it with `--stamp-workers` on
+# a machine with more RAM; that flag exists precisely because this ceiling is host-specific.
+_MAX_STAMP_WORKERS: Final = 6
+_RESERVED_CORES: Final = 2
+# How often the stage says where it is. Long enough to stay quiet next to the per-trajectory
+# completion lines, short enough that "hung" is visible within a minute rather than at the end.
+_HEARTBEAT_S: Final = 60.0
+
+
+def default_stamp_workers() -> int:
+    """Parallel replays to run by default: host cores minus the host's share, capped by memory."""
+    return max(1, min(_MAX_STAMP_WORKERS, (os.cpu_count() or 1) - _RESERVED_CORES))
+
+
+def group_by_instance(
+    pending: list[tuple[str, str, Path]],
+) -> list[list[tuple[str, str, Path]]]:
+    """One parallel work unit per INSTANCE; its own trajectories replay serially inside it."""
+    # THIS GROUPING IS A CORRECTNESS BOUNDARY, not a scheduling nicety. The admissibility gate is
+    # a property of the INSTANCE and costs two full container test runs; its verdict is cached in
+    # `admissibility.json`, and in the serial loop the first trajectory of an instance measures it
+    # and the other 4.8 on average hit the cache. Hand two trajectories of ONE instance to two
+    # workers and both miss the cache and both run the gate — up to 11x redundant container work
+    # on the largest instance, and, because the legs are real test runs, two runs CAN disagree
+    # (one flaky test in FAIL_TO_PASS u PASS_TO_PASS is enough). A disagreement leaves some of an
+    # instance's trajectories stamped and the rest actively CLEARED, which the serial loop can
+    # never produce. Keeping an instance whole in one worker removes that race by construction
+    # rather than by locking it.
+    groups: dict[str, list[tuple[str, str, Path]]] = {}
+    for item in pending:
+        groups.setdefault(item[1], []).append(item)
+    # Longest instance first: an 11-trajectory unit scheduled last is a tail that leaves every
+    # other worker idle while it drains.
+    return sorted(groups.values(), key=len, reverse=True)
+
+
+def _rejected_instances(live_dir: Path) -> int:
+    """How many instances the gate has rejected so far, read from the committed verdict file."""
+    verdicts = replay_admissibility.load_verdicts(live_dir)
+    return sum(1 for v in verdicts.values() if not v.admissible)
+
+
+def _hms(seconds: float) -> str:
+    return f"{int(seconds) // 3600:d}:{int(seconds) // 60 % 60:02d}:{int(seconds) % 60:02d}"
+
+
+@dataclass
+class _StampProgress:
+    """Live counters + the single output gate, so N workers' lines never interleave mid-line."""
+
+    total: int
+    live_dir: Path
+    started: float = field(default_factory=time.monotonic)
+    done: int = 0
+    failures: list[str] = field(default_factory=list)
+    in_flight: dict[str, float] = field(default_factory=dict)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def emit(self, text: str) -> None:
+        """Print one block atomically with respect to every other writer in this process."""
+        with self.lock:
+            print(text, flush=True)  # noqa: T201
+
+    def begin(self, trajectory_id: str) -> None:
+        with self.lock:
+            self.in_flight[trajectory_id] = time.monotonic()
+
+    def finish(self, trajectory_id: str, failure: str | None) -> str:
+        with self.lock:
+            self.in_flight.pop(trajectory_id, None)
+            self.done += 1
+            if failure:
+                self.failures.append(failure)
+            elapsed = time.monotonic() - self.started
+            eta = (elapsed / self.done) * (self.total - self.done)
+            state = f"FAILED {failure}" if failure else "ok"
+            return (
+                f"  stamp [{self.done}/{self.total}] {trajectory_id}: {state} "
+                f"| elapsed {_hms(elapsed)} eta {_hms(eta)}"
             )
-            continue
-        except OSError as exc:
-            logger.warning("stamp: %s failed to launch (%s) — skipping", trajectory_id, exc)
-            continue
+
+    def heartbeat(self) -> str:
+        """One line saying whether the stage is progressing, stalled, or repeating an error."""
+        # `in flight` with a per-trajectory age is what separates SLOW from HUNG: a replay that
+        # has been running 40 minutes is named, so a supervisor never has to infer a stall from
+        # the absence of output.
+        with self.lock:
+            now = time.monotonic()
+            ages = sorted(((now - t, tid) for tid, t in self.in_flight.items()), reverse=True)
+            elapsed = now - self.started
+            eta = (elapsed / self.done) * (self.total - self.done) if self.done else 0.0
+            last = self.failures[-1] if self.failures else "none"
+            flight = ", ".join(f"{tid} {age:.0f}s" for age, tid in ages[:8]) or "none"
+            return (
+                f"  stamp HEARTBEAT {self.done}/{self.total} done, {self.total - self.done} left "
+                f"| {len(self.in_flight)} in flight | {len(self.failures)} failed "
+                f"| {_rejected_instances(self.live_dir)} instances rejected "
+                f"| elapsed {_hms(elapsed)} eta {_hms(eta)}\n"
+                f"  stamp HEARTBEAT in flight: {flight}\n"
+                f"  stamp HEARTBEAT last failure: {last}"
+            )
+
+
+def _text(stream: bytes | str | None) -> str:
+    """Whatever a captured stream holds, as text (a TimeoutExpired hands back bytes/None)."""
+    if stream is None:
+        return ""
+    return stream if isinstance(stream, str) else stream.decode("utf-8", "replace")
+
+
+def _child_block(trajectory_id: str, stdout: bytes | str | None, stderr: bytes | str | None) -> str:
+    """One replay's captured output, every line tagged with the trajectory it came from."""
+    # Captured and re-emitted rather than streamed: N children sharing one pipe interleave
+    # mid-line, and a rebuild log in which a gate verdict cannot be attributed to a trajectory is
+    # not diagnosable. Volume is low (a verdict line, maybe a clearing warning, a final line).
+    lines = [ln for ln in f"{_text(stderr)}\n{_text(stdout)}".splitlines() if ln.strip()]
+    return "".join(f"  [{trajectory_id}] {ln}\n" for ln in lines).rstrip("\n")
+
+
+def _replay_one(
+    item: tuple[str, str, Path],
+    *,
+    digest: str,
+    replay_timeout: float,
+    progress: _StampProgress,
+) -> None:
+    """Replay ONE trajectory in a subprocess and record it in the ledger only if it completed."""
+    trajectory_id, instance_id, path = item
+    progress.begin(trajectory_id)
+    argv = [trajectory_id, "--instance-id", instance_id, "--jsonl", str(path)]
+    failure: str | None = None
+    block = ""
+    try:
+        result = run_module(OFFLINE_REPLAY, argv, timeout=replay_timeout, capture=True)
+    except subprocess.TimeoutExpired as expired:
+        _reap_replay_container(trajectory_id)
+        block = _child_block(trajectory_id, expired.stdout, expired.stderr)
+        failure = f"{trajectory_id}: exceeded --replay-timeout {replay_timeout}s"
+    except Exception as exc:  # noqa: BLE001 — one bad trajectory never aborts the other workers
+        failure = f"{trajectory_id}: failed to launch ({exc})"
+    else:
+        block = _child_block(trajectory_id, result.stdout, result.stderr)
         if result.returncode != 0:
-            logger.warning("stamp: %s exited %s — skipping", trajectory_id, result.returncode)
+            failure = f"{trajectory_id}: exited {result.returncode}"
+        else:
+            record_stamped(path.parent, trajectory_id, digest)
+    line = progress.finish(trajectory_id, failure)
+    progress.emit(f"{block}\n{line}" if block else line)
+
+
+def _replay_instance(
+    group: list[tuple[str, str, Path]],
+    *,
+    digest: str,
+    replay_timeout: float,
+    progress: _StampProgress,
+) -> None:
+    """Replay one instance's trajectories in sequence — the gate measures once, the rest cache."""
+    for item in group:
+        _replay_one(item, digest=digest, replay_timeout=replay_timeout, progress=progress)
+
+
+def _beat(progress: _StampProgress, stop: threading.Event, interval: float) -> None:
+    while not stop.wait(interval):
+        progress.emit(progress.heartbeat())
+
+
+def run_stamp_stage(
+    pending: list[tuple[str, str, Path]],
+    *,
+    live_dir: Path,
+    workers: int,
+    replay_timeout: float,
+    heartbeat_s: float = _HEARTBEAT_S,
+) -> list[str]:
+    """Replay every owed trajectory across *workers*, instance by instance; return the failures."""
+    digest = replay_admissibility.instrument_digest()
+    groups = group_by_instance(pending)
+    workers = max(1, min(workers, len(groups)))
+    progress = _StampProgress(total=len(pending), live_dir=live_dir)
+    progress.emit(
+        f"  stamp: {len(pending)} trajectories across {len(groups)} instances, "
+        f"{workers} workers, replay-timeout {replay_timeout:.0f}s, digest {digest[:12]}"
+    )
+    stop = threading.Event()
+    beater = threading.Thread(target=_beat, args=(progress, stop, heartbeat_s), daemon=True)
+    beater.start()
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(
+                    _replay_instance,
+                    group,
+                    digest=digest,
+                    replay_timeout=replay_timeout,
+                    progress=progress,
+                )
+                for group in groups
+            ]
+        for future in futures:
+            future.result()  # re-raise anything the per-item guard did not catch
+    finally:
+        stop.set()
+        beater.join(timeout=2.0)
+    progress.emit(progress.heartbeat())
+    return progress.failures
+
+
+def stage_stamp(args: argparse.Namespace, _state: PipelineState) -> None:
+    """Replay every owed trajectory; a timeout or non-zero exit FAILS the stage, never skips."""
+    pending = pending_trajectories(restamp=args.restamp)
+    if not pending:
+        print("  stamp: no trajectories owed under the current replay instrument")  # noqa: T201
+        return
+    failures = run_stamp_stage(
+        pending,
+        live_dir=LIVE_DIR,
+        workers=args.stamp_workers,
+        replay_timeout=args.replay_timeout,
+    )
+    if failures:
+        # LOUD, not a warning buried in a green run: an unreplayed trajectory keeps whatever it
+        # was stamped with before, so a silent skip is how fabricated outcomes survive a rebuild.
+        raise StageError(f"{len(failures)}/{len(pending)} replays did not complete: {failures}")
 
 
 def stage_evaluate(_args: argparse.Namespace, state: PipelineState) -> None:
@@ -538,6 +817,24 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Start at a later stage (e.g. --from report re-derives artifacts, no re-collection)",
     )
     ap.add_argument("--replay-timeout", type=float, default=DEFAULT_REPLAY_TIMEOUT)
+    ap.add_argument(
+        "--stamp-workers",
+        type=int,
+        default=default_stamp_workers(),
+        help=(
+            "Instances replayed in parallel during the stamp stage (default: host cores minus "
+            f"{_RESERVED_CORES}, capped at {_MAX_STAMP_WORKERS}). One instance is never split "
+            "across workers. Container replays pin ~1 core each — oversubscribing costs ~2x."
+        ),
+    )
+    ap.add_argument(
+        "--restamp",
+        action="store_true",
+        help=(
+            "Re-replay ALREADY-stamped trajectories too (the full-corpus rebuild). Resumes from "
+            f"{STAMP_LEDGER_NAME}; without it --from stamp only replays unstamped trajectories."
+        ),
+    )
     ap.add_argument(
         "--check-figures",
         action="store_true",

@@ -14,6 +14,13 @@
 #
 # The selection rule lives here ONCE (`select_from_rates`) and viz_knn.knn_select
 # delegates to it, so a null and the figure it nulls can never drift apart.
+#
+# A NULL ANSWERS THE SECOND QUESTION, NOT THE FIRST. Everything here asks "could chance have
+# produced this number?". It cannot ask "can this pipeline produce a number about anything?" —
+# a front end that embeds the wrong text, or embeds nothing, yields an observation AND a null
+# that agree perfectly and report `NULL RESULT` forever. That prior question is
+# `benchmark.routing.instrument_control`, and the two result objects below carry its verdict in a
+# REQUIRED, non-defaulted field so a routing verdict cannot be published without it.
 
 from __future__ import annotations
 
@@ -21,6 +28,8 @@ from dataclasses import dataclass
 from typing import Final
 
 import numpy as np
+
+from benchmark.admissibility import AdmissibilityResult
 
 # A permutation band needs enough draws that its 2.5/97.5 percentiles are stable;
 # 200 is the project floor for any permutation null quoted on a figure.
@@ -225,6 +234,15 @@ def routed_pass_rate(
 class TransferCurve:
     """Routing pass-rate vs k, with the three lines that make it falsifiable."""
 
+    # REQUIRED and FIRST, with no default, so this object cannot be constructed — and therefore
+    # its verdict cannot be quoted — without the caller stating whether the instrument that
+    # produced it has cleared its positive control and destroyed-signal null. The nulls below
+    # answer "could chance have produced this number?"; this field answers the prior question,
+    # "can this pipeline produce a number about anything at all?", and only the caller is in a
+    # position to answer it because only the caller holds the front end (`benchmark.routing.
+    # instrument_control.run_control`). A defaulted field would have let every existing call site
+    # keep compiling and keep publishing, which is exactly how this gate went unwired.
+    admissibility: AdmissibilityResult
     ks: tuple[int, ...]
     loo: tuple[float, ...]
     memorisation: tuple[float, ...]
@@ -277,12 +295,14 @@ def _permuted_pass_rates(  # noqa: PLR0913
     return draws
 
 
-def transfer_curve(
+def transfer_curve(  # noqa: PLR0913 (one knob per null parameter, plus the required gate)
     sims: np.ndarray,
     pass_mat: np.ndarray,
     models_by_price: list[str],
     ks: list[int],
     threshold: float,
+    *,
+    admissibility: AdmissibilityResult,
     n_perm: int = DEFAULT_PERMUTATIONS,
     seed: int = 0,
 ) -> TransferCurve:
@@ -299,6 +319,7 @@ def transfer_curve(
     const_rates = pass_mat.mean(axis=0)
     best_i = int(np.argmax(const_rates))
     return TransferCurve(
+        admissibility=admissibility,
         ks=tuple(ks),
         loo=tuple(loo),
         memorisation=tuple(ceiling),
@@ -344,6 +365,8 @@ def repo_of(task_id: str) -> str:
 class CrossRepo:
     """Routing pass-rate for every (index repo, query repo) pair, plus its null."""
 
+    # Required and first, for the reason given on `TransferCurve.admissibility`.
+    admissibility: AdmissibilityResult
     repos: tuple[str, ...]
     counts: tuple[int, ...]
     grid: np.ndarray
@@ -357,12 +380,14 @@ class CrossRepo:
         return self.diagonal_mean - self.off_diagonal_mean
 
 
-def cross_repo_transfer(
+def cross_repo_transfer(  # noqa: PLR0913 (one knob per null parameter, plus the required gate)
     sims: np.ndarray,
     pass_mat: np.ndarray,
     task_ids: list[str],
     k: int,
     threshold: float,
+    *,
+    admissibility: AdmissibilityResult,
     min_tasks: int = 8,
     n_perm: int = DEFAULT_PERMUTATIONS,
     seed: int = 0,
@@ -408,6 +433,7 @@ def cross_repo_transfer(
         n_off = null_grid[~np.eye(len(repos), dtype=bool)]
         draws[i] = float(np.nanmean(n_diag)) - float(np.nanmean(n_off))
     return CrossRepo(
+        admissibility=admissibility,
         repos=tuple(repos),
         counts=tuple(c for _, c in keep),
         grid=grid,
