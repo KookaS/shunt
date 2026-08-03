@@ -31,11 +31,14 @@
 # percentile", never "above the point estimate".
 #
 # THE NULL IS FAMILY-WISE ACROSS DEPTHS, because the verdict is. `run_eval._status` prints OK if
-# ANY reported depth clears and `_no_skill_reason` reports the max-incremental depth, so the three
-# `DEFAULT_DEPTHS` are a max over THREE tests — and that max carried no correction at all.
+# ANY reported depth clears and `_no_skill_reason` reports the max-incremental depth, so the
+# requested `DEFAULT_DEPTHS` — (10,) since 2026-08-02, when depths 5 and 20 left the ladder
+# (depth 5: rank-deficient design; depth 20: exceeded its own selection-bias tolerance;
+# features.py records the decision) — are a max over
+# that many tests, and that max carried no correction at all.
 # Bonferroni would be the wrong instrument here: the depths' row sets are strictly NESTED (a run
-# admitted at depth 20 is admitted at 10 and at 5, so depth 20's rows are a subset of depth 10's,
-# which are a subset of depth 5's), the three statistics are therefore strongly positively
+# admitted at a deeper depth is admitted at every shallower one, so a deeper depth's rows are a
+# subset of the shallower's), the reported statistics are therefore strongly positively
 # dependent, and a threshold priced for independence would be conservative by an unknown amount.
 # `evaluate` instead draws ONE within-challenge shuffle per replicate, scores it at EVERY requested
 # depth, and keeps the max; each depth's observed statistic is then gated against that max
@@ -231,15 +234,23 @@ class DepthReport:
     # nobody runs. None means the report was hand-built, and the figure then draws no baseline at
     # all rather than falling back to prevalence.
     null_auprc: metrics.NullResult | None = None
+    # Whether this depth's design matrix [features | intercept] has full column rank on the rows it
+    # actually admits. A depth whose design is rank-deficient CANNOT be evaluated — its AUROC is
+    # arithmetic, not evidence — and the eval must not headline it. Depth 5 on the rebuilt corpus
+    # is the measured case: 412 of 414 rows carry one identical vector, so the design ranks 3 of 4
+    # and its score is chance by construction (see `features.py` and the strict xfail in
+    # `test_features.py`). Defaulted True so hand-built reports stay construction-compatible; a
+    # real `evaluate` always supplies the measured value.
+    design_full_rank: bool = True
 
     @property
     def gate_null_prefix(self) -> metrics.NullResult:
-        """The prefix-AUROC null the skill gate reads — family-wise when there was a family."""
+        """The prefix-AUROC null the admissibility gate reads — family-wise in a family."""
         return self.null_prefix if self.null_prefix_family is None else self.null_prefix_family
 
     @property
     def gate_null_incremental(self) -> metrics.NullResult:
-        """The incremental-AUROC null the skill gate reads — family-wise when there was a family."""
+        """The incremental-AUROC null the admissibility gate reads — family-wise in a family."""
         if self.null_incremental_family is None:
             return self.null_incremental
         return self.null_incremental_family
@@ -270,7 +281,8 @@ class DepthReport:
         # null asks "could shuffled labels do this", the interval asks "would another sample of
         # challenges do this" — and it was computed and then ignored until now.
         # Both nulls are the FAMILY-WISE ones: `run_eval._status` says OK if any reported depth
-        # clears, so a per-depth threshold would let the best of three tests pass at a nominal 2.5%
+        # clears, so a per-depth threshold would let the best of the reported depths pass at a
+        # nominal 2.5%
         # each. `gate_null_*` is the marginal null exactly when the family really is one depth.
         if len(set(self.scores)) <= 1:
             return False
@@ -327,6 +339,9 @@ class DepthReport:
             "null_auroc_prefix_familywise": self.gate_null_prefix.to_dict(),
             "null_incremental_familywise": self.gate_null_incremental.to_dict(),
             "has_skill": self.has_skill,
+            # Whether this depth could actually be evaluated — see the field's own comment for why
+            # a rank-deficient design is arithmetic rather than evidence.
+            "design_full_rank": self.design_full_rank,
         }
 
 
@@ -545,6 +560,7 @@ class _Prepared:
     groups: list[str]
     base: np.ndarray
     fit: _Fit
+    design_full_rank: bool
 
 
 def _prepare(trajectories: Sequence[Trajectory], depth: int) -> _Prepared | None:
@@ -558,7 +574,13 @@ def _prepare(trajectories: Sequence[Trajectory], depth: int) -> _Prepared | None
         return None
     groups = [r.group for r in rows]
     base = np.asarray([r.features for r in rows], dtype=float)
-    return _Prepared(depth, census, labels, groups, base, _fit_once(rows, base, labels, groups))
+    # The same rank the `test_features.py` guard checks: [features | intercept] must span its own
+    # column space, or a depth with 3 distinct rows (depth 5 today) reports an arithmetic AUROC.
+    design = np.column_stack([base, np.ones(len(base))])
+    full_rank = int(np.linalg.matrix_rank(design)) == design.shape[1]
+    return _Prepared(
+        depth, census, labels, groups, base, _fit_once(rows, base, labels, groups), full_rank
+    )
 
 
 def evaluate_depth(
@@ -628,7 +650,7 @@ def _shared_null_draws(
     """
     # ONE shuffle per replicate, shared across depths: that is what makes the max distribution the
     # exact family-wise reference (module header). Drawing independently per depth would leave the
-    # depths' nulls uncoupled and the max of three of them meaningless as a joint statistic.
+    # depths' nulls uncoupled and the max of them meaningless as a joint statistic.
     rng = random.Random(seed)
     shared = _SharedNull({p.depth: [] for p in prepared}, [], [])
     while len(shared.max_prefix) < n_permutations:
@@ -687,6 +709,7 @@ def _depth_report(prep: _Prepared, shared: _SharedNull, *, seed: int) -> DepthRe
         ci_incremental=_incremental_ci(fit, labels, groups, seed),
         scores=tuple(fit.prefix),
         labels=tuple(labels),
+        design_full_rank=prep.design_full_rank,
     )
 
 

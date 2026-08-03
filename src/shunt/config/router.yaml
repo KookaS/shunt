@@ -32,6 +32,8 @@ router:
   # cost. When enabled, a SAME verified failure (same normalized failing-check id) seen
   # escalate_after_n times within stale_window decisions raises one rung at the NEXT session
   # boundary — effort first (cache-safe), then a model rank. Never mid-cached-turn.
+  # A switch inside a cached turn invalidates the prompt cache and the recompute costs ~4x
+  # the context, so the boundary is the ONLY point a model change is free.
   escalation:
     enabled: false
     escalate_after_n: 2           # same-key verified failures before a step (1 = failure-biased)

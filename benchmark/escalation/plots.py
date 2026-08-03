@@ -3,28 +3,25 @@
 # own data earned — no file I/O here. The figure's static READ/GOAL/TERMS/NOTE/LIMITS text lives
 # next to each function as a frozen FigureSpec; anything data-dependent comes back through
 # Annotations so it can never go stale as the corpus grows.
-#
-# EVERY curve figure here is drawn against its null. A shape without a null band invites the reader
-# to see signal in noise, which is exactly what the previous ROC figure did: its polyline admitted
-# one tied row at a time in corpus order, so the drawn area was 0.554 while the title said 0.450 —
-# visually above chance for a below-chance detector. Ties are now collapsed to real operating
-# points (metrics.roc_operating_points / pr_operating_points), so the drawn area equals the number.
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import numpy as np
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+from matplotlib.patches import Rectangle
 
-from benchmark.escalation import metrics
+from benchmark.calibration.labeler_metrics import ConfusionMatrix
 from benchmark.plot_frame import Annotations, FigureSpec
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from matplotlib.axes import Axes
+    from matplotlib.table import Table
 
-    from benchmark.calibration.labeler_metrics import ConfusionMatrix
     from benchmark.escalation.features import ModelCoverage
     from benchmark.escalation.metrics import NullResult
     from benchmark.escalation.policy_eval import PolicyCell
@@ -35,88 +32,87 @@ _OBSERVED = "#B71C1C"
 # reference is the MEASURED null centre, which on a refit-per-shuffle pipeline is not 0.5.
 _FAINT = "#CCCCCC"
 _NULL_CENTRE = "#616161"
+# The shipped row's locator shade — bold text plus a light amber fill. It is a POINTER, not a
+# colour channel: the sweep table's reading already refuses a colour scale (two distinct results
+# cannot carry one honestly), and shading the single known default locates it without encoding
+# any result.
+_SHIPPED_ROW = "#FFF3CD"
+
+# Diverging fill for the confusion matrix: red where a cell exceeds its random-flagger baseline,
+# blue where it falls short, white AT the baseline. Light enough that the black count/expected/
+# excess text stays legible on top; intensity is proportional to |excess| (TwoSlopeNorm).
+_EXCESS_POS = "#FFCDD2"
+_EXCESS_NEG = "#BBDEFB"
+_EXCESS_ZERO = "#FFFFFF"
+# Floor for the colour scale when every cell sits exactly on its baseline (peak = |excess| max).
+_DELTA_FLOOR = 1.0
 
 PR_CURVE_SPEC = FigureSpec(
     reading=(
-        "x is recall and y is precision, both 0-1, over the out-of-fold risk score of one "
-        "trajectory per row. One vertex is one DISTINCT score threshold — ties are collapsed, so "
-        "the area under the drawn line is the AUPRC in the title, not a row-ordering artifact. "
-        "The grey band is the MEASURED permutation null and the dashed line through it is that "
-        "null's centre: what this pipeline's own AUPRC comes to when the outcome labels carry no "
-        "information. That band, not prevalence, is the no-skill reference on this corpus."
+        "x is recall and y is precision, both 0-1, over the SWEPT escalation policy: one point per "
+        "escalate_after_n value that fired. As the recurrence threshold rises, the policy flags "
+        "fewer runs with higher precision. The dashed line is the corpus base failure rate — the "
+        "no-skill precision a random flagger reaches. The prefix risk model's own PR curve is not "
+        "drawn: its score is constant at the evaluated depths (early steps are all "
+        "bug-reproduction), so it ranks nothing."
     ),
     goal=(
-        "Look for the curve sitting well above the grey null band and staying high as recall "
-        "grows. A curve inside or hugging the band is no signal."
+        "Look for points sitting clearly ABOVE the dashed base-rate line. A point above it with "
+        "its interval excluding the base rate is a measured operating point for escalation."
     ),
     definitions=(
         ("precision", "share of flagged runs that really failed"),
-        ("recall", "share of failed runs the model flagged"),
-        ("AUPRC", "average precision over the ranked runs"),
-        (
-            "permutation null",
-            "the AUPRC this same fitted pipeline reaches on shuffled outcome labels — measured, "
-            "not assumed",
-        ),
+        ("recall", "share of failed runs the policy flagged"),
+        ("base failure rate", "the corpus's overall failure rate — a random flagger's precision"),
     ),
     notes=(
-        "The score is the grouped-cross-validated probability that this run ends in failure, "
-        "predicted from a fixed-depth prefix — a continuous score, not the policy's fired flag.",
-        "PREVALENCE IS NOT DRAWN AS THE BASELINE. It is the no-skill average precision for "
-        "EXCHANGEABLE rows; these rows cluster by challenge and the whole pipeline is refit per "
-        "shuffle, so the pipeline's no-information AUPRC is an empirical quantity. Both numbers "
-        "are printed below — the gap between them is the size of the assumption that was dropped.",
+        "The sweep is ONE family: the point with the highest precision is measured, never adopted "
+        "as the shipped default — the shipped configuration is reported separately on the sweep "
+        "table.",
+        "One point per swept cell, so the curve is a discrete operating characteristic, not a "
+        "continuous score sweep.",
     ),
     limitations=(
-        "One row is one run, so the corpus failure rate quoted below is per-trajectory rather "
-        "than the tiny per-prefix rate the old framing used — the two AUPRC numbers are not "
-        "comparable.",
-        "AUPRC alone does not say whether the model beats the router's own t=0 task prior; read "
-        "the incremental number on the permutation-null figure for that.",
-        "This null is this depth's own. The family-wise correction on the permutation-null figure "
-        "applies to the AUROC statistics the skill gate reads, and AUPRC is not one of them.",
+        "A cell that never fires has no precision at all and is absent rather than plotted at 0.0.",
+        "This shows the detector's operating points, NOT what escalating would have CHANGED — no "
+        "stored trajectory contains an escalation that actually happened.",
     ),
 )
 
 ROC_CURVE_SPEC = FigureSpec(
     reading=(
-        "x is the false-positive rate and y the true-positive rate over the same out-of-fold "
-        "risk score, one vertex per DISTINCT threshold. The grey band is the label-permutation "
-        "null and the dashed line through it is that null's MEASURED centre — the reference here. "
-        "The faint dotted diagonal is the theoretical 0.5 chance line, drawn for orientation "
-        "only: this pipeline's no-information AUROC is the MEASURED number in the legend, which "
-        "need not be 0.5. A curve inside the band is noise."
+        "x is the false-positive rate and y the true-positive rate over the SWEPT escalation "
+        "policy, one point per escalate_after_n value that fired. The dotted diagonal is chance. "
+        "As the recurrence threshold rises the policy moves up the curve: more precision, less "
+        "recall. The prefix risk model's ROC is not drawn: its score is constant at the evaluated "
+        "depths, so it ranks nothing."
     ),
     goal=(
-        "Look for the curve leaving the grey null band toward the top-left. A curve inside the "
-        "band means the model is indistinguishable from randomly shuffled labels — read it "
-        "against the band and its measured centre, never against the dotted diagonal."
+        "Look for points leaving the diagonal toward the top-left. A point clearly above the "
+        "diagonal means firing concentrates on failed runs."
     ),
     definitions=(
-        ("true-positive rate", "share of failed runs the model flagged"),
-        ("false-positive rate", "share of resolved runs the model wrongly flagged"),
-        ("AUROC", "tie-averaged rank statistic behind this curve"),
-        ("null band", "where the curve lands when the outcome labels are shuffled at random"),
-        (
-            "measured null centre",
-            "the mean AUROC over those shuffles; the operative chance level for this pipeline",
-        ),
+        ("true-positive rate", "share of failed runs the policy flagged"),
+        ("false-positive rate", "share of resolved runs the policy wrongly flagged"),
+        ("escalate_after_n", "the number of same-key verified failures that trigger escalation"),
     ),
-    notes=("Auxiliary: AUPRC against its own measured null is the primary measure.",),
+    notes=("Auxiliary to the PR figure: precision vs recall is the primary view.",),
     limitations=(
-        "The band and its centre are drawn as two-segment curves with exactly the null's areas; "
-        "they are area-equivalent envelopes, not the pointwise spread of the permuted curves.",
+        "This shows the detector's operating points, NOT what escalating would have CHANGED.",
+        "A cell that never fires is absent rather than plotted at (0,0).",
     ),
 )
 
 CONFUSION_MATRIX_SPEC = FigureSpec(
     reading=(
-        "A 2x2 count grid at the operating threshold. Rows are the truth (run failed / resolved), "
-        "columns are what the detector said (flagged / not flagged). Each cell prints the observed "
-        "count, in brackets the count a RANDOM flagger at the same flag rate would produce, and "
-        "the difference between them. There is deliberately NO colour channel: with the number of "
-        "flags fixed, all four differences are the SAME number up to sign, so shading four counts "
-        "would dress one quantity up as four."
+        "A 2x2 count grid at one swept policy configuration — the cell whose precision is highest "
+        "among those that fired. Rows are the truth (run failed / resolved), columns are what the "
+        "escalation policy said (flagged / not flagged). Each cell prints the observed count, in "
+        "brackets the count a RANDOM flagger at the same flag rate would produce, and the "
+        "difference between them. The cell fill is a diverging heatmap on that excess — red where "
+        "a cell exceeds its random baseline, blue where it falls short, white AT it. With the "
+        "number of flags fixed, all four differences are the SAME number up to sign, so the two "
+        "hues restate the one excess rather than carry four independent facts."
     ),
     goal=(
         "Want the top-left count well ABOVE its bracketed random counterpart. That one excess IS "
@@ -124,26 +120,23 @@ CONFUSION_MATRIX_SPEC = FigureSpec(
         "below random means the flag carries no information."
     ),
     definitions=(
-        ("flagged", "detector score at or above the operating threshold"),
+        ("flagged", "the policy fired on this run (same-key recurrence reached escalate_after_n)"),
         (
-            "operating threshold",
-            "the base-rate quantile of the score; rows tied with the cut are admitted whole, so "
-            "the realised flag count can exceed the base-rate budget",
+            "random baseline",
+            "expected count if the same number of flags were scattered at random",
         ),
-        ("random baseline", "expected count if the same number of flags were scattered at random"),
         ("excess", "observed minus that random baseline, in the cell's own units"),
     ),
     notes=(
         "Counts are per trajectory, not per prefix.",
-        "The threshold is DERIVED from this corpus (the base-rate quantile of the score), never a "
-        "fixed 0.5: the score is a calibrated probability, so its centre tracks the corpus failure "
-        "rate and a cut pinned away from that rate degenerates to flagging almost nothing or "
-        "almost everything. This corpus's measured base rate is stated below.",
+        "The cell shown is the SWEPT cell with the highest measured precision, not the shipped "
+        "default: the shipped default (escalate_after_n=2) fires on every trajectory on this "
+        "corpus, so its 'not flagged' column is empty by construction. Read this figure together "
+        "with the sweep table, which shows every cell.",
     ),
     limitations=(
-        "One operating point, not a sweep — the curve figures show the rest.",
-        "Spending a flag budget equal to prevalence is a choice, not an optimum; a different "
-        "budget moves every count in this grid.",
+        "One operating point, not a sweep — the PR/ROC figures show the rest.",
+        "Spending a flag budget equal to the cell's fired count is a choice, not an optimum.",
         "The random baseline is an expectation, not a sampled interval; a cell one or two counts "
         "above it is not evidence.",
     ),
@@ -154,7 +147,9 @@ SWEEP_TABLE_SPEC = FigureSpec(
         "One row per swept configuration. Columns: escalations fired, P(fail | fired) with its "
         "95% challenge-bootstrap interval, the base failure rate, lift, and the permutation-null "
         "verdict. The table is drawn rather than plotted because the sweep has too few distinct "
-        "results to carry a colour channel honestly."
+        "results to carry a colour channel honestly. The row that IS the shipped default is "
+        "highlighted — bold text on a shaded background — so the configuration the product "
+        "actually ships can be spotted at a glance."
     ),
     goal=(
         "Read the P(fail | fired) interval against the base rate column. An interval containing "
@@ -166,13 +161,12 @@ SWEEP_TABLE_SPEC = FigureSpec(
         ("lift", "P(fail | fired) divided by the base failure rate; 1.0 is worthless"),
     ),
     notes=(
-        "ladder is pinned, not swept, and stale_window is swept only incidentally: the shipped "
-        "cell (stale_window=10) is appended to a grid pinned at 5, so the column carries two "
-        "values rather than one. Both knobs were measured inert on this corpus (12 cells "
-        "collapsed to 2 distinct score vectors) — which is why the two n=2 rows agree on every "
-        "measured column rather than being a duplicated row.",
+        "escalate_after_n AND stale_window are both swept (the two are coupled: reaching n "
+        "recurrences needs a window at least that wide, so the stale=10 rows stop firing at "
+        "n>=15). The shipped default (escalate_after_n=2, stale_window=10) is guaranteed a row "
+        "and is the highlighted one.",
         "The interval is a CHALLENGE-level bootstrap, not a Wilson interval over rows: the corpus "
-        "is 791 runs drawn from 160 challenges, so rows are not independent draws and a row-level "
+        "is 799 runs drawn from ~160 challenges, so rows are not independent draws and a row-level "
         "interval is roughly 2x too narrow.",
     ),
     limitations=(
@@ -185,48 +179,41 @@ SWEEP_TABLE_SPEC = FigureSpec(
 
 PERMUTATION_NULL_SPEC = FigureSpec(
     reading=(
-        "The grey histogram is the statistic recomputed under outcome labels shuffled WITHIN each "
-        "challenge, with the whole fitting pipeline re-run per shuffle. It is the FAMILY-WISE "
-        "null: each shuffle is scored at EVERY reported depth and only the largest of those "
-        "values enters the histogram, so the band already prices the fact that the verdict takes "
-        "the best depth. The dashed lines bound that max distribution's central 95%. The red line "
-        "is the real, unshuffled value at this depth. x is the statistic named on the axis."
+        "The grey histogram is the maximum AUROC the swept policy reaches under BLOCK "
+        "permutation — whole challenge blocks are shuffled, so outcomes move between challenges "
+        "while the global multiset is preserved — with one shared shuffle scored at every swept "
+        "cell and only the largest kept — the FAMILY-WISE (maxT) null across the whole sweep. The "
+        "dashed lines bound that max distribution's central 95%. The red line is the real, "
+        "unshuffled AUROC at the cell that separates best. x is the statistic named on the axis."
     ),
     goal=(
         "The red line must sit clearly to the RIGHT of the upper dashed line. Inside the dashed "
-        "bounds means the result is indistinguishable from noise, whatever the point estimate."
+        "bounds means the sweep's best cell is indistinguishable from noise."
     ),
     definitions=(
-        ("null", "what this pipeline scores when the labels carry no information"),
+        ("null", "what this policy scores when the labels carry no information"),
         (
             "family-wise",
-            "the max-statistic (maxT) null over the reported depths, so the p-value beside it is "
-            "already the multiplicity-adjusted one — exact under any dependence between depths",
+            "the max-statistic (maxT) null over the swept cells, so the p-value beside it is "
+            "already the multiplicity-adjusted one — exact under any dependence between cells",
         ),
         (
-            "incremental",
-            "AUROC of prior+prefix minus the router's t=0 prior FLOORED at chance, "
-            "max(prior, 0.5) — an anti-predictive prior must not be beatable",
+            "AUROC",
+            "rank statistic of the fired/not-fired flag against the run outcome, tie-averaged",
         ),
     ),
     notes=(
         "The null is the gate: a point estimate above chance is not skill on its own.",
-        "Permuting inside each challenge preserves every challenge's outcome multiset, so the "
-        "deployable prior is IDENTICAL under the null and the observation and only the prefix's "
-        "contribution is nulled. A global shuffle collapses the prior to chance and leaves the "
-        "two arms in different headroom regimes, which is a gate with no power.",
-        "The uncorrected per-depth null is reported in the JSON beside this one, so the size of "
-        "the correction is readable rather than folded away.",
+        "Permuting whole challenge blocks preserves the between-challenge variance the "
+        "observation carries; a global shuffle would destroy the clustering and make the band too "
+        "narrow. One shared randomization serves every swept cell, and only the max enters the "
+        "histogram — exactly the distribution the verdict is read off.",
     ),
     limitations=(
-        "Clearing this null is necessary, not sufficient: the paired grouped bootstrap must also "
-        "exclude zero, or the estimate is a property of this particular set of challenges.",
-        "A challenge whose runs all share an outcome cannot move under a within-challenge "
-        "permutation, so this null is estimated off the heterogeneous challenges only — here "
-        "roughly half the corpus.",
-        "One shared randomization serves every depth, so a deeper depth's own outcome multiset is "
-        "not preserved exactly within its subset. That widens the null at depth rather than "
-        "narrowing it, which is the conservative direction.",
+        "Clearing this null is necessary, not sufficient: the precision interval must also clear "
+        "the base rate (see the confusion figure), or the AUROC reflects a rank ordering with no "
+        "operating value.",
+        "A cell that never fires has AUROC 0.5 by definition and contributes nothing to the max.",
     ),
 )
 
@@ -285,192 +272,36 @@ CAPTURE_COVERAGE_SPEC = FigureSpec(
 )
 
 
-def _scored_note(labels: Sequence[bool]) -> str:
-    """How much data is behind a curve — runtime, so it can never go stale as the corpus grows."""
-    return f"scored on {len(labels)} trajectories, {sum(labels)} of them failed"
-
-
-def pr_curve(
-    scores: Sequence[float], labels: Sequence[bool], null: NullResult | None, ax: Axes
-) -> Annotations:
-    """Tie-collapsed precision-recall curve against the MEASURED AUPRC null, not prevalence."""
-    # PREVALENCE IS NOT THE NO-SKILL LINE HERE. It is the no-skill average precision for
-    # exchangeable rows; these rows cluster by challenge and `prefix_eval` refits the whole
-    # pipeline per shuffle, so the pipeline's own no-information AUPRC is something you MEASURE.
-    # Drawing prevalence as "no skill" set the bar at a number no null ever produced, and on the
-    # committed corpus it sat above the measured null — i.e. the wrong side, the one that hides a
-    # detector rather than flattering it. The measured band comes in through `null`; it is never
-    # reconstructed here from a literal.
-    points = metrics.pr_operating_points(scores, labels)
-    if null is not None:
-        ax.axhspan(
-            null.ci_low, null.ci_high, color=_NULL_BAND, alpha=0.55, label="permutation null 95%"
-        )
-        ax.axhline(
-            null.mean,
-            linestyle="--",
-            color=_NULL_CENTRE,
-            label=f"permutation null={null.mean:.3f}",
-        )
-    ax.plot([r for r, _ in points], [p for _, p in points], marker="o", label="risk model")
-    ax.set_xlabel("recall")
-    ax.set_ylabel("precision")
-    ax.set_title(f"PR (AUPRC={metrics.auprc(scores, labels):.3f})")
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.legend()
-    return Annotations(
-        notes=(
-            _scored_note(labels),
-            f"{len(points)} distinct operating points",
-            *_pr_null_notes(null, labels),
-        ),
-        limitations=(
-            *(() if any(labels) else ("No failed runs: the curve is meaningless.",)),
-            *_pr_null_limits(null),
-        ),
-    )
-
-
-def _pr_null_notes(null: NullResult | None, labels: Sequence[bool]) -> tuple[str, ...]:
-    """State the measured null and the prevalence it replaced, so the gap is on the canvas."""
-    prevalence = metrics.prevalence(labels)
-    if null is None:
-        return (f"corpus prevalence {prevalence:.4f} (printed, NOT drawn as a no-skill line)",)
-    verdict = "outside" if null.beats_null else "INSIDE"
-    return (
-        f"no-skill reference is the MEASURED permutation null {null.mean:.4f} "
-        f"(95% [{null.ci_low:.4f}, {null.ci_high:.4f}], sd {null.sd:.4f}, "
-        f"{null.n_permutations} shuffles); corpus prevalence is {prevalence:.4f}",
-        f"observed AUPRC {null.observed:.4f} sits {verdict} that null band, p={null.p_value:.3f}",
-    )
-
-
-def _pr_null_limits(null: NullResult | None) -> tuple[str, ...]:
-    """Refuse to imply skill, and refuse to imply a baseline that was never supplied."""
-    if null is None:
-        return (
-            "NO BASELINE DRAWN: no permutation null was supplied for this figure. Prevalence is "
-            "not a substitute on a challenge-clustered corpus, so the curve is shown bare.",
-        )
-    if null.beats_null:
-        return ()
-    return ("NO USABLE SIGNAL: the observed AUPRC is inside its own permutation null.",)
-
-
-def roc_curve(
-    scores: Sequence[float], labels: Sequence[bool], null: NullResult, ax: Axes
-) -> Annotations:
-    """Tie-collapsed ROC against the MEASURED null band and centre; 0.5 is drawn faint."""
-    points = metrics.roc_operating_points(scores, labels)
-    _null_band(null, ax)
-    # De-emphasised on purpose. 0.5 is the chance level for a fixed score vector against shuffled
-    # labels; it is NOT this pipeline's no-information level, because the pipeline is refit per
-    # shuffle. Drawing it as a bold dashed reference beside a measured null centre elsewhere on
-    # the canvas invited the reader to judge the curve against the wrong line.
-    ax.plot(
-        [0, 1],
-        [0, 1],
-        linestyle=":",
-        color=_FAINT,
-        linewidth=0.8,
-        label="theoretical chance 0.5 (not the reference)",
-    )
-    centre_x, centre_y = _area_polyline(null.mean)
-    ax.plot(
-        centre_x,
-        centre_y,
-        linestyle="--",
-        color=_NULL_CENTRE,
-        linewidth=1.4,
-        label=f"measured null centre (AUROC={null.mean:.3f})",
-    )
-    ax.plot([x for x, _ in points], [y for _, y in points], marker="o", label="risk model")
-    ax.set_xlabel("false-positive rate")
-    ax.set_ylabel("true-positive rate")
-    ax.set_title(f"ROC (AUROC={metrics.auroc(scores, labels):.3f}, auxiliary)")
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.legend()
-    verdict = "outside" if null.beats_null else "INSIDE"
-    return Annotations(
-        notes=(
-            _scored_note(labels),
-            f"{len(points)} distinct operating points",
-            f"observed AUROC sits {verdict} the null band "
-            f"[{null.ci_low:.3f}, {null.ci_high:.3f}], p={null.p_value:.3f}",
-            f"the null is MEASURED, not assumed: it centres at {null.mean:.4f} "
-            f"(sd {null.sd:.4f}, {null.n_permutations} shuffles), so that value and not the "
-            f"dotted 0.5 diagonal is this pipeline's no-information level",
-        ),
-        limitations=(
-            ()
-            if null.beats_null
-            else ("NO USABLE SIGNAL: the observed AUROC is inside its own permutation null.",)
-        ),
-    )
-
-
-def _area_polyline(area: float) -> tuple[list[float], list[float]]:
-    """The two-segment ROC (0,0)->(0.5,b)->(1,1) whose area is exactly `area`: b = 2*(area-0.25)."""
-    return [0.0, 0.5, 1.0], [0.0, min(1.0, max(0.0, 2 * (area - 0.25))), 1.0]
-
-
-def _null_band(null: NullResult, ax: Axes) -> None:
-    """Shade between the two two-segment ROC curves whose areas equal the null's 95% bounds."""
-    # A polyline (0,0)->(0.5,b)->(1,1) has area 0.5*b + 0.25, so b = 2*(A - 0.25) draws a curve of
-    # exactly area A. Two of them bound the region an AUROC in the null interval can occupy.
-    x, low = _area_polyline(null.ci_low)
-    _, high = _area_polyline(null.ci_high)
-    ax.fill_between(x, low, high, color=_NULL_BAND, alpha=0.55, label="permutation null 95%")
-
-
-def confusion_matrix_plot(
-    cm: ConfusionMatrix, ax: Axes, *, threshold: float, flag_budget: int
-) -> Annotations:
-    """2x2 counts, the expected-under-random count, and the one excess all four cells share."""
-    counts = ((cm.tp, cm.fn), (cm.fp, cm.tn))
-    positives = cm.tp + cm.fn
-    negatives = cm.fp + cm.tn
-    total = positives + negatives
-    flagged = cm.tp + cm.fp
-    rate = flagged / total if total else 0.0
-    expected = (
-        (positives * rate, positives * (1 - rate)),
-        (negatives * rate, negatives * (1 - rate)),
-    )
-    _draw_confusion_cells(counts, expected, ax)
-    ax.set_title(
-        f"confusion @ derived operating threshold {threshold:.3f} "
-        "(count, [random at the same flag rate], excess)"
-    )
-    return Annotations(
-        notes=_confusion_notes(cm, expected[0][0], total=total, threshold=threshold, rate=rate),
-        limitations=(
-            *_budget_limits(flagged, flag_budget, total),
-            *(
-                ()
-                if cm.tp > expected[0][0]
-                else (
-                    "The detector catches no more failures than random flagging at the same rate.",
-                )
-            ),
-        ),
-    )
-
-
 def _draw_confusion_cells(
     counts: tuple[tuple[int, int], tuple[int, int]],
     expected: tuple[tuple[float, float], tuple[float, float]],
     ax: Axes,
 ) -> None:
-    """A plain ruled 2x2 — NO colour channel, because the four cells carry ONE number."""
-    # The previous version shaded the cells by raw count, which put the heaviest ink on the cell
-    # that was furthest BELOW its random baseline: the eye read "biggest = best" off a deficit.
-    # Worse, with the flag count fixed the four excesses are algebraically the same number up to
-    # sign (tn - E[tn] == tp - E[tp], and both off-diagonals are its negation), so a four-valued
-    # colour scale was encoding one degree of freedom as four. Same reasoning as `sweep_table`,
-    # which drops colour because two distinct results cannot carry a colour channel honestly.
+    """A 2x2 heatmap whose fill is the cell's excess over its random-flagger baseline."""
+    # The four cells carry ONE number: with the flag count fixed every excess is the same magnitude
+    # up to sign (tn - E[tn] == tp - E[tp], and both off-diagonals are its negation), so the fill
+    # is a diverging scale on that single excess — red above the baseline, blue below, white at it —
+    # NOT a shade per cell. The previous version shaded by RAW count, which put the heaviest ink on
+    # the cell furthest BELOW its baseline: the eye read "biggest = best" off a deficit, and a
+    # four-valued scale was encoding one degree of freedom as four. Same reasoning as `sweep_table`,
+    # which refuses a colour scale because two distinct results cannot carry one honestly; here the
+    # single degree of freedom is what the colour encodes, and the footer says so.
+    deltas = np.array([[counts[r][c] - expected[r][c] for c in range(2)] for r in range(2)])
+    peak = max(float(np.abs(deltas).max()), _DELTA_FLOOR)
+    cmap = LinearSegmentedColormap.from_list("excess", (_EXCESS_NEG, _EXCESS_ZERO, _EXCESS_POS))
+    norm = TwoSlopeNorm(vcenter=0.0, vmin=-peak, vmax=peak)
+    for r in range(2):
+        for c in range(2):
+            ax.add_patch(
+                Rectangle(
+                    (c - 0.5, r - 0.5),
+                    1.0,
+                    1.0,
+                    facecolor=cmap(norm(deltas[r, c])),
+                    edgecolor=_NULL_CENTRE,
+                    linewidth=0.8,
+                )
+            )
     ax.set_xlim(-0.5, 1.5)
     ax.set_ylim(1.5, -0.5)
     ax.set_xticks([0, 1], ["flagged", "not flagged"])
@@ -487,6 +318,18 @@ def _draw_confusion_cells(
                 va="center",
                 color="black",
             )
+    _attach_excess_colorbar(ax, cmap, norm, peak)
+
+
+def _attach_excess_colorbar(ax: Axes, cmap, norm, peak: float) -> None:
+    """The scale the fills live on; the footer's notes explain what it encodes."""
+    # The grid uses only the two extremes of the scale, so the colorbar ticks at them rather than
+    # at intermediate values the data never reaches.
+    mappable = ScalarMappable(norm=norm, cmap=cmap)
+    mappable.set_array(np.array([-peak, peak]))
+    ax.figure.colorbar(
+        mappable, ax=ax, label="excess over random flagging", ticks=[-peak, peak], format="%+.1f"
+    )
 
 
 def _confusion_notes(
@@ -525,7 +368,9 @@ def _budget_limits(flagged: int, budget: int, total: int) -> tuple[str, ...]:
     )
 
 
-def sweep_table(cells: Sequence[PolicyCell], ax: Axes) -> Annotations:
+def sweep_table(
+    cells: Sequence[PolicyCell], ax: Axes, *, shipped_index: int | None = None
+) -> Annotations:
     """The sweep as a table with intervals — the honest replacement for a 2-result heatmap."""
     ax.axis("off")
     # `stale_window` is a COLUMN, not a pinned constant: the shipped cell is appended to the swept
@@ -552,8 +397,23 @@ def sweep_table(cells: Sequence[PolicyCell], ax: Axes) -> Annotations:
     # is scaled wider and the font dropped a point to keep every cell inside its border.
     table.set_fontsize(8)
     table.scale(1.16, 1.6)
-    ax.set_title("policy sweep — escalate_after_n × stale_window (ladder pinned)")
+    title = "policy sweep — escalate_after_n × stale_window (ladder pinned)"
+    if shipped_index is not None and 0 <= shipped_index < len(rows):
+        _mark_shipped_row(table, shipped_index)
+        title += " — shipped default is the highlighted row"
+    ax.set_title(title)
     return Annotations(notes=(_sweep_note(cells),), limitations=_sweep_limits(cells))
+
+
+def _mark_shipped_row(table: Table, index: int) -> None:
+    """Bold the shipped row's text and shade its cells, so the default is spot-table."""
+    # `get_celld()` keys are (row, col); the header occupies row 0, so data row `index` is cell
+    # row `index + 1`. The shipped index is passed in (run_eval owns what "shipped" means) rather
+    # than matched by value here, so plots.py never imports the eval's constants.
+    for (row, _col), cell in table.get_celld().items():
+        if row == index + 1:
+            cell.set_text_props(fontweight="bold")
+            cell.set_facecolor(_SHIPPED_ROW)
 
 
 def _sweep_note(cells: Sequence[PolicyCell]) -> str:
@@ -614,6 +474,173 @@ def permutation_null_plot(null: NullResult, ax: Axes, *, label: str) -> Annotati
         limitations=()
         if null.beats_null
         else (f"NO USABLE SIGNAL on {label}: p={null.p_value:.3f} against shuffled labels.",),
+    )
+
+
+def _annotate_sweep_points(
+    ax: Axes,
+    cells: Sequence[PolicyCell],
+    xy_of: Callable[[PolicyCell], tuple[float, float | None]],
+) -> None:
+    """Label each fired operating point, deduplicating co-located cells and staggering overlaps."""
+    # The two stale_window rows of one escalate_after_n can land on the SAME plotted point (the
+    # window only gates how many events the trigger admits, not whether it fired), and the old
+    # code annotated EVERY cell — two identical `n=2` labels printed on top of each other, then
+    # the next threshold's label on top of both. Coincident points are annotated ONCE (their n
+    # values joined); points that merely land close together on the curve are pushed apart
+    # vertically so no two labels sit on the same spot.
+    grouped: dict[tuple[float, float], list[PolicyCell]] = {}
+    for c in cells:
+        if c.precision is None:
+            continue
+        x, y = xy_of(c)
+        if y is None:
+            continue
+        grouped.setdefault((round(x, 6), round(y, 6)), []).append(c)
+    placed: list[tuple[float, float]] = []
+    for (x, y), members in grouped.items():
+        label = "n=" + ",".join(f"{c.escalate_after_n}" for c in members)
+        # Drop the label until its anchor clears every earlier one: consecutive thresholds sit
+        # within ~0.03-0.05 of each other on the curve, so a flat (6, 4) offset stacks every
+        # label on its neighbour. `step` is roughly one text line in data units (fontsize 8).
+        nudge = 0
+        step, radius = 0.035, 0.022
+        while any(
+            abs(px - x) < 0.10 and abs(py - (y - step * nudge)) < radius for px, py in placed
+        ):
+            nudge += 1
+        placed.append((x, y - step * nudge))
+        ax.annotate(
+            label,
+            (x, y),
+            textcoords="offset points",
+            xytext=(6, 4 - 14 * nudge),
+            fontsize=8,
+        )
+
+
+def policy_pr_curve(cells: Sequence[PolicyCell], ax: Axes) -> Annotations:
+    """Precision vs recall across SWEPT thresholds — the escalation method's curve."""
+    # The old PR figure was drawn from the prefix risk model, whose score is constant at the
+    # evaluated depths (early steps are all bug-reproduction, so the model ranks nothing) — a
+    # degenerate 1-2-point curve. The escalation METHOD is the policy, and its operating
+    # characteristic is real: as escalate_after_n rises, precision climbs from the base rate to
+    # 0.71 while recall falls. One point per swept cell; the base rate is the no-skill line.
+    points = [(c.recall, c.precision) for c in cells if c.precision is not None]
+    scored = [c for c in cells if c.precision is not None]
+    if not points:
+        return Annotations(
+            limitations=(
+                "NO CONFIGURATION FIRED: the sweep contains no measurable operating point.",
+            )
+        )
+    base = next((c.base_failure_rate for c in cells if c.precision is not None), 0.0)
+    ax.axhline(
+        base,
+        linestyle="--",
+        color=_NULL_CENTRE,
+        label=f"base failure rate={base:.3f}",
+    )
+    xs, ys = zip(*points, strict=True)
+    ax.plot(xs, ys, marker="o", label="policy sweep (escalate_after_n rising)")
+    _annotate_sweep_points(ax, cells, lambda c: (c.recall, c.precision))
+    ax.set_xlabel("recall (share of failed runs flagged)")
+    ax.set_ylabel("precision (P(fail | flagged))")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_title("escalation policy operating characteristic — precision vs recall")
+    ax.legend()
+    best = max(scored, key=lambda c: c.precision or 0.0)
+    return Annotations(
+        notes=(
+            f"{len(scored)} of {len(cells)} swept cells fired; one point per escalate_after_n",
+            f"highest precision {best.precision:.3f} at n={best.escalate_after_n} "
+            f"(recall {best.recall:.3f}) against a base rate of {best.base_failure_rate:.3f}",
+        ),
+        limitations=(
+            ()
+            if best.precision_ci[0] > best.base_failure_rate
+            else (
+                "NO OPERATING POINT CLEARS THE BASE RATE: no swept configuration's precision "
+                "interval excludes the base failure rate.",
+            )
+        ),
+    )
+
+
+def policy_roc_curve(cells: Sequence[PolicyCell], ax: Axes) -> Annotations:
+    """TPR vs FPR across the SWEPT recurrence thresholds — the escalation method's ROC."""
+    # Same re-pointing as `policy_pr_curve`: the method's curve, not the degenerate prefix score's.
+    points = [
+        (
+            c.fp / (c.fp + c.tn) if (c.fp + c.tn) else 0.0,
+            c.tp / (c.tp + c.fn) if (c.tp + c.fn) else 0.0,
+        )
+        for c in cells
+        if c.precision is not None
+    ]
+    if not points:
+        return Annotations(
+            limitations=(
+                "NO CONFIGURATION FIRED: the sweep contains no measurable operating point.",
+            )
+        )
+    ax.plot([0, 1], [0, 1], linestyle=":", color=_FAINT, linewidth=0.8, label="chance")
+    xs, ys = zip(*points, strict=True)
+    ax.plot(xs, ys, marker="o", label="policy sweep (escalate_after_n rising)")
+    rates = {
+        c: (
+            c.fp / (c.fp + c.tn) if (c.fp + c.tn) else 0.0,
+            c.tp / (c.tp + c.fn) if (c.tp + c.fn) else 0.0,
+        )
+        for c in cells
+        if c.precision is not None
+    }
+    _annotate_sweep_points(ax, cells, lambda c: rates[c])
+    ax.set_xlabel("false-positive rate (share of resolved runs flagged)")
+    ax.set_ylabel("true-positive rate (share of failed runs flagged)")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_title("escalation policy ROC across recurrence thresholds")
+    ax.legend()
+    return Annotations(notes=(f"{len(points)} swept cells fired; one point per escalate_after_n",))
+
+
+def policy_confusion(cell: PolicyCell, ax: Axes, *, flag_budget: int | None = None) -> Annotations:
+    """The 2x2 of the SWEPT CELL that separates best — the escalation method's operating point."""
+    # The old confusion figure came from the prefix score, which flags every row when the score is
+    # constant, so the "not flagged" column was empty (0/0) — exactly the "no datapoints being
+    # kept" the audit flagged. The policy cell at high n has all four cells populated.
+    cm = ConfusionMatrix(tp=cell.tp, fp=cell.fp, fn=cell.fn, tn=cell.tn)
+    flagged = cell.tp + cell.fp
+    budget = flag_budget if flag_budget is not None else flagged
+    counts = ((cm.tp, cm.fn), (cm.fp, cm.tn))
+    positives = cm.tp + cm.fn
+    negatives = cm.fp + cm.tn
+    total = positives + negatives
+    rate = flagged / total if total else 0.0
+    expected = (
+        (positives * rate, positives * (1 - rate)),
+        (negatives * rate, negatives * (1 - rate)),
+    )
+    _draw_confusion_cells(counts, expected, ax)
+    ax.set_title(
+        f"escalation policy confusion @ escalate_after_n={cell.escalate_after_n}, "
+        f"stale_window={cell.stale_window} "
+        "(count, [random at the same flag rate], excess)"
+    )
+    return Annotations(
+        notes=_confusion_notes(cm, expected[0][0], total=total, threshold=0.0, rate=rate),
+        limitations=(
+            *_budget_limits(flagged, budget, total),
+            *(
+                ()
+                if cm.tp > expected[0][0]
+                else (
+                    "The detector catches no more failures than random flagging at the same rate.",
+                )
+            ),
+        ),
     )
 
 
@@ -776,10 +803,10 @@ __all__ = [
     "ROC_CURVE_SPEC",
     "SWEEP_TABLE_SPEC",
     "capture_coverage",
-    "confusion_matrix_plot",
     "outcome_bars",
     "permutation_null_plot",
-    "pr_curve",
-    "roc_curve",
+    "policy_confusion",
+    "policy_pr_curve",
+    "policy_roc_curve",
     "sweep_table",
 ]

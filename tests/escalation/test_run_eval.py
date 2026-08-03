@@ -10,7 +10,7 @@ from typing import Final
 
 import pytest
 
-from benchmark.escalation import features, metrics, run_eval, schema
+from benchmark.escalation import deployability, features, metrics, run_eval, schema
 from tests.escalation.factories import make_depth_report, make_null, make_step, make_trajectory
 
 pytest.importorskip("sklearn")
@@ -97,12 +97,61 @@ def test_a_pure_null_reports_no_skill_not_ok(null_report: run_eval.EvalReport) -
     assert not any(d.has_skill for d in report.depth_reports)
 
 
-def test_real_signal_reports_ok(signal_report: run_eval.EvalReport) -> None:
+def test_offline_signal_reports_ok_offline_only(signal_report: run_eval.EvalReport) -> None:
     report = signal_report
-    assert report.status == "OK"
+    # The badge must not over-read: this corpus is scored at STEP cadence, so the cell that clears
+    # the null is an OFFLINE-ONLY UPPER BOUND, not a shippable "OK". The status value says so.
+    assert report.status == "OK_OFFLINE_ONLY"
+    assert report.deployability.deployable is False
     # The null named in the OK sentence is the one the gate applied — family-wise across the
     # reported depths (here a family of one, which is why real signal still clears it).
     assert "clears its family-wise permutation null" in report.reason
+    assert "OFFLINE-ONLY UPPER BOUND" in report.reason
+
+
+def test_a_deployable_signal_reports_plain_ok() -> None:
+    # A null-clearing cell on a DEPLOYABLE estimate — every scored feature projects onto the live
+    # decision context AND the cadence is production's — keeps the plain "OK" badge. Only the
+    # projecting feature subset is deployable at SESSION cadence: the full FEATURE_NAMES set is
+    # non-deployable at ANY cadence, because infra_rate and max_action_repeat_rate read fields the
+    # production decision never sees.
+    from benchmark.escalation import policy_eval
+
+    deployable = deployability.assess(("fail_rate",), deployability.Cadence.SESSION)
+    assert deployable.deployable
+    cell = policy_eval.PolicyCell(
+        escalate_after_n=30,
+        stale_window=1000,
+        ladder="rank_only",
+        n_trajectories=100,
+        n_escalated=30,
+        tp=20,
+        fp=10,
+        fn=10,
+        tn=60,
+        base_failure_rate=0.3,
+        precision_ci=(0.5, 0.9),
+        quiet_ci=(0.1, 0.3),
+        null_auroc=make_null(0.66, 0.55, p_value=0.005),
+    )
+    assert cell.has_skill
+    status, reason = run_eval._status([cell], [], 0, deployable)
+    assert status == "OK"
+    assert "OFFLINE-ONLY UPPER BOUND" not in reason
+    report = run_eval.EvalReport(
+        status=status,
+        reason=reason,
+        n_trajectories=100,
+        n_stamped=100,
+        n_multistep=100,
+        authenticity_errors=0,
+        policy_cells=[cell],
+        depth_reports=[],
+        coverage=[],
+        deployability=deployable,
+    )
+    assert report.status == "OK"
+    assert report.deployability.deployable is True
 
 
 def test_no_skill_reason_carries_the_number_not_just_the_verdict(
@@ -137,9 +186,54 @@ def test_no_skill_reason_names_the_condition_that_actually_failed() -> None:
     assert f"{0.144:+.3f}" in reason
 
 
+def test_best_depth_never_headlines_a_rank_deficient_design() -> None:
+    # Depth 5's design on the rebuilt corpus ranks 3 of 4 (412 of 414 rows carry one vector), so
+    # its incremental is arithmetic, not evidence — and removing depth 20 from the ladder made it
+    # the plain `max(incremental)` winner. The headline depth must come from a design the eval
+    # could actually evaluate; the degenerate one is excluded, not preferred.
+    degenerate = replace(make_depth_report(depth=5, incremental_auroc=0.1), design_full_rank=False)
+    estimable = replace(make_depth_report(depth=10, incremental_auroc=0.03), design_full_rank=True)
+    report = run_eval.EvalReport(
+        status="NO_SKILL",
+        reason="hand-built",
+        n_trajectories=2,
+        n_stamped=2,
+        n_multistep=2,
+        authenticity_errors=0,
+        policy_cells=[],
+        depth_reports=[degenerate, estimable],
+        coverage=[],
+        deployability=deployability.assess((), deployability.Cadence.SESSION),
+    )
+    assert report.best_depth is estimable
+    # The no-skill sentence follows the same preference: name the depth that could be measured,
+    # never the arithmetic one.
+    status, reason = run_eval._status([], [degenerate, estimable])
+    assert status == "NO_SKILL"
+    assert "at depth 10" in reason
+    assert "at depth 5" not in reason
+    # ...and the fallback still reports SOMETHING when no depth ranks full.
+    both_degenerate = [replace(d, design_full_rank=False) for d in (degenerate, estimable)]
+    assert (
+        run_eval.EvalReport(
+            status="NO_SKILL",
+            reason="hand-built",
+            n_trajectories=2,
+            n_stamped=2,
+            n_multistep=2,
+            authenticity_errors=0,
+            policy_cells=[],
+            depth_reports=both_degenerate,
+            coverage=[],
+            deployability=deployability.assess((), deployability.Cadence.SESSION),
+        ).best_depth
+        is both_degenerate[0]
+    )  # the max-incremental one
+
+
 def test_the_status_gate_reads_the_family_wise_null_not_the_per_depth_one() -> None:
     # THE DEFECT THIS PINS. `_status` says OK if ANY depth clears and `_no_skill_reason` reports the
-    # max-incremental depth, so `DEFAULT_DEPTHS`'s three depths are a max over three tests — and
+    # max-incremental depth, so `DEFAULT_DEPTHS`'s depths are a max over that many tests — and
     # each was gated at its own nominal 2.5%, with no family-wise correction anywhere. This report
     # clears its per-depth nulls comfortably and MUST still be refused, because the max-statistic
     # band across the family sits above the observation.
@@ -223,7 +317,9 @@ def test_a_report_with_no_shipped_cell_has_no_headline_rather_than_a_mislabelled
         corpus, [replay.GridPoint(9, 999, "rank_only")], n_permutations=_PERMUTATIONS
     )
     report = run_eval.EvalReport(
-        status="OK",
+        # STEP-cadence deployability below: the corpus is not a deployable estimate, so a hand-built
+        # report must not carry the shippable "OK" badge either — that is the over-read this pins.
+        status="OK_OFFLINE_ONLY",
         reason="hand-built",
         n_trajectories=len(corpus),
         n_stamped=len(corpus),
@@ -347,6 +443,16 @@ def test_permutations_below_the_floor_is_a_parser_error_not_a_traceback(capsys) 
         run_eval.main(["--permutations", str(metrics.MIN_PERMUTATIONS - 1)])
     assert exc.value.code == 2  # argparse usage error
     assert f">= {metrics.MIN_PERMUTATIONS}" in capsys.readouterr().err
+
+
+def test_non_positive_depths_are_a_parser_error_not_a_traceback(capsys) -> None:
+    # `--depths 0` / `--depths -3` are not valid absolute step counts; they used to fail deep
+    # inside the prefix admission/refit path. Rejected at parse time, like `--permutations`.
+    for bad in ("0", "-3"):
+        with pytest.raises(SystemExit) as exc:
+            run_eval.main(["--depths", bad])
+        assert exc.value.code == 2  # argparse usage error
+        assert "must be > 0" in capsys.readouterr().err
 
 
 def test_main_errors_when_the_live_directory_is_missing(tmp_path) -> None:

@@ -45,15 +45,14 @@
 # rejection is genuine — the instance is unmeasurable offline — and per-test adjudication keeps it
 # rejected (measured on requests-1724: at gold, 0 of its 6 F2P pass and 24 P2P still fail).
 #
-# RELATION TO THE SHARED RESEARCH GATE. This mirrors the contract of the wrapper's
-# `admissibility_gate.py` — controls supplied by the caller, adjudicator separate from oracle,
-# verdict about the INSTRUMENT and never about the hypothesis — but it cannot import it: that
-# module lives in the private build wrapper and this file ships in the public repo, so a clean
-# clone would not have it. The numeric adjudicator is also the wrong shape here. Its null rung
-# asks a score to COLLAPSE TO CHANCE, which suits a continuous metric under shuffled labels; this
-# instrument is discrete and its destroyed-signal leg must land on the DEFINITE OPPOSITE verdict
-# (FAILURE), not at chance. Same discipline, correct encoding for the modality — the documented
-# per-modality destroyed-signal control the shared gate explicitly allows for.
+# RELATION TO THE SHARED RESEARCH GATE. This mirrors the contract of a shared adjudicator module
+# that is not shipped in this repository — controls supplied by the caller, adjudicator separate
+# from oracle, verdict about the INSTRUMENT and never about the hypothesis — but it cannot import
+# it: a clean clone would not have it. The numeric adjudicator is also the wrong shape here. Its
+# null rung asks a score to COLLAPSE TO CHANCE, which suits a continuous metric under shuffled
+# labels; this instrument is discrete and its destroyed-signal leg must land on the DEFINITE
+# OPPOSITE verdict (FAILURE), not at chance. Same discipline, correct encoding for the modality —
+# the documented per-modality destroyed-signal control the shared gate explicitly allows for.
 
 from __future__ import annotations
 
@@ -77,15 +76,24 @@ _LOG = logging.getLogger(__name__)
 VERDICT_FILENAME = "admissibility.json"
 
 # Every module whose source decides what a verdict IS: the classifier, the assembled replay the
-# legs run through, and this adjudicator. Their combined digest is the instrument fingerprint —
-# edit any of them and every cached verdict is invalidated automatically. A hand-bumped version
-# constant would be the thing that goes stale silently, which is the failure this key exists to
-# make impossible.
+# legs run through, this adjudicator, the normalizer that STAMPS per-step outcomes onto the
+# trajectory, the verifier modules that rank/parse outcomes, and the record/schema modules a
+# verdict round-trips through. Their combined digest is the instrument fingerprint — edit any of
+# them and every cached verdict is invalidated automatically. A hand-bumped version constant
+# would be the thing that goes stale silently, which is the failure this key exists to make
+# impossible. Closure coverage is pinned by benchmark/tests/test_instrument_digest_closure.py.
 _INSTRUMENT_MODULES: Final[tuple[str, ...]] = (
     "shunt.verifiers.parse",
+    "shunt.verifiers.tier2",
+    "shunt.verifiers.aggregator",
     "benchmark.runner.swebench_grading",
     "benchmark.runner.offline_replay",
     "benchmark.runner.replay_admissibility",
+    "benchmark.runner.state_capture_audit",
+    "benchmark.runner.step_snapshots",
+    "benchmark.escalation.schema",
+    "benchmark.escalation.authenticity",
+    "benchmark.escalation.normalize.mini_swe_agent",
 )
 
 

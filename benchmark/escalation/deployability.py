@@ -63,8 +63,6 @@ OFFLINE_SOURCE: Final[dict[str, str]] = {
 FEATURE_SOURCES: Final[dict[str, tuple[str, ...]]] = {
     "fail_rate": ("success",),
     "infra_rate": ("is_infra_failure",),
-    "distinct_check_id_rate": ("failing_check_id",),
-    "max_key_repeat_rate": ("failing_check_id",),
     "max_action_repeat_rate": ("action",),
 }
 

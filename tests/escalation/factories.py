@@ -111,7 +111,7 @@ def make_depth_report(  # noqa: PLR0913 (test builder — many optional knobs by
     scores: tuple[float, ...] = (0.1, 0.2, 0.3, 0.4),
     labels: tuple[bool, ...] = (False, True, False, True),
 ) -> DepthReport:
-    """A DepthReport whose skill-gate inputs are set directly, with the rest left inert."""
+    """A DepthReport whose admissibility-gate inputs are set directly, with the rest left inert."""
     return DepthReport(
         depth=depth,
         n_rows=len(scores),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import random
 
 import pytest
 
@@ -38,7 +39,14 @@ def test_n_escalated_counts_trajectories_not_sweep_cells() -> None:
     assert len(cells) == len(datasets.DEFAULT_GRID)
     for cell in cells:
         assert cell.n_escalated <= cell.n_trajectories == len(corpus)
-        assert cell.n_escalated == 5
+        # Every thrashing run repeats one key `n` times, so the recurrence trigger fires on the 5
+        # thrashing runs whenever escalate_after_n <= the run's failure count (8). Cells past the
+        # fixture's count structurally cannot fire — the grid's high-n tail is there to probe the
+        # corpus's own edge, not this synthetic fixture's, so the invariant is the per-cell bound
+        # above plus the fired-count identity below, never a fixed 5 for every cell.
+        assert cell.n_escalated == 5 or cell.n_escalated == 0
+        if cell.n_escalated == 5:
+            assert cell.tp + cell.fp == 5
 
 
 def test_confusion_partitions_the_corpus_exactly_once() -> None:
@@ -91,6 +99,49 @@ def test_precision_interval_is_reported_and_contains_the_estimate() -> None:
     assert cell.precision is not None
     low, high = cell.precision_ci
     assert low <= cell.precision <= high
+
+
+def test_a_single_cell_family_keeps_the_marginal_precision_interval() -> None:
+    # The family-wise max-over-cells correction only kicks in for a family of MORE than one cell:
+    # a single swept cell IS its own reference, so it must carry the exact marginal bootstrap.
+    corpus = [_thrashing(f"t{i}", resolved=i < 3) for i in range(10)]
+    corpus += [_quiet(f"q{i}", resolved=True) for i in range(10)]
+    point = replay.GridPoint(2, 5)
+    swept = policy_eval.evaluate(corpus, [point], n_permutations=_PERMUTATIONS)
+    assert len(swept) == 1
+    alone = policy_eval.evaluate_cell(corpus, point, n_permutations=_PERMUTATIONS)
+    assert swept[0].precision_ci == alone.precision_ci
+
+
+def test_every_fired_cell_reports_its_own_marginal_precision_interval() -> None:
+    # The bug this replaces put the SAME family-wise max-over-cells reference on every cell of a
+    # swept family — the argmax cell's interval — so a cell whose estimate sat outside it (the
+    # shipped cell read `0.421 [0.606, 0.788]`) reported a CI that excluded its own point
+    # estimate. Each cell now carries its own marginal bootstrap: the CI contains the estimate it
+    # is an interval for, and equals what a lone `evaluate_cell` of the same point would produce.
+    corpus = [_thrashing(f"f{i}", resolved=False, n=30) for i in range(10)]
+    corpus += [_thrashing(f"r{i}", resolved=True, n=5) for i in range(10)]
+    corpus += [_quiet(f"q{i}", resolved=True) for i in range(10)]
+    low, high = replay.GridPoint(2, 1000), replay.GridPoint(30, 1000)
+    cells = policy_eval.evaluate(corpus, [low, high], n_permutations=_PERMUTATIONS)
+    assert len(cells) == 2
+    best = max(cells, key=lambda c: c.null_auroc.observed)
+    for cell in cells:
+        if cell.precision is None:
+            assert all(math.isnan(v) for v in cell.precision_ci)
+            continue
+        low, high_ci = cell.precision_ci
+        assert low <= cell.precision <= high_ci
+        marginal = policy_eval.evaluate_cell(
+            corpus,
+            replay.GridPoint(cell.escalate_after_n, cell.stale_window),
+            n_permutations=_PERMUTATIONS,
+        ).precision_ci
+        assert cell.precision_ci == pytest.approx(marginal)
+    # The AUROC family-wise null is untouched: `gate_null` IS the max-over-cells reference, and
+    # the best cell still clears it (only the precision interval went marginal).
+    assert best.gate_null is best.null_auroc_family
+    assert best.gate_null.beats_null
 
 
 def test_a_never_firing_configuration_has_no_precision_at_all() -> None:
@@ -146,11 +197,46 @@ def test_the_quiet_arm_interval_is_clustered_by_challenge_not_wilson_over_rows()
     assert high - low > 2 * (wilson_hi - wilson_lo)
 
 
-def test_default_grid_pins_the_inert_knobs() -> None:
-    # stale_window and ladder were measured inert (12 cells -> 2 distinct score vectors), so they
-    # are pinned rather than swept; escalate_after_n=1 is included because it is the one level
-    # where precision separates and the report must show it next to the shipped default.
-    assert len(datasets.DEFAULT_GRID) == 3
-    assert sorted(p.escalate_after_n for p in datasets.DEFAULT_GRID) == [1, 2, 3]
-    assert len({p.stale_window for p in datasets.DEFAULT_GRID}) == 1
+def test_default_grid_sweeps_both_knobs_and_guarantees_the_shipped_cell() -> None:
+    # stale_window and ladder were measured inert (12 cells -> 2 distinct score vectors) in the
+    # OLD single-axis grid, which stopped at escalate_after_n=3 and never reached the regime where
+    # the recurrence edge exists. The 2026-08-02 audit re-measured: the edge lives at HIGH
+    # thresholds (n>=10 clears the family-wise null), and `_in_window` admits at most
+    # `stale_window` events — so reaching n recurrences needs a window at least that wide, and the
+    # grid sweeps both knobs. `ladder` stays pinned (the detection metric reads whether the policy
+    # fired, not which rung it climbed).
+    assert sorted({p.escalate_after_n for p in datasets.DEFAULT_GRID}) == [2, 5, 8, 10, 15, 20, 30]
+    assert sorted({p.stale_window for p in datasets.DEFAULT_GRID}) == [10, 1000]
     assert len({p.ladder for p in datasets.DEFAULT_GRID}) == 1
+    # The shipped configuration (escalate_after_n=2, stale_window=10) must be in-grid so the
+    # report measures what ships, never only what scores better.
+    assert any(p.escalate_after_n == 2 and p.stale_window == 10 for p in datasets.DEFAULT_GRID)
+
+
+def test_policy_null_uses_block_permutation_not_within_challenge_shuffles() -> None:
+    # The policy half's claim is UNCONDITIONAL ("given the policy fired, is this run likelier to
+    # fail than one picked at random"), so the exchangeable unit is the whole CHALLENGE and the
+    # null must be a BLOCK permutation: whole challenge blocks are shuffled and outcome labels
+    # MOVE between challenges, with only the global multiset preserved. A within-challenge shuffle
+    # removes exactly the between-challenge variation the unconditional statistic contains, giving
+    # a too-narrow null (measured sd 0.0036 vs 0.0282 for the block shuffle at n=10). This test
+    # pins the mechanism so the docs cannot drift from it again (2026-08-02: three shipped
+    # documents described the policy null as a within-challenge shuffle while the code permuted
+    # whole blocks; no test caught it).
+    labels = [True, False, False, True, True, False, False, False, True, False]
+    groups = ["a", "a", "a", "b", "b", "b", "c", "c", "c", "c"]
+    # A within-challenge permutation preserves every group's multiset in EVERY draw. A block
+    # permutation cannot guarantee that, so over many draws at least one group's multiset must
+    # change (a block swap of unequal composition is near-certain to land). We assert the two
+    # procedures are distinguishable: the policy null must behave like block permutation.
+    changed_any = False
+    for seed in range(25):
+        shuffled = policy_eval._permute_clusters(labels, groups, random.Random(seed))
+        assert sorted(shuffled) == sorted(labels)  # global multiset preserved
+        for g in {"a", "b", "c"}:
+            orig = sorted(labels[i] for i, x in enumerate(groups) if x == g)
+            perm = sorted(shuffled[i] for i, x in enumerate(groups) if x == g)
+            if orig != perm:
+                changed_any = True
+                break
+    assert changed_any

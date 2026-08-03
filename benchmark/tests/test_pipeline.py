@@ -6,6 +6,8 @@ Every stage module is stubbed (no live/Docker/paid path) by patching `pipeline.r
 from __future__ import annotations
 
 import argparse
+import ast
+import importlib.util
 import json
 import os
 import subprocess
@@ -453,3 +455,107 @@ class TestStandaloneFigureFreshness:
         jobs = {job.name: job for job in pipeline.STANDALONE_FIGURES}
         for name in ("plot_timing", "plot_strategies"):
             assert any(p.name == "strategies" for p in jobs[name].inputs)
+
+
+def _module_origin(name: str) -> Path | None:
+    """Source file for an IN-REPO module name, or None for anything else."""
+    if not (name.startswith("benchmark") or name.startswith("shunt")):
+        return None
+    try:
+        spec = importlib.util.find_spec(name)
+    except (ImportError, AttributeError, ValueError):
+        return None
+    if spec is None or spec.origin is None or spec.origin == "namespace":
+        return None
+    path = Path(spec.origin).resolve()
+    return path if path.exists() else None
+
+
+def _import_deps(name: str) -> set[str]:
+    """The in-repo modules a module's source imports (absolute and relative, ast-resolved)."""
+    origin = _module_origin(name)
+    if origin is None:
+        return set()
+    tree = ast.parse(origin.read_text(encoding="utf-8"))
+    pkg = name.rpartition(".")[0]
+    deps: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            deps.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                parts = pkg.split(".") if pkg else []
+                cut = node.level - 1
+                base = ".".join(parts[: len(parts) - cut]) if cut < len(parts) else ""
+                full = f"{base}.{node.module}" if base and node.module else (base or node.module)
+                if full:
+                    deps.add(full)
+            elif node.module:
+                deps.add(node.module)
+                for alias in node.names:
+                    sub = f"{node.module}.{alias.name}"
+                    if _module_origin(sub):
+                        deps.add(sub)
+    return deps
+
+
+def _figure_closure(module: str) -> set[str]:
+    """The transitive in-repo import closure of a figure producer module."""
+    seen: set[str] = set()
+    queue = [module]
+    while queue:
+        name = queue.pop(0)
+        if name in seen:
+            continue
+        seen.add(name)
+        for dep in sorted(_import_deps(name)):
+            if _module_origin(dep) is not None:
+                queue.append(dep)
+    return seen
+
+
+def _input_origins(job: pipeline.FigureJob) -> set[Path]:
+    """Every source file a figure job's inputs hash (files plus directories' *.py)."""
+    origins: set[Path] = set()
+    for item in job.inputs:
+        item = item.resolve()
+        if item.is_dir():
+            origins.update(p.resolve() for p in item.rglob("*.py"))
+        else:
+            origins.add(item)
+    return origins
+
+
+class TestFigureAnalysisClosure:
+    """The figure digest must cover the analysis modules each figure's imports reach."""
+
+    # viz_knn imported summary/config/impute/metrics while its `inputs` tuple omitted them, so
+    # stale_figures()==[] could certify a figure drawn from changed analysis code. The digest now
+    # includes the routing analysis layer; this pins the closure so the tuple cannot silently
+    # shrink again. Collection/eval machinery is exempt: its outputs are already fingerprinted
+    # as data.
+
+    def test_every_figure_analysis_dependency_is_fingerprinted(self) -> None:
+        for job in pipeline.STANDALONE_FIGURES:
+            origins = _input_origins(job)
+            missing = sorted(
+                name
+                for name in _figure_closure(job.module)
+                if (
+                    name.startswith("benchmark.routing")
+                    or name
+                    in (
+                        "benchmark.config",
+                        "benchmark.plot_frame",
+                        "benchmark.admissibility",
+                    )
+                )
+                and not name.startswith(("benchmark.runner", "benchmark.escalation"))
+                and name != "benchmark.corpus_lock"
+                and (_module_origin(name) not in origins)
+            )
+            assert not missing, (
+                f"{job.name} reaches analysis module(s) its inputs tuple omits — add them to "
+                f"`inputs` (a change there can alter the figure without stale_figures noticing): "
+                + ", ".join(missing)
+            )

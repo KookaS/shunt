@@ -163,7 +163,7 @@ It composes five existing stages in order and prints one consolidated summary:
    anything.
 
 The final **summary** block prints the routing paired kill-gate line, the escalation
-status (SKILL / NO_SKILL), the capability rank order with the strongest-vs-control
+status (`OK` / `OK_OFFLINE_ONLY` / `NO_SKILL`), the capability rank order with the strongest-vs-control
 check, the band count, and the total real cost, followed by a per-stage ran/failed
 ledger. A stage that fails never corrupts collected data or aborts the rest — the
 ledger records which stages ran.

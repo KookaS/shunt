@@ -13,14 +13,14 @@ Verdict about the INSTRUMENT, never about the hypothesis. Controls are supplied 
 # been shown to detect anything.
 #
 # WHY IT IS A LOCAL COPY, AND WHAT KEEPS IT FROM GOING STALE. The canonical adjudicator lives in
-# the private build wrapper (`.agentic/skills/research/tools/admissibility_gate.py`). This file
-# ships in the public repo, so it cannot import it — a clean clone would not have it, exactly as
+# a shared adjudicator module that is not shipped in this repository. This file ships in the
+# public repo, so it cannot import it — a clean clone would not have it, exactly as
 # `benchmark/runner/replay_admissibility.py` documents for its own leg. Duplicating a gate is how
 # the first copy goes stale, so the duplication is PINNED rather than trusted:
-# `tests/test_admissibility.py::TestParityWithTheSharedGate` imports the wrapper module by relative
-# path when it is reachable and asserts this adjudicator returns bit-identical verdicts over a table
-# of cases, and skips in a clone where the path does not exist. Semantics here are the wrapper's,
-# unchanged; only the module home differs.
+# `tests/test_admissibility.py::TestParityWithTheSharedGate` imports the shared module by the
+# `SHUNT_SHARED_ADJUDICATOR` path when that variable is set and asserts this adjudicator returns
+# bit-identical verdicts over a table of cases, and skips in a clone where the path does not
+# exist. Semantics here are the shared module's, unchanged; only the module home differs.
 #
 # THE OTHER IN-REPO LEG IS DELIBERATELY NOT THIS ONE. `replay_admissibility` is discrete — its
 # destroyed-signal control must land on the DEFINITE OPPOSITE verdict (FAILURE), not at chance —

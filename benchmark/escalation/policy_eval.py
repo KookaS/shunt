@@ -7,8 +7,9 @@
 # likely to fail than a run picked at random?
 #
 # ONE TRAJECTORY IS NOT ONE INDEPENDENT OBSERVATION, AND THIS HALF USED TO PRETEND IT WAS. The
-# corpus is 791 stamped runs drawn from only 160 challenges (every challenge is attempted by
-# several model/effort arms), so outcomes cluster hard by challenge. Until this was fixed the
+# corpus is 727 stamped runs drawn from 166 challenges (152 among stamped; every challenge is
+# attempted by several model/effort arms), so outcomes cluster hard by challenge. Until this was
+# fixed the
 # policy half took a GLOBAL label shuffle for its null and a Wilson interval over rows, while the
 # prefix half (`prefix_eval.py`) already permuted WITHIN a challenge and bootstrapped over whole
 # challenges. Measured over 2000 draws at escalate_after_n=10, the two nulls disagree by 2.2x in
@@ -60,6 +61,12 @@ class PolicyCell:
     fn: int
     tn: int
     base_failure_rate: float
+    # This cell's OWN marginal challenge bootstrap. Cells used to carry a FAMILY-WISE
+    # max-over-cells reference when scored inside a swept family, so every cell reported the SAME
+    # interval — the argmax cell's — even when it excluded the cell's own point estimate (the
+    # shipped cell read `0.421 [0.606, 0.788]`). A CI that excludes its estimate is not an
+    # interval for it: each cell reports its marginal, and the family-wise correction applies to
+    # the AUROC null only (`null_auroc_family`), never to the precision interval.
     precision_ci: tuple[float, float]
     # The quiet arm's interval, on the SAME footing as `precision_ci` (same estimator, same
     # resamples) because the outcome figure compares the two to call a direction. It is required
@@ -67,6 +74,25 @@ class PolicyCell:
     # nobody computed, which is the defect this field exists to close.
     quiet_ci: tuple[float, float]
     null_auroc: metrics.NullResult
+    # THE GATE'S NULL: the max-over-cells family-wise null, because `run_eval._status` reads the
+    # sweep as a family (OK if ANY cell clears). Each observed AUROC is gated against the
+    # distribution of the MAX AUROC over all swept cells under one shared shuffle — the same maxT
+    # construction the prefix half uses across depths. None means the cell was hand-built or scored
+    # alone (a family of one IS the marginal null above, which the gate then reads instead).
+    null_auroc_family: metrics.NullResult | None = None
+
+    @property
+    def gate_null(self) -> metrics.NullResult:
+        """The null the admissibility gate reads — family-wise within a swept family."""
+        return self.null_auroc if self.null_auroc_family is None else self.null_auroc_family
+
+    @property
+    def has_skill(self) -> bool:
+        """Skill means the family-wise null AND the precision interval both clear their bars."""
+        if self.precision is None:
+            return False
+        return self.gate_null.beats_null and self.precision_ci[0] > self.base_failure_rate
+
     # NO ESCALATION-TIMING ARRAYS. `lead_times_*` and `first_fire_*` existed solely to feed
     # `plots.lead_time_by_outcome`, which was deleted: on this corpus the policy fires in the first
     # two decisions of nearly every run it flags, so a lead time is the run LENGTH minus a constant
@@ -117,6 +143,12 @@ class PolicyCell:
             "base_failure_rate": round(self.base_failure_rate, 4),
             "lift": _rounded(self.lift),
             "null_auroc": self.null_auroc.to_dict(),
+            # The FAMILY-WISE null the admissibility gate reads — the max-over-cells reference.
+            # None when the cell was hand-built or scored alone; the gate reads the marginal then.
+            "null_auroc_familywise": (
+                None if self.null_auroc_family is None else self.null_auroc_family.to_dict()
+            ),
+            "has_skill": self.has_skill,
         }
 
 
@@ -134,14 +166,8 @@ class _Scored:
     groups: Sequence[str]
 
 
-def evaluate_cell(
-    trajectories: Sequence[Trajectory],
-    point: replay.GridPoint,
-    *,
-    n_permutations: int = metrics.MIN_PERMUTATIONS,
-    seed: int = 0,
-) -> PolicyCell:
-    """Replay one configuration over every trajectory and score it at the trajectory level."""
+def _scored_for(trajectories: Sequence[Trajectory], point: replay.GridPoint) -> _Scored:
+    """Replay one configuration over every trajectory — one alignment the cells share."""
     fired: list[bool] = []
     failed: list[bool] = []
     groups: list[str] = []
@@ -152,15 +178,34 @@ def evaluate_cell(
         # The SAME grouping key the prefix half's grouped CV uses (challenge, i.e. instance id):
         # the two halves must not disagree about what an independent observation is.
         groups.append(features.group_of(traj))
-    return _cell(point, _Scored(fired, failed, groups), n_permutations, seed)
+    return _Scored(fired, failed, groups)
 
 
-def _cell(point: replay.GridPoint, s: _Scored, n_permutations: int, seed: int) -> PolicyCell:
+def evaluate_cell(
+    trajectories: Sequence[Trajectory],
+    point: replay.GridPoint,
+    *,
+    n_permutations: int = metrics.MIN_PERMUTATIONS,
+    seed: int = 0,
+) -> PolicyCell:
+    """Replay one configuration over every trajectory and score it at the trajectory level."""
+    return _cell(point, _scored_for(trajectories, point), n_permutations, seed)
+
+
+def _cell(
+    point: replay.GridPoint,
+    s: _Scored,
+    n_permutations: int,
+    seed: int,
+    *,
+    family_draws: Sequence[float] | None = None,
+) -> PolicyCell:
     """Assemble one cell's 2x2, its clustered arm intervals, and its clustered permutation null."""
     fired, failed = s.fired, s.failed
     tp = sum(f and y for f, y in zip(fired, failed, strict=True))
     scores = [1.0 if f else 0.0 for f in fired]
     fired_ci, quiet_ci = _arm_intervals(fired, failed, s.groups, seed=seed)
+    null_auroc = _clustered_null(scores, failed, s.groups, n_permutations=n_permutations, seed=seed)
     return PolicyCell(
         escalate_after_n=point.escalate_after_n,
         stale_window=point.stale_window,
@@ -174,8 +219,11 @@ def _cell(point: replay.GridPoint, s: _Scored, n_permutations: int, seed: int) -
         base_failure_rate=metrics.prevalence(failed),
         precision_ci=fired_ci,
         quiet_ci=quiet_ci,
-        null_auroc=_clustered_null(
-            scores, failed, s.groups, n_permutations=n_permutations, seed=seed
+        null_auroc=null_auroc,
+        null_auroc_family=(
+            None
+            if family_draws is None
+            else metrics.permutation_null(metrics.auroc(scores, failed), family_draws)
         ),
     )
 
@@ -236,6 +284,23 @@ def _clustered_null(
     return metrics.permutation_null(metrics.auroc(scores, labels), draws)
 
 
+def _family_null_draws(scored: Sequence[_Scored], *, n_permutations: int, seed: int) -> list[float]:
+    """One shared challenge-block shuffle scored at EVERY cell, keeping the max AUROC."""
+    # The sweep's cells share every trajectory (only the knobs differ), so their fired vectors are
+    # strongly dependent — the same way the prefix depths' row sets nest. A gate that read each
+    # cell at a nominal 2.5% would let the best of N cells clear by luck; the maxT construction
+    # (one shuffle, max over cells) is the exact family-wise reference.
+    labels = list(scored[0].failed)
+    groups = list(scored[0].groups)
+    score_vectors = [[1.0 if f else 0.0 for f in s.fired] for s in scored]
+    rng = random.Random(seed)
+    draws: list[float] = []
+    for _ in range(n_permutations):
+        shuffled = _permute_clusters(labels, groups, rng)
+        draws.append(max(metrics.auroc(scores, shuffled) for scores in score_vectors))
+    return draws
+
+
 def _arm_intervals(
     fired: Sequence[bool], failed: Sequence[bool], groups: Sequence[str], *, seed: int
 ) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -274,10 +339,27 @@ def evaluate(
     n_permutations: int = metrics.MIN_PERMUTATIONS,
     seed: int = 0,
 ) -> list[PolicyCell]:
-    """Every swept configuration, scored per trajectory."""
+    """Every swept configuration, scored per trajectory, gated as ONE family."""
+    # The cells share every trajectory (only the knobs differ), so their statistics are dependent
+    # and the admissibility gate reads the max over them — each null is the maxT family-wise null
+    # built from the SAME shuffles (`_family_null_draws`). Each cell's PRECISION interval stays
+    # its own marginal challenge bootstrap: the family-wise correction is applied to the AUROC
+    # null only, because a CI that excludes a cell's own point estimate is not an interval for it.
+    # A single-cell call (or a hand-built grid of one) has a family of one, where the family null
+    # IS the marginal null above.
+    if not grid:
+        raise ValueError("evaluate requires at least one grid point (the shipped cell is default)")
+    scored = [_scored_for(trajectories, point) for point in grid]
+    family_draws = _family_null_draws(scored, n_permutations=n_permutations, seed=seed)
     return [
-        evaluate_cell(trajectories, point, n_permutations=n_permutations, seed=seed)
-        for point in grid
+        _cell(
+            point,
+            s,
+            n_permutations,
+            seed,
+            family_draws=family_draws,
+        )
+        for point, s in zip(grid, scored, strict=True)
     ]
 
 

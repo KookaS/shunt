@@ -215,7 +215,7 @@ class NullResult:
 
     @property
     def beats_null(self) -> bool:
-        """True iff the observation sits ABOVE the null's 97.5th percentile — the skill gate."""
+        """True iff the observation sits ABOVE the null's 97.5th percentile — the gate."""
         return self.observed > self.ci_high
 
     def to_dict(self) -> dict[str, object]:

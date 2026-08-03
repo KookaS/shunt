@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import pytest
 
+from benchmark import config
+from benchmark.routing import censoring
 from benchmark.runner import kill_gate
 
 
@@ -49,6 +51,56 @@ class TestUnscorableCellsExcluded:
         by_task = {d[0]: d for d in control}
         assert by_task["t1"][7] is True
         assert by_task["t2"][7] is False
+
+
+class TestCensoringGuardFiresWhenImputeIsOff:
+    """The censoring guard's fallback path (impute off) must actually fire and be reported."""
+
+    # With the shipped `impute.enabled: true` the matrix is completed FIRST, so a censored cell
+    # is imputed and the guard never fires on it; with impute off the guard is the whole
+    # mechanism. Pin that it fires and is reported, so it cannot silently rot into dead code.
+
+    def test_censored_cell_is_unscorable_and_reported_when_impute_off(self, monkeypatch):
+        monkeypatch.setattr(
+            config, "impute_config", lambda: {"enabled": False, "drop_unsolvable": False}
+        )
+        tasks = ["t1", "t2"]
+        matrix = _frontier_matrix(tasks)
+        # t1's frontier cell stopped on a resource limit: its true pass/fail is unknown, so it
+        # is NOT a clean capability fail. With imputation off, `is_censored` must fire on it.
+        matrix["results"]["t1"]["frontier"] = {
+            "pass": False,
+            "cost": 1.0,
+            "stop_reason": "step_limit",
+        }
+        pricing = {"frontier": {"input": 5.0, "output": 5.0}}
+
+        def fake_router(m, task_ids, strategy=None):
+            return [_d(t, "router", True, 0.5) for t in task_ids]
+
+        def fake_oracle(m, task_ids, pricing):
+            return [_d(t, "cheap", True, 0.1) for t in task_ids]
+
+        monkeypatch.setattr(kill_gate, "evaluate_knn_cascade", fake_router)
+        monkeypatch.setattr(kill_gate, "evaluate_test", fake_oracle)
+
+        censored_cell = matrix["results"]["t1"]["frontier"]
+        assert censoring.is_censored(censored_cell)
+        decision = kill_gate._make_decision("t1", "frontier", censored_cell)
+        assert decision[7] is False  # the censoring guard excluded it from the pairing
+
+        _, report = kill_gate.run_kill_gate(
+            matrix=matrix,
+            pricing=pricing,
+            task_ids=tasks,
+            verifier_threshold=0.6,
+            frontier_model="frontier",
+            n_iterations=200,
+        )
+        assert "Unscorable (cov gap): 1" in report
+        # The report names the handler, so a reader cannot mistake impute-off exclusion for
+        # impute-on completion.
+        assert "impute.enabled=false" in report
 
     def test_bootstrap_cost_delta_drops_phantom_zero_fail(self):
         # t2 test-arm cell is unmeasured: recorded (pass=False, cost=0.0). It must

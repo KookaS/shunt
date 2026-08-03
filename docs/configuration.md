@@ -387,14 +387,20 @@ router:
 
 Escalation triggers only on **confirmed, verified capability failures** — a test suite
 re-run via `work_dir`, or a manual `shunt flag <session_id> bad`. Non-blocking results
-(lint-only or infrastructure failures) and unconfirmed flakes never count. Enable it
-with a flag override:
+(lint-only or infrastructure failures) and unconfirmed flakes never count. Enable it by
+setting `escalation.enabled: true` in a `router.yaml`:
 
-```bash
-shunt start --config-override 'router.escalation.enabled=true'
+```yaml
+router:
+  escalation:
+    enabled: true
 ```
 
-or `escalation.enabled: true` in your `router.yaml`.
+There is no `--config-override` CLI flag. `shunt start` only exposes the routing-strategy
+flags (`--strategy`, `--explore`, `--explore-budget-frac`); escalation knobs have no CLI or
+environment override and are configured exclusively through `router.yaml` (the file at
+`$SHUNT_CONFIG_DIR/router.yaml`, else `~/.config/shunt/router.yaml`, else the packaged
+default), which is loaded whole — so copy the packaged file before editing it.
 
 > **Note on `blocking_exit_code`:** reserved for a future hook-stream path (where a Stop
 > hook reports exit 2 for a blocking gate and exit 1 for lint). The **current off-wire

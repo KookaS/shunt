@@ -12,8 +12,10 @@ number.
 The short version: cheap-first routing with verified escalation reaches
 always-frontier quality for a fraction of the cost ($20.46 against $87.04 over
 the full suite; $13.42 against $43.72 on the measured-only subset), the machine
-learning contributes nothing to that saving, and the escalation model does not
-work. The saving comes from mechanism, not prediction.
+learning contributes nothing to that saving, and the escalation signal is real
+but sits in the recurrence policy at high recurrence thresholds, not in the
+prefix risk model (which reads no skill). The saving comes from mechanism, not
+prediction.
 
 We do **not** claim the project's make-or-break gate is passed. The reasons are
 in [Routing results](#routing-results).
@@ -30,7 +32,7 @@ them makes every number ambiguous, so they stay apart throughout.
 | Input | The task text, embedded | The running trajectory: discussion, tool use, verified check results |
 | Learns from | Task outcome, pass/fail | Whether this attempt ultimately failed |
 | Today | k-nearest-neighbours over task embeddings | A recurrence rule over verified failing-check ids |
-| Status | No measurable signal over the base rate yet | Recurrence policy active; prefix risk model: `NO_SKILL` |
+| Status | No measurable signal over the base rate yet | Policy: `OK_OFFLINE_ONLY` at high `escalate_after_n`; prefix model: `NO_SKILL` |
 | Next | bigram / linear models, calibrated classifiers, better selection rules | calibrated risk scoring, structural loop features, late fusion |
 
 **Rank and cost are different orderings.** We have conflated them ourselves, so,
@@ -304,7 +306,16 @@ single command. Making it reproducible is queued.
 
 ## Escalation results
 
-Status: **work in progress, and currently not working.**
+Status: **`OK_OFFLINE_ONLY` — but through the recurrence policy, not the prefix risk model.**
+
+`OK_OFFLINE_ONLY` here means a statistical signal on the offline corpus: the policy at n=30
+clears its permutation null, and its precision interval clears the base rate.
+It is not a shippable verdict. The `deployability` field (below) marks the
+number **`OFFLINE-ONLY UPPER BOUND`**: the sweep scores one event per step while
+production decides once per session, so this is a per-step signal the live
+router does not run, and at 0.662 the AUROC sits below the project's cost
+break-even (~0.72). "There is a signal" and "you can ship it" are different
+sentences, and only the first is being asserted.
 
 ### The old evaluation could not have detected success
 
@@ -313,9 +324,70 @@ defined as the last few steps of a failed run, so a content-free clock scored
 AUROC 0.970 while a perfect task-level oracle capped at 0.757. Any detector
 tuned against that was tuned against a clock.
 
-### On the corrected causal label
+### The recurrence policy has a real edge — at high recurrence thresholds
 
-Over 727 trajectories with verified per-step outcomes:
+Over 727 stamped trajectories (152 distinct challenges, base rate 0.421), the
+sweep varies `escalate_after_n` × `stale_window` (14 cells). The two knobs are
+coupled: `_in_window` admits at most `stale_window` events, so reaching *n*
+recurrences needs a window at least that wide, and the grid sweeps the window
+over {10, 1000}.
+
+- The shipped default (`escalate_after_n=2`, `stale_window=10`) fires on **727 of
+  727** trajectories: P(fail | fired) = **0.421** — exactly the
+  base rate, lift 1.00, no edge. It fires on everything because reproduction
+  failures recur at step 1–2.
+- The edge lives at thresholds the old grid (n ∈ {1, 2, 3}) never probed. As the
+  threshold rises, precision separates from the base rate: n=5 reads 0.426, n=8
+  0.453, n=10 0.482–0.484, n=15 (`stale=1000`) **0.538** (lift
+  1.28), n=20 **0.582** (lift 1.38), and n=30 (`stale=1000`)
+  **0.706** (lift 1.68). Every cell reports its OWN marginal challenge bootstrap
+  (the family-wise maxT correction is applied to the AUROC null only, never to a
+  precision interval — a CI that excluded a cell's own point estimate would not be
+  an interval for it). The n=30 cell's marginal interval is **[0.606, 0.788]**, so
+  the numbers quoted against it are the ones the report prints.
+- The n=30 cell clears the gate outright: AUROC **0.662** against the
+  max-over-cells family-wise null 95% **[0.500, 0.549]**, adjusted **p = 0.005**.
+  That clearance is why the harness reports `OK_OFFLINE_ONLY`; the gate itself is described on
+  [the offline-eval page](escalation.md#evaluating-the-detector-offline).
+- `stale_window` is not inert at high n: with the window at 10 the policy stops
+  firing once n ≥ 15 — it takes a window at least that wide to collect the
+  recurrence. Only the `stale=1000` rows reach the null-clearing edge.
+
+### The prefix risk model is honestly `NO_SKILL`
+
+The other half of the eval fits a continuous risk score from prefix-only
+features. On this corpus it reads no signal:
+
+- At depth **10** — the shallowest full-rank, leak-safe depth — prefix AUROC is
+  **0.478** and the incremental over the prior floored at chance is **−0.022**,
+  inside the family-wise null. This is a real negative, not a bug: the escalation
+  signal does not live in a shallow prefix on this corpus.
+- Depth 5 is dropped from the reported ladder: its design is rank-deficient (412
+  of 414 admitted rows carry an identical feature vector, because in the first
+  five replayed steps the agent is still reproducing the bug). Depth 20 is
+  dropped too: at that depth the admission test selects failures (run length is
+  outcome-correlated), so its near-nonzero incremental measured selection, not
+  prefix evidence.
+- The minimum detectable effect is ≈ **0.59**, so this corpus cannot resolve a
+  weaker detector. The 727 scored runs cluster on only 152 distinct challenges,
+  so settling the prefix question needs roughly four times the distinct
+  challenges (152 → ~640); more runs per existing challenge buy almost nothing,
+  because the clustering already inflates variance ~3×.
+
+### The instrument is valid
+
+The R0 gate passes: a planted, known-learnable signal is recovered by the
+assembled pipeline (AUROC **1.000**), and a within-challenge shuffle of the
+outcome labels collapses it to chance (**0.535**, inside the band). A second
+positive control proves power at the effect size the claim rests on, not only
+detectability: with the fired↔failed link made imperfect (70% of failed runs
+fire, 40% of resolved runs fire spuriously) the best cell still clears the
+family-wise null at AUROC **0.634**. A permanent
+test (`tests/escalation/test_instrument_validity.py`) enforces both controls, so the
+`NO_SKILL` verdict above is a null on an instrument shown to detect a signal,
+not a null on a broken one.
+
+### The retraction, still on record
 
 - **Task identity alone**, which is what the routing model already knows at
   *t=0*, was once published here at **AUROC 0.886**. **We have retracted that
@@ -323,52 +395,26 @@ Over 727 trajectories with verified per-step outcomes:
   instance's other runs*, while the cross-validation split grouped by instance —
   so it was scored on labels from its own test fold. A router meeting a new task
   has no such siblings. That leaked quantity still appears in the harness, now
-  explicitly labelled as *not* the baseline (it scores 0.846–0.859 here). Grouped
-  honestly the deployable prior is **0.42–0.45**, i.e. no better than chance.
-- **The increment is measured against the prior floored at chance**, i.e.
-  `AUROC(prior + prefix) − max(AUROC(prior), 0.5)`. Without the floor, an
-  anti-predictive baseline donates its own deficit to the detector: the
-  previously published **+0.144** at 5 decisions is **+0.061** floored, so 57% of
-  it was the broken comparator rather than prefix evidence.
-- **The null permutes labels within a challenge, not globally.** A global shuffle
+  explicitly labelled as *not* the baseline (it scores 0.804 here). Grouped
+  honestly the deployable prior is **0.497**, i.e. no better than chance.
+- Earlier prefix increments — **+0.144** at 5 decisions, **+0.061** floored, and
+  **+0.076** at the best depth (20 decisions) — were inflated by the
+  between-fold base-rate accounting artifact in the prior column and by depth
+  selection. Under the corrected methodology the increment is **−0.022** at depth
+  10. The comparator is floored at chance, `AUROC(prior + prefix) −
+  max(AUROC(prior), 0.5)`, so an anti-predictive baseline cannot be beaten into
+  an apparent finding.
+- The null permutes labels **within a challenge**, not globally: a global shuffle
   destroys the challenge-level clustering of outcomes, which collapses the prior
   to chance under the null while the observation keeps a real one — the two arms
   then sit in different headroom regimes and the gate has no power. Permuting
   inside each challenge preserves every challenge's outcome multiset, so the
   prior is identical in both arms and only the prefix's contribution is nulled.
-- The detector's **incremental** contribution is not measurable. An earlier
-  evaluation reported +0.076 at the best depth (20 decisions) against a
-  permutation null of [+0.036, +0.070], p = 0.015, but that figure was inflated
-  by the between-fold base-rate accounting artifact in the prior column (see
-  *"The increment is measured against the prior floored at chance"* above). Under
-  the corrected methodology using StratifiedGroupKFold to stratify by challenge,
-  the incremental signal collapses to approximately zero across all depths.
-- That clearance is **not** skill, and the harness does not score it as such: the
-  paired bootstrap over challenges puts the increment's 95% interval across zero,
-  [−0.119, +0.129]. At the same depth (20 decisions, n = 228) the prefix-only risk
-  model reads AUROC **0.519** (AUPRC 0.557 against a base rate of 0.540), and at 5
-  decisions it reads **0.496** — chance. The gate requires the prefix null, the
-  incremental null, and the bootstrap interval to all exclude no-information, and
-  at no depth do all three.
-- Policy precision runs **0.421** [0.346, 0.486] against a **0.421** base rate,
-  lift 1.00×. It equals the base rate identically, because on this corpus the
-  recurrence policy fires on *every* scored trajectory: 727 of 727 escalate, so
-  there is no left-alone arm to compare against and recall is 1.0 by
-  construction. Every swept configuration behaves the same way.
-- Harness status: **`NO_SKILL`**.
-- At the operating threshold the detector flags all 727 scored trajectories:
-  306 true positives (failures caught), 421 false positives, 0 false negatives,
-  0 true negatives.
 
-So the honest verdict is the unsatisfying one: **we cannot yet tell.** This
-evaluation can only resolve a detector at AUROC ≥ 0.59 (the measured minimum
-detectable effect is 0.592 / 0.591 / 0.606 at 5 / 10 / 20 decisions), and the raw
-features hint at ≈ 0.52 — inside the blind spot. The corpus is not what caps it:
-the 727 scored runs cluster on only 152 distinct challenges, so the effective
-sample is far smaller than the run count. Settling it needs roughly four times
-the distinct challenges (152 → ~640); more runs per existing challenge buy almost
-nothing, because the clustering already inflates variance ~3×. The feature ships
-disabled until then.
+So the honest verdict has changed: the escalation signal is real, and it lives in
+the recurrence policy at high recurrence thresholds. The shipped default is
+mis-tuned for this corpus — it fires on everything — and the prefix model remains
+`NO_SKILL`, but the policy half now clears its gate.
 
 ### Two caveats that make it harder than it looks
 
@@ -383,8 +429,8 @@ per-step outcomes. The 72 that do not break down as: 22 whose captured state was
 lost mid-run and whose steps the state-capture audit therefore marks *unmeasured*
 rather than failed, 7 that carry no state-capture audit record at all (so whether
 their capture was lost is unknown, and their stamps cannot be trusted), and 43
-that the per-step stamping stage simply never reached. The confound is gone — and,
-as the section above records, closing it did not change the verdict.
+that the per-step stamping stage simply never reached. The confound is gone — and
+the prefix `NO_SKILL` verdict above stands on the complete corpus.
 
 **The value is not identified.** Our logging policy never escalates, so
 P(escalate) = 0 and the overlap condition that every off-policy estimator
@@ -579,61 +625,71 @@ bar pools whatever arm mix that model ran.
 ### Escalation
 
 **[permutation_null.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/permutation_null.png)**
-— the headline null. Grey is the incremental-AUROC statistic recomputed under
-shuffled outcome labels with the whole fitting pipeline re-run per shuffle;
-dashed lines bound the central 95%. Labels are shuffled **inside each challenge**,
-so every challenge keeps its outcome multiset and the two arms share the same
-prior; only the prefix's contribution is nulled. For the detector to be doing
-anything, the red line must sit clearly right of the upper dashed line. Under the
-corrected methodology using StratifiedGroupKFold, the incremental signal is not
-measurable — the point estimate is approximately zero across all depths. (An
-earlier figure reported +0.076 at 20 decisions, but that was inflated by a
-between-fold base-rate accounting artifact in the prior column; the corrected
-stratification collapses the fold-prevalence spread from 0.141 to 0.011 and pins
-E[incremental] to approximately zero, confirmed by a null-corpus regression test
-on pure Gaussian noise.) The leaked leave-one-out prior (0.846) is still printed
-on the panel as a diagnostic contrast and is explicitly **not** the baseline.
-Read it against the bootstrap interval: resampling whole challenges puts the
-increment at [−0.014, +0.145], across zero.
+— the headline null, now for the escalation **policy**. Grey is the maximum AUROC
+the swept policy reaches under **block permutation** — whole challenge blocks
+shuffled, so outcomes move between challenges while the global multiset is
+preserved — with one shared shuffle scored at every swept cell and only the
+largest kept — the family-wise (maxT) null across the whole sweep; dashed lines bound its
+central 95%. The red line is the real, unshuffled AUROC at the cell that
+separates best (n=30, `stale=1000`): **0.662**, clearly right of the upper dashed
+bound **[0.500, 0.549]**, adjusted **p = 0.005**. The null is the gate — a point
+estimate above chance is not skill on its own — and this clearance is one half of
+the `OK_OFFLINE_ONLY` verdict: the precision interval must also clear the base rate (see the
+confusion figure). A cell that never fires has AUROC 0.5 by definition and
+contributes nothing to the max. The old figure nulled the prefix risk model's
+incremental; that instrument now reports `NO_SKILL` on its own path, and this
+panel plots the policy that carries the edge.
 
 **[roc_curve.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/roc_curve.png)**
-— the out-of-fold risk score. The grey band is the label-permutation null and the
-dashed line through it is that null's **measured** centre; the faint dotted
-diagonal at 0.5 is orientation only. Because the whole pipeline is refit on every
-shuffle, its no-information AUROC is measured rather than assumed and need not
-land on 0.5 — reading the curve against the diagonal is reading it against a line
-the harness never measured. Look for the curve leaving the band toward the
-top-left. Auxiliary to the PR view.
+— the escalation **policy**'s ROC across the swept recurrence thresholds: one
+point per `escalate_after_n` value that fired, each labelled with its n. As the
+threshold rises the policy moves up the curve — more precision, less recall. The
+faint dotted diagonal at 0.5 is chance and orientation only. The prefix risk
+model's ROC is not drawn: its score is constant at the evaluated depths, so it
+ranks nothing. Look for points leaving the diagonal toward the top-left. Auxiliary
+to the PR view.
 
 **[pr_curve.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/pr_curve.png)**
-— precision against recall. Look for the curve well above the grey band. That
-band is the **measured** permutation null — the AUPRC this same pipeline reaches
-when the outcome labels are shuffled — and it, not prevalence, is the no-skill
-reference: prevalence is the no-skill average precision for exchangeable rows,
-while these rows cluster by challenge and the whole pipeline is refit per
-shuffle. Both numbers are printed on the canvas, so the size of the assumption
-that was dropped is readable. The curve hugs the band. AUPRC alone does not say
-whether the model beats the router's t=0 task prior; the permutation-null figure
-is where that is answered.
+— precision against recall over the **swept escalation policy**: one point per
+`escalate_after_n` value that fired — a discrete operating characteristic, not a
+continuous score sweep. The dashed line is the corpus base failure rate — the
+no-skill precision a random flagger reaches. As the threshold rises, precision
+climbs from the base rate toward 0.71 while recall falls; a point above the line
+whose interval excludes the base rate is a measured operating point. The prefix
+risk model's PR curve is not drawn (its score is constant at the evaluated
+depths). This shows the detector's operating points, NOT what escalating would
+have **changed**; the permutation-null figure is where a clearance is scored.
 
 **[confusion_matrix.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/confusion_matrix.png)**
-— counts at the operating threshold, each cell printed beside what a random
-flagger at the same flag rate would produce and the difference between them. Want
-the top-left count well above its bracketed counterpart. That single excess is
-the whole figure: with the flag count fixed, the other three cells are the same
-number with a sign, which is why the grid carries no colour channel. The footer
-also states when the tie block at the cut overspent the base-rate flag budget —
-`score >= threshold` admits a block of tied runs whole, so the realised flag rate
-can exceed the rate the threshold was derived from. One arbitrary operating
-point, not a sweep.
+— the escalation **policy**'s 2×2 at the swept cell that separates best (rows:
+run failed / resolved; columns: flagged / not flagged). Each cell prints the
+observed count, in brackets what a random flagger at the same flag rate would
+produce, and the excess. Want the top-left count well above its bracketed
+counterpart; that single excess is the whole figure — with the flag count fixed,
+the other three cells are the same number with a sign. The cell fill is a
+diverging heatmap on that excess (red above the random baseline, blue below,
+white at it), so the two hues restate the one fact rather than carry four.
+Unlike the old figure, the **"not flagged" column is
+populated**: the previous empty 0/0 column was the degenerate prefix score
+flagging everything, whereas the best-separating policy cell leaves runs alone.
+One operating point, not a sweep — the PR/ROC figures and the sweep table show
+the rest.
 
 **[sweep_table.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/sweep_table.png)**
-— the policy sweep over `escalate_after_n`. Read P(fail | fired) against the base
-rate column: an interval containing the base rate is a configuration with no
-measured value. Every configuration does: all show P(fail | fired) = 0.421
-[0.346, 0.486] against a base rate of 0.421, because each fires on all 727 scored
-trajectories (n = 1 or 2, stale window 5 or 10) or 726 of them (n = 3). The other
-two knobs were measured inert on this corpus and are pinned, not swept.
+— the policy sweep over `escalate_after_n` × `stale_window` (14 cells). Read
+P(fail | fired) against the base-rate column: an interval containing the base
+rate is a configuration with no measured value. Each cell prints its OWN marginal
+challenge-grouped bootstrap interval — the family-wise maxT correction applies to
+the AUROC null only, never to a precision interval — so [0.606, 0.788] is
+specifically the n=30 (`stale=1000`) cell's interval, and the separating facts
+are the point estimates with their own intervals: n=15 (`stale=1000`) 0.538, n=20
+0.582, n=30 0.706 — while the shipped
+default (n=2, `stale=10`) fires on all 727 trajectories and reads the base rate
+0.421. The
+shipped-default row is highlighted (bold on a shaded background). Both knobs are
+swept because they are coupled: reaching n recurrences needs a window at least
+that wide, so the `stale=10` rows stop firing at n ≥ 15. The intervals are
+challenge-level bootstraps.
 
 **[trajectory_outcomes.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/trajectory_outcomes.png)**
 — failure rate among runs the policy escalated against runs it left alone. Want
@@ -646,8 +702,14 @@ have **changed**.
 
 **[failure_capture_coverage.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/failure_capture_coverage.png)**
 — the closed data gap, per model. Each bar is the share of that model's
-trajectories that went through per-step verified-outcome stamping. Want every bar
-at 1.0. All six now are: the three models that previously sat at zero were
+trajectories that went through per-step verified-outcome stamping. The bars are
+stamped/total, not 1.0: deepseek-v4-flash 248/268 (0.925), gpt-5-mini 266/284
+(0.937), kimi-k2.5 94/105 (0.895), kimi-k3 52/56 (0.929), qwen3.7-plus 47/60
+(0.783), zai-glm-5.2 20/26 (0.769) — 72 of 799 trajectories carry no per-step
+verified outcomes. (The `capture_rate` field, by contrast, is 1.000 for every
+model BY CONSTRUCTION: the normalizer writes `success`, `failing_check_id` and
+`blocking` in one assignment, so it is a different quantity and not the bar.) The
+three models that previously sat at zero were
 re-stamped by offline container replay, so coverage no longer tracks capture date
 and model is no longer confounded with it.
 
@@ -661,12 +723,14 @@ opportunistic 84-task subset, sized against that floor, and better routing
 models (bigram and linear, calibrated classifiers, better selection rules)
 evaluated against the same nulls.
 
-Escalation: the evaluation can only resolve a detector at AUROC ≥ 0.59, and the
-raw features hint at ≈ 0.52 — inside the blind spot. We cannot yet tell whether
-escalation works. The offline re-stamping is done — coverage is complete and the
-verdict did not move — so the remaining work is more distinct challenges, and
-ε-greedy randomisation with logged propensities so the value question becomes
-identified at all.
+Escalation: the signal is real and it lives in the recurrence policy at high
+recurrence thresholds — the shipped default (n=2) is mis-tuned for this corpus
+and fires on everything, while the prefix risk model remains `NO_SKILL` (the
+corpus cannot resolve a prefix detector below AUROC ≈ 0.59). The offline
+re-stamping is done — coverage is complete. The remaining work is tuning the
+recurrence threshold on the live path, more distinct challenges to resolve the
+prefix question (~640), and ε-greedy randomisation with logged propensities so
+the value question becomes identified at all.
 
 Related reading: [Benchmark](benchmark.md) for how the harness works,
 [Benchmark design](benchmark-design.md) for why it is built this way, and

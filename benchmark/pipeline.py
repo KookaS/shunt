@@ -483,10 +483,15 @@ def stage_report(_args: argparse.Namespace, _state: PipelineState) -> None:
 # check is seconds (it hashes files, it does not draw), so it can run in the test suite
 # while the regeneration itself stays a deliberate `make benchmark-figures`.
 #
-# Deliberately NOT in the digest: the shared analysis modules (summary, impute, metrics).
-# They are exercised by their own tests and by the report stage; folding them in would
-# turn every unrelated refactor into a 15-minute figure rebuild, and a gate people
-# routinely override is not a gate.
+# Every figure job's `inputs` ALSO covers the routing ANALYSIS layer the producing scripts
+# import (`summary`, `config`, `impute`, `metrics`, `plot_style`, the strategies, …). It used
+# to omit those — viz_knn imported them while its tuple named only its own file — so a change
+# to e.g. `summary.py` left `stale_figures()==[]` certifying a figure drawn from changed
+# analysis code. The closure is pinned by the test suite, so the tuple cannot silently shrink
+# again. Deliberately OUT: the collection/eval machinery (`benchmark.runner.*`,
+# `benchmark.escalation.*`, `corpus_lock`) — its OUTPUTS (results.csv, the escalation corpus)
+# are already fingerprinted as data, so digesting the machinery would double-count the same
+# bytes and mark every figure stale on edits that cannot change them.
 # ---------------------------------------------------------------------------
 
 # Repo-root-anchored so a digest is identical wherever the checkout lives (a CWD-relative
@@ -496,6 +501,61 @@ _ROUTING = _REPO_ROOT / "benchmark" / "routing"
 _SCRIPTS = _ROUTING / "scripts"
 _STRATEGIES = _ROUTING / "strategies"
 FIGURE_MANIFEST = _ROUTING / "figure_inputs.json"
+
+
+def _module_file(name: str) -> Path:
+    """The source file for an in-repo module name (a package resolves to its __init__.py)."""
+    from importlib.util import find_spec
+
+    spec = find_spec(name)
+    if spec is None or spec.origin is None or spec.origin == "namespace":
+        raise ValueError(f"no importable source for {name!r}")
+    path = Path(spec.origin).resolve()
+    try:
+        path.relative_to(_REPO_ROOT.resolve())
+    except ValueError:
+        raise ValueError(f"{name!r} resolves outside the repo ({path})") from None
+    return path
+
+
+# The analysis layer every standalone routing figure derives from. Kept as module names (one
+# source per row, packages included) and resolved to files by `_module_file`; `_figure_inputs`
+# appends them to each job's tuple. `benchmark.routing.plot_style` is in the layer rather than
+# listed per job so no job can silently omit it again.
+_ROUTING_ANALYSIS: Final[tuple[str, ...]] = (
+    "benchmark.admissibility",
+    "benchmark.config",
+    "benchmark.plot_frame",
+    "benchmark.routing",
+    "benchmark.routing.censoring",
+    "benchmark.routing.impute",
+    "benchmark.routing.instrument_control",
+    "benchmark.routing.metrics",
+    "benchmark.routing.plot_style",
+    "benchmark.routing.scripts",
+    "benchmark.routing.scripts.knn_nulls",
+    "benchmark.routing.strategies",
+    "benchmark.routing.strategies.knn",
+    "benchmark.routing.strategies.oracle",
+    "benchmark.routing.summary",
+)
+# plot_timing additionally derives from the report/summary machinery, whose own closure reaches
+# the run_eval/validate path — those modules join its digest too.
+_TIMING_ANALYSIS: Final[tuple[str, ...]] = (
+    *_ROUTING_ANALYSIS,
+    "benchmark.routing.authenticity",
+    "benchmark.routing.coverage",
+    "benchmark.routing.frontier_estimate",
+    "benchmark.routing.integrity",
+    "benchmark.routing.report",
+    "benchmark.routing.run_eval",
+    "benchmark.routing.validate",
+)
+
+
+def _figure_inputs(*paths: Path, analysis: tuple[str, ...]) -> tuple[Path, ...]:
+    """A figure job's input set: its producing files plus its analysis-layer module sources."""
+    return (*paths, *(_module_file(name) for name in analysis))
 
 
 @dataclass(frozen=True)
@@ -530,37 +590,58 @@ STANDALONE_FIGURES: Final[tuple[FigureJob, ...]] = (
             "model_performance_descriptive.png",
             "neighborhood_purity.png",
         ),
-        (_SCRIPTS / "viz_knn.py", _SCRIPTS / "knn_nulls.py", _ROUTING / "plot_style.py"),
+        _figure_inputs(
+            _SCRIPTS / "viz_knn.py",
+            _SCRIPTS / "knn_nulls.py",
+            analysis=_ROUTING_ANALYSIS,
+        ),
     ),
     FigureJob(
         "benchmark.routing.scripts.plot_knn_nulls",
         ("knn_cross_repo_transfer.png", "knn_transfer_curve.png"),
-        (_SCRIPTS / "plot_knn_nulls.py", _SCRIPTS / "knn_nulls.py", _SCRIPTS / "viz_knn.py"),
+        _figure_inputs(
+            _SCRIPTS / "plot_knn_nulls.py",
+            _SCRIPTS / "knn_nulls.py",
+            _SCRIPTS / "viz_knn.py",
+            analysis=_ROUTING_ANALYSIS,
+        ),
     ),
     FigureJob(
         "benchmark.routing.scripts.threshold_sweep",
         ("threshold_sweep_heatmap.png",),
-        (_SCRIPTS / "threshold_sweep.py",),
+        _figure_inputs(_SCRIPTS / "threshold_sweep.py", analysis=_ROUTING_ANALYSIS),
     ),
     FigureJob(
         "benchmark.routing.scripts.plot_exploration",
         ("exploration_replay.png",),
-        (_SCRIPTS / "plot_exploration.py", _ROUTING / "exploration_replay.py"),
+        _figure_inputs(
+            _SCRIPTS / "plot_exploration.py",
+            _ROUTING / "exploration_replay.py",
+            analysis=_ROUTING_ANALYSIS,
+        ),
     ),
     FigureJob(
         "benchmark.routing.scripts.embedding_compare",
         ("embedding_compare.png",),
-        (_SCRIPTS / "embedding_compare.py",),
+        _figure_inputs(_SCRIPTS / "embedding_compare.py", analysis=_ROUTING_ANALYSIS),
     ),
     FigureJob(
         "benchmark.routing.scripts.plot_strategies",
         ("strategy_comparison.png",),
-        (_SCRIPTS / "plot_strategies.py", _STRATEGIES),
+        _figure_inputs(
+            _SCRIPTS / "plot_strategies.py",
+            _STRATEGIES,
+            analysis=_ROUTING_ANALYSIS,
+        ),
     ),
     FigureJob(
         "benchmark.routing.scripts.plot_timing",
         ("timing_comparison.png",),
-        (_SCRIPTS / "plot_timing.py", _STRATEGIES),
+        _figure_inputs(
+            _SCRIPTS / "plot_timing.py",
+            _STRATEGIES,
+            analysis=_TIMING_ANALYSIS,
+        ),
     ),
 )
 
@@ -765,7 +846,9 @@ def _real_cost() -> float | None:
 
 
 def _skill_label(status: str) -> str:
-    return "SKILL" if status == "OK" else "NO_SKILL"
+    # `OK_OFFLINE_ONLY` is still skill — the signal exists, but it was measured at a cadence
+    # production does not run. Mapping it to NO_SKILL would mis-report the presence of the signal.
+    return "SKILL" if status in ("OK", "OK_OFFLINE_ONLY") else "NO_SKILL"
 
 
 def run_summary(args: argparse.Namespace, state: PipelineState, outcomes: dict[str, str]) -> None:

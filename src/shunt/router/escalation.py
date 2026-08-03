@@ -4,6 +4,12 @@
 # default). Boundary-only by construction: a directive applies to the NEXT decision, never
 # mid-cached-turn (cache-safety spine). A "verified same failure seen N times" signal — same
 # normalized failing-check id — steps effort first (cache-safe), then a model rank.
+#
+# WHY MID-SESSION SWITCHES ARE FORBIDDEN, IN COST TERMS. A model switch inside a cached turn
+# invalidates the prompt cache, and the recompute is roughly 4x the cached context — every
+# request that would have hit the cache re-bills its full prefix. Routing escalation at the
+# boundary is the same decision made at the moment it costs nothing; a maintainer reading only
+# this module must see that a switch made at the wrong time is not a free action.
 
 from __future__ import annotations
 

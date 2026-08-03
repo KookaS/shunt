@@ -180,36 +180,33 @@ def test_features_move_when_the_prefix_itself_differs() -> None:
     assert features.extract_features(quiet, 5) != features.extract_features(thrashing, 5)
 
 
-# DEPTH 5's DESIGN IS DEGENERATE ON THE REBUILT CORPUS, and that is a fact about the data rather
-# than a redundant column. Measured 2026-08-02 over the 414 admitted depth-5 rows: 412 carry the
-# IDENTICAL vector (1.0, 0.0, 0.2, 1.0, 0.2), `distinct_check_id_rate` takes exactly one value, and
-# `max_key_repeat_rate == fail_rate` on 414 of 414. The mechanism is not a coding error — in the
+# DEPTH 5's DESIGN IS DEGENERATE ON THE REBUILT CORPUS, and that is a fact about the DATA rather
+# than a redundant column. The two columns that used to share the blame — `max_key_repeat_rate`
+# (== `fail_rate` on 414/414 rows) and `distinct_check_id_rate` (constant) — have been REMOVED
+# from `FEATURE_NAMES` (see features.py), and the design STILL cannot rank full. Measured
+# 2026-08-02 over the 414 admitted depth-5 rows: 412 carry the IDENTICAL vector (1.0, 0.0, 0.2),
+# leaving three distinct rows in the whole design. The mechanism is not a coding error — in the
 # first five replayed steps the agent has not yet changed the workspace, so the selector fails
-# every time on the SAME id; one distinct key makes `max_key_repeat_rate` collapse onto `fail_rate`
-# and `distinct_check_id_rate` collapse onto `1/depth`. With three distinct rows the design cannot
-# rank above 3 whatever its columns are, so no column edit repairs it, and restating the assertion
-# as "as full-rank as the rows allow" would only hide it.
+# every time on the same test id and `fail_rate` collapses to 1.0 while the other two rates
+# collapse to their own constants. With three distinct rows the design cannot rank above 3 of 4
+# whatever its columns are, so no column edit repairs it, and restating the assertion as "as
+# full-rank as the rows allow" would only hide it.
 #
-# So it is left RED AND DECLARED rather than weakened. `strict=True` is the ratchet: the day depth
-# 5 regains rank, the XPASS turns the suite red and forces this marker out. It is NOT the same
-# defect class as the hardcoded live-corpus counts this file no longer pins — those failed because
-# the corpus improved; this one fails because a stated property genuinely does not hold, and the
-# finding it holds open (the depth-5 prefix arm has no feature variance to learn from, and
-# `max_key_repeat_rate` duplicates `fail_rate` on 342/344 rows at depth 10 and 226/228 at depth 20,
-# where the design ranks full only on two outlier rows apiece) belongs to the feature set and the
-# reported depth ladder, not to this test.
+# DEPTH 5 LEFT `DEFAULT_DEPTHS` on 2026-08-02 (features.py records the decision): a reported
+# depth must be measurable, and this one is not. The finding is NOT dropped with the depth — it
+# stays pinned here as its own strict xfail, so the day depth 5 regains rank (a corpus change, an
+# admission change) the XPASS turns the suite red and forces the ladder to be reconsidered.
+# `strict=True` is the ratchet: an xfail that would have XPASSed had it stayed on the ladder is
+# exactly the same guard, moved to where it still bites.
 _DEGENERATE_AT_DEPTH_5 = pytest.mark.xfail(
     strict=True,
     reason="412 of 414 depth-5 rows carry one identical feature vector on the rebuilt corpus, so "
-    "the design cannot rank above 3 of 6 — a corpus property, not a redundant column",
-)
-_RANK_DEPTHS = tuple(
-    pytest.param(depth, marks=[_DEGENERATE_AT_DEPTH_5] if depth == 5 else [])
-    for depth in features.DEFAULT_DEPTHS
+    "the design cannot rank above 3 of 4 — a corpus property, not a redundant column; depth 5 "
+    "left DEFAULT_DEPTHS for this reason and this xfail keeps the finding from returning unseen",
 )
 
 
-@pytest.mark.parametrize("depth", _RANK_DEPTHS)
+@pytest.mark.parametrize("depth", features.DEFAULT_DEPTHS)
 def test_the_design_matrix_has_full_column_rank_on_the_real_corpus(depth: int) -> None:
     # THE GUARD THIS REPLACED asserted `columns[a] != columns[b]` — exact vector inequality — which
     # only catches bit-identical duplication. Affine dependence passes it by construction, and two
@@ -238,6 +235,20 @@ def test_the_design_matrix_has_full_column_rank_on_the_real_corpus(depth: int) -
         f"({', '.join(features.FEATURE_NAMES)} + intercept) — some feature is an affine "
         "combination of the others and carries no information the fit can use"
     )
+
+
+@_DEGENERATE_AT_DEPTH_5
+def test_the_dropped_depth_5_remains_rank_deficient_on_the_real_corpus() -> None:
+    # Depth 5 left `DEFAULT_DEPTHS` because its design cannot rank full — the corpus property this
+    # xfail pins. Kept as its OWN test (not parametrized over the ladder) so the reason it is not
+    # reported cannot silently come back as a green full-rank row.
+    trajectories = [t for t in _live_corpus() if features.is_stamped(t)]
+    rows = features.build_rows(trajectories, 5)
+    assert len(rows) >= prefix_eval.MIN_ROWS
+    design = np.column_stack(
+        [np.asarray([r.features for r in rows], dtype=float), np.ones(len(rows))]
+    )
+    assert int(np.linalg.matrix_rank(design)) == design.shape[1]
 
 
 @pytest.mark.parametrize("depth", features.DEFAULT_DEPTHS)
@@ -301,18 +312,22 @@ def test_the_margin_admits_exactly_the_runs_with_room_to_spare_on_the_frozen_cor
 # WHAT THE REBUILD ACTUALLY DID (re-measured 2026-08-02, after the state-capture marking). The
 # prediction in the paragraph above — that the rebuild moving these figures would not turn this into
 # a flake — did NOT hold. The stamped corpus is now 727 runs at a 0.4209 base rate (marking a
-# lost-capture step unmeasured takes it out of `is_stamped`), and the reported depths sit at
-# +0.0525 / +0.0820 / +0.1186. Depth 20 therefore uses 98.8% of the bound, and the first depth the
-# bound refuses moved from 32 down to 26 — the "one depth of slack" is spent. The direction is the
-# mechanism, not noise: admission at depth 20 still conditions on run length, and the corrected
-# corpus has fewer stamped runs to dilute it.
-# THE BOUND IS NOT WIDENED FOR THIS, and the reading matters. 0.12 was the ABSOLUTE encoding of a
-# 26% RELATIVE shift on a 0.460 base rate; on 0.4209 that same 26% is 0.109, so the absolute number
-# is now looser than its own justification and depth 20 (+0.1186 = 28.2% relative) is already past
-# the criterion the comment states. Raising 0.12 would be fitting the bound to the data it exists to
-# police. If the next corpus movement turns this red, the free variable is the ladder's ceiling —
-# whether depth 20 still belongs in `DEFAULT_DEPTHS` — not the tolerance.
-_BASE_RATE_TOLERANCE = 0.12
+# lost-capture step unmeasured takes it out of `is_stamped`), and the reported depths sat at
+# +0.0525 / +0.0820 / +0.1186. Depth 20 therefore used 98.8% of the old absolute bound, and the
+# first depth the bound refused moved from 32 down to 26 — the "one depth of slack" is spent. The
+# direction is the mechanism, not noise: admission at depth 20 still conditions on run length, and
+# the corrected corpus has fewer stamped runs to dilute it.
+# THE BOUND IS NOT WIDENED FOR THIS — it is REEXPRESSED AS THE RELATIVE NUMBER IT ALWAYS WAS, and
+# the ladder is cut to match. 0.12 was the ABSOLUTE encoding of a 26% RELATIVE shift on a 0.460
+# base rate; on 0.4209 that same 26% is 0.109, so the old absolute number was looser than its own
+# justification and depth 20 (+0.1186 = 28.2% relative) was already past the criterion the comment
+# stated. Writing the bound as the relative 26% it claimed to encode closes that gap by
+# construction — the bound moves with the corpus instead of silently drifting from its meaning —
+# and depth 20, which the relative bound now refuses, has LEFT `DEFAULT_DEPTHS` (features.py's
+# ladder comment records the decision). Depths 5 and 10 sit at +12.5% and +19.5% relative, inside
+# the 26%, which is why the ladder ends where it does. Raising 0.26 would be fitting the bound to
+# the data it exists to police; cutting the ladder is not.
+_BASE_RATE_TOLERANCE_REL = 0.26
 
 
 def _stamped_corpus():  # type: ignore[no-untyped-def]
@@ -340,11 +355,14 @@ def test_every_reported_depth_admits_a_population_close_to_the_corpus_base_rate(
     corpus = _corpus_base_rate(stamped)
     admitted = _admitted_base_rate(stamped, depth)
     assert admitted is not None, f"depth {depth} admitted nothing"
-    assert abs(admitted - corpus) <= _BASE_RATE_TOLERANCE, (
+    bound = _BASE_RATE_TOLERANCE_REL * corpus
+    assert abs(admitted - corpus) <= bound, (
         f"depth {depth} admits a base rate of {admitted:.4f} against the corpus's {corpus:.4f} "
-        f"— a drift of {admitted - corpus:+.4f}, past the {_BASE_RATE_TOLERANCE} selection-bias "
-        "bound. At that drift the depth is selecting a different population rather than reading "
-        "a longer prefix, and its incremental AUROC measures the selection"
+        f"— a drift of {admitted - corpus:+.4f} "
+        f"({abs(admitted - corpus) / corpus:.1%} relative), past the "
+        f"{_BASE_RATE_TOLERANCE_REL:.0%} relative selection-bias bound ({bound:.4f} absolute on "
+        "this base rate). At that drift the depth is selecting a different population rather than "
+        "reading a longer prefix, and its incremental AUROC measures the selection"
     )
 
 
@@ -360,7 +378,7 @@ def test_the_base_rate_bound_actually_refuses_a_selection_driven_depth() -> None
         if (rate := _admitted_base_rate(stamped, depth)) is not None
     }
     assert deep, "no deep depth is measurable on this corpus — the bound cannot be shown to bite"
-    assert max(rate - corpus for rate in deep.values()) > _BASE_RATE_TOLERANCE
+    assert max(rate - corpus for rate in deep.values()) > _BASE_RATE_TOLERANCE_REL * corpus
     # ...and in the direction the mechanism predicts: admission conditions on run length, run length
     # is outcome-correlated, so deeper means MORE failures, not merely different ones. This half is
     # the claim that survives the corpus rebuild even when every figure above moves.
@@ -396,6 +414,13 @@ def test_the_aliased_and_constant_features_are_gone() -> None:
         # steps from the verdict — were the sole reason the depth-5 design ranked full. Once
         # MIN_WITHHELD excludes those, the equality is 452/452 and the design is rank-deficient.
         "recent_fail_rate",
+        # Dropped 2026-08-02 for non-independence on the REBUILT corpus (features.py has the
+        # measurements). `max_key_repeat_rate` is `fail_rate` on 414/414 depth-5 rows, 342/344 at
+        # depth 10 and 226/228 at depth 20 — the rank guard was green on two outlier rows apiece.
+        # `distinct_check_id_rate` is constant at depth 5 and binary at 10/20. Both were aliases
+        # of the same constant-key mechanism that degrades the shallow design.
+        "max_key_repeat_rate",
+        "distinct_check_id_rate",
     ):
         assert dropped not in features.FEATURE_NAMES
 

@@ -302,11 +302,9 @@ Be honest with yourself about where this does nothing:
 
 ## Turn it on
 
-```bash
-shunt start --config-override 'router.escalation.enabled=true'
-```
-
-or set it permanently in your `router.yaml`:
+Escalation ships off and is configured through `router.yaml` — there is no CLI flag
+(`shunt start --config-override '...'` does not exist; the `start` flags cover only routing
+strategy, exploration, and budget). Set it in your `router.yaml`:
 
 ```yaml
 router:
@@ -408,7 +406,11 @@ failure rate. The bootstrap resamples whole challenges rather than rows, because
 challenge are correlated and a row-level interval is too narrow; the fired and not-fired arms
 are estimated from the same resamples, so the two are comparable. Read `P(fail | fired)`
 against `base`: an interval containing the base rate is a configuration with no measured
-value, and an interval below it means firing predicts *success*.
+value, and an interval below it means firing predicts *success*. The sweep varies **both**
+`escalate_after_n` and `stale_window` — they are coupled, since reaching *n* recurrences needs
+a window at least that wide — so the grid spans `escalate_after_n` ∈ {2, 5, 8, 10, 15, 20, 30}
+× `stale_window` ∈ {10, 1000} (14 cells). The shipped configuration is guaranteed a cell and is
+reported separately, never adopted by argmax.
 
 **2. A prefix risk model, graded against the null.** A continuous risk score — the probability
 this run ends unresolved — is fit from prefix-only features at fixed decision depths and
@@ -422,6 +424,14 @@ evaluated out-of-fold. Three numbers are reported and only the last one is meani
 - `incremental` — `AUROC(prior + prefix) − max(AUROC(prior), 0.5)`. **This is the number that
   decides whether escalation is worth anything.** Everything else overstates it. The comparator
   is floored at chance so an anti-predictive prior cannot be beaten into an apparent finding.
+
+The reported ladder is a single depth, **10** — the shallowest depth this corpus can score
+full-rank. Depth 5 is dropped: its design is rank-deficient (the first five replayed steps are
+all bug-reproduction, so almost every row carries the same feature vector). Depth 20 is
+dropped too: at that depth the admission test selects failures, so its incremental measures
+selection rather than prefix evidence. On the current corpus this half reads `NO_SKILL`
+(prefix AUROC 0.478, incremental −0.022, minimum detectable effect ≈ 0.59) — it is the
+secondary, honest instrument; the measurable edge belongs to the policy half.
 
 ### Two things this sweep does not establish
 
@@ -451,15 +461,27 @@ guard switched off.
 
 What the rest of the report means:
 
-- **`status` is gated by a permutation null, not by a point estimate.** The status is `OK`
-  only when a depth's incremental AUROC sits above the 97.5th percentile of at least 200
-  label shuffles, with the whole fitting pipeline re-run per shuffle. Labels are permuted
-  **within each challenge**, never globally: a global shuffle destroys the challenge-level
-  clustering of outcomes, which leaves the null and the observation with different amounts of
-  headroom and the gate with no power. Otherwise it is
-  `NO_SKILL` (with the number and the p-value in the reason) or `INSUFFICIENT_DATA`, and
-  every figure states it in red under the plot. A point estimate above 0.5 is never treated
-  as skill on its own.
+- **`status` is gated by a permutation null — and it reads the policy half too, not only the
+  prefix.** A policy cell counts as skill when it (a) actually fires, (b) clears its family-wise
+  permutation null — the max-over-cells (maxT) reference across the whole swept family, one
+  shared shuffle scored at every cell — and (c) has a `P(fail | fired)` interval that clears
+  the base failure rate. That interval is corrected the same way: for a swept family it is the
+  family-wise max-over-cells reference built from the same challenge resamples (the distribution
+  of the family's best precision), so the precision clause pays for the same selection the null
+  does, and a single-cell call keeps its marginal bootstrap. On the current corpus that happens
+  at `escalate_after_n=30` /
+  `stale_window=1000` (AUROC 0.662 against the null 95% [0.500, 0.549], adjusted p = 0.005), so
+  the status is `OK_OFFLINE_ONLY` and the verdict names the winning cell, not a model. The policy null is a
+  BLOCK permutation — whole challenge blocks are shuffled, so outcomes move between challenges
+  while the global multiset is preserved — because this half's claim is unconditional and the
+  exchangeable unit is the whole challenge. Only if no policy cell
+  clears does the gate fall through to the prefix depths, which read the family-wise incremental
+  AUROC null with the whole fitting pipeline re-run per shuffle. Labels are permuted **within
+  each challenge**, never globally: a global shuffle destroys the challenge-level clustering of
+  outcomes, which leaves the null and the observation with different amounts of headroom and
+  the gate with no power. Otherwise the status is `NO_SKILL` (with the numbers and p-value in
+  the reason), `INSUFFICIENT_DATA`, or `AUTHENTICITY_FAILED`, and every figure states it in red
+  under the plot. A point estimate above 0.5 is never treated as skill on its own.
 - **`deployability` says whether the number is one you could ship.** `status` answers "is there
   a signal"; this answers "is the thing that found it a policy the router could run". It is
   mechanical, not editorial: every scored feature is checked against the fields a live
@@ -484,24 +506,30 @@ What the rest of the report means:
   as a diagnostic contrast rather than the baseline. Because that honest prior scores *below*
   chance on this corpus, the increment is measured against `max(prior, 0.5)` — an
   anti-predictive baseline must not be beatable into an apparent finding.
-- **The sweep varies `escalate_after_n` only.** `stale_window` is pinned because 602 of 613
-  firings occur at step_index ≤ 1 (two strictly adjacent same-key failures), making windows ≥ 2
-  unable to discriminate. (The knob IS observable at the 1↔2 boundary, but the current default is
-  appropriate.) `ladder` collapsed to 2 distinct score vectors. `escalate_after_n=1` is swept
-  alongside the shipped default of 2; the report **flags** a better cell and never changes the
-  shipped default.
+- **The sweep varies `escalate_after_n` AND `stale_window` — they are coupled.** `_in_window`
+  admits at most `stale_window` events, so reaching *n* recurrences needs a window at least
+  that wide. The grid spans n ∈ {2, 5, 8, 10, 15, 20, 30} × `stale_window` ∈ {10, 1000};
+  `escalate_after_n=1` is deliberately excluded (it fires on the first verified failure, which
+  is failure-biased). `ladder` is pinned: the detection metric reads whether the policy fired,
+  not which rung it climbed, so it cannot move the headline. The shipped configuration
+  (n=2, `stale=10`) is guaranteed a row, highlighted on the sweep table, and the report
+  **flags** a better cell and never changes the shipped default. On this corpus the `stale=10`
+  rows stop firing at n ≥ 15 — the window cannot hold enough recurrences — while the
+  `stale=1000` rows reach a null-clearing edge at high n.
 - **Runs with no per-step verified outcomes are excluded and counted.** A trajectory the
   stamping stage never processed carries parser defaults, not evidence; including it would feed
   the model a collection-date proxy. The exclusion count appears in the JSON and in every
   figure footer.
-- **Figures.** PR curve and ROC (both tie-collapsed, so the drawn area equals the reported
-  statistic, and both drawn against the MEASURED permutation null rather than against
-  prevalence or the 0.5 diagonal — the pipeline is refit per shuffle, so its no-information
-  score is measured, not assumed), the confusion matrix with a random-at-the-same-flag-rate
-  baseline and excess in each cell, the family-wise permutation-null histogram, the sweep as an
-  interval table, trajectory outcomes against the base rate, and failure-capture coverage per
-  model. Each carries a footer — what the axes are, what to look for, what the jargon means, and
-  the honest limits — so a figure pasted elsewhere is still readable on its own.
+- **Figures.** PR curve and ROC are the **policy** operating characteristics across the swept
+  recurrence thresholds (one point per `escalate_after_n` value that fired; the prefix risk
+  model's curves are not drawn, because its score is constant at the evaluated depths and it
+  ranks nothing), the confusion matrix at the best-separating cell with a random-at-the-same-
+  flag-rate baseline and a populated "not flagged" column, the policy's family-wise
+  max-over-cells permutation-null histogram, the sweep as an interval table with the
+  shipped-default row highlighted, trajectory outcomes (escalated vs left alone) at the shipped
+  cell against the base rate, and failure-capture coverage per model. Each carries a footer —
+  what the axes are, what to look for, what the jargon means, and the honest limits — so a
+  figure pasted elsewhere is still readable on its own.
 
 **The harness runs on captured multi-step trajectories only.** The recurrence trigger cannot
 fire on a length-1 stream, and a prefix model needs a prefix, so the eval reads

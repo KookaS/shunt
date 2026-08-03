@@ -82,6 +82,10 @@ class ExpectedCensus:
 # and margin-cut in between. `test_prefix_eval` re-derives the whole table from SPECS and refuses a
 # mismatch, so a typo here fails loudly instead of quietly re-pinning a wrong number. A depth added
 # to `features.DEFAULT_DEPTHS` and not added here raises KeyError rather than skipping silently.
+# The 20 entry is intentionally still here: depth 20 left `DEFAULT_DEPTHS` on 2026-08-02 (its
+# admitted population drifted past the ladder's own selection-bias bound — features.py records the
+# decision), and this row is the fixture record of what it WOULD admit, referenced from that
+# comment so the removed depth does not vanish from every representation at once.
 EXPECTED: Final[dict[int, ExpectedCensus]] = {
     5: ExpectedCensus(n_rows=6, n_groups=5, n_unstamped=2, n_too_short=1, n_by_margin=2),
     10: ExpectedCensus(n_rows=4, n_groups=4, n_unstamped=2, n_too_short=1, n_by_margin=4),

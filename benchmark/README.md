@@ -67,7 +67,7 @@ changes how you read the result · **NO** does not hold.
   that carries the statement; the zero-ML strategies are unaffected.
 - **PARTLY — evaluate escalation offline.** `make escalation-eval` scores the detector over the
   stamped corpus with permutation nulls. Its report carries a `deployability` verdict, currently
-  **OFFLINE-ONLY UPPER BOUND**: 2 of the 5 features (`infra_rate`, `max_action_repeat_rate`) read
+  **OFFLINE-ONLY UPPER BOUND**: 2 of the 3 features (`infra_rate`, `max_action_repeat_rate`) read
   fields that do not exist at the production decision point, and the eval scores one decision per
   step where production decides once per session (`escalation/deployability.py`). The number is
   real; it bounds a policy production does not run.

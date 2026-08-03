@@ -14,6 +14,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Secret scan (LFS corpus)
+        # The pre-commit gitleaks hook only sees the staged diff's Git-LFS POINTERS, so a real
+        # secret inside a committed benchmark trajectory would sail through it. Scan the actual
+        # LFS content instead. Scoped to benchmark/escalation/data/ with the config passed
+        # explicitly: `gitleaks dir` only auto-discovers <target>/.gitleaks.toml, and it
+        # IGNORES .gitignore, so pointing it at the repo root would also read the dev's
+        # root-level .env.
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          gitleaks dir --no-banner --config .gitleaks.toml benchmark/escalation/data/
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}

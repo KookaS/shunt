@@ -416,6 +416,8 @@ def _format_report(  # noqa: PLR0913
     n_unscorable: int,
     cache_aware_ratio: float,
     decomposition: dict[str, float] | None = None,
+    *,
+    impute_enabled: bool = False,
 ) -> str:
     n_actual = len(control)
     control_pass = sum(1 for d in control if d[2])
@@ -437,6 +439,17 @@ def _format_report(  # noqa: PLR0913
     lines.append(f"Tasks               : {n_actual} (requested: {n})")
     lines.append(f"Verifier threshold  : {verifier_threshold}")
     lines.append(f"Unscorable (cov gap): {n_unscorable}")
+    # WHO handled the censored cells. With impute.enabled, main() completes the matrix FIRST, so
+    # a censored cell is imputed and the censoring guard below is fallback-only; with it off the
+    # guard is the whole mechanism. State which, so a reader cannot guess why unscorable was 0.
+    impute_note = (
+        "impute.enabled=true: the matrix was completed by the monotone-ladder imputer before "
+        "scoring, so resource-limit cells are imputed; the censoring guard is the fallback"
+        if impute_enabled
+        else "impute.enabled=false: cells were scored raw, so the censoring guard excluded "
+        "every resource-limit (CENSORED) cell"
+    )
+    lines.append(f"Censoring guard     : {impute_note}")
     lines.append("")
     lines.append("\u2500" * 72)
     lines.append(
@@ -602,6 +615,11 @@ def run_kill_gate(
         1 for cd, rd in zip(control, router, strict=True) if not _scorable_pair(cd, rd)
     )
 
+    # Read live so the report cannot contradict the matrix that was actually scored: main()
+    # completes the matrix when impute is on, so whether the censoring guard or the imputer
+    # handled a censored cell is a property of the config at run time, not of this file.
+    impute_enabled = bool(config.impute_config().get("enabled", False))
+
     report = _format_report(
         control=control,
         router=router,
@@ -618,6 +636,7 @@ def run_kill_gate(
         n_unscorable=n_unscorable,
         cache_aware_ratio=cache_aware_ratio,
         decomposition=decomposition,
+        impute_enabled=impute_enabled,
     )
 
     exit_code, _ = decide_verdict(

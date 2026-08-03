@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -15,10 +16,11 @@ import pytest
 
 from benchmark.admissibility import admissibility_verdict, run_gate
 
-_ROOT = Path(__file__).resolve().parents[1]
-# The canonical adjudicator lives in the private build wrapper, one level above this repo. A
-# public clone does not have it, so the parity test skips there rather than failing.
-_SHARED_GATE = _ROOT.parent / ".agentic" / "skills" / "research" / "tools" / "admissibility_gate.py"
+# The canonical adjudicator lives OUTSIDE this repo, so a public clone does not have it. The
+# parity test reads its path from the SHUNT_SHARED_ADJUDICATOR env var (set by the build
+# environment that owns the shared module) and skips when the variable is unset — naming the
+# shared module's internal path here would leak a tree this repo does not ship.
+_SHARED_GATE = Path(os.environ.get("SHUNT_SHARED_ADJUDICATOR", ""))
 
 
 class TestTheThreeCanonicalShapes:
@@ -113,13 +115,16 @@ def _load_shared_gate() -> ModuleType:
     return module
 
 
-@pytest.mark.skipif(not _SHARED_GATE.exists(), reason="canonical adjudicator not in this checkout")
+@pytest.mark.skipif(
+    not _SHARED_GATE.is_file(),
+    reason="shared adjudicator not in this checkout (set SHUNT_SHARED_ADJUDICATOR to its path)",
+)
 class TestParityWithTheSharedGate:
     """Duplicating a gate is how the first copy goes stale. This pins the copy instead."""
 
     # Every case the local adjudicator can face: both legs pass, each fails alone, both fail, and
-    # the two edges. If the canonical adjudicator's semantics ever move, this fails on the next
-    # run in the build wrapper rather than drifting silently for months.
+    # the two edges. If the shared adjudicator's semantics ever move, this fails on the next run
+    # in the build environment that owns it rather than drifting silently for months.
     CASES = (
         (0.92, 0.04, 0.0, 0.15),
         (0.05, 0.03, 0.0, 0.15),

@@ -88,14 +88,15 @@ if TYPE_CHECKING:
 # WHY A x2 LADDER FROM 5. Five decisions is roughly the earliest point an escalation router could
 # act on and still save anything — below it the prefix is one or two commands and there is nothing
 # to summarise; a router that only decides after 40 turns has already paid for the run it was
-# supposed to divert. Doubling (5, 10, 20) spans that usable window on a log scale rather than
+# supposed to divert. Doubling (5, 10) spans that usable window on a log scale rather than
 # oversampling one neighbourhood, which is what a linear 5/10/15 would do. The ladder is a
 # reporting choice about where a router could act, made independently of what the numbers say.
 #
-# THEY WERE NOT CHOSEN BY OUTCOME. The tuple was introduced whole and has never been edited (git
-# history), and none of the three is a local maximum of any reported statistic — a result-maximiser
-# on this corpus would have picked 24/33/42, not 5/10/20. The defect this comment repairs is that
-# a load-bearing choice was undocumented, not that it was gamed.
+# THEY WERE NOT CHOSEN BY OUTCOME. The original three-depth tuple (5, 10, 20) was introduced whole
+# and stood for its first edit (see "DEPTH 20 LEFT" below); none of its members was a local maximum
+# of any reported statistic — a result-maximiser on this corpus would have picked 24/33/42, not
+# 5/10/20. The defect this comment repairs is that a load-bearing choice was undocumented, not that
+# it was gamed.
 #
 # THE CEILING, AND WHY THERE IS ONE. Do not raise these depths to chase a bigger incremental AUROC.
 # Admission at depth d requires `len(scorable) >= d + MIN_WITHHELD`, so a deeper depth does not
@@ -119,7 +120,44 @@ if TYPE_CHECKING:
 # `tests/escalation/test_features.py` turns the ceiling into a checkable bound rather than a
 # warning: every reported depth's admitted base rate must stay within a stated tolerance of the
 # corpus base rate, which is the selection channel measured directly.
-DEFAULT_DEPTHS: Final[tuple[int, ...]] = (5, 10, 20)
+#
+# DEPTH 20 LEFT, MEASURED 2026-08-02, AND THAT IS NOT A NUMBER EDIT — the tolerance section in
+# `test_features.py` is the story. The bound encodes a 26% RELATIVE shift in the admitted
+# population's outcome mix, and the rebuilt corpus (727 stamped runs, base rate 0.4209) put
+# depth 20 at +0.1186 absolute = 28.2% relative — PAST the criterion its own comment states,
+# while still inside the old ABSOLUTE 0.12 (which is 26% of the PRE-rebuild 0.460 base rate and
+# therefore looser than its justification on 0.4209). The tolerance was NOT widened to keep it:
+# the earlier note in this comment ("if the next corpus movement turns this red, the free
+# variable is the ladder's ceiling, not the tolerance") is the recorded decision, and the ladder
+# now ends where the selection channel stays inside the bound it declares. The cost is real and
+# stated: depth 20 was the one depth whose prefix-only score came closest to looking nonzero
+# (0.519 vs a family-wise null [0.494, 0.555] in the 2026-08-01 report), and it is now
+# unreported. It is removed because at 28.2% relative drift its incremental measured the
+# admission test selecting failures, not prefix evidence — the exact failure the bound exists to
+# refuse. The depth-20 row does not go away quietly: `frozen_corpus.EXPECTED[20]` still documents
+# what it would admit, and this paragraph is the record of why it is not reported.
+#
+# DEPTH 5 LEFT, MEASURED 2026-08-02, AND FOR THE OPPOSITE REASON — ITS DESIGN IS RANK-DEFICIENT,
+# not selection-shifted. 412 of 414 admitted depth-5 rows carry the IDENTICAL feature vector
+# (fail_rate=1.0, infra_rate=0.0, max_action_repeat_rate=0.2): in the first five replayed steps
+# the agent is still reproducing the bug (running the failing test before editing anything), so
+# every run "fails" identically and the design `[features | intercept]` ranks 3 of 4. A depth
+# whose score is constant by construction reports an arithmetic AUROC, not evidence, and the
+# eval must not headline it — `prefix_eval`'s `design_full_rank` gate refuses it and
+# `run_eval.best_depth` excludes it. It is a corpus property, not a redundant column: the two
+# columns that once shared the blame (max_key_repeat_rate, distinct_check_id_rate) are already
+# removed, and the degeneracy survives. It is dropped from the reported ladder for the same
+# reason depth 20 was: a reported depth must be measurable, and depth 5 is not. `frozen_corpus`
+# records what it WOULD admit so the finding stays visible.
+#
+# WHAT REMAINS. The reported ladder is the shallowest depth the corpus can actually score: depth
+# 10, full-rank (7 distinct vectors) and inside the selection bound (+19.5% relative). It is the
+# honest floor for a prefix risk score on this corpus — and the audit that removed depth 5 also
+# established WHERE the escalation edge actually lives: NOT in a shallow prefix (early steps are
+# all bug-reproduction, so no prefix feature separates) but in the shipped recurrence POLICY at
+# HIGH thresholds (escalate_after_n >= 10 clears the family-wise null; see `datasets.DEFAULT_GRID`
+# and `policy_eval`). The prefix model is reported as the secondary instrument it is.
+DEFAULT_DEPTHS: Final[tuple[int, ...]] = (10,)
 
 # Non-terminal steps that must remain UNREAD after the prefix for a trajectory to qualify (rule 2).
 # A module constant, deliberately not a parameter with a default: a caller that could pass its own
@@ -173,14 +211,34 @@ MIN_WITHHELD: Final[int] = 22
 # `tests/escalation/test_features.py` now gates on the RANK of [features | intercept] over the real
 # corpus, not on pairwise inequality, which affine dependence passes by construction.
 
-# Five columns, each carrying rank no other column already carries at EVERY reported depth — see
-# the census above for the seven removed as aliases of `fail_rate`, as affine combinations, as a
-# coverage artifact, or (`recent_fail_rate`) as the leak's conduit and a depth-5 duplicate.
+# THREE columns, each carrying rank no other column already carries at EVERY reported depth — the
+# five-column claim that stood here was false and is why this comment exists.
+#
+# TWO MORE REMOVED, 2026-08-02, FOR NON-INDEPENDENCE ON THE REBUILT CORPUS — the measure that
+# killed `recent_fail_rate` runs again, and this time it is measured corpus-wide rather than on a
+# depth-5 slice:
+#
+#   `max_key_repeat_rate` == `fail_rate` on 414/414 depth-5 rows, 342/344 at depth 10 and
+#     226/228 at depth 20. The mechanism is the same one that degrades the whole shallow design:
+#     until the agent edits the workspace, the selector fails on the SAME test id every step, so
+#     one distinct key repeated n times makes the max-repeat rate and the failure rate the same
+#     number. The 2/344 and 2/228 exceptions are the "two outlier rows" that used to let the
+#     design-matrix rank guard read as green on a margin of two observations.
+#   `distinct_check_id_rate` takes exactly ONE value at depth 5 (1/5) and TWO at depths 10 and
+#     20 (1/depth, 2/depth). At a fixed absolute depth it is a binary "did more than one test id
+#     fail" flag, and its one informative state is a near-copy of the same constant-key mechanism
+#     `max_key_repeat_rate` was a copy of.
+#   Both were kept on the old argument that they were not EXACT aliases; the design-matrix rank
+#   guard, which catches affine dependence by construction, was staying green on the handful of
+#   rows where they differ. That is the same failure `recent_fail_rate` shipped — the guard
+#   satisfied only by the leakiest rows there are — and it is now closed by removing the columns
+#   rather than re-scoring them. What remains — `fail_rate`, `infra_rate`,
+#   `max_action_repeat_rate` — is pairwise affinely independent at every reported depth on the
+#   rebuilt corpus, and the depth-5 rank guard now fails for the honest reason (the DATA has three
+#   distinct rows, not because a redundant column split the rank).
 FEATURE_NAMES: Final[tuple[str, ...]] = (
     "fail_rate",
     "infra_rate",
-    "distinct_check_id_rate",
-    "max_key_repeat_rate",
     "max_action_repeat_rate",
 )
 
@@ -228,13 +286,10 @@ def extract_features(traj: Trajectory, depth: int) -> tuple[float, ...] | None:
 def _features(steps: Sequence[StepView]) -> tuple[float, ...]:
     """The FEATURE_NAMES vector over exactly these steps. Every value is a rate in [0, 1]."""
     n = len(steps)
-    keys = [s.failing_check_id for s in steps if s.failing_check_id is not None]
     actions = Counter(s.action for s in steps)
     return (
         _rate(sum(not s.success for s in steps), n),
         _rate(sum(s.is_infra_failure for s in steps), n),
-        _rate(len(set(keys)), n),
-        _rate(max(Counter(keys).values()) if keys else 0, n),
         _rate(max(actions.values()), n),
     )
 

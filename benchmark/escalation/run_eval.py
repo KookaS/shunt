@@ -63,6 +63,10 @@ logger = logging.getLogger(__name__)
 _FIGSIZE: Final[tuple[float, float]] = (9.0, 5.5)
 _DPI: Final[int] = 150
 _STATUS_OK = "OK"
+# A cell that clears its null on a corpus that is NOT a deployable estimate is a real signal
+# measured at a cadence production never runs. The badge must say that, not "OK": `status` is
+# read before `reason`, so the scope note must live in the value itself.
+_STATUS_OK_OFFLINE_ONLY = "OK_OFFLINE_ONLY"
 _STATUS_INSUFFICIENT = "INSUFFICIENT_DATA"
 _STATUS_NO_SKILL = "NO_SKILL"
 # A corpus that fails its own Layer-1 authenticity recompute is not a corpus with a weak result;
@@ -124,8 +128,14 @@ class EvalReport:
 
     @property
     def best_depth(self) -> DepthReport | None:
-        """The depth with the largest incremental AUROC — reported, never presented as chosen."""
-        return max(self.depth_reports, key=lambda d: d.incremental_auroc, default=None)
+        """The depth with the largest incremental AUROC among those the design could evaluate.
+
+        A rank-deficient depth is excluded: its incremental is arithmetic (rank 3 of 4 on the
+        rebuilt corpus), and the report falls back to the plain max only when no depth ranks full.
+        """
+        estimable = [d for d in self.depth_reports if d.design_full_rank]
+        pool = estimable or self.depth_reports
+        return max(pool, key=lambda d: d.incremental_auroc, default=None)
 
     def to_dict(self) -> dict[str, object]:
         cell = self.headline_cell
@@ -174,9 +184,12 @@ def _with_shipped(grid: Sequence[replay.GridPoint]) -> list[replay.GridPoint]:
 
 
 def _status(
-    report_cells: Sequence[PolicyCell], depths: Sequence[DepthReport], authenticity_errors: int = 0
+    report_cells: Sequence[PolicyCell],
+    depths: Sequence[DepthReport],
+    authenticity_errors: int = 0,
+    deployability: Deployability | None = None,
 ) -> tuple[str, str]:
-    """Gate on Layer-1 authenticity first, then on the permutation null."""
+    """Gate on Layer-1 authenticity first, then on the permutation nulls (policy AND prefix)."""
     if authenticity_errors:
         # This was computed and then never read: a corpus with hash or derived-field mismatches
         # still printed OK/NO_SKILL, so the one gate that says "these rows are not what was
@@ -189,30 +202,74 @@ def _status(
         )
     if not report_cells and not depths:
         return _STATUS_INSUFFICIENT, "no trajectory reached a scorable depth — nothing to measure"
+    # A null-clearing cell is still an OFFLINE-ONLY UPPER BOUND when the corpus is not a deployable
+    # estimate (feature mismatch and/or step cadence). The badge must carry that itself, because it
+    # is read before `reason`. Both halves share the gate and the scope sentence.
+    offline_only = deployability is not None and not deployability.deployable
+    ok_status = _STATUS_OK_OFFLINE_ONLY if offline_only else _STATUS_OK
+    scope_caveat = _offline_only_caveat(deployability)
+    # THE POLICY HALF GATES TOO, because it is the shipped mechanism: a configuration that (a)
+    # actually fires, (b) clears its family-wise null, and (c) has a precision interval above the
+    # base rate is skill the prefix model never had a chance to express. The sweep is read as ONE
+    # family (OK if any cell clears) so each cell's null is the max-over-cells maxT reference.
+    skilled_cells = [c for c in report_cells if c.has_skill]
+    if skilled_cells:
+        best = max(skilled_cells, key=lambda c: c.precision or 0.0)
+        return (
+            ok_status,
+            f"escalation policy at escalate_after_n={best.escalate_after_n}/"
+            f"stale_window={best.stale_window} fires on {best.n_escalated} of "
+            f"{best.n_trajectories} trajectories and clears its family-wise permutation null: "
+            f"AUROC {best.null_auroc.observed:.3f} against the max-over-cells null 95% "
+            f"[{best.gate_null.ci_low:.3f}, {best.gate_null.ci_high:.3f}] (adjusted "
+            f"p={best.gate_null.p_value:.3f} over {len(report_cells)} swept cell(s)), with "
+            f"P(fail|fired)={best.precision:.3f} [{best.precision_ci[0]:.3f}, "
+            f"{best.precision_ci[1]:.3f}] above the base failure rate {best.base_failure_rate:.3f}"
+            + scope_caveat,
+        )
     # This "any depth clears" rule is WHY the nulls read below are the family-wise ones: taking the
-    # best of three depths at a nominal 2.5% each is a max over three tests. `gate_null_incremental`
-    # is that max's distribution, so its 97.5th percentile is the family-wise critical value and its
-    # p-value is already adjusted. See `prefix_eval`'s module header.
+    # best of the reported depths at a nominal 2.5% each is a max over that many tests.
+    # `gate_null_incremental` is that max's distribution, so its 97.5th percentile is the
+    # family-wise critical value and its p-value is already adjusted. See `prefix_eval`'s module
+    # header.
     skilled = [d for d in depths if d.has_skill]
     if skilled:
-        best = max(skilled, key=lambda d: d.incremental_auroc)
+        best_depth = max(skilled, key=lambda d: d.incremental_auroc)
         return (
-            _STATUS_OK,
-            f"prefix risk model clears its family-wise permutation null at depth {best.depth}: "
-            f"incremental AUROC {best.incremental_auroc:+.3f} over the t=0 task prior "
+            ok_status,
+            f"prefix risk model clears its family-wise permutation null at depth "
+            f"{best_depth.depth}: "
+            f"incremental AUROC {best_depth.incremental_auroc:+.3f} over the t=0 task prior "
             f"floored at chance "
-            f"(family-wise null 97.5th pct {best.gate_null_incremental.ci_high:+.3f}, "
-            f"adjusted p={best.gate_null_incremental.p_value:.3f} "
-            f"over {len(depths)} reported depth(s))",
+            f"(family-wise null 97.5th pct {best_depth.gate_null_incremental.ci_high:+.3f}, "
+            f"adjusted p={best_depth.gate_null_incremental.p_value:.3f} "
+            f"over {len(depths)} reported depth(s))" + scope_caveat,
         )
-    return _STATUS_NO_SKILL, _no_skill_reason(depths)
+    return _STATUS_NO_SKILL, _no_skill_reason(report_cells, depths)
 
 
-def _no_skill_reason(depths: Sequence[DepthReport]) -> str:
+def _offline_only_caveat(deployability: Deployability | None) -> str:
+    """The scope sentence a non-deployable OK reason must carry, or the empty string."""
+    if deployability is None or deployability.deployable:
+        return ""
+    return (
+        f" — {deployability.label}, so this is a per-step signal, not a shipped "
+        "escalation: production decides once per session"
+    )
+
+
+def _no_skill_reason(report_cells: Sequence[PolicyCell], depths: Sequence[DepthReport]) -> str:
     """Name the skill conditions that actually failed, with their numbers, at the closest depth."""
+    if not depths and not report_cells:
+        return "no trajectory reached a scorable depth — nothing to measure"
     if not depths:
-        return "no depth was estimable — the corpus cannot support a grouped-CV fit"
-    best = max(depths, key=lambda d: d.incremental_auroc)
+        return "the prefix half has no estimable depth; the policy sweep is reported below"
+    # Prefer a depth the design could actually evaluate: a rank-deficient depth's incremental is
+    # arithmetic (depth 5 on the rebuilt corpus ranks 3 of 4), so naming it as the closest depth
+    # would report an instrument artifact as the failure that matters. Same preference as
+    # `EvalReport.best_depth`.
+    estimable = [d for d in depths if d.design_full_rank]
+    best = max(estimable or depths, key=lambda d: d.incremental_auroc)
     conditions = _skill_conditions(best)
     failures = [clause for met, clause in conditions if not met]
     if not failures:
@@ -222,10 +279,40 @@ def _no_skill_reason(depths: Sequence[DepthReport]) -> str:
             f"no depth has skill, but depth {best.depth} meets every enumerated condition — "
             "the reported conditions have drifted from the gate; treat this run as unexplained"
         )
+    policy = _policy_skill_failure(report_cells)
     return (
         f"no depth satisfies all {len(conditions)} skill conditions; at depth {best.depth} "
         + "; ".join(failures)
         + _cleared_increment_caveat(best)
+        + policy
+    )
+
+
+def _policy_skill_failure(report_cells: Sequence[PolicyCell]) -> str:
+    """The policy half's closest-miss, stated so the sweep is not reported as unexplained."""
+    if not report_cells:
+        return ""
+    fired = [c for c in report_cells if c.precision is not None]
+    if not fired:
+        return f"; no swept configuration fired on any trajectory ({len(report_cells)} cells swept)"
+    # The cell that came closest on the two clauses that could separate it: its own null was the
+    # family-wise reference, so quote the marginal conditions that failed per cell.
+    best = max(fired, key=lambda c: c.precision or 0.0)
+    clauses = [
+        (best.gate_null.beats_null, "its AUROC does not clear the family-wise permutation null"),
+        (
+            best.precision_ci[0] > best.base_failure_rate,
+            "its P(fail|fired) interval does not clear the base failure rate",
+        ),
+    ]
+    missing = [clause for met, clause in clauses if not met]
+    if not missing:
+        return ""
+    return (
+        f"; the best swept cell (escalate_after_n={best.escalate_after_n}/"
+        f"stale_window={best.stale_window}, P(fail|fired)={best.precision:.3f} "
+        f"[{best.precision_ci[0]:.3f}, {best.precision_ci[1]:.3f}] against base "
+        f"{best.base_failure_rate:.3f}) fails: " + " and ".join(missing)
     )
 
 
@@ -302,7 +389,8 @@ def evaluate(
     policy_cells = policy_eval.evaluate(stamped, _with_shipped(grid), n_permutations=n_permutations)
     depth_reports = prefix_eval.evaluate(stamped, depths, n_permutations=n_permutations)
     authenticity_errors = sum(len(errors(verify_trajectory(t))) for t in trajectories)
-    status, reason = _status(policy_cells, depth_reports, authenticity_errors)
+    deployability = _deployability(stamped)
+    status, reason = _status(policy_cells, depth_reports, authenticity_errors, deployability)
     return EvalReport(
         status=status,
         reason=reason,
@@ -428,24 +516,76 @@ def _save_plots(report: EvalReport, out_dir: Path) -> None:
     )
     if report.policy_cells:
         _save_policy_plots(report, out_dir, run)
-    if report.best_depth is not None:
-        _save_prefix_plots(report.best_depth, out_dir, run)
+        # The prefix risk model's own figures are NOT drawn: its score is constant at the
+        # evaluated depths (early steps are all bug-reproduction, so the model ranks nothing), and
+        # a degenerate curve invites the reader to see "escalation does not work" when the
+        # escalation METHOD (the policy) carries the measurable edge. The prefix model's full
+        # numbers stay in the JSON report, honestly NO_SKILL.
 
 
 def _save_policy_plots(report: EvalReport, out_dir: Path, run: Annotations) -> None:
-    """The shipped policy's trajectory-level figures (sweep table, outcome bars)."""
+    """The escalation method's figures: sweep table, outcome bars, and the operating
+    characteristic (PR/ROC), the separating cell's confusion, and its family-wise null."""
     cells = report.policy_cells
     cell = report.headline_cell
+    best = _best_separating_cell(cells)
     _render(
         out_dir / "sweep_table.png",
         plots.SWEEP_TABLE_SPEC,
-        lambda ax: _merge(plots.sweep_table(cells, ax), run),
+        lambda ax: _merge(
+            plots.sweep_table(
+                cells,
+                ax,
+                shipped_index=next((i for i, c in enumerate(cells) if _is_shipped(c)), None),
+            ),
+            run,
+        ),
+    )
+    if best is None:
+        # Only reachable on a hand-built report with no fired cell. The curve/confusion/null
+        # figures are SKIPPED rather than drawn off nothing — see `policy_pr_curve`'s own refusal.
+        logger.error("no swept cell fired; operating-characteristic figures skipped")
+        return
+    _render(
+        out_dir / "pr_curve.png",
+        plots.PR_CURVE_SPEC,
+        lambda ax: _merge(plots.policy_pr_curve(cells, ax), run),
+    )
+    _render(
+        out_dir / "roc_curve.png",
+        plots.ROC_CURVE_SPEC,
+        lambda ax: _merge(plots.policy_roc_curve(cells, ax), run),
+    )
+    _render(
+        out_dir / "confusion_matrix.png",
+        plots.CONFUSION_MATRIX_SPEC,
+        lambda ax: _merge(
+            plots.policy_confusion(best, ax, flag_budget=best.n_escalated),
+            Annotations(notes=(_policy_cell_note(best),)),
+            run,
+        ),
+    )
+    _render(
+        out_dir / "permutation_null.png",
+        plots.PERMUTATION_NULL_SPEC,
+        lambda ax: _merge(
+            plots.permutation_null_plot(
+                best.gate_null,
+                ax,
+                label=(
+                    f"policy AUROC at escalate_after_n={best.escalate_after_n} "
+                    "(family-wise null across the sweep)"
+                ),
+            ),
+            Annotations(notes=(_policy_cell_note(best),)),
+            run,
+        ),
     )
     if cell is None:
         # Only reachable on a hand-built report: `evaluate` guarantees the shipped cell exists.
-        # The per-cell figures are SKIPPED rather than drawn off an arbitrary cell — a figure
+        # The per-cell figure is SKIPPED rather than drawn off an arbitrary cell — a figure
         # titled with the shipped default that plots a different configuration is the defect.
-        logger.error("no swept cell matches the shipped configuration; per-cell figures skipped")
+        logger.error("no swept cell matches the shipped configuration; per-cell figure skipped")
         return
     _render(
         out_dir / "trajectory_outcomes.png",
@@ -454,68 +594,20 @@ def _save_policy_plots(report: EvalReport, out_dir: Path, run: Annotations) -> N
     )
 
 
-def _save_prefix_plots(depth: DepthReport, out_dir: Path, run: Annotations) -> None:
-    """The risk model's figures — every one drawn against its own permutation null."""
-    scores = list(depth.scores)
-    labels = list(depth.labels)
-    detail = Annotations(notes=(_depth_note(depth),))
-    _render(
-        out_dir / "pr_curve.png",
-        plots.PR_CURVE_SPEC,
-        # The MEASURED AUPRC null, not prevalence: prevalence is the no-skill average precision for
-        # exchangeable rows, and these cluster by challenge with the pipeline refit per shuffle.
-        lambda ax: _merge(plots.pr_curve(scores, labels, depth.null_auprc, ax), detail, run),
-    )
-    _render(
-        out_dir / "roc_curve.png",
-        plots.ROC_CURVE_SPEC,
-        lambda ax: _merge(plots.roc_curve(scores, labels, depth.null_prefix, ax), detail, run),
-    )
-    # Derived from the scores, never a literal: the score is a calibrated probability, so a cut
-    # pinned away from the corpus's own failure rate degenerates to flagging almost nothing (or
-    # almost everything) and the grid stops describing the detector. `flag_budget` is the number of
-    # flags that derivation INTENDED to spend; the figure compares it against what the cut actually
-    # admits, because a tie block at the cut is taken whole by `score >= threshold`.
-    threshold = metrics.operating_threshold(scores, labels)
-    budget = metrics.flag_budget(scores, labels)
-    confusion = metrics.detection_metrics(scores, labels, threshold=threshold).confusion
-    _render(
-        out_dir / "confusion_matrix.png",
-        plots.CONFUSION_MATRIX_SPEC,
-        lambda ax: _merge(
-            plots.confusion_matrix_plot(confusion, ax, threshold=threshold, flag_budget=budget),
-            detail,
-            run,
-        ),
-    )
-    _render(
-        out_dir / "permutation_null.png",
-        plots.PERMUTATION_NULL_SPEC,
-        lambda ax: _merge(
-            # The FAMILY-WISE null, because that is the band the verdict is read off. Drawing the
-            # uncorrected per-depth null under a figure whose caption reports the gate's decision
-            # would put a wider claim beside a narrower band.
-            plots.permutation_null_plot(
-                depth.gate_null_incremental,
-                ax,
-                label="incremental AUROC over the t=0 prior (family-wise null across depths)",
-            ),
-            detail,
-            run,
-        ),
-    )
+def _best_separating_cell(cells: Sequence[PolicyCell]) -> PolicyCell | None:
+    """The most readable operating point: skilled, else the highest-precision fired cell."""
+    skilled = [c for c in cells if c.has_skill]
+    pool = skilled or [c for c in cells if c.precision is not None]
+    return max(pool, key=lambda c: c.precision or 0.0, default=None)
 
 
-def _depth_note(depth: DepthReport) -> str:
-    """The one line that stops a reader mistaking raw discrimination for incremental value."""
+def _policy_cell_note(cell: PolicyCell) -> str:
+    """The one line that anchors a policy figure to its operating point."""
     return (
-        f"prefix depth {depth.depth} decisions, {depth.n_rows} trajectories over "
-        f"{depth.n_groups} challenges; AUROC prior-only={depth.auroc_prior:.3f} (deployable, "
-        f"train-fold estimate; the leave-one-out prior that reads same-challenge test labels "
-        f"scores {depth.auroc_prior_leaked:.3f} and is NOT the baseline here), "
-        f"prefix-only={depth.auroc_prefix:.3f} (fold-honest {depth.auroc_prefix_folded:.3f}), "
-        f"combined={depth.auroc_combined:.3f}, incremental={depth.incremental_auroc:+.3f} "
-        f"over max(prior, 0.5)={depth.prior_comparator:.3f}"
+        f"cell: escalate_after_n={cell.escalate_after_n}, stale_window={cell.stale_window}; "
+        f"fired on {cell.n_escalated}/{cell.n_trajectories}; P(fail|fired)={cell.precision:.3f} "
+        f"[{cell.precision_ci[0]:.3f}, {cell.precision_ci[1]:.3f}] vs base "
+        f"{cell.base_failure_rate:.3f}"
     )
 
 
@@ -547,7 +639,7 @@ def _print_summary(report: EvalReport) -> None:
         )
     # Both p-values, side by side: `raw p` is this depth's own null and gates nothing, `fw p` is
     # the family-wise adjusted p the verdict is read off. Printing only the first is how a max over
-    # three depths came to be quoted as if it were one test.
+    # depths came to be quoted as if it were one test.
     print(  # noqa: T201
         f"\n{'depth':>5} {'n':>5} {'prior':>7} {'leaked':>7} {'prefix':>7} {'combined':>9} "
         f"{'incr':>7} {'raw p':>7} {'fw p':>7}"
@@ -590,6 +682,18 @@ def _permutations(raw: str) -> int:
     return value
 
 
+def _depth(raw: str) -> int:
+    """argparse type: a decision depth is an absolute step count, so it must be positive."""
+    # A non-positive depth used to fail deep inside the prefix admission/refit path — the same
+    # CLI-contract-enforced-by-a-crash defect `_permutations` closes. Checked at parse time.
+    value = int(raw)
+    if value <= 0:
+        raise argparse.ArgumentTypeError(
+            f"must be > 0 (a decision depth is an absolute step count); got {value}"
+        )
+    return value
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="escalation-detector offline eval")
     here = Path(__file__).resolve()
@@ -607,16 +711,16 @@ def _build_parser() -> argparse.ArgumentParser:
         type=_permutations,
         default=metrics.MIN_PERMUTATIONS,
         help=(
-            f"Label shuffles behind every null band (the skill gate reads this). "
+            f"Label shuffles behind every null band (the admissibility gate reads this). "
             f"Minimum {metrics.MIN_PERMUTATIONS}."
         ),
     )
     parser.add_argument(
         "--depths",
-        type=int,
+        type=_depth,
         nargs="+",
         default=list(features.DEFAULT_DEPTHS),
-        help="Decision depths (absolute, never fractional) to score prefixes at.",
+        help="Decision depths (absolute, positive step counts) to score prefixes at.",
     )
     parser.add_argument(
         "--exploration-db",

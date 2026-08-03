@@ -130,8 +130,10 @@ doesn't work" as a measured claim would require running it. We have not.
 ## What we are still testing
 
 Shunt's escalation trigger — decide mid-task that a cheap model is not going to
-get there — is unsettled. Our current shipped detector performs near chance on
-our own trajectories, which is documented in the escalation page. These are the
+get there — is partly settled. The recurrence policy carries a measured edge, but
+only at recurrence thresholds far above the shipped default; the shipped detector
+and the prefix risk model perform near chance on our own trajectories (see the
+dated entry below and the escalation page). These are the
 candidate directions, listed as open questions rather than as a plan we have
 committed to.
 
@@ -188,6 +190,39 @@ merely noisy, it is **not identified**. No amount of re-analysis of the existing
 trajectories will tell us whether escalation helps. The fix is randomised
 escalation at flagged checkpoints with logged propensities, and it needs a live
 run to collect.
+
+## Escalation: the edge was real but sat at high recurrence thresholds (2026-08-02)
+
+The escalation sweep once reported `NO_SKILL`, with the shipped default firing on every
+trajectory. That was an artefact of the grid. The old sweep varied `escalate_after_n` over
+n ∈ {1, 2, 3} only, which could measure the shipped-default mask — it fires on everything, so
+precision equals the base rate — and nothing else. Extending the grid to n ∈ {2, 5, 8, 10, 15,
+20, 30} × `stale_window` ∈ {10, 1000} (the two knobs are coupled: a recurrence needs a window
+wide enough to hold n events) reveals a real, family-wise-corrected edge at high thresholds:
+P(fail | fired) climbs from the base rate 0.421 to 0.538 at n=15 (lift 1.28), 0.582 at n=20
+(lift 1.38) and 0.706 at n=30 (lift 1.68), with AUROC 0.662 clearing the max-over-cells
+family-wise null 95% [0.500, 0.549] at adjusted p = 0.005. The escalation eval status is now
+`OK_OFFLINE_ONLY` — through the policy half. The recurrence framing itself was not wrong; it just needed a
+higher threshold than the shipped default.
+
+The shallow prefix is informationless. Early steps are all bug-reproduction — the agent re-runs
+the failing test before editing anything — so no prefix feature separates and the depth-5 design
+is rank-deficient (412 of 414 rows identical). The deep-depth "signal" was length-selection:
+admission at depth d requires `depth + MIN_WITHHELD` scorable steps, run length is
+outcome-correlated, so the admission test selects failures and a rising incremental at depth
+measures that selection rather than prefix evidence. The MIN_WITHHELD wall is validated — it is
+what keeps the reported ladder (now depth 10, prefix AUROC 0.478, incremental −0.022) honest.
+The R0 instrument gate passes: a planted signal is recovered by the assembled pipeline (AUROC
+1.000) and a within-challenge label shuffle collapses it to chance (0.535, inside the band), so
+the prefix null is a falsification, not a coverage gap.
+
+Next directions: embedding features on step text fused with the recurrence signal — the policy
+edge is real but threshold-only and per-step (production decides once per session, so it is an
+offline-only upper bound below the cost break-even), and step content may carry more, earlier
+signal — and more distinct challenges: the prefix instrument's minimum detectable effect is
+≈ 0.59, and settling it needs roughly 640 challenges, not more runs per challenge. Tuning the
+recurrence knob on the LIVE path is not a direct transfer of this result: at session cadence a
+higher `escalate_after_n` means more *sessions* failing on the same check, not more steps.
 
 ## Contributing
 

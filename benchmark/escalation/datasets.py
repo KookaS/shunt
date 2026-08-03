@@ -18,23 +18,37 @@ if TYPE_CHECKING:
 
     from benchmark.escalation.schema import Trajectory
 
-# The sweep varies `escalate_after_n` ONLY, and the two knobs it used to vary are pinned.
+# The sweep varies BOTH `escalate_after_n` AND `stale_window`, because the two are coupled and the
+# old one-axis grid was the reason the escalation edge was invisible. Measured on the rebuilt
+# corpus (2026-08-02, 727 stamped runs, base rate 0.421):
 #
-# `stale_window` and `ladder` were measured INERT on this corpus: hashing the full score vector for
-# all 12 old cells returned exactly 2 distinct results. `stale_window` never binds because the
-# median first same-key repeat is at step index 1, so no window >= 5 can retire an entry before it
-# recurs; `ladder` cannot move a detection metric at all, because the metric reads whether the
-# policy fired, not which rung it climbed. Sweeping 12 cells to obtain 2 answers dressed a 1-in-2
-# coin flip as a 1-in-12 optimisation, so the dead axes are pinned at their defaults and named
-# here rather than swept. Re-open them when a knob is shown to change an outcome.
-_PINNED_STALE_WINDOW: Final[int] = 5
+#   - The recurrence trigger has a REAL, null-clearing edge, but only at HIGH recurrence
+#     thresholds: escalate_after_n=15 -> P(fail|fired)=0.538 (lift 1.28), n=20 -> 0.582 (1.38),
+#     n=30 -> 0.706 (1.68), all outside the challenge-block permutation null (p=0.005). The
+#     shipped default n=2 fires on 727/727 trajectories (reproduction failures recur at step 1-2),
+#     so it reads precision == base rate and hides the edge. A grid that stopped at n=3 could only
+#     ever measure the mask, never the signal.
+#   - `stale_window` is NOT inert at high n: `_in_window` admits at most `stale_window` events, so
+#     reaching n recurrences needs a window at least that wide. The grid sweeps {10, 1000} so the
+#     binding is visible rather than assumed. `ladder` stays pinned: the detection metric reads
+#     whether the policy fired, not which rung it climbed, so it cannot move the headline.
+#   - `escalate_after_n=2` stays in the grid as the SHIPPED cell: the report must show what ships,
+#     not only what scores better (run_eval guarantees it is measured and flagged, never adopted).
 _PINNED_LADDER: Final[str] = "effort_then_rank"
 
-# escalate_after_n=1 is included deliberately: it is not the shipped default (2) but it is the one
-# cell where measured precision separates from the rest, so the report must show it.
+# n below the shipped default is deliberately excluded: escalate_after_n=1 fires on the FIRST
+# verified failure, which is failure-biased (intermediate fail-then-fix is normal) and which the
+# shipped config comment already rules out. n=2..30 spans the mask (all-fire) through the
+# null-clearing edge with room to see the precision/recall trade-off.
+_N_LADDER: Final[tuple[int, ...]] = (2, 5, 8, 10, 15, 20, 30)
+# 10 is the shipped window; 1000 is "the whole session" (a run's median length is ~31 steps), so a
+# recurrence can never retire inside a session. The two values show the window's binding at high n.
+_STALE_WINDOWS: Final[tuple[int, ...]] = (10, 1000)
+
 DEFAULT_GRID: Final[list[GridPoint]] = [
-    GridPoint(escalate_after_n=n, stale_window=_PINNED_STALE_WINDOW, ladder=_PINNED_LADDER)
-    for n in (1, 2, 3)
+    GridPoint(escalate_after_n=n, stale_window=sw, ladder=_PINNED_LADDER)
+    for n in _N_LADDER
+    for sw in _STALE_WINDOWS
 ]
 
 _TRUE = "True"

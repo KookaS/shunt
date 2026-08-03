@@ -154,13 +154,17 @@ Conflating them makes every number ambiguous, so we keep them apart throughout.
 | Input | The task text, embedded | Verified failing-check ids from re-running your tests off the wire |
 | Learns from | Task outcome, pass/fail | Whether this attempt ultimately failed |
 | Today | k-nearest-neighbours over task embeddings | A recurrence rule over verified failing-check ids |
-| Status | **No measurable signal over the base rate yet** | **First attempt, not working — `NO_SKILL`** |
+| Status | **No measurable signal over the base rate yet** | **Policy: `OK_OFFLINE_ONLY` at high `escalate_after_n` — per-step signal, below the cost break-even; prefix model: `NO_SKILL`** |
 | Next | bigram / linear models, calibrated classifiers, better selection rules | calibrated risk scoring, structural loop features, late fusion |
 
 The escalation model is a **first attempt**, inspired by the published
-[ACRouter](https://arxiv.org/abs/2606.22902) design. It does not currently show
-good performance, and it ships **disabled**. We reproduced that paper and
-withdrew our citation of it; the write-up is in the
+[ACRouter](https://arxiv.org/abs/2606.22902) design. The recurrence policy
+carries a real edge only at recurrence thresholds far above the shipped default,
+and that edge is a **per-step** signal on the offline corpus: production decides
+once per session, so the measured AUROC (0.662) is an offline-only upper bound
+that sits below the cost break-even (~0.72) — a statistical signal, not a
+shippable one. The prefix risk model reads no skill, and it ships **disabled**.
+We reproduced that paper and withdrew our citation of it; the write-up is in the
 [research log](docs/research-log.md).
 
 ### Both pipelines, end to end
@@ -339,36 +343,36 @@ from an identifier — not that it is unrecoverable from the task.
 
 <br>
 
-**1. The gate: is it beating its own null?** The grey histogram is the same
-statistic recomputed under randomly shuffled outcome labels, with the whole
-fitting pipeline re-run per shuffle, and labels shuffled *inside* each challenge
-so both arms keep the same prior; dashed lines bound the null's central 95%.
-*How to read it:* for the detector to be doing anything, the red line must sit
-clearly right of the upper dashed line. Under the corrected methodology using
-StratifiedGroupKFold to avoid fold-prevalence accounting artifacts, the
-incremental signal is not measurable — resampling whole challenges puts the
-increment at approximately zero, so the harness returns `NO_SKILL`. (An earlier
-evaluation reported +0.076 here, but that figure was inflated by the same
-between-fold base-rate artifact that contaminated the prior column; see the
-retraction section below.)
+**1. The gate: is it beating its own null?** The grey histogram is the escalation
+**policy**'s family-wise (max-over-cells) null: the maximum AUROC the swept
+policy reaches under BLOCK permutation — whole challenge blocks shuffled, so
+outcomes move between challenges while the global multiset is preserved — with
+one shared shuffle scored at every swept cell and only the largest kept; dashed
+lines bound the null's central 95%. *How to read it:* for
+the policy to be doing anything, the red line must sit clearly right of the
+upper dashed line. It does: the best cell (n=30, `stale=1000`) reads AUROC
+**0.662** against the family-wise null 95% **[0.500, 0.549]**, adjusted
+**p = 0.005** — that clearance is why the harness reports `OK_OFFLINE_ONLY`. The prefix risk
+model's incremental is nulled on its own path and honestly reports `NO_SKILL`;
+see the escalation results section below.
 
 ![Escalation permutation null](benchmark/escalation/reports/permutation_null.png)
 
 **2. The question the product actually asks.** Of the runs the policy escalated,
 how many failed — against the runs it left alone, and against the corpus base
-rate. *Look for:* the escalated bar clearly above the base-rate line. On this
-corpus the policy escalates every scored run, so there is no left-alone arm and
-the escalated rate is the base rate by construction (lift 1.00×).
+rate. *Look for:* the escalated bar clearly above the base-rate line. On the
+shipped cell (n=2, `stale=10`) the policy escalates every scored run, so there is
+no left-alone arm and the escalated rate is the base rate by construction (lift
+1.00×); the separated cells at high n are shown in the sweep table.
 
 ![Outcome by escalation](benchmark/escalation/reports/trajectory_outcomes.png)
 
-**3. Ranking quality.** The ROC curve for the detector's score against the
-corrected causal label. *Look for:* a curve leaving the grey permutation-null
-band toward the top-left. The reference is that band and the dashed line at its
-**measured** centre — not the faint 0.5 diagonal. The whole pipeline is refit on
-every label shuffle, so its no-information AUROC is something the harness
-measures rather than assumes; the legend prints the value it came to. The curve
-stays inside the band.
+**3. Ranking quality.** The escalation **policy**'s ROC across the swept
+recurrence thresholds: one point per `escalate_after_n` value that fired, each
+labelled with its n. As the threshold rises the policy moves up the curve — more
+precision, less recall. *Look for:* points leaving the faint 0.5 diagonal toward
+the top-left. The prefix risk model's curve is not drawn: its score is constant
+at the evaluated depths, so it ranks nothing.
 
 ![Escalation ROC](benchmark/escalation/reports/roc_curve.png)
 
@@ -376,7 +380,8 @@ stays inside the band.
 through per-step outcome stamping. *Look for:* every bar at 1.0. All six now are.
 Three models used to sit at **zero**, leaving the recurrence trigger structurally
 dead on them; offline container replay re-stamped those runs at zero API cost.
-Closing the gap did not change the verdict.
+Closing the gap did not change the prefix verdict — the `NO_SKILL` on the prefix
+model stands on the complete corpus.
 
 ![Failure capture coverage](benchmark/escalation/reports/failure_capture_coverage.png)
 
@@ -389,7 +394,8 @@ headline, stated plainly:
 
 > **Cheap-first routing with verified escalation reaches always-frontier quality
 > for roughly a quarter of the cost ($20.46 against $87.04) — but the machine
-> learning contributes nothing to that, and the escalation model does not work.**
+> learning contributes nothing to that, and the escalation signal lives in the
+> recurrence policy at high thresholds, not in the prefix risk model.**
 > The saving is real and comes from *mechanism*, not prediction.
 
 | strategy | pass rate | total cost |
@@ -540,12 +546,16 @@ features cannot distinguish model identity — a fact unambiguously present in
 trajectory patterns — shows the gate was a null generator, not an instrument.
 
 So we are withdrawing *"the escalation model does not work"* and replacing it
-with something less satisfying and more accurate: **we cannot yet tell.** This
-evaluation could only ever have detected a detector at AUROC ≥ 0.59. The raw
-features hint at ≈ 0.52 — squarely inside the blind spot. Resolving it needs
-roughly four times the distinct challenges (152 → ~640); more runs per existing
-challenge buy almost nothing, because the clustering already inflates variance
-~3×.
+with something less satisfying and more accurate: **we cannot yet tell** — at
+least not for a shallow-prefix detector, which is why that half still reads
+`NO_SKILL`; the escalation results now attribute the signal to the recurrence
+policy at high thresholds (status `OK_OFFLINE_ONLY` at `escalate_after_n=30` /
+`stale_window=1000`, see [docs/results.md](docs/results.md#escalation-results)).
+The prefix evaluation could only ever have detected a detector at AUROC ≥ 0.59.
+The raw features hint at ≈ 0.52 — squarely inside the blind spot. Resolving it
+needs roughly four times the distinct challenges (152 → ~640); more runs per
+existing challenge buy almost nothing, because the clustering already inflates
+variance ~3×.
 
 **What survives all of it:** the cascade result. Price-Cascade at $20.46 against
 Always-Frontier's $87.04 is untouched by every defect above — it uses no model,

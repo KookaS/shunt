@@ -15,14 +15,12 @@ from benchmark.escalation import deployability, features, run_eval
 from shunt.router.escalation import EscalationContext, FailureEvent
 from tests.escalation.factories import make_step
 
-# The three FEATURE_NAMES columns whose source fields DO reach the production decision context.
+# The FEATURE_NAMES columns whose source fields DO reach the production decision context. With the
+# 2026-08-02 removal of the two `failing_check_id`-derived columns (`distinct_check_id_rate`,
+# `max_key_repeat_rate`) this is exactly one: `fail_rate` reads `success`, which production holds.
 # Named here so the pass-direction cases are a real subset of what the eval scores, not an
 # invented set chosen to make the gate green.
-_PROJECTABLE: Final[tuple[str, ...]] = (
-    "fail_rate",
-    "distinct_check_id_rate",
-    "max_key_repeat_rate",
-)
+_PROJECTABLE: Final[tuple[str, ...]] = ("fail_rate",)
 
 
 # ── the context is read off the shipped code, not restated ──────────────────────────
@@ -143,14 +141,19 @@ def test_the_cadence_alone_can_sink_an_otherwise_projectable_set() -> None:
 
 
 def test_a_feature_on_an_unfilled_production_field_is_starved_not_supported() -> None:
-    # The class the "8 fields at 0.0%" census is about: production HAS `current_rank_index`, but
-    # if no corpus record carries it, a model fitted on it was fitted on nothing.
+    # The class the "8 fields at 0.0%" census is about: production HAS the field, but if no corpus
+    # record carries it, a model fitted on it was fitted on nothing. The 2026-08-02 feature
+    # reduction removed the two `failing_check_id`-derived columns that USED to be the way this
+    # class reached FEATURE_NAMES (the old fixture starved `distinct_check_id_rate` /
+    # `max_key_repeat_rate` via `unfilled={"dedup_key"}`); `fail_rate` is the one remaining
+    # projectable column, so `unfilled={"success"}` is the synthetic version of the same
+    # mechanism — a field production holds that no record fills starves the feature that reads it.
     verdict = deployability.assess(
-        _PROJECTABLE, deployability.Cadence.SESSION, unfilled=frozenset({"dedup_key"})
+        _PROJECTABLE, deployability.Cadence.SESSION, unfilled=frozenset({"success"})
     )
     assert not verdict.deployable
-    assert set(verdict.starved) == {"distinct_check_id_rate", "max_key_repeat_rate"}
-    assert verdict.supported == ("fail_rate",)
+    assert set(verdict.starved) == {"fail_rate"}
+    assert verdict.supported == ()
     assert "no corpus record fills" in verdict.reason
 
 

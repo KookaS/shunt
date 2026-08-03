@@ -35,7 +35,8 @@ class MiniSweAgentParser:
         for i, msg in enumerate(messages):
             if isinstance(msg, dict) and msg.get("role") == "assistant":
                 step = self._step(len(steps), msg, _next_observation(messages, i))
-                if step.step_index in outcomes:  # ADR-PSV-4 side-channel map
+                # side channel: per-step outcomes keyed by step_index, applied where present
+                if step.step_index in outcomes:
                     step = stamp_step(step, outcomes[step.step_index])
                 steps.append(step)
         if steps and "terminal_resolved" in meta:

@@ -71,7 +71,25 @@ id = "generic-api-key"
   condition = "AND"
   paths = ['''^benchmark/escalation/data/live/admissibility\.json$''']
   regexTarget = "match"
-  regexes = ['''^gate_key": "[0-9a-f]{10,64}"?$''']
+  # `\s*` before the field name: the committed record is `json.dumps(indent=2)`, so the field
+  # line is `    "gate_key": "<hex>"` — the previous `^gate_key"` anchor never matched a line
+  # with leading indentation, silently voiding this allowlist (165 false positives when the
+  # corpus is scanned directly). Binding the WHOLE field name (never a suffix) is unchanged.
+  regexes = ['''^\s*gate_key": "[0-9a-f]{10,64}"?$''']
+
+  [[rules.allowlists]]
+  description = "django session auth hashes in committed corpus trajectories (session_hash values, not credentials)"
+  condition = "AND"
+  paths = ['''^benchmark/escalation/data/live/django__django-16631__kimi-k2\.5__(think|nothink)\.jsonl$''']
+  regexTarget = "match"
+  # `_auth_user_hash` is django's session-hash field name inside a captured agent's command and
+  # its output (the trajectory's `result` text), and its value is a 64-char SHA-256 session
+  # digest (`get_session_auth_hash`) the test printed — a content hash, never a key. The finding
+  # match is the field plus its value (`_auth_user_hash': '<hex>'`, no leading quote: the field
+  # sits inside a JSON string), so the regex binds the WHOLE field name and a bare hex value; a
+  # `secret_key`/`api_key`-shaped line still fires because the field name is required. Bound to
+  # the two corpus files that contain it.
+  regexes = ['''^_auth_user_hash': '[0-9a-f]{10,64}'?$''']
 
 # A GAP IN THE UPSTREAM RULESET, not a relaxation of it — the only rule here that ADDS coverage.
 # gitleaks v8.21.2 ships no Anthropic rule, and `generic-api-key` does not reach the shape either:

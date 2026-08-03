@@ -299,6 +299,10 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
             selection_rule=selection_rule,
             cold_start_strategy=ColdStartStrategy(threshold_tier2=0, threshold_tier1=0),
             cold_start_threshold=0,
+            # The engine's neighbourhood size was left at its default 20 while `self._k` (also
+            # 20 by default, but a real knob) was stored and never wired through — a benchmark
+            # run with `strategies.knn.k != 20` silently measured k=20. Pass the knob through.
+            neighbor_k=self._k,
         )
 
         self._ready = True

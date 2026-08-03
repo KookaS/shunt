@@ -75,7 +75,7 @@ def test_stamp_step_infra_is_never_a_capability_failure() -> None:
     assert stamped.blocking is False  # infra never counts toward escalation
 
 
-# ── parser side-channel map (ADR-PSV-4) ───────────────────────────────────────
+# ── parser side-channel map ─────────────────────────────────────────────────
 
 
 def test_parser_stamps_steps_from_the_outcome_map() -> None:

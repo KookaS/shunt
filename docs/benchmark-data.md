@@ -128,7 +128,7 @@ through the `benchmark` extra (a bare `uv run` strips the harness dependencies).
 
 ### Routing pipeline
 
-`make benchmark` runs the whole lifecycle — **collect → stamp → evaluate → report** —
+`make benchmark` runs the whole lifecycle — **collect → stamp → evaluate → report → figures** —
 and prints one consolidated summary:
 
 ```bash
