@@ -456,6 +456,13 @@ class TestStandaloneFigureFreshness:
         for name in ("plot_timing", "plot_strategies"):
             assert any(p.name == "strategies" for p in jobs[name].inputs)
 
+    def test_the_model_registry_is_part_of_the_data_digest(self) -> None:
+        """A `default_arm` change in models.yaml re-picks each model's canonical routing
+        row, which moved every strategy number without any results.csv edit. It must be
+        fingerprinted or the committed figures silently outlive the registry."""
+        inputs = pipeline._data_inputs()
+        assert any(p.name == "models.yaml" and "config" in str(p) for p in inputs)
+
 
 def _module_origin(name: str) -> Path | None:
     """Source file for an IN-REPO module name, or None for anything else."""

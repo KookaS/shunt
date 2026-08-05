@@ -194,3 +194,193 @@ def test_sweep_emits_one_point_per_grid_point() -> None:
     for point in result.points:
         assert len(point.decisions) == len(trajs)  # every trajectory replayed, no drops
     assert [p.grid_point for p in result.points] == grid  # no dups, order preserved
+
+
+def test_is_edit_action_detects_writes_but_not_reads() -> None:
+    writes = [
+        "cd /testbed && sed -i 's/foo/bar/' x.py",
+        "cat > x.py << 'EOF'\ncontent",
+        "python -c \"open('x.py','w').write('...')\"",
+        "perl -i -pe 's/x/y/' x.py",
+        "git apply patch.diff",
+        "cd /testbed && tee -a x.py << 'EOF'",
+        "printf 'x' >> x.py",
+        "patch -p1 < /tmp/fix.diff",
+        "patch -p0 -i /tmp/fix.diff",
+        "patch -i fix.patch",
+        "patch < fix.diff",
+        "applypatch /tmp/patch",
+        "git apply --check && patch -p1 < /tmp/fix.diff",
+    ]
+    reads = [
+        "cat x.py",
+        "grep -n foo x.py",
+        "sed -n '1,40p' x.py",
+        "ls -la",
+        "git log --oneline -5",
+        "git diff",
+        "cd /tmp && cat > tmp.sh",  # scratch, not a code change
+        "python -c \"print('hello')\"",
+        "cat patch.txt",  # a READ of a file named patch, not a patch invocation
+        "curl -sL https://example.com/patch -o /tmp/patch",  # download ends in 'patch'
+        "from unittest.mock import patch",  # python: mock.patch, not the patch(1) utility
+    ]
+    for write in writes:
+        assert replay.is_edit_action(write), write
+    for read in reads:
+        assert not replay.is_edit_action(read), read
+
+
+def test_count_from_first_edit_ignores_the_reproduction_phase() -> None:
+    # The shipped counter counts EVERY same-key failure, so two reproduction-phase reds (the
+    # agent running the failing test before changing anything) fire the trigger on a run that is
+    # about to fix the bug. `count_from_first_edit` treats pre-edit failures as no-ops — the
+    # reproduction phase is the target bug at t=0, not "an edit did not work".
+    pre = make_trajectory(
+        [
+            make_step(step_index=0, decision_index=0, success=False, failing_check_id="t::a"),
+            make_step(step_index=1, decision_index=1, success=False, failing_check_id="t::a"),
+        ]
+    )
+    post = make_trajectory(
+        [
+            make_step(
+                step_index=0,
+                decision_index=0,
+                success=False,
+                failing_check_id="t::a",
+                action="cat x.py",
+            ),
+            make_step(
+                step_index=1,
+                decision_index=1,
+                success=False,
+                failing_check_id="t::a",
+                action="sed -i 's/a/b/' x.py",
+            ),
+            make_step(
+                step_index=2,
+                decision_index=2,
+                success=False,
+                failing_check_id="t::a",
+                action="python -c \"open('x.py','w').write('z')\"",
+            ),
+        ]
+    )
+    cfg = GridPoint(2, 10).to_config()
+    # Ungated: the reproduction-phase failures fire the trigger.
+    assert replay.replay_config(pre, cfg, context=_CTX).escalated
+    # Gated: pre-edit failures are no-ops, so a two-failure reproduction holds...
+    assert not replay.replay_config(pre, cfg, context=_CTX, count_from_first_edit=True).escalated
+    # ...while two failures AFTER the first edit fire.
+    assert replay.replay_config(post, cfg, context=_CTX, count_from_first_edit=True).escalated
+
+
+def test_max_recurrence_counts_every_same_key_failure_by_default() -> None:
+    # The default factory action ("act") is not an edit, so both failures sit in the
+    # reproduction phase — and the as-shipped counter counts them anyway.
+    traj = make_trajectory(
+        [
+            make_step(step_index=0, decision_index=0, success=False, failing_check_id="t::a"),
+            make_step(step_index=1, decision_index=1, success=False, failing_check_id="t::a"),
+        ]
+    )
+    cfg = GridPoint(2, 10).to_config()
+    assert replay.max_recurrence(traj, cfg) >= 2
+
+
+def test_max_recurrence_is_zero_for_a_reproduction_phase_when_edit_gated() -> None:
+    # `count_from_first_edit=True` treats pre-edit failures as no-ops — the target bug at t=0,
+    # not "an edit did not work" — so a two-failure reproduction scores 0, mirroring the
+    # `replay_config` directive stream's HOLD.
+    traj = make_trajectory(
+        [
+            make_step(step_index=0, decision_index=0, success=False, failing_check_id="t::a"),
+            make_step(step_index=1, decision_index=1, success=False, failing_check_id="t::a"),
+        ]
+    )
+    cfg = GridPoint(2, 10).to_config()
+    assert replay.max_recurrence(traj, cfg, count_from_first_edit=True) == 0
+
+
+def test_max_recurrence_a_verified_pass_clears_the_window() -> None:
+    # fail, fail, success, fail: the pass retires the window, so the trailing failure counts as
+    # one — the score is the earlier 2-streak, never 3.
+    traj = make_trajectory(
+        [
+            make_step(step_index=0, decision_index=0, success=False, failing_check_id="t::a"),
+            make_step(step_index=1, decision_index=1, success=False, failing_check_id="t::a"),
+            make_step(step_index=2, decision_index=2, success=True),
+            make_step(step_index=3, decision_index=3, success=False, failing_check_id="t::a"),
+        ]
+    )
+    cfg = GridPoint(2, 10).to_config()
+    assert replay.max_recurrence(traj, cfg) == 2
+
+
+def test_max_recurrence_is_the_same_key_streak_length() -> None:
+    # A 4-failure same-key streak scores its length; distinct keys never aggregate.
+    streak = make_trajectory(
+        [
+            make_step(step_index=i, decision_index=i, success=False, failing_check_id="t::a")
+            for i in range(4)
+        ]
+    )
+    cfg = GridPoint(2, 10).to_config()
+    assert replay.max_recurrence(streak, cfg) == 4
+    distinct = make_trajectory(
+        [
+            make_step(step_index=0, decision_index=0, success=False, failing_check_id="t::a"),
+            make_step(step_index=1, decision_index=1, success=False, failing_check_id="t::b"),
+        ]
+    )
+    assert replay.max_recurrence(distinct, cfg) == 1
+
+
+def test_max_recurrence_retires_failures_outside_the_stale_window() -> None:
+    # Two failures, a gap longer than the window, then two more: the first pair is retired, so
+    # the score is the 2-streak, never 4 — while a whole-session window accumulates them all.
+    traj = make_trajectory(
+        [
+            make_step(step_index=0, decision_index=0, success=False, failing_check_id="t::a"),
+            make_step(step_index=1, decision_index=1, success=False, failing_check_id="t::a"),
+            make_step(step_index=10, decision_index=10, success=False, failing_check_id="t::a"),
+            make_step(step_index=11, decision_index=11, success=False, failing_check_id="t::a"),
+        ]
+    )
+    assert replay.max_recurrence(traj, GridPoint(2, 3).to_config()) == 2
+    assert replay.max_recurrence(traj, GridPoint(2, 1000).to_config()) == 4
+
+
+def test_max_recurrence_treats_unstamped_and_infra_steps_as_no_ops() -> None:
+    # `max_recurrence` re-implements the lifecycle the `replay_config` tests pin, so the NONE
+    # steps must behave the same here: an unstamped step (`success=True, confirmed=False`) and an
+    # infra red (`success=True, is_infra_failure=True`) are neither verified passes (which retire
+    # the window) nor verified failures (which count) — the running max must survive them.
+    for noop in (
+        make_step(step_index=1, decision_index=1, success=True, confirmed=False),
+        make_step(step_index=1, decision_index=1, success=True, is_infra_failure=True),
+    ):
+        traj = make_trajectory(
+            [
+                make_step(step_index=0, decision_index=0, success=False, failing_check_id="t::a"),
+                noop,
+                make_step(step_index=2, decision_index=2, success=False, failing_check_id="t::a"),
+            ]
+        )
+        cfg = GridPoint(2, 10).to_config()
+        assert replay.max_recurrence(traj, cfg) == 2
+
+
+def test_max_recurrence_ignores_failures_with_no_dedup_key() -> None:
+    # A verified failure with no failing-check id contributes no FailureEvent
+    # (`_step_failure_event` returns None), so it can neither count nor retire the window —
+    # exactly like the live path, which returns early when `dedup_key is None`.
+    traj = make_trajectory(
+        [
+            make_step(step_index=0, decision_index=0, success=False, failing_check_id="t::a"),
+            make_step(step_index=1, decision_index=1, success=False),
+            make_step(step_index=2, decision_index=2, success=False, failing_check_id="t::a"),
+        ]
+    )
+    assert replay.max_recurrence(traj, GridPoint(2, 10).to_config()) == 2

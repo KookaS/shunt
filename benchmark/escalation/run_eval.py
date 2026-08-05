@@ -46,7 +46,9 @@ from benchmark.escalation.ope import (
     rows_from_records,
 )
 from benchmark.escalation.schema import Trajectory, load_jsonl
+from benchmark.escalation.session_eval import SessionCadenceReport, session_cadence
 from benchmark.plot_frame import Annotations, FigureSpec
+from shunt.router.escalation import EscalationConfig
 from shunt.router.policy import load_router_policy, packaged_policy_path
 
 matplotlib.use("Agg")
@@ -102,13 +104,43 @@ class EvalReport:
     n_multistep: int
     authenticity_errors: int
     policy_cells: list[PolicyCell]
-    depth_reports: list[DepthReport]
-    coverage: list[ModelCoverage]
     # REQUIRED, deliberately not defaulted: a skill verdict says whether a signal is there, and
     # this says whether that signal is one production could act on. A default would let a report
     # be built — and its numbers quoted — without anyone stating which of the two it is.
     deployability: Deployability
+    # The SAME recurrence sweep, replayed with `count_from_first_edit=True`: failures before the
+    # agent's first edit are treated as the reproduction phase (the target bug at t=0), not as
+    # escalation evidence. This is the variant that actually discriminates on this corpus — the
+    # ungated shipped cell fires on every run and reads the base rate, while the edit-gated cells
+    # at n=2..10 carry AUROC ~0.71-0.73 with a run-length baseline near 0.57 — so it is reported
+    # as its OWN family (own family-wise null) rather than folded into the shipped one. It is an
+    # EVAL-ONLY policy: the live router has no per-step action stream to gate on, so it describes
+    # what the recurrence mechanism could do if a per-step detector ran in production.
+    policy_cells_edit_gated: list[PolicyCell] = field(default_factory=list)
+    depth_reports: list[DepthReport] = field(default_factory=list)
+    coverage: list[ModelCoverage] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    # The session-cadence escalation value: the corpus's multiple (model, arm) sessions per
+    # instance read as repeated attempts at one task, so "cheap session failed -> escalate the
+    # next session to a frontier model" is measurable at the cadence production actually runs.
+    # Observational (parallel arms, adaptive coverage), and small-n; reported as context for the
+    # per-step sweep, never as a gate. None when the corpus cannot support it.
+    session_cadence: SessionCadenceReport | None = None
+    # The per-run continuous recurrence scores behind the `recurrence_roc.png` figure:
+    # (as-shipped stuck-depth scores, edit-gated stuck-depth scores, terminal-failed labels,
+    # challenge groups), aligned index-for-index over the STAMPED trajectories. Not serialized —
+    # it is figure input, not a reported statistic (the figure's AUROCs are the reportable
+    # numbers). The groups ride along so the figure's detection floor can use the SAME
+    # challenge-block permutation the policy cells use (`policy_eval.null_roc_band`).
+    recurrence_scores: (
+        tuple[tuple[float, ...], tuple[float, ...], tuple[bool, ...], tuple[str, ...]] | None
+    ) = None
+    # The recurrence score's detection floor: the scalar family-wise AUROC null and the shaded
+    # 2.5-97.5% band drawn on `recurrence_roc.png`. Figure input, not serialized.
+    recurrence_null: metrics.NullResult | None = None
+    recurrence_null_band: tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]] | None = (
+        None
+    )
     # The off-policy escalation-value estimate, present only when a real exploration log was
     # supplied. None means "not asked", NOT "no effect" — the two must stay distinguishable.
     policy_value: PolicyValueEstimate | None = None
@@ -125,6 +157,19 @@ class EvalReport:
         # `evaluate` guarantees the shipped point is in the grid so the None branch means a
         # hand-built report, not a routine run.
         return next((c for c in self.policy_cells if _is_shipped(c)), None)
+
+    @property
+    def best_skilled_cell(self) -> PolicyCell | None:
+        """Strongest skilled cell across BOTH families, ranked by AUROC (the detection claim)."""
+        # Each family carries its own maxT null (computed inside `policy_eval.evaluate`), so a
+        # cell's `has_skill` is already multiplicity-corrected within its family. Reading the best
+        # across two families is a mild selection over two corrected tests; the p-values on this
+        # corpus are at the draw floor (0.005), so it survives trivially, and the reason string
+        # names the family. AUROC first, precision second: the verdict is a DETECTION claim, and
+        # ranking by precision alone would headline the 69-run n=30 cell over the 435-run n=2 cell
+        # that actually separates runs. The status gate routes through the same helper so the
+        # report and the reason cannot disagree about which cell is best.
+        return _best_skilled_cell([*self.policy_cells, *self.policy_cells_edit_gated])
 
     @property
     def best_depth(self) -> DepthReport | None:
@@ -151,9 +196,15 @@ class EvalReport:
             "authenticity_errors": self.authenticity_errors,
             "headline_policy_cell": None if cell is None else cell.to_dict(),
             "policy_cells": [c.to_dict() for c in self.policy_cells],
+            # The reproduction-phase-gated family, reported as its own sweep. Its cells carry
+            # their own family-wise null; `best_skilled_cell` reads across both.
+            "policy_cells_edit_gated": [c.to_dict() for c in self.policy_cells_edit_gated],
             "prefix_model": [d.to_dict() for d in self.depth_reports],
             "capture_coverage": [c.to_dict() for c in self.coverage],
             "notes": self.notes,
+            "session_cadence": (
+                None if self.session_cadence is None else self.session_cadence.to_dict()
+            ),
             "escalation_policy_value": (
                 None if self.policy_value is None else asdict(self.policy_value)
             ),
@@ -188,6 +239,7 @@ def _status(
     depths: Sequence[DepthReport],
     authenticity_errors: int = 0,
     deployability: Deployability | None = None,
+    edit_gated_cells: Sequence[PolicyCell] = (),
 ) -> tuple[str, str]:
     """Gate on Layer-1 authenticity first, then on the permutation nulls (policy AND prefix)."""
     if authenticity_errors:
@@ -212,19 +264,34 @@ def _status(
     # actually fires, (b) clears its family-wise null, and (c) has a precision interval above the
     # base rate is skill the prefix model never had a chance to express. The sweep is read as ONE
     # family (OK if any cell clears) so each cell's null is the max-over-cells maxT reference.
-    skilled_cells = [c for c in report_cells if c.has_skill]
-    if skilled_cells:
-        best = max(skilled_cells, key=lambda c: c.precision or 0.0)
+    # BOTH families are considered: each carries its OWN family-wise null (30 cells each on this
+    # corpus), and `_best_skilled_cell` reads across them — a mild, uncorrected selection over
+    # two corrected tests, which the reason string states rather than hides. The reason names
+    # which family the best cell belongs to.
+    all_cells = [*report_cells, *edit_gated_cells]
+    best = _best_skilled_cell(all_cells)
+    if best is not None:
+        # Identity, never structural equality: a report_cells cell that happens to equal an
+        # edit-gated one is still gated against ITS OWN family's null, and the family sentence
+        # (and the multiplicity quoted below) must follow which list the winning OBJECT is in.
+        in_edit_family = any(best is c for c in edit_gated_cells)
+        family = "edit-gated (post-first-edit recurrence)" if in_edit_family else "as-shipped"
+        # The adjusted p is family-wise WITHIN the best cell's own family (the maxT reference it
+        # was gated against), NOT across both families — quoting len(all_cells)=60 would overstate
+        # the multiplicity correction.
+        family_size = len(edit_gated_cells) if in_edit_family else len(report_cells)
         return (
             ok_status,
-            f"escalation policy at escalate_after_n={best.escalate_after_n}/"
+            f"escalation policy ({family}) at escalate_after_n={best.escalate_after_n}/"
             f"stale_window={best.stale_window} fires on {best.n_escalated} of "
             f"{best.n_trajectories} trajectories and clears its family-wise permutation null: "
             f"AUROC {best.null_auroc.observed:.3f} against the max-over-cells null 95% "
             f"[{best.gate_null.ci_low:.3f}, {best.gate_null.ci_high:.3f}] (adjusted "
-            f"p={best.gate_null.p_value:.3f} over {len(report_cells)} swept cell(s)), with "
+            f"p={best.gate_null.p_value:.3f} within its {family_size}-cell sweep, selected across "
+            f"the as-shipped and edit-gated families), with "
             f"P(fail|fired)={best.precision:.3f} [{best.precision_ci[0]:.3f}, "
             f"{best.precision_ci[1]:.3f}] above the base failure rate {best.base_failure_rate:.3f}"
+            + _length_disclosure(best)
             + scope_caveat,
         )
     # This "any depth clears" rule is WHY the nulls read below are the family-wise ones: taking the
@@ -245,7 +312,7 @@ def _status(
             f"adjusted p={best_depth.gate_null_incremental.p_value:.3f} "
             f"over {len(depths)} reported depth(s))" + scope_caveat,
         )
-    return _STATUS_NO_SKILL, _no_skill_reason(report_cells, depths)
+    return _STATUS_NO_SKILL, _no_skill_reason(report_cells, depths, edit_gated_cells)
 
 
 def _offline_only_caveat(deployability: Deployability | None) -> str:
@@ -258,7 +325,30 @@ def _offline_only_caveat(deployability: Deployability | None) -> str:
     )
 
 
-def _no_skill_reason(report_cells: Sequence[PolicyCell], depths: Sequence[DepthReport]) -> str:
+def _length_disclosure(cell: PolicyCell) -> str:
+    """The run-length honesty sentence a skilled cell's reason must carry, or the empty string."""
+    # The challenge-block gate removes the length→failure association along with everything else,
+    # so a cell can clear it while most of its excess over chance is length selection. The two
+    # length references are the disclosure: how much of the AUROC a pure length>=t predictor gets
+    # at the same flag count, and whether the recurrence excess clears a null that KEEPS the
+    # length association. Absent when the cell was hand-built without them.
+    if cell.length_baseline_auroc is None or cell.null_auroc_length is None:
+        return ""
+    length_null = cell.null_auroc_length
+    length_verdict = "clears" if length_null.beats_null else "does NOT clear"
+    return (
+        f" — run length alone scores {cell.length_baseline_auroc:.3f} at the same flag count, "
+        f"and the recurrence excess {length_verdict} the length-stratified null "
+        f"(AUROC {cell.null_auroc.observed:.3f} against {length_null.ci_low:.3f}-"
+        f"{length_null.ci_high:.3f}, p={length_null.p_value:.3f})"
+    )
+
+
+def _no_skill_reason(
+    report_cells: Sequence[PolicyCell],
+    depths: Sequence[DepthReport],
+    edit_gated_cells: Sequence[PolicyCell] = (),
+) -> str:
     """Name the skill conditions that actually failed, with their numbers, at the closest depth."""
     if not depths and not report_cells:
         return "no trajectory reached a scorable depth — nothing to measure"
@@ -279,7 +369,7 @@ def _no_skill_reason(report_cells: Sequence[PolicyCell], depths: Sequence[DepthR
             f"no depth has skill, but depth {best.depth} meets every enumerated condition — "
             "the reported conditions have drifted from the gate; treat this run as unexplained"
         )
-    policy = _policy_skill_failure(report_cells)
+    policy = _policy_skill_failure(report_cells, edit_gated_cells)
     return (
         f"no depth satisfies all {len(conditions)} skill conditions; at depth {best.depth} "
         + "; ".join(failures)
@@ -288,16 +378,20 @@ def _no_skill_reason(report_cells: Sequence[PolicyCell], depths: Sequence[DepthR
     )
 
 
-def _policy_skill_failure(report_cells: Sequence[PolicyCell]) -> str:
+def _policy_skill_failure(
+    report_cells: Sequence[PolicyCell], edit_gated_cells: Sequence[PolicyCell] = ()
+) -> str:
     """The policy half's closest-miss, stated so the sweep is not reported as unexplained."""
-    if not report_cells:
+    all_cells = [*report_cells, *edit_gated_cells]
+    if not all_cells:
         return ""
-    fired = [c for c in report_cells if c.precision is not None]
+    fired = [c for c in all_cells if c.precision is not None]
     if not fired:
-        return f"; no swept configuration fired on any trajectory ({len(report_cells)} cells swept)"
+        return f"; no swept configuration fired on any trajectory ({len(all_cells)} cells swept)"
     # The cell that came closest on the two clauses that could separate it: its own null was the
     # family-wise reference, so quote the marginal conditions that failed per cell.
     best = max(fired, key=lambda c: c.precision or 0.0)
+    family = "edit-gated" if any(best is c for c in edit_gated_cells) else "as-shipped"
     clauses = [
         (best.gate_null.beats_null, "its AUROC does not clear the family-wise permutation null"),
         (
@@ -309,7 +403,7 @@ def _policy_skill_failure(report_cells: Sequence[PolicyCell]) -> str:
     if not missing:
         return ""
     return (
-        f"; the best swept cell (escalate_after_n={best.escalate_after_n}/"
+        f"; the best swept cell ({family}, escalate_after_n={best.escalate_after_n}/"
         f"stale_window={best.stale_window}, P(fail|fired)={best.precision:.3f} "
         f"[{best.precision_ci[0]:.3f}, {best.precision_ci[1]:.3f}] against base "
         f"{best.base_failure_rate:.3f}) fails: " + " and ".join(missing)
@@ -387,10 +481,22 @@ def evaluate(
     stamped = [t for t in trajectories if features.is_stamped(t)]
     multistep = [t for t in trajectories if not datasets.is_degenerate(t)]
     policy_cells = policy_eval.evaluate(stamped, _with_shipped(grid), n_permutations=n_permutations)
+    # The SAME grid replayed with the reproduction phase excluded. A family of its own, with its
+    # own family-wise null — reported beside the shipped sweep, never merged into it. See the
+    # field's comment for why it exists.
+    edit_gated = policy_eval.evaluate(
+        stamped, _with_shipped(grid), n_permutations=n_permutations, count_from_first_edit=True
+    )
     depth_reports = prefix_eval.evaluate(stamped, depths, n_permutations=n_permutations)
     authenticity_errors = sum(len(errors(verify_trajectory(t))) for t in trajectories)
     deployability = _deployability(stamped)
-    status, reason = _status(policy_cells, depth_reports, authenticity_errors, deployability)
+    status, reason = _status(
+        policy_cells, depth_reports, authenticity_errors, deployability, edit_gated
+    )
+    recurrence = _recurrence_scores(stamped)
+    recurrence_null, recurrence_null_band = (
+        _recurrence_null(*recurrence, n_permutations=n_permutations) if recurrence else (None, None)
+    )
     return EvalReport(
         status=status,
         reason=reason,
@@ -399,10 +505,17 @@ def evaluate(
         n_multistep=len(multistep),
         authenticity_errors=authenticity_errors,
         policy_cells=policy_cells,
+        policy_cells_edit_gated=edit_gated,
         depth_reports=depth_reports,
         coverage=features.model_coverage(trajectories),
         deployability=_deployability(stamped),
         notes=_corpus_notes(trajectories, stamped, policy_cells),
+        # The session-cadence escalation value, computed whenever the corpus carries enough
+        # multi-arm instances to estimate it. Observational context, never a gate.
+        session_cadence=session_cadence(trajectories),
+        recurrence_scores=recurrence,
+        recurrence_null=recurrence_null,
+        recurrence_null_band=recurrence_null_band,
         # Only ever computed from a REAL exploration log. Trajectories carry no propensity
         # (the committable whitelist has no `action`/`propensity`), so deriving rows from them
         # would manufacture propensity=1.0 for every decision — a fabricated input, not data.
@@ -521,14 +634,24 @@ def _save_plots(report: EvalReport, out_dir: Path) -> None:
         # a degenerate curve invites the reader to see "escalation does not work" when the
         # escalation METHOD (the policy) carries the measurable edge. The prefix model's full
         # numbers stay in the JSON report, honestly NO_SKILL.
+    if report.session_cadence is not None:
+        _render(
+            out_dir / "session_cadence.png",
+            plots.SESSION_CADENCE_SPEC,
+            lambda ax: _merge(plots.session_cadence_bars(report.session_cadence, ax), run),
+        )
 
 
 def _save_policy_plots(report: EvalReport, out_dir: Path, run: Annotations) -> None:
     """The escalation method's figures: sweep table, outcome bars, and the operating
     characteristic (PR/ROC), the separating cell's confusion, and its family-wise null."""
     cells = report.policy_cells
+    edit_gated = report.policy_cells_edit_gated
     cell = report.headline_cell
-    best = _best_separating_cell(cells)
+    # The separating cell comes from BOTH families: on this corpus the edit-gated n=2 cell
+    # (post-first-edit recurrence) separates best, and the confusion/null figures should show the
+    # mechanism at its strongest honest operating point, not the weakest one that happens to ship.
+    best = _best_separating_cell([*cells, *edit_gated])
     _render(
         out_dir / "sweep_table.png",
         plots.SWEEP_TABLE_SPEC,
@@ -541,6 +664,15 @@ def _save_policy_plots(report: EvalReport, out_dir: Path, run: Annotations) -> N
             run,
         ),
     )
+    if edit_gated:
+        _render(
+            out_dir / "edit_gated_sweep_table.png",
+            plots.EDIT_GATED_SWEEP_TABLE_SPEC,
+            # No shipped-highlight on this family: it is EVAL-ONLY (`count_from_first_edit` is not
+            # what ships), so the "shipped default is the highlighted row" title and the amber
+            # locator would point a reader at a default production does not run.
+            lambda ax: _merge(plots.sweep_table(edit_gated, ax), run),
+        )
     if best is None:
         # Only reachable on a hand-built report with no fired cell. The curve/confusion/null
         # figures are SKIPPED rather than drawn off nothing — see `policy_pr_curve`'s own refusal.
@@ -549,12 +681,17 @@ def _save_policy_plots(report: EvalReport, out_dir: Path, run: Annotations) -> N
     _render(
         out_dir / "pr_curve.png",
         plots.PR_CURVE_SPEC,
-        lambda ax: _merge(plots.policy_pr_curve(cells, ax), run),
+        lambda ax: _merge(plots.policy_pr_curve(cells, ax, edit_gated=edit_gated), run),
     )
     _render(
         out_dir / "roc_curve.png",
         plots.ROC_CURVE_SPEC,
-        lambda ax: _merge(plots.policy_roc_curve(cells, ax), run),
+        lambda ax: _merge(plots.policy_roc_curve(cells, ax, edit_gated=edit_gated), run),
+    )
+    _render(
+        out_dir / "recurrence_roc.png",
+        plots.RECURRENCE_ROC_SPEC,
+        lambda ax: _merge(_recurrence_roc_plot(report, ax), run),
     )
     _render(
         out_dir / "confusion_matrix.png",
@@ -594,20 +731,98 @@ def _save_policy_plots(report: EvalReport, out_dir: Path, run: Annotations) -> N
     )
 
 
+def _recurrence_scores(
+    stamped: Sequence[Trajectory],
+) -> tuple[tuple[float, ...], tuple[float, ...], tuple[bool, ...], tuple[str, ...]]:
+    """Per-run continuous recurrence scores (as-shipped + edit-gated) and the terminal labels."""
+    # The shipped config's stale_window; the continuous score's whole purpose is to be
+    # threshold-free in `escalate_after_n`, and the window only gates retirement, so the shipped
+    # value is the honest default. Uses the shipped config directly (never the user override) so
+    # the figure means the same thing wherever it is rendered.
+    shipped = _shipped_escalation()
+    cfg = EscalationConfig(
+        enabled=True,
+        escalate_after_n=shipped[0],
+        stale_window=shipped[1],
+        ladder=shipped[2],
+    )
+    plain: list[float] = []
+    edit: list[float] = []
+    labels: list[bool] = []
+    groups: list[str] = []
+    for traj in stamped:
+        plain.append(float(replay.max_recurrence(traj, cfg)))
+        edit.append(float(replay.max_recurrence(traj, cfg, count_from_first_edit=True)))
+        labels.append(not traj.header.terminal_resolved)
+        # The SAME grouping key the policy half uses — the figure's detection floor must permute
+        # at the same exchangeable unit the rest of the eval does.
+        groups.append(features.group_of(traj))
+    return tuple(plain), tuple(edit), tuple(labels), tuple(groups)
+
+
+def _recurrence_null(
+    plain: Sequence[float],
+    edit: Sequence[float],
+    labels: Sequence[bool],
+    groups: Sequence[str],
+    *,
+    n_permutations: int,
+) -> tuple[metrics.NullResult, tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]]:
+    """The recurrence score's detection floor: a scalar null and the drawn chance-curve band."""
+    # Both the scalar AUROC null and the ROC band come from the SAME challenge-block shuffles
+    # (`policy_eval.null_roc_band`), so the footnote's "null 95% [x, y]" is the band's own
+    # construction, not a second estimator. The family-wise max over the two score vectors keeps
+    # the floor honest to the figure showing both curves: either curve clearing it is the claim.
+    score_vectors = (plain, edit)
+    band = policy_eval.null_roc_band(
+        score_vectors, labels, groups, n_permutations=n_permutations, seed=0
+    )
+    observed = max(metrics.auroc(scores, labels) for scores in score_vectors)
+    draws = policy_eval.family_null_draws(
+        score_vectors, labels, groups, n_permutations=n_permutations, seed=0
+    )
+    return metrics.permutation_null(observed, draws), band
+
+
+def _recurrence_roc_plot(report: EvalReport, ax: Axes) -> Annotations:
+    """The complete recurrence-ROC figure, or an honest refusal when the scores are absent."""
+    if report.recurrence_scores is None:
+        return Annotations(limitations=("no recurrence scores on this report",))
+    plain, edit, labels, _groups = report.recurrence_scores
+    return plots.recurrence_roc(
+        plain,
+        edit,
+        labels,
+        ax,
+        null=report.recurrence_null,
+        band=report.recurrence_null_band,
+    )
+
+
+def _best_skilled_cell(cells: Sequence[PolicyCell]) -> PolicyCell | None:
+    """The strongest cell that clears its OWN family-wise null, ranked by AUROC (detection)."""
+    # AUROC first, precision second — the verdict is a detection claim; ranking by precision
+    # alone would headline a 69-run tail cell over the 435-run cell that actually separates. The
+    # single definition shared by the report property and the status gate so they cannot disagree.
+    skilled = [c for c in cells if c.has_skill]
+    return max(skilled, key=lambda c: (c.null_auroc.observed, c.precision or 0.0), default=None)
+
+
 def _best_separating_cell(cells: Sequence[PolicyCell]) -> PolicyCell | None:
-    """The most readable operating point: skilled, else the highest-precision fired cell."""
+    """The most readable operating point: skilled by AUROC, else highest-precision fired cell."""
     skilled = [c for c in cells if c.has_skill]
     pool = skilled or [c for c in cells if c.precision is not None]
-    return max(pool, key=lambda c: c.precision or 0.0, default=None)
+    return max(pool, key=lambda c: (c.null_auroc.observed, c.precision or 0.0), default=None)
 
 
 def _policy_cell_note(cell: PolicyCell) -> str:
     """The one line that anchors a policy figure to its operating point."""
+    length = "n/a" if cell.length_baseline_auroc is None else f"{cell.length_baseline_auroc:.3f}"
     return (
         f"cell: escalate_after_n={cell.escalate_after_n}, stale_window={cell.stale_window}; "
         f"fired on {cell.n_escalated}/{cell.n_trajectories}; P(fail|fired)={cell.precision:.3f} "
         f"[{cell.precision_ci[0]:.3f}, {cell.precision_ci[1]:.3f}] vs base "
-        f"{cell.base_failure_rate:.3f}"
+        f"{cell.base_failure_rate:.3f}; run-length-only AUROC at this flag count: {length}"
     )
 
 
@@ -637,6 +852,20 @@ def _print_summary(report: EvalReport) -> None:
             f"{f'[{c.precision_ci[0]:.3f}, {c.precision_ci[1]:.3f}]':>18} "
             f"{c.base_failure_rate:>6.3f} {lift:>6}{marker}"
         )
+    if report.policy_cells_edit_gated:
+        # The reproduction-phase-gated family, printed under the shipped one. Read the precision
+        # against the same base rate: the gated cells separate where the ungated ones mask the
+        # signal (n=2 as-shipped fires on everything; n=2 edit-gated carries a real edge).
+        print("\nEDIT-GATED sweep (failures before the first edit are not escalation evidence):")  # noqa: T201
+        for c in report.policy_cells_edit_gated:
+            precision = "n/a" if c.precision is None else f"{c.precision:.3f}"
+            lift = "n/a" if c.lift is None else f"{c.lift:.2f}x"
+            length = "n/a" if c.length_baseline_auroc is None else f"{c.length_baseline_auroc:.3f}"
+            print(  # noqa: T201
+                f"{c.escalate_after_n:>3} {c.stale_window:>3} {c.n_escalated:>5} {precision:>14} "
+                f"{f'[{c.precision_ci[0]:.3f}, {c.precision_ci[1]:.3f}]':>18} "
+                f"{c.base_failure_rate:>6.3f} {lift:>6}  len-only {length}"
+            )
     # Both p-values, side by side: `raw p` is this depth's own null and gates nothing, `fw p` is
     # the family-wise adjusted p the verdict is read off. Printing only the first is how a max over
     # depths came to be quoted as if it were one test.
@@ -664,6 +893,21 @@ def _print_summary(report: EvalReport) -> None:
                 f"escalation OPE contrast V(escalate) - V(hold): {pv.contrast_estimate:+.4f} "
                 f"[{pv.contrast_ci_low:+.4f}, {pv.contrast_ci_high:+.4f}]{verdict}"
             )
+    if report.session_cadence is not None:
+        sc = report.session_cadence
+        lift = "n/a" if sc.lift is None else f"{sc.lift:.2f}x"
+        print("\nsession-cadence escalation value (observational, same-instance subset):")  # noqa: T201
+        print(  # noqa: T201
+            f"  P(frontier resolves | cheap failed) = {sc.escalate_rate:.3f} "
+            f"[{sc.escalate_ci[0]:.3f}, {sc.escalate_ci[1]:.3f}] "
+            f"({sc.n_escalated_resolved}/{sc.n_escalated})"
+        )
+        print(  # noqa: T201
+            f"  P(cheap retry resolves | cheap failed) = {sc.retry_rate:.3f} "
+            f"[{sc.retry_ci[0]:.3f}, {sc.retry_ci[1]:.3f}] "
+            f"({sc.n_retried_resolved}/{sc.n_retried})"
+        )
+        print(f"  lift {lift} over {sc.n_overlap_instances} overlap instances")  # noqa: T201
     for note in report.notes:
         print(f"\nNOTE: {note}", file=sys.stderr)  # noqa: T201
 

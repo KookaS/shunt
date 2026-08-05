@@ -146,9 +146,11 @@ curl -s localhost:8080/admin/loop-health
 
 ## What feedback changes
 
-A verified outcome updates three things for the **next** session, never mid-session:
-the kNN index (so a similar prompt routes to what worked), the exploration priors,
-and the escalation gate (a model that proves not capable is escalated next time — see
+A verified outcome updates the routing state for the **next** session, never mid-session:
+the kNN index (so a similar prompt routes to what worked) and the exploration priors. The
+**auto-escalation gate** is fed only by the off-wire test-suite re-run at session close — a
+manual `shunt flag` writes the outcome row but runs in a separate process and does not reach the
+in-process escalation log (see
 [Error detection & auto-escalation](escalation.md)).
 Learning is batch — the index rebuilds from an append-only outcome log on a cadence,
 not on every request — which keeps the cache-safe, one-decision-per-session guarantee

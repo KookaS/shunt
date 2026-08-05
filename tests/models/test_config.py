@@ -394,6 +394,34 @@ class TestDefaultRegistryHasReasoning:
             assert model.reasoning is not None, f"{name} missing reasoning block"
             assert model.reasoning.default_arm in {a.id for a in model.reasoning.arms}
 
+    def test_shipped_enabled_models_keep_effort_headroom_for_the_cache_safe_rung(self) -> None:
+        # The effort-escalation ladder (`effort_then_rank`) steps the SAME model's reasoning arm
+        # first precisely because that rung is cache-safe — but the rung only exists when the
+        # shipped default is NOT already the top arm. A config edit that moves a multi-arm model's
+        # default to its ceiling silently demotes `effort_then_rank` to `rank_only` on that model,
+        # trading the cache-safe step for a cache-breaking one. This pins the shipped registry
+        # against that: every ENABLED model with >=2 arms must default below its top arm.
+        # Single-arm models (kimi-k3, claude-fable-5) have no effort ladder at all and are
+        # exempt — they step rank directly, which the escalation docs state.
+        from shunt.router.policy import load_router_policy, packaged_policy_path
+
+        enabled = load_router_policy(packaged_policy_path()).models
+        assert enabled, "the shipped router.yaml must name its live models"
+        pool = ModelPool()
+        headroomless: list[str] = []
+        for name in enabled:
+            model = pool.get_model(name)
+            if model is None or model.reasoning is None or len(model.reasoning.arms) < 2:
+                continue
+            top = max(model.reasoning.arms, key=lambda a: a.rank).id
+            if model.reasoning.default_arm == top:
+                headroomless.append(name)
+        assert not headroomless, (
+            f"multi-arm enabled model(s) default at their top arm, so the cache-safe effort "
+            f"rung never fires on them and effort_then_rank degrades to rank_only: "
+            f"{sorted(headroomless)}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # D2 — arm_api_params resolver (the EXTRACT seam: benchmark + prod router)

@@ -10,7 +10,14 @@ from typing import Final
 
 import pytest
 
-from benchmark.escalation import deployability, features, metrics, run_eval, schema
+from benchmark.escalation import (
+    deployability,
+    features,
+    metrics,
+    policy_eval,
+    run_eval,
+    schema,
+)
 from tests.escalation.factories import make_depth_report, make_null, make_step, make_trajectory
 
 pytest.importorskip("sklearn")
@@ -21,11 +28,14 @@ _FIGURES: Final[frozenset[str]] = frozenset(
     {
         "pr_curve.png",
         "roc_curve.png",
+        "recurrence_roc.png",
         "confusion_matrix.png",
         "permutation_null.png",
         "sweep_table.png",
         "trajectory_outcomes.png",
         "failure_capture_coverage.png",
+        "edit_gated_sweep_table.png",
+        "session_cadence.png",
     }
 )
 
@@ -231,6 +241,115 @@ def test_best_depth_never_headlines_a_rank_deficient_design() -> None:
     )  # the max-incremental one
 
 
+def test_family_attribution_uses_identity_not_structural_equality() -> None:
+    # `best in edit_gated_cells` used structural equality, so a report_cells cell that is
+    # field-for-field equal to an edit-gated twin was credited to the edit-gated family — and
+    # `family_size` quoted the wrong family's multiplicity. Attribution must follow identity.
+    skilled = policy_eval.PolicyCell(
+        escalate_after_n=2,
+        stale_window=1000,
+        ladder="effort_then_rank",
+        n_trajectories=100,
+        n_escalated=50,
+        tp=40,
+        fp=10,
+        fn=10,
+        tn=40,
+        base_failure_rate=0.5,
+        precision_ci=(0.6, 0.9),
+        quiet_ci=(0.1, 0.4),
+        null_auroc=make_null(0.7, 0.55, p_value=0.005),
+        null_auroc_family=make_null(0.7, 0.55, p_value=0.005),
+    )
+    assert skilled.has_skill
+    twin = replace(skilled)
+    assert twin == skilled  # structurally equal...
+    assert twin is not skilled  # ...but a different object
+    status, reason = run_eval._status([skilled], [], 0, None, [twin])
+    assert status == "OK"
+    # The best cell is `skilled` (the report_cells copy, first in the pool); it must be named
+    # as-shipped, not edit-gated — the twin in the edit-gated list is a different cell. (The
+    # sentence still mentions the edit-gated FAMILY in its selection clause, so the assertion is
+    # on the family label after "policy (", not on the bare word.)
+    assert "escalation policy (as-shipped)" in reason
+    assert "escalation policy (edit-gated" not in reason
+
+
+def test_the_ok_reason_discloses_the_run_length_share() -> None:
+    # A skilled cell's reason must carry `_length_disclosure`: how much of its AUROC a pure
+    # length>=t predictor gets at the same flag count, and whether the recurrence excess clears
+    # the length-stratified null. Without it an "OK" hides that the edge may be run-length
+    # selection (the exact caveat that made the n=30 cell look better than it was).
+    cell = policy_eval.PolicyCell(
+        escalate_after_n=2,
+        stale_window=1000,
+        ladder="effort_then_rank",
+        n_trajectories=100,
+        n_escalated=50,
+        tp=40,
+        fp=10,
+        fn=10,
+        tn=40,
+        base_failure_rate=0.5,
+        precision_ci=(0.6, 0.9),
+        quiet_ci=(0.1, 0.4),
+        null_auroc=make_null(0.7, 0.55, p_value=0.005),
+        null_auroc_family=make_null(0.7, 0.55, p_value=0.005),
+        length_baseline_auroc=0.570,
+        null_auroc_length=make_null(0.7, 0.62, p_value=0.01),
+    )
+    assert cell.has_skill
+    status, reason = run_eval._status([cell], [], 0, None)
+    assert status == "OK"
+    assert "run length alone scores 0.570" in reason
+    assert "the recurrence excess clears the length-stratified null" in reason
+
+
+def test_best_skilled_cell_ranks_across_both_families_by_auroc() -> None:
+    # `best_skilled_cell` is the detection headline: AUROC first, precision second, reading across
+    # BOTH families. A higher-AUROC edit-gated cell must outrank an as-shipped one even when the
+    # as-shipped cell has the higher precision (the old precision-only ranking would headline the
+    # 71-run n=30 tail cell over the 456-run n=2 cell that actually separates runs).
+    as_shipped = policy_eval.PolicyCell(
+        escalate_after_n=2,
+        stale_window=1000,
+        ladder="effort_then_rank",
+        n_trajectories=100,
+        n_escalated=50,
+        tp=40,
+        fp=10,
+        fn=10,
+        tn=40,
+        base_failure_rate=0.5,
+        precision_ci=(0.6, 0.9),
+        quiet_ci=(0.1, 0.4),
+        null_auroc=make_null(0.6, 0.55, p_value=0.005),
+        null_auroc_family=make_null(0.6, 0.55, p_value=0.005),
+    )
+    edit_gated = replace(
+        as_shipped,
+        null_auroc=make_null(0.8, 0.55, p_value=0.005),
+        null_auroc_family=make_null(0.8, 0.55, p_value=0.005),
+    )
+    assert as_shipped.has_skill and edit_gated.has_skill
+    assert edit_gated.precision == as_shipped.precision
+    assert run_eval._best_skilled_cell([as_shipped, edit_gated]) is edit_gated
+    report = run_eval.EvalReport(
+        status="OK_OFFLINE_ONLY",
+        reason="hand-built",
+        n_trajectories=100,
+        n_stamped=100,
+        n_multistep=100,
+        authenticity_errors=0,
+        policy_cells=[as_shipped],
+        policy_cells_edit_gated=[edit_gated],
+        depth_reports=[],
+        coverage=[],
+        deployability=deployability.assess((), deployability.Cadence.STEP),
+    )
+    assert report.best_skilled_cell is edit_gated
+
+
 def test_the_status_gate_reads_the_family_wise_null_not_the_per_depth_one() -> None:
     # THE DEFECT THIS PINS. `_status` says OK if ANY depth clears and `_no_skill_reason` reports the
     # max-incremental depth, so `DEFAULT_DEPTHS`'s depths are a max over that many tests — and
@@ -406,7 +525,11 @@ def test_main_writes_every_figure_through_the_frame(tmp_path, capsys) -> None:
         ]
     )
     assert rc == 0
-    assert {p.name for p in plots_dir.glob("*.png")} == _FIGURES
+    # `session_cadence.png` is absent because this synthetic corpus uses model "m", which is not
+    # in the price registry — no task has both >=2 cheap sessions AND a frontier session, so the
+    # session-cadence estimate is "not supported" (None) and the figure is skipped, exactly as
+    # the run_eval contract says it should be.
+    assert {p.name for p in plots_dir.glob("*.png")} == _FIGURES - {"session_cadence.png"}
     # dpi 150 at (9, 5.5) plus the footer: a bare dpi=80 figure never reaches this size.
     assert all(p.stat().st_size > 20_000 for p in plots_dir.glob("*.png"))
     assert '"prefix_model"' in capsys.readouterr().out

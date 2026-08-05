@@ -30,6 +30,48 @@ def _quiet(tid: str, *, resolved: bool, n: int = 8):  # type: ignore[no-untyped-
     return make_trajectory(steps, trajectory_id=tid, terminal_resolved=resolved)
 
 
+def test_the_length_reference_explains_a_pure_length_confounded_cell() -> None:
+    # Firing here IS run length: at escalate_after_n=20 the long all-failing runs fire and the
+    # short ones never reach 20 failures, while failure is perfectly length-correlated. The
+    # observed AUROC is 1.0, the length-only baseline matches it (the fired vector IS the length
+    # predictor), and the length-stratified null — failures permuted WITHIN length bins, so the
+    # length association survives — sits at 1.0 too, so the cell does NOT clear it. That is the
+    # disclosure in one sentence: an AUROC that cannot beat a null that keeps the length
+    # association is run-length selection, not recurrence. (The challenge-block null clears — it
+    # destroys the length link along with everything else, which is exactly why it cannot be the
+    # only reference a recurrence claim is read against.)
+    long = [_thrashing(f"long{i}", resolved=False, n=25) for i in range(15)]
+    short = [_thrashing(f"short{i}", resolved=True, n=5) for i in range(15)]
+    cell = policy_eval.evaluate_cell(
+        long + short, replay.GridPoint(20, 1000), n_permutations=_PERMUTATIONS
+    )
+    assert cell.n_escalated == 15
+    assert cell.null_auroc.observed == pytest.approx(1.0)
+    assert cell.length_baseline_auroc == pytest.approx(1.0)
+    assert cell.null_auroc_length is not None
+    assert cell.null_auroc_length.observed == pytest.approx(1.0)
+    assert not cell.null_auroc_length.beats_null  # length explains the whole association
+
+
+def test_length_stratified_null_is_cleared_by_length_independent_recurrence() -> None:
+    # The mirror of the confounded-cell test: every run has the SAME length, so firing cannot be
+    # run-length selection, and the length-stratified null (which keeps the length association)
+    # must CLEAR — the disclosure has to distinguish recurrence from length in BOTH directions,
+    # or "run-length selection" becomes a label that sticks to any high-AUROC cell. Runs are
+    # interleaved (thrash, quiet) so each equal-count length bin holds both classes and the
+    # within-bin shuffle can actually break the fired→failure link.
+    thrash = [_thrashing(f"t{i}", resolved=False, n=10) for i in range(12)]
+    quiet = [_quiet(f"q{i}", resolved=True, n=10) for i in range(12)]
+    interleaved = [x for pair in zip(thrash, quiet, strict=True) for x in pair]
+    cell = policy_eval.evaluate_cell(
+        interleaved, replay.GridPoint(2, 1000), n_permutations=_PERMUTATIONS
+    )
+    assert cell.n_escalated == 12
+    assert cell.null_auroc.observed == pytest.approx(1.0)
+    assert cell.null_auroc_length is not None
+    assert cell.null_auroc_length.beats_null  # recurrence beyond length clears
+
+
 def test_n_escalated_counts_trajectories_not_sweep_cells() -> None:
     # The old report summed n_escalated across all 12 grid cells and printed 4980 next to
     # n_trajectories=799 — 415 real escalations shown as 4980. Each cell now owns its own count.
@@ -204,8 +246,26 @@ def test_default_grid_sweeps_both_knobs_and_guarantees_the_shipped_cell() -> Non
     # thresholds (n>=10 clears the family-wise null), and `_in_window` admits at most
     # `stale_window` events — so reaching n recurrences needs a window at least that wide, and the
     # grid sweeps both knobs. `ladder` stays pinned (the detection metric reads whether the policy
-    # fired, not which rung it climbed).
-    assert sorted({p.escalate_after_n for p in datasets.DEFAULT_GRID}) == [2, 5, 8, 10, 15, 20, 30]
+    # fired, not which rung it climbed). The ladder is dense (15 values) so the PR/ROC figures
+    # trace the full precision/recall frontier instead of a few vertices; the high end (40, 50)
+    # probes past the corpus's ~31-step median where remaining precision is run-length selection.
+    assert sorted({p.escalate_after_n for p in datasets.DEFAULT_GRID}) == [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        8,
+        10,
+        12,
+        15,
+        20,
+        25,
+        30,
+        40,
+        50,
+    ]
     assert sorted({p.stale_window for p in datasets.DEFAULT_GRID}) == [10, 1000]
     assert len({p.ladder for p in datasets.DEFAULT_GRID}) == 1
     # The shipped configuration (escalate_after_n=2, stale_window=10) must be in-grid so the

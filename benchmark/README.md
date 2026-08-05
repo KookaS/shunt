@@ -37,7 +37,8 @@ changes how you read the result · **NO** does not hold.
   plain git, not LFS), and `make state-import` restores them byte-identically on any checkout.
   **Two inputs remain outside git and always will:** the instance images (~100 GB) and the gold
   `patch`/`test_patch` rows, which `offline_replay._dataset_row` fetches from the HF dataset at
-  replay time *without* pinning `swebench_specs.DATASET_REVISION`. `make replay-inputs` enumerates
+  replay time *pinned* to `swebench_specs.DATASET_REVISION` (the same pin `build_challenges` uses,
+  so the replay's gold rows cannot drift from the revision the gate key claims). `make replay-inputs` enumerates
   every one of them and exits non-zero — a partial reproduction that silently produces different
   numbers is worse than a refusal. So a clone can re-score policies unconditionally, and re-derive
   outcomes once it has Docker, the images, and HF access.

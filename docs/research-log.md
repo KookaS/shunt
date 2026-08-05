@@ -130,9 +130,12 @@ doesn't work" as a measured claim would require running it. We have not.
 ## What we are still testing
 
 Shunt's escalation trigger — decide mid-task that a cheap model is not going to
-get there — is partly settled. The recurrence policy carries a measured edge, but
-only at recurrence thresholds far above the shipped default; the shipped detector
-and the prefix risk model perform near chance on our own trajectories (see the
+get there — is partly settled. The recurrence policy carries a measured edge: as
+shipped (counting every same-key failure) it only separates at thresholds far
+above the shipped default, but gated on failures after the agent's first edit it
+separates at (and just above) the shipped `escalate_after_n=2` (n=2 AUROC 0.711,
+best cell n=3 AUROC 0.724, eval-only);
+the prefix risk model performs near chance on our own trajectories (see the
 dated entry below and the escalation page). These are the
 candidate directions, listed as open questions rather than as a plan we have
 committed to.
@@ -223,6 +226,29 @@ signal — and more distinct challenges: the prefix instrument's minimum detecta
 ≈ 0.59, and settling it needs roughly 640 challenges, not more runs per challenge. Tuning the
 recurrence knob on the LIVE path is not a direct transfer of this result: at session cadence a
 higher `escalate_after_n` means more *sessions* failing on the same check, not more steps.
+
+## Escalation: the reproduction phase was the mask, and the grid is now dense (2026-08-04)
+
+The 2026-08-02 finding above ("the recurrence framing just needed a higher threshold") was
+re-audited and refined. The per-step stamp is a whole-spec gate — "is the F2P∪P2P target set
+green at this step's tree state" — so same-key recurrence is a time-to-fix clock, and the
+shipped counter was counting the *reproduction phase*: every run's first reds are the target bug
+at t=0. Excluding failures before the agent's first edit-like action (`count_from_first_edit`,
+eval-only — production has no per-step action stream) separates at and just above the shipped
+threshold: the best cell is edit-gated n=3 — 358/727 runs, P(fail|fired)=0.642 (lift 1.53), AUROC
+0.724, clearing both the family-wise null [0.500, 0.542] and a length-stratified null [0.498,
+0.563] (p=0.005) — and n=2 already reads AUROC 0.711 (435/727, P=0.593, lift 1.41). The old
+"high-threshold edge" (as-shipped n=30, AUROC 0.662) is roughly 40%
+run-length selection. The grid is now dense — n ∈ {1,2,3,4,5,6,8,10,12,15,20,25,30,40,50} ×
+{10, 1000} — so the PR/ROC figures trace the full precision/recall frontier; a continuous
+"stuck-depth" score (`max_recurrence`) gives the complete ROC (as-shipped AUROC 0.601 vs
+edit-gated 0.781). At the session cadence the ladder's value is large and observational: a
+frontier session resolved 56.8% (21/37) of tasks a cheap session failed vs 22.6% (7/31) for a
+same-cost cheap retry — 2.5× on the same-instance subset. An embedding "going-in-circles"
+feature (fastembed on failing-step output) was explored in an earlier, UNCOMMITTED experiment and
+carried ~0.70 AUROC alone; that figure was never reproduced by the committed pipeline — the
+escalation path currently uses no embeddings at all — so it stands as a superseded hint, not a
+measured result, and the claim is not repeated in the results page.
 
 ## Contributing
 

@@ -110,6 +110,37 @@ def test_one_separating_cell_does_not_vouch_for_the_rest_of_the_sweep() -> None:
     plt.close(fig)
 
 
+def test_a_never_firing_cell_prints_n_a_not_a_literal_nan() -> None:
+    # A never-firing cell's interval is (nan, nan), not None, so the old formatter rendered the
+    # literal "[nan, nan]" in the CI column — contradicting the footer's "it prints n/a rather
+    # than 0.000". Seven cells on the committed sweep tables never fire.
+    empty = _counts_cell(0, 0, precision_ci=_UNDEFINED_CI)
+    fig, ax = plt.subplots()
+    plots.sweep_table([empty], ax)
+    texts = [cell.get_text().get_text() for cell in ax.tables[0].get_celld().values()]
+    assert "[n/a, n/a]" in texts
+    assert not any("nan" in t.lower() for t in texts)
+    plt.close(fig)
+
+
+def test_sweep_point_labels_nudge_across_families_not_just_within_one() -> None:
+    # The nudge used to reset per family call, so the edit-gated labels were placed against an
+    # empty `placed` list and landed on the as-shipped ones (n=20/n=4, n=25/n=8, n=50/n=30 on the
+    # PR figure; n=15/n=20 on the ROC). Sharing the `placed` list across the two calls makes the
+    # second family dodge the first: a co-located second-family point is nudged off the first's
+    # anchor rather than stacked on it.
+    c = _counts_cell(9, 1, precision_ci=(0.85, 0.95))
+    fig, ax = plt.subplots()
+    placed: list[tuple[float, float]] = []
+    plots._annotate_sweep_points(ax, [c], lambda cell: (0.5, 0.5), placed)
+    first = ax.texts[-1]
+    plots._annotate_sweep_points(ax, [c], lambda cell: (0.5, 0.5), placed)
+    second = ax.texts[-1]
+    assert first.xyann == (6, 4)  # un-nudged anchor
+    assert second.xyann == (6, -10)  # nudged off the as-shipped anchor, not on top of it
+    plt.close(fig)
+
+
 def test_a_never_firing_cell_is_undefined_rather_than_ranked_at_zero() -> None:
     # precision returns None, not 0.0, for a cell that never fired: 0.0 would enter the argmax
     # and lose only by luck, and the bar would read as a measured "escalating predicts success".
@@ -263,6 +294,38 @@ def _counts_cell(
     )
 
 
+def test_recurrence_roc_reports_its_detection_floor() -> None:
+    # The recurrence ROC must not let a reader infer skill from an AUROC against nothing: the
+    # figure reports the score's OWN permutation null as a shaded band and a footnote CI, so an
+    # AUROC above the band is a claim, an AUROC inside it is indistinguishable from chance.
+    labels = [False, True, True, False, True]
+    scores_plain = [0.0, 1.0, 2.0, 0.0, 3.0]
+    scores_edit = [0.0, 2.0, 3.0, 0.0, 4.0]
+    null = metrics.permutation_null(0.781, [0.45 + 0.005 * (i % 10) for i in range(_PERMUTATIONS)])
+    fig, ax = plt.subplots()
+    ann = plots.recurrence_roc(
+        scores_plain,
+        scores_edit,
+        labels,
+        ax,
+        null=null,
+        band=((0.0, 0.5, 1.0), (0.0, 0.2, 0.8), (0.0, 0.5, 1.0)),
+    )
+    assert any("null 95%" in n and "detection floor" in n for n in ann.notes)
+    assert any(p.get_label() == "null 95% band" for p in ax.collections)
+    plt.close(fig)
+
+
+def test_recurrence_roc_without_a_null_stays_quiet() -> None:
+    # The band and the footnote are opt-in: a caller with no null (hand-built scores) must not be
+    # handed a fabricated detection floor.
+    fig, ax = plt.subplots()
+    ann = plots.recurrence_roc([0.0, 1.0], [0.0, 2.0], [False, True], ax)
+    assert not any("null 95%" in n for n in ann.notes)
+    assert not any("detection floor" in n for n in ann.notes)
+    plt.close(fig)
+
+
 def test_every_figure_spec_carries_read_and_goal() -> None:
     specs = [
         plots.PR_CURVE_SPEC,
@@ -272,6 +335,7 @@ def test_every_figure_spec_carries_read_and_goal() -> None:
         plots.PERMUTATION_NULL_SPEC,
         plots.OUTCOME_BARS_SPEC,
         plots.CAPTURE_COVERAGE_SPEC,
+        plots.RECURRENCE_ROC_SPEC,
     ]
     for spec in specs:
         assert spec.reading.strip()

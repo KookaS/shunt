@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import random
 
+from benchmark.admissibility import admissibility_verdict
 from benchmark.escalation import datasets, metrics, policy_eval
 from benchmark.escalation.schema import Trajectory
 from tests.escalation.factories import make_step, make_trajectory
@@ -173,7 +174,11 @@ def test_policy_sweep_clears_the_admissibility_gate() -> None:
     """The assembled sweep recovers a planted signal and collapses on shuffled labels."""
     # Positive control: the planted corpus's best fired cell must clear the pipeline's
     # OWN empirical chance band — the shuffled corpus's family-wise null 97.5th pct —
-    # by the same strict `>` the admissibility gate encodes (never a fixed tolerance).
+    # by the same strict `>` the shared admissibility adjudicator encodes (never a fixed
+    # tolerance). The adjudication is the shared gate (`benchmark.admissibility`), not a
+    # local re-derivation: chance_level is AUROC chance (0.5) and chance_band is the
+    # half-width that makes `chance_level + chance_band` land exactly on the measured
+    # family-wise null upper bound, so the two-control verdict is the shared one.
     positive_cells = policy_eval.evaluate(
         _planted_corpus(), datasets.DEFAULT_GRID, n_permutations=_PERMUTATIONS
     )
@@ -190,15 +195,18 @@ def test_policy_sweep_clears_the_admissibility_gate() -> None:
     shuffled_score = max((c.null_auroc.observed for c in scored_null), default=0.5)
     null_band = max((c.gate_null.ci_high for c in null_cells), default=0.5)
 
+    verdict = admissibility_verdict(
+        positive_score, shuffled_score, chance_level=0.5, chance_band=null_band - 0.5
+    )
     # The family-wise null on the planted corpus must itself clear — the gate the
     # report actually reads, not just a raw AUROC comparison.
     assert best.gate_null.beats_null
-    # Positive control clears the empirical chance band (the shuffled corpus's own
-    # family-wise null 97.5th pct), mirroring the shared gate's `> chance + band`.
-    assert positive_score > null_band
-    # Shuffled-label null collapses to chance: inside [1 - band, band] of 0.5.
-    assert shuffled_score <= null_band
-    assert shuffled_score >= 1.0 - null_band
+    # Shared adjudication: positive control clears the empirical chance band (the
+    # shuffled corpus's own family-wise null 97.5th pct) AND the shuffled-label null
+    # collapses to chance.
+    assert verdict.positive_passed
+    assert verdict.null_at_chance
+    assert verdict.admissible
 
 
 def test_policy_sweep_has_power_at_the_production_effect_size() -> None:
@@ -221,12 +229,15 @@ def test_policy_sweep_has_power_at_the_production_effect_size() -> None:
     shuffled_score = max((c.null_auroc.observed for c in scored_null), default=0.5)
     null_band = max((c.gate_null.ci_high for c in null_cells), default=0.5)
 
+    verdict = admissibility_verdict(
+        recovered, shuffled_score, chance_level=0.5, chance_band=null_band - 0.5
+    )
     # Power at the realistic effect size: the best cell clears the family-wise null computed on its
     # OWN corpus, and the recovered AUROC sits in the production claim's band, not at 1.0.
     assert best.gate_null.beats_null
-    assert recovered > null_band
+    assert verdict.positive_passed
     assert 0.55 <= recovered <= 0.80
-    # Labels permuted within each challenge destroy the imperfect link too: no cell may clear.
-    assert shuffled_score <= null_band
-    assert shuffled_score >= 1.0 - null_band
+    # Labels permuted within each challenge destroy the imperfect link too: the destroyed-signal
+    # null is at chance (shared adjudication) and no cell clears its own family-wise gate.
+    assert verdict.null_at_chance
     assert not any(c.gate_null.beats_null for c in scored_null)

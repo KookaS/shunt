@@ -39,6 +39,8 @@ import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from benchmark.escalation import features, metrics, replay
 
 if TYPE_CHECKING:
@@ -80,6 +82,20 @@ class PolicyCell:
     # construction the prefix half uses across depths. None means the cell was hand-built or scored
     # alone (a family of one IS the marginal null above, which the gate then reads instead).
     null_auroc_family: metrics.NullResult | None = None
+    # ── THE RUN-LENGTH REFERENCE (disclosure, never a gate) ──
+    # `null_auroc_length` is a MARGINAL length-stratified null: failure labels permuted within
+    # equal-count length bins, so the length→failure association is preserved while the
+    # fired→failure link is destroyed. It answers "is firing predictive BEYOND what the lengths of
+    # the fired runs alone predict". `length_baseline_auroc` is the AUROC of the pure "run length
+    # >= t" predictor at THIS cell's flag count — the number a reader would get if run length were
+    # the whole story. Both exist because the challenge-block gate deliberately removes the
+    # length→failure association along with everything else (labels move across challenges), so a
+    # cell can clear that gate while most of its excess over chance is length selection; on this
+    # corpus that is exactly what happens (n=30: observed 0.662, length-only 0.565). The
+    # family-wise gate stays on the challenge-block null; these two are the honest disclosure that
+    # separates the recurrence-specific share.
+    length_baseline_auroc: float | None = None
+    null_auroc_length: metrics.NullResult | None = None
 
     @property
     def gate_null(self) -> metrics.NullResult:
@@ -148,6 +164,14 @@ class PolicyCell:
             "null_auroc_familywise": (
                 None if self.null_auroc_family is None else self.null_auroc_family.to_dict()
             ),
+            # The run-length reference: what a pure length>=t predictor scores at this flag count,
+            # and the length-stratified null. Disclosure, never a gate — the gate stays on the
+            # challenge-block null above. Read `null_auroc` against BOTH: an observed AUROC mostly
+            # explained by the length baseline is length selection, not recurrence.
+            "length_baseline_auroc": _rounded(self.length_baseline_auroc),
+            "null_auroc_length_stratified": (
+                None if self.null_auroc_length is None else self.null_auroc_length.to_dict()
+            ),
             "has_skill": self.has_skill,
         }
 
@@ -164,21 +188,34 @@ class _Scored:
     fired: Sequence[bool]
     failed: Sequence[bool]
     groups: Sequence[str]
+    # Total steps per trajectory. This is the run-length axis the high-threshold cells trade on:
+    # firing at escalate_after_n=N needs >= N same-key failing steps, so a cell's fired vector is
+    # mechanically correlated with length, and run length is outcome-correlated on this corpus.
+    lengths: Sequence[int]
 
 
-def _scored_for(trajectories: Sequence[Trajectory], point: replay.GridPoint) -> _Scored:
+def _scored_for(
+    trajectories: Sequence[Trajectory],
+    point: replay.GridPoint,
+    *,
+    count_from_first_edit: bool = False,
+) -> _Scored:
     """Replay one configuration over every trajectory — one alignment the cells share."""
     fired: list[bool] = []
     failed: list[bool] = []
     groups: list[str] = []
+    lengths: list[int] = []
     for traj in trajectories:
-        decision = replay.replay_config(traj, point.to_config())
+        decision = replay.replay_config(
+            traj, point.to_config(), count_from_first_edit=count_from_first_edit
+        )
         fired.append(decision.escalated)
         failed.append(not traj.header.terminal_resolved)
+        lengths.append(traj.header.n_steps)
         # The SAME grouping key the prefix half's grouped CV uses (challenge, i.e. instance id):
         # the two halves must not disagree about what an independent observation is.
         groups.append(features.group_of(traj))
-    return _Scored(fired, failed, groups)
+    return _Scored(fired, failed, groups, lengths)
 
 
 def evaluate_cell(
@@ -187,9 +224,15 @@ def evaluate_cell(
     *,
     n_permutations: int = metrics.MIN_PERMUTATIONS,
     seed: int = 0,
+    count_from_first_edit: bool = False,
 ) -> PolicyCell:
     """Replay one configuration over every trajectory and score it at the trajectory level."""
-    return _cell(point, _scored_for(trajectories, point), n_permutations, seed)
+    return _cell(
+        point,
+        _scored_for(trajectories, point, count_from_first_edit=count_from_first_edit),
+        n_permutations,
+        seed,
+    )
 
 
 def _cell(
@@ -224,6 +267,10 @@ def _cell(
             None
             if family_draws is None
             else metrics.permutation_null(metrics.auroc(scores, failed), family_draws)
+        ),
+        length_baseline_auroc=_length_only_auroc(fired, failed, s.lengths, fire_count=sum(fired)),
+        null_auroc_length=_length_stratified_null(
+            scores, failed, s.lengths, n_permutations=n_permutations, seed=seed
         ),
     )
 
@@ -284,6 +331,129 @@ def _clustered_null(
     return metrics.permutation_null(metrics.auroc(scores, labels), draws)
 
 
+def _length_bins(lengths: Sequence[int], n_bins: int = 10) -> list[int]:
+    """Equal-count length bins: the axis a length-stratified permutation must not break."""
+    # Equal-count rather than fixed-width: every bin keeps a usable row count AND the corpus's
+    # monotone length→failure association, which is the association the null must preserve. Fixed
+    # width would leave the tail bins (a handful of 200-step runs) too small to permute.
+    out = [0] * len(lengths)
+    ranked = sorted(range(len(lengths)), key=lambda i: lengths[i])
+    for rank, index in enumerate(ranked):
+        out[index] = min(rank * n_bins // max(len(ranked), 1), n_bins - 1)
+    return out
+
+
+def _permute_within_length_bins(
+    labels: Sequence[bool], bins: Sequence[int], rng: random.Random
+) -> list[bool]:
+    """Shuffle failure labels INSIDE each length bin, so every bin's failure rate is fixed."""
+    by_bin: dict[int, list[int]] = {}
+    for index, bin_id in enumerate(bins):
+        by_bin.setdefault(bin_id, []).append(index)
+    out = list(labels)
+    for indices in by_bin.values():
+        block = [labels[i] for i in indices]
+        rng.shuffle(block)
+        for index, value in zip(indices, block, strict=True):
+            out[index] = value
+    return out
+
+
+def _length_stratified_null(
+    scores: Sequence[float],
+    labels: Sequence[bool],
+    lengths: Sequence[int],
+    *,
+    n_permutations: int,
+    seed: int,
+) -> metrics.NullResult:
+    """The AUROC null under within-length-bin label shuffles — recurrence BEYOND run length."""
+    # The challenge-block null (`_clustered_null`) permutes labels across challenges, which breaks
+    # the length→failure association along with everything else — so a cell whose firing is really
+    # run-length selection can clear it. Here failures stay inside their length bin (every bin's
+    # failure rate is preserved), so the null keeps the length→failure link the fired vector rides
+    # on, and a cell only clears it if firing predicts failure for runs of comparable length. It is
+    # deliberately MARGINAL (one cell's own draws, no max-over-cells correction): it is a disclosure
+    # reference, not the gate.
+    bins = _length_bins(lengths)
+    rng = random.Random(seed)
+    draws = [
+        metrics.auroc(scores, _permute_within_length_bins(labels, bins, rng))
+        for _ in range(n_permutations)
+    ]
+    return metrics.permutation_null(metrics.auroc(scores, labels), draws)
+
+
+def _length_only_auroc(
+    fired: Sequence[bool], failed: Sequence[bool], lengths: Sequence[int], *, fire_count: int
+) -> float | None:
+    """The AUROC a pure 'run length >= t' predictor reaches at THIS cell's flag count, or None."""
+    # Fires no rows => the length predictor is constant (all quiet), AUROC undefined at a nonzero
+    # flag budget. Otherwise: find the length threshold whose `length >= t` flag set is closest to
+    # the cell's fire count, and score it. That is the number a reader would get if run length
+    # were the whole story — the honest share of the observed AUROC that is NOT recurrence.
+    if fire_count <= 0 or not lengths:
+        return None
+    ordered = sorted(lengths)
+    threshold = ordered[-fire_count]
+    flag = [length >= threshold for length in lengths]
+    return metrics.auroc([1.0 if f else 0.0 for f in flag], failed)
+
+
+def family_null_draws(
+    score_vectors: Sequence[Sequence[float]],
+    labels: Sequence[bool],
+    groups: Sequence[str],
+    *,
+    n_permutations: int,
+    seed: int,
+) -> list[float]:
+    """One shared challenge-block shuffle scored at EVERY score vector, keeping the max AUROC."""
+    # The same maxT construction as `_family_null_draws`, generalized to arbitrary score vectors
+    # (there the vectors are binary fired masks; the recurrence ROC passes continuous
+    # `max_recurrence` scores). Challenge identity is the exchangeable unit, so the shuffle is
+    # block-permutation — a global shuffle would understate the band exactly as `_clustered_null`
+    # documents for the policy cells.
+    rng = random.Random(seed)
+    draws: list[float] = []
+    for _ in range(n_permutations):
+        shuffled = _permute_clusters(labels, groups, rng)
+        draws.append(max(metrics.auroc(scores, shuffled) for scores in score_vectors))
+    return draws
+
+
+def null_roc_band(
+    score_vectors: Sequence[Sequence[float]],
+    labels: Sequence[bool],
+    groups: Sequence[str],
+    *,
+    n_permutations: int,
+    seed: int,
+    n_fpr: int = 101,
+) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]:
+    """The 2.5-97.5% TPR envelope of the null ROC curves, on a shared FPR grid."""
+    # The recurrence ROC's detection floor is drawn as a BAND, not just a scalar CI: on ROC axes
+    # the chance region is where permuted-label curves live, so one grid of FPR values collects
+    # every permutation's TPR at each point and the band is the central 95% of those columns.
+    # Reuses the SAME challenge-block shuffle as `family_null_draws` so the scalar AUROC null and
+    # the drawn band are one construction, not two.
+    rng = random.Random(seed)
+    grid = np.linspace(0.0, 1.0, n_fpr)
+    columns: list[list[float]] = [[] for _ in grid]
+    for _ in range(n_permutations):
+        shuffled = _permute_clusters(labels, groups, rng)
+        for scores in score_vectors:
+            fpr_tpr = metrics.roc_operating_points(scores, list(shuffled))
+            xs = [p[0] for p in fpr_tpr]
+            ys = [p[1] for p in fpr_tpr]
+            tpr = np.interp(grid, xs, ys)
+            for index, value in enumerate(tpr):
+                columns[index].append(float(value))
+    lo = tuple(float(np.percentile(col, 2.5)) for col in columns)
+    hi = tuple(float(np.percentile(col, 97.5)) for col in columns)
+    return tuple(float(x) for x in grid), lo, hi
+
+
 def _family_null_draws(scored: Sequence[_Scored], *, n_permutations: int, seed: int) -> list[float]:
     """One shared challenge-block shuffle scored at EVERY cell, keeping the max AUROC."""
     # The sweep's cells share every trajectory (only the knobs differ), so their fired vectors are
@@ -293,12 +463,9 @@ def _family_null_draws(scored: Sequence[_Scored], *, n_permutations: int, seed: 
     labels = list(scored[0].failed)
     groups = list(scored[0].groups)
     score_vectors = [[1.0 if f else 0.0 for f in s.fired] for s in scored]
-    rng = random.Random(seed)
-    draws: list[float] = []
-    for _ in range(n_permutations):
-        shuffled = _permute_clusters(labels, groups, rng)
-        draws.append(max(metrics.auroc(scores, shuffled) for scores in score_vectors))
-    return draws
+    return family_null_draws(
+        score_vectors, labels, groups, n_permutations=n_permutations, seed=seed
+    )
 
 
 def _arm_intervals(
@@ -338,6 +505,7 @@ def evaluate(
     *,
     n_permutations: int = metrics.MIN_PERMUTATIONS,
     seed: int = 0,
+    count_from_first_edit: bool = False,
 ) -> list[PolicyCell]:
     """Every swept configuration, scored per trajectory, gated as ONE family."""
     # The cells share every trajectory (only the knobs differ), so their statistics are dependent
@@ -349,7 +517,10 @@ def evaluate(
     # IS the marginal null above.
     if not grid:
         raise ValueError("evaluate requires at least one grid point (the shipped cell is default)")
-    scored = [_scored_for(trajectories, point) for point in grid]
+    scored = [
+        _scored_for(trajectories, point, count_from_first_edit=count_from_first_edit)
+        for point in grid
+    ]
     family_draws = _family_null_draws(scored, n_permutations=n_permutations, seed=seed)
     return [
         _cell(
@@ -363,4 +534,4 @@ def evaluate(
     ]
 
 
-__all__ = ["PolicyCell", "evaluate", "evaluate_cell"]
+__all__ = ["PolicyCell", "evaluate", "evaluate_cell", "family_null_draws", "null_roc_band"]

@@ -385,8 +385,10 @@ router:
 | `exploration_epsilon` | `0.0` | Fraction of *flagged* checkpoints where the escalation is randomly withheld, so its value becomes measurable. `0.0` is fully deterministic. A **separate** opt-in: `enabled: true` alone never randomizes. |
 | `exploration_seed` | `null` | Seed for that randomization. `null` means shunt draws one and records it on every decision, so any logged propensity stays reproducible. |
 
-Escalation triggers only on **confirmed, verified capability failures** — a test suite
-re-run via `work_dir`, or a manual `shunt flag <session_id> bad`. Non-blocking results
+Escalation triggers only on **confirmed, verified capability failures** — the test suite
+re-run via `work_dir` at session close. A manual `shunt flag <session_id> bad` feeds the
+routing learner (the outcome index), but it runs in a separate process and never reaches the
+in-process escalation log, so it does not trip escalation. Non-blocking results
 (lint-only or infrastructure failures) and unconfirmed flakes never count. Enable it by
 setting `escalation.enabled: true` in a `router.yaml`:
 

@@ -14,6 +14,7 @@ from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 from matplotlib.patches import Rectangle
 
 from benchmark.calibration.labeler_metrics import ConfusionMatrix
+from benchmark.escalation import metrics
 from benchmark.plot_frame import Annotations, FigureSpec
 
 if TYPE_CHECKING:
@@ -52,25 +53,33 @@ PR_CURVE_SPEC = FigureSpec(
         "x is recall and y is precision, both 0-1, over the SWEPT escalation policy: one point per "
         "escalate_after_n value that fired. As the recurrence threshold rises, the policy flags "
         "fewer runs with higher precision. The dashed line is the corpus base failure rate — the "
-        "no-skill precision a random flagger reaches. The prefix risk model's own PR curve is not "
-        "drawn: its score is constant at the evaluated depths (early steps are all "
-        "bug-reproduction), so it ranks nothing."
+        "no-skill precision a random flagger reaches. When present, a SECOND curve (filled "
+        "triangles) is the edit-gated family: the same recurrence rule with failures before the "
+        "agent's first edit excluded from the counter — the reproduction phase is the target bug "
+        "at t=0, not evidence the agent is stuck. The prefix risk model's own PR curve is not "
+        "drawn: its score is constant at the evaluated depths, so it ranks nothing."
     ),
     goal=(
         "Look for points sitting clearly ABOVE the dashed base-rate line. A point above it with "
-        "its interval excluding the base rate is a measured operating point for escalation."
+        "its interval excluding the base rate is a measured operating point for escalation. The "
+        "edit-gated curve should sit above and to the right of the as-shipped one — that gap is "
+        "the reproduction phase masking the recurrence signal."
     ),
     definitions=(
         ("precision", "share of flagged runs that really failed"),
         ("recall", "share of failed runs the policy flagged"),
         ("base failure rate", "the corpus's overall failure rate — a random flagger's precision"),
+        (
+            "edit-gated",
+            "the same recurrence policy with failures before the agent's first edit excluded "
+            "from the counter (an eval-only knob — production has no per-step action stream)",
+        ),
     ),
     notes=(
-        "The sweep is ONE family: the point with the highest precision is measured, never adopted "
-        "as the shipped default — the shipped configuration is reported separately on the sweep "
-        "table.",
-        "One point per swept cell, so the curve is a discrete operating characteristic, not a "
-        "continuous score sweep.",
+        "The point with the highest precision is measured, never adopted as the shipped default — "
+        "the shipped configuration is reported separately on the sweep table.",
+        "One point per swept cell per family, so the curve is a discrete operating characteristic, "
+        "not a continuous score sweep (the continuous recurrence ROC is a separate figure).",
     ),
     limitations=(
         "A cell that never fires has no precision at all and is absent rather than plotted at 0.0.",
@@ -84,12 +93,15 @@ ROC_CURVE_SPEC = FigureSpec(
         "x is the false-positive rate and y the true-positive rate over the SWEPT escalation "
         "policy, one point per escalate_after_n value that fired. The dotted diagonal is chance. "
         "As the recurrence threshold rises the policy moves up the curve: more precision, less "
-        "recall. The prefix risk model's ROC is not drawn: its score is constant at the evaluated "
-        "depths, so it ranks nothing."
+        "recall. When present, a SECOND curve (filled triangles) is the edit-gated family: the "
+        "same recurrence rule with failures before the agent's first edit excluded from the "
+        "counter. The prefix risk model's ROC is not drawn: its score is constant at the "
+        "evaluated depths, so it ranks nothing."
     ),
     goal=(
         "Look for points leaving the diagonal toward the top-left. A point clearly above the "
-        "diagonal means firing concentrates on failed runs."
+        "diagonal means firing concentrates on failed runs. The edit-gated curve should leave the "
+        "diagonal earlier and higher than the as-shipped one."
     ),
     definitions=(
         ("true-positive rate", "share of failed runs the policy flagged"),
@@ -105,8 +117,9 @@ ROC_CURVE_SPEC = FigureSpec(
 
 CONFUSION_MATRIX_SPEC = FigureSpec(
     reading=(
-        "A 2x2 count grid at one swept policy configuration — the cell whose precision is highest "
-        "among those that fired. Rows are the truth (run failed / resolved), columns are what the "
+        "A 2x2 count grid at the swept policy configuration that separates best (highest AUROC "
+        "among cells that clear their null; on the current corpus that is the edit-gated n=2 "
+        "cell). Rows are the truth (run failed / resolved), columns are what the "
         "escalation policy said (flagged / not flagged). Each cell prints the observed count, in "
         "brackets the count a RANDOM flagger at the same flag rate would produce, and the "
         "difference between them. The cell fill is a diverging heatmap on that excess — red where "
@@ -129,10 +142,11 @@ CONFUSION_MATRIX_SPEC = FigureSpec(
     ),
     notes=(
         "Counts are per trajectory, not per prefix.",
-        "The cell shown is the SWEPT cell with the highest measured precision, not the shipped "
-        "default: the shipped default (escalate_after_n=2) fires on every trajectory on this "
+        "The cell shown is the SWEPT cell with the highest AUROC that clears its null (edit-gated "
+        "n=2 on the current corpus), not the shipped default: the shipped default "
+        "(escalate_after_n=2) fires on every trajectory on this "
         "corpus, so its 'not flagged' column is empty by construction. Read this figure together "
-        "with the sweep table, which shows every cell.",
+        "with the sweep tables, which show every cell of both families.",
     ),
     limitations=(
         "One operating point, not a sweep — the PR/ROC figures show the rest.",
@@ -145,26 +159,33 @@ CONFUSION_MATRIX_SPEC = FigureSpec(
 SWEEP_TABLE_SPEC = FigureSpec(
     reading=(
         "One row per swept configuration. Columns: escalations fired, P(fail | fired) with its "
-        "95% challenge-bootstrap interval, the base failure rate, lift, and the permutation-null "
-        "verdict. The table is drawn rather than plotted because the sweep has too few distinct "
-        "results to carry a colour channel honestly. The row that IS the shipped default is "
-        "highlighted — bold text on a shaded background — so the configuration the product "
-        "actually ships can be spotted at a glance."
+        "95% challenge-bootstrap interval, the base failure rate, lift, the permutation-null "
+        "verdict, and the run-length-only AUROC — what a pure 'run length >= t' predictor scores "
+        "at the same flag count. The table is drawn rather than plotted because the sweep has too "
+        "few distinct results to carry a colour channel honestly. The row that IS the shipped "
+        "default is highlighted — bold text on a shaded background — so the configuration the "
+        "product actually ships can be spotted at a glance."
     ),
     goal=(
         "Read the P(fail | fired) interval against the base rate column. An interval containing "
         "the base rate is a configuration with no measured value; an interval BELOW it means "
-        "firing predicts success."
+        "firing predicts success. Read the AUROC against the len-only column too: an AUROC no "
+        "higher than the length-only figure means the 'recurrence' signal is run-length selection."
     ),
     definitions=(
         ("P(fail | fired)", "share of escalated runs that ultimately failed"),
         ("lift", "P(fail | fired) divided by the base failure rate; 1.0 is worthless"),
+        (
+            "len-only AUROC",
+            "the AUROC of a pure run-length threshold at this cell's flag count — the ceiling "
+            "run length alone can explain",
+        ),
     ),
     notes=(
         "escalate_after_n AND stale_window are both swept (the two are coupled: reaching n "
         "recurrences needs a window at least that wide, so the stale=10 rows stop firing at "
-        "n>=15). The shipped default (escalate_after_n=2, stale_window=10) is guaranteed a row "
-        "and is the highlighted one.",
+        "n>=12 on the current corpus). The shipped default (escalate_after_n=2, stale_window=10) "
+        "is guaranteed a row and is the highlighted one.",
         "The interval is a CHALLENGE-level bootstrap, not a Wilson interval over rows: the corpus "
         "is 799 runs drawn from ~160 challenges, so rows are not independent draws and a row-level "
         "interval is roughly 2x too narrow.",
@@ -240,6 +261,187 @@ OUTCOME_BARS_SPEC = FigureSpec(
     ),
 )
 
+EDIT_GATED_SWEEP_TABLE_SPEC = FigureSpec(
+    reading=(
+        "The SAME recurrence sweep as the main sweep table, replayed with the reproduction phase "
+        "excluded: failures before the agent's first edit-like action are NOT counted as "
+        "escalation evidence. One row per configuration; columns match the main table, including "
+        "the run-length-only AUROC. This is the variant that separates on this corpus — the "
+        "as-shipped counter fires on every run because reproduction failures recur at step 1-2, "
+        "so it reads the base rate, while the edit-gated counter only accumulates once the agent "
+        "has actually started changing code."
+    ),
+    goal=(
+        "Read the P(fail | fired) interval against the base rate column AND the AUROC against "
+        "the len-only column. A cell that clears both its permutation null and the run-length "
+        "baseline is a recurrence edge that run length alone cannot explain."
+    ),
+    definitions=(
+        ("P(fail | fired)", "share of escalated runs that ultimately failed"),
+        ("lift", "P(fail | fired) divided by the base failure rate; 1.0 is worthless"),
+        (
+            "len-only AUROC",
+            "the AUROC a pure run-length threshold reaches at this cell's flag count — the "
+            "ceiling run length alone can explain",
+        ),
+    ),
+    notes=(
+        "This is an EVAL-ONLY knob: the live router has no per-step action stream to gate on. It "
+        "measures what the recurrence mechanism could do if a per-step detector ran in production "
+        "and only counted failures after the agent first tried to change the code.",
+    ),
+    limitations=(
+        "Still scored at per-step cadence, not the per-session cadence production runs.",
+        "No stored trajectory contains an escalation that actually happened, so this is "
+        "association, not a causal estimate of what escalating would have CHANGED.",
+    ),
+)
+
+
+SESSION_CADENCE_SPEC = FigureSpec(
+    reading=(
+        "Two bars with 95% Wilson intervals, measured on the SAME instances (the overlap subset "
+        "where each task has >=2 cheap sessions AND a frontier session). The left bar: after a "
+        "cheap session FAILED on a task, the share of FRONTIER sessions on that task that "
+        "resolved it — the escalation arm. The right bar: after a cheap session failed, the share "
+        "of a SECOND cheap session on that task that resolved it — the no-escalation retry arm. "
+        "The dashed line is the cheap model's overall base rate."
+    ),
+    goal=(
+        "Want the left bar clearly above the right bar: escalating to a frontier model after a "
+        "cheap failure should resolve the task far more often than a same-cost retry. This is "
+        "the value of the ladder at the cadence production actually runs (one decision per "
+        "session), where the per-step sweep does not apply."
+    ),
+    definitions=(
+        ("frontier", "the most expensive models present in the corpus — the escalation target"),
+        ("cheap", "the cheapest model present — the base pick, and the retry counterfactual"),
+        (
+            "overlap subset",
+            "tasks with >=2 cheap sessions AND a frontier session, so both arms "
+            "are read on the same tasks (adaptive-coverage selection removed as far as possible)",
+        ),
+    ),
+    notes=(
+        "Observational, not causal: the arms ran in parallel, and which tasks got frontier "
+        "coverage was adaptive. Small-n — read the intervals, not the point estimates.",
+        "At session cadence the detector is trivially satisfied (the failed cheap session carries "
+        "the task's target failing-check id), so this measures the ladder's VALUE, not the "
+        "trigger's detection quality.",
+    ),
+    limitations=(
+        "The escalation ladder in production steps one rank at a time (effort, then the next "
+        "price rank), not straight to the frontier; this figure collapses the ladder to its "
+        "endpoint.",
+        "No causal ordering: a frontier session that resolved might have done so regardless of "
+        "the cheap failure that preceded it in this ordering.",
+    ),
+)
+
+
+RECURRENCE_ROC_SPEC = FigureSpec(
+    reading=(
+        "The COMPLETE ROC of the recurrence signal as a continuous score. Each run gets a score "
+        "= the largest number of times the same failing-check id recurred in a window (the "
+        "'stuck depth'); the curve sweeps that score over ALL thresholds, so unlike the discrete "
+        "operating-characteristic figures it has a point at every possible escalate_after_n, not "
+        "just the swept grid. Two curves: as-shipped (every same-key failure counted) and "
+        "edit-gated (failures before the agent's first edit excluded). The dashed diagonal is "
+        "chance; the shaded band is the recurrence score's OWN permutation null — the central "
+        "95% of AUROCs the score reaches when terminal outcomes are shuffled across challenges "
+        "— so an AUROC above it is signal, not noise; the area under each curve is its AUROC."
+    ),
+    goal=(
+        "The edit-gated curve should sit clearly above and left of the as-shipped one — the "
+        "reproduction phase (counted by the as-shipped score) is pure noise at the low end, so "
+        "the as-shipped curve hugs the diagonal until the score gets large. The gap between the "
+        "two curves is exactly what the reproduction phase masks. Read both AUROCs against the "
+        "shaded null band: a curve whose AUROC clears the band's upper edge is a detector, one "
+        "inside it is indistinguishable from shuffled labels."
+    ),
+    definitions=(
+        ("stuck depth", "max same-key verified failure count the run ever accumulates"),
+        ("edit-gated", "failures before the agent's first edit-like action are not counted"),
+        ("AUROC", "area under this curve — the discrimination of the score over terminal outcome"),
+    ),
+    notes=(
+        "This is the recurrence rule relaxed to a score; the discrete PR/ROC figures are its "
+        "operating points at the swept thresholds. The AUROC of the score bounds what ANY "
+        "single threshold (any escalate_after_n) can achieve.",
+    ),
+    limitations=(
+        "Still per-step cadence and eval-only (production has no per-step action stream).",
+        "The score is computed with the shipped stale_window; a shorter window would change it.",
+    ),
+)
+
+
+def recurrence_roc(
+    scores_plain: Sequence[float],
+    scores_edit: Sequence[float],
+    labels: Sequence[bool],
+    ax: Axes,
+    *,
+    null: NullResult | None = None,
+    band: tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]] | None = None,
+) -> Annotations:
+    """The complete ROC of the recurrence 'stuck depth' score, as-shipped and edit-gated."""
+    # One point per DISTINCT score threshold (the score is integer-valued, so the curve has a
+    # vertex at every possible escalate_after_n) — a proper continuous curve, not the discrete
+    # operating characteristic of the swept policy.
+    ax.plot([0, 1], [0, 1], linestyle=":", color=_FAINT, linewidth=0.8, label="chance")
+    if band is not None:
+        grid, low, high = band
+        ax.fill_between(
+            grid,
+            low,
+            high,
+            color=_NULL_BAND,
+            alpha=0.45,
+            label="null 95% band",
+        )
+    for scores, label, colour, style in (
+        (scores_plain, "as-shipped", "#455A64", "--"),
+        (scores_edit, "edit-gated", _OBSERVED, "-"),
+    ):
+        fpr_tpr = metrics.roc_operating_points(scores, list(labels))
+        xs, ys = zip(*fpr_tpr, strict=True)
+        ax.plot(
+            xs,
+            ys,
+            label=f"{label} (AUROC {metrics.auroc(scores, labels):.3f})",
+            color=colour,
+            linestyle=style,
+            linewidth=1.8,
+        )
+    ax.set_xlabel("false-positive rate (share of resolved runs flagged)")
+    ax.set_ylabel("true-positive rate (share of failed runs flagged)")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_title("complete ROC of the recurrence score — every threshold, both gating modes")
+    ax.legend()
+    return Annotations(
+        notes=(
+            f"AUROC as-shipped {metrics.auroc(scores_plain, labels):.3f} vs edit-gated "
+            f"{metrics.auroc(scores_edit, labels):.3f}",
+            "one point per distinct recurrence count, so the curve is continuous in the "
+            "escalate_after_n threshold",
+            *(
+                (
+                    f"null 95% [{null.ci_low:.3f}, {null.ci_high:.3f}]; AUROC above it "
+                    "clears the instrument's detection floor",
+                )
+                if null is not None
+                else ()
+            ),
+        ),
+        limitations=(
+            "The score is integer (a same-key failure count), so the curve has a vertex per "
+            "possible threshold — smooth-looking but discrete under the hood.",
+        ),
+    )
+
+
 CAPTURE_COVERAGE_SPEC = FigureSpec(
     reading=(
         "One bar per model: the share of that model's trajectories that went through the per-step "
@@ -265,9 +467,9 @@ CAPTURE_COVERAGE_SPEC = FigureSpec(
         "This figure deliberately does NOT plot the `capture_rate` field that the JSON report "
         "carries. That field is the share of failed steps holding a failing_check_id, and the "
         "normalizer writes `success`, `failing_check_id` and `blocking` in one assignment — so it "
-        "is 1.000 for every model BY CONSTRUCTION (measured 6644/6644, 5278/5278, 3260/3260, "
-        "993/993, 2245/2245, 841/841). A bar chart of it would be six identical full bars "
-        "presenting an identity as a measurement.",
+        "is 1.000 for every model BY CONSTRUCTION on every corpus that was stamped by the grader-"
+        "parity replay. A bar chart of it would be six identical full bars presenting an identity "
+        "as a measurement.",
     ),
 )
 
@@ -377,7 +579,17 @@ def sweep_table(
     # grid and differs from it on exactly that knob. Rendering `n` alone drew the shipped row and
     # the swept n=2 row as two identical lines — a duplicate to any reader, under a title that
     # claimed the knob was pinned.
-    header = ["n", "stale", "escalated", "P(fail|fired)", "95% CI", "base", "lift", "vs null"]
+    header = [
+        "n",
+        "stale",
+        "escalated",
+        "P(fail|fired)",
+        "95% CI",
+        "base",
+        "lift",
+        "vs null",
+        "len-only",
+    ]
     rows = [
         [
             str(c.escalate_after_n),
@@ -388,15 +600,15 @@ def sweep_table(
             f"{c.base_failure_rate:.3f}",
             "n/a" if c.lift is None else f"{c.lift:.2f}x",
             "beats" if c.null_auroc.beats_null else "inside",
+            "n/a" if c.length_baseline_auroc is None else f"{c.length_baseline_auroc:.3f}",
         ]
         for c in cells
     ]
     table = ax.table(cellText=rows, colLabels=header, loc="center", cellLoc="center")
     table.auto_set_font_size(False)
-    # 8 columns, not 7: at fontsize 9 the "95% CI" text ran over its own cell rules, so the table
-    # is scaled wider and the font dropped a point to keep every cell inside its border.
+    # 9 columns: at fontsize 8 the widest cells stay inside their borders without shrinking.
     table.set_fontsize(8)
-    table.scale(1.16, 1.6)
+    table.scale(1.16, 1.55)
     title = "policy sweep — escalate_after_n × stale_window (ladder pinned)"
     if shipped_index is not None and 0 <= shipped_index < len(rows):
         _mark_shipped_row(table, shipped_index)
@@ -481,6 +693,7 @@ def _annotate_sweep_points(
     ax: Axes,
     cells: Sequence[PolicyCell],
     xy_of: Callable[[PolicyCell], tuple[float, float | None]],
+    placed: list[tuple[float, float]] | None = None,
 ) -> None:
     """Label each fired operating point, deduplicating co-located cells and staggering overlaps."""
     # The two stale_window rows of one escalate_after_n can land on the SAME plotted point (the
@@ -489,6 +702,13 @@ def _annotate_sweep_points(
     # the next threshold's label on top of both. Coincident points are annotated ONCE (their n
     # values joined); points that merely land close together on the curve are pushed apart
     # vertically so no two labels sit on the same spot.
+    #
+    # `placed` is SHARED across family calls (both curves of the PR/ROC figure pass the SAME
+    # list), so the edit-gated labels dodge the as-shipped ones: the old per-call local list let
+    # an edit-gated n=20 label land on the as-shipped n=4 label, and so on for four pairs on the
+    # committed figures. None (a standalone call) starts a fresh list.
+    if placed is None:
+        placed = []
     grouped: dict[tuple[float, float], list[PolicyCell]] = {}
     for c in cells:
         if c.precision is None:
@@ -497,7 +717,6 @@ def _annotate_sweep_points(
         if y is None:
             continue
         grouped.setdefault((round(x, 6), round(y, 6)), []).append(c)
-    placed: list[tuple[float, float]] = []
     for (x, y), members in grouped.items():
         label = "n=" + ",".join(f"{c.escalate_after_n}" for c in members)
         # Drop the label until its anchor clears every earlier one: consecutive thresholds sit
@@ -519,16 +738,24 @@ def _annotate_sweep_points(
         )
 
 
-def policy_pr_curve(cells: Sequence[PolicyCell], ax: Axes) -> Annotations:
+def policy_pr_curve(
+    cells: Sequence[PolicyCell], ax: Axes, *, edit_gated: Sequence[PolicyCell] = ()
+) -> Annotations:
     """Precision vs recall across SWEPT thresholds — the escalation method's curve."""
     # The old PR figure was drawn from the prefix risk model, whose score is constant at the
     # evaluated depths (early steps are all bug-reproduction, so the model ranks nothing) — a
     # degenerate 1-2-point curve. The escalation METHOD is the policy, and its operating
-    # characteristic is real: as escalate_after_n rises, precision climbs from the base rate to
-    # 0.71 while recall falls. One point per swept cell; the base rate is the no-skill line.
+    # characteristic is real: as escalate_after_n rises, precision climbs from the base rate
+    # toward 1.0 (as-shipped 0.878 at n=50; edit-gated 0.950) while recall falls. One point per
+    # swept cell per family; the base rate is the no-skill line.
+    # When the edit-gated family is present it is drawn as a SECOND curve (filled markers): the
+    # same recurrence rule with failures before the agent's first edit excluded from the counter.
+    # On this corpus that variant separates much earlier and harder (n=2 already lifts 1.41), so
+    # the two curves together ARE the finding — the mechanism works when the reproduction phase
+    # is not counted as escalation evidence.
     points = [(c.recall, c.precision) for c in cells if c.precision is not None]
     scored = [c for c in cells if c.precision is not None]
-    if not points:
+    if not points and not edit_gated:
         return Annotations(
             limitations=(
                 "NO CONFIGURATION FIRED: the sweep contains no measurable operating point.",
@@ -541,22 +768,53 @@ def policy_pr_curve(cells: Sequence[PolicyCell], ax: Axes) -> Annotations:
         color=_NULL_CENTRE,
         label=f"base failure rate={base:.3f}",
     )
-    xs, ys = zip(*points, strict=True)
-    ax.plot(xs, ys, marker="o", label="policy sweep (escalate_after_n rising)")
-    _annotate_sweep_points(ax, cells, lambda c: (c.recall, c.precision))
+    placed: list[tuple[float, float]] = []
+    if points:
+        xs, ys = zip(*points, strict=True)
+        ax.plot(xs, ys, marker="o", linestyle="--", label="as-shipped (escalate_after_n rising)")
+        _annotate_sweep_points(ax, cells, lambda c: (c.recall, c.precision), placed)
+    gated = [(c.recall, c.precision) for c in edit_gated if c.precision is not None]
+    if gated:
+        xs, ys = zip(*gated, strict=True)
+        ax.plot(
+            xs,
+            ys,
+            marker="^",
+            linestyle="-",
+            color=_OBSERVED,
+            label="edit-gated (failures before first edit excluded)",
+        )
+        _annotate_sweep_points(ax, edit_gated, lambda c: (c.recall, c.precision), placed)
     ax.set_xlabel("recall (share of failed runs flagged)")
     ax.set_ylabel("precision (P(fail | flagged))")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.set_title("escalation policy operating characteristic — precision vs recall")
     ax.legend()
-    best = max(scored, key=lambda c: c.precision or 0.0)
+    pool = [*scored, *[c for c in edit_gated if c.precision is not None]]
+    best = max(pool, key=lambda c: c.precision or 0.0)
+    # The family label on the note must come from the EDIT-GATED arm's own best, never the
+    # combined best: when an as-shipped tail cell out-precisions every edit-gated cell (as-shipped
+    # n=50 reaches 0.878), quoting `best` here would credit the wrong family with a precision it
+    # does not have. Computed only when the edit-gated arm actually fired (its iterable is empty
+    # otherwise).
+    notes = []
+    if scored:
+        notes.append(
+            f"{len(scored)} of {len(cells)} swept cells fired; one point per escalate_after_n"
+        )
+    if gated:
+        best_gated = max(
+            (c for c in edit_gated if c.precision is not None), key=lambda c: c.precision or 0.0
+        )
+        notes.append(
+            f"edit-gated family: {len(gated)} fired cells; highest precision "
+            f"{best_gated.precision:.3f} "
+            f"at n={best_gated.escalate_after_n} (recall {best_gated.recall:.3f}) against the "
+            f"same base {base:.3f}"
+        )
     return Annotations(
-        notes=(
-            f"{len(scored)} of {len(cells)} swept cells fired; one point per escalate_after_n",
-            f"highest precision {best.precision:.3f} at n={best.escalate_after_n} "
-            f"(recall {best.recall:.3f}) against a base rate of {best.base_failure_rate:.3f}",
-        ),
+        notes=tuple(notes),
         limitations=(
             ()
             if best.precision_ci[0] > best.base_failure_rate
@@ -568,42 +826,58 @@ def policy_pr_curve(cells: Sequence[PolicyCell], ax: Axes) -> Annotations:
     )
 
 
-def policy_roc_curve(cells: Sequence[PolicyCell], ax: Axes) -> Annotations:
+def policy_roc_curve(
+    cells: Sequence[PolicyCell], ax: Axes, *, edit_gated: Sequence[PolicyCell] = ()
+) -> Annotations:
     """TPR vs FPR across the SWEPT recurrence thresholds — the escalation method's ROC."""
+
     # Same re-pointing as `policy_pr_curve`: the method's curve, not the degenerate prefix score's.
-    points = [
-        (
-            c.fp / (c.fp + c.tn) if (c.fp + c.tn) else 0.0,
-            c.tp / (c.tp + c.fn) if (c.tp + c.fn) else 0.0,
+    # The edit-gated family is drawn as the second curve when present (see `policy_pr_curve`).
+    def _roc_point(cell: PolicyCell) -> tuple[float, float]:
+        return (
+            cell.fp / (cell.fp + cell.tn) if (cell.fp + cell.tn) else 0.0,
+            cell.tp / (cell.tp + cell.fn) if (cell.tp + cell.fn) else 0.0,
         )
-        for c in cells
-        if c.precision is not None
-    ]
-    if not points:
+
+    points = [p for c in cells if c.precision is not None and (p := _roc_point(c))]
+    gated = [p for c in edit_gated if c.precision is not None and (p := _roc_point(c))]
+    if not points and not gated:
         return Annotations(
             limitations=(
                 "NO CONFIGURATION FIRED: the sweep contains no measurable operating point.",
             )
         )
     ax.plot([0, 1], [0, 1], linestyle=":", color=_FAINT, linewidth=0.8, label="chance")
-    xs, ys = zip(*points, strict=True)
-    ax.plot(xs, ys, marker="o", label="policy sweep (escalate_after_n rising)")
-    rates = {
-        c: (
-            c.fp / (c.fp + c.tn) if (c.fp + c.tn) else 0.0,
-            c.tp / (c.tp + c.fn) if (c.tp + c.fn) else 0.0,
+    placed: list[tuple[float, float]] = []
+    if points:
+        xs, ys = zip(*points, strict=True)
+        ax.plot(xs, ys, marker="o", linestyle="--", label="as-shipped (escalate_after_n rising)")
+        rates = {c: _roc_point(c) for c in cells if c.precision is not None}
+        _annotate_sweep_points(ax, cells, lambda c: rates.get(c, (0.0, None)), placed)
+    if gated:
+        xs, ys = zip(*gated, strict=True)
+        ax.plot(
+            xs,
+            ys,
+            marker="^",
+            linestyle="-",
+            color=_OBSERVED,
+            label="edit-gated (failures before first edit excluded)",
         )
-        for c in cells
-        if c.precision is not None
-    }
-    _annotate_sweep_points(ax, cells, lambda c: rates[c])
+        rates = {c: _roc_point(c) for c in edit_gated if c.precision is not None}
+        _annotate_sweep_points(ax, edit_gated, lambda c: rates.get(c, (0.0, None)), placed)
     ax.set_xlabel("false-positive rate (share of resolved runs flagged)")
     ax.set_ylabel("true-positive rate (share of failed runs flagged)")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.set_title("escalation policy ROC across recurrence thresholds")
     ax.legend()
-    return Annotations(notes=(f"{len(points)} swept cells fired; one point per escalate_after_n",))
+    return Annotations(
+        notes=(
+            f"{len(points)} as-shipped and {len(gated)} edit-gated cells fired; "
+            "one point per escalate_after_n per family",
+        )
+    )
 
 
 def policy_confusion(cell: PolicyCell, ax: Axes, *, flag_budget: int | None = None) -> Annotations:
@@ -691,7 +965,12 @@ def _bar_geometry(value: float | None, interval: tuple[float, float]) -> tuple[f
 
 def _rate(value: float | None, digits: int = 3) -> str:
     """Format a proportion for a caption, keeping an undefined one visibly undefined."""
-    return "n/a" if value is None else f"{value:.{digits}f}"
+    # A never-firing cell's interval is (nan, nan) — not None — so the bare-value guard was not
+    # enough: the CI column rendered the literal "[nan, nan]" against the footer's promise that
+    # an undefined interval "prints n/a rather than 0.000". NaN is the same undefined quantity.
+    if value is None or np.isnan(value):
+        return "n/a"
+    return f"{value:.{digits}f}"
 
 
 def _outcome_note(cell: PolicyCell) -> str:
@@ -743,12 +1022,70 @@ def _outcome_limits(cell: PolicyCell) -> tuple[str, ...]:
     )
 
 
+def session_cadence_bars(
+    sc: object,
+    ax: Axes,  # noqa: ANN401 (SessionCadenceReport, TYPE_CHECKING-imported)
+) -> Annotations:
+    """The escalate-vs-cheap-retry resolution contrast at the session cadence."""
+    from benchmark.escalation.session_eval import SessionCadenceReport
+
+    if not isinstance(sc, SessionCadenceReport):
+        return Annotations(limitations=("no session-cadence estimate on this corpus",))
+    ax.bar(
+        ["escalate\nto frontier", "cheap\nretry"],
+        [sc.escalate_rate, sc.retry_rate],
+        yerr=_session_error(sc),
+        capsize=6,
+        color=[_OBSERVED, "#455A64"],
+    )
+    ax.axhline(
+        sc.cheap_base_rate,
+        linestyle="--",
+        color=_NULL_CENTRE,
+        label=f"cheap base rate={sc.cheap_base_rate:.3f}",
+    )
+    ax.set_ylabel("P(task resolved by the retry session)")
+    ax.set_ylim(0, 1)
+    ax.set_title("session-cadence escalation value — escalate vs same-cost retry")
+    ax.legend()
+    lift = "n/a" if sc.lift is None else f"{sc.lift:.2f}x"
+    return Annotations(
+        notes=(
+            f"overlap subset: {sc.n_overlap_instances} tasks with >=2 cheap sessions AND a "
+            f"frontier session",
+            f"escalate {sc.n_escalated_resolved}/{sc.n_escalated} vs cheap retry "
+            f"{sc.n_retried_resolved}/{sc.n_retried}; lift {lift}",
+            # The dashed line is the CHEAP model's UNCONDITIONAL base rate, which can sit above
+            # the escalate bar: the bars are conditioned on a cheap session having FAILED that
+            # task, so they measure a harder subset than the unconditional rate. Without this
+            # line a reader compares bars to a line they do not share a denominator with.
+            f"dashed line = cheap model's unconditional base rate {sc.cheap_base_rate:.3f} — the "
+            "bars condition on a cheap failure on the same task, so the line is not a bar ceiling",
+        ),
+        limitations=(
+            "Observational (parallel arms, adaptive coverage); small-n — read the intervals.",
+        ),
+    )
+
+
+def _session_error(sc: object) -> list[list[float]]:  # noqa: ANN401
+    from benchmark.escalation.session_eval import SessionCadenceReport
+
+    if not isinstance(sc, SessionCadenceReport):
+        return [[0.0, 0.0], [0.0, 0.0]]
+    return [
+        [sc.escalate_rate - sc.escalate_ci[0], sc.escalate_ci[1] - sc.escalate_rate],
+        [sc.retry_rate - sc.retry_ci[0], sc.retry_ci[1] - sc.retry_rate],
+    ]
+
+
 def capture_coverage(coverages: Sequence[ModelCoverage], ax: Axes) -> Annotations:
     """Per-model share of trajectories that carry per-step verified outcomes."""
     # STAMPING coverage is plotted, never `ModelCoverage.capture_rate`. The latter is 1.000 for
     # every model on this corpus by construction (see the spec's limitation), so a bar of it would
     # be a tautology drawn six times. Stamping coverage is the real collection diagnostic and it
-    # does vary — 262/268 for one model against 284/284 for another, 8 unstamped runs overall.
+    # does vary — 0.769 to 0.937 across the six models, 727 of 799 runs stamped overall. The
+    # per-model counts are printed on the bars themselves, so no literal is pinned here.
     names = [c.model for c in coverages]
     shares = [c.n_stamped / c.n_trajectories if c.n_trajectories else 0.0 for c in coverages]
     bars = ax.barh(names, shares)
@@ -797,10 +1134,13 @@ def _coverage_limits(coverages: Sequence[ModelCoverage]) -> tuple[str, ...]:
 __all__ = [
     "CAPTURE_COVERAGE_SPEC",
     "CONFUSION_MATRIX_SPEC",
+    "EDIT_GATED_SWEEP_TABLE_SPEC",
     "OUTCOME_BARS_SPEC",
     "PERMUTATION_NULL_SPEC",
     "PR_CURVE_SPEC",
+    "RECURRENCE_ROC_SPEC",
     "ROC_CURVE_SPEC",
+    "SESSION_CADENCE_SPEC",
     "SWEEP_TABLE_SPEC",
     "capture_coverage",
     "outcome_bars",
@@ -808,5 +1148,7 @@ __all__ = [
     "policy_confusion",
     "policy_pr_curve",
     "policy_roc_curve",
+    "recurrence_roc",
+    "session_cadence_bars",
     "sweep_table",
 ]

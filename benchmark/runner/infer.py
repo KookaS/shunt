@@ -141,7 +141,11 @@ def gold_patches(instance_ids: list[str]) -> dict[str, str]:
     """Pull the gold ``patch`` for each instance id from the HF Verified dataset."""
     from datasets import load_dataset
 
-    ds = load_dataset(swebench_specs.DATASET_NAME, split=swebench_specs.DATASET_SPLIT)
+    ds = load_dataset(
+        swebench_specs.DATASET_NAME,
+        split=swebench_specs.DATASET_SPLIT,
+        revision=swebench_specs.DATASET_REVISION,
+    )
     wanted = set(instance_ids)
     found = {str(r["instance_id"]): str(r["patch"]) for r in ds if str(r["instance_id"]) in wanted}
     missing = wanted - found.keys()
@@ -269,7 +273,11 @@ def _dataset_instances() -> dict[str, dict[str, Any]]:
     """All Verified rows keyed by instance id (loaded once; used for problem statements)."""
     from datasets import load_dataset  # noqa: PLC0415
 
-    ds = load_dataset(swebench_specs.DATASET_NAME, split=swebench_specs.DATASET_SPLIT)
+    ds = load_dataset(
+        swebench_specs.DATASET_NAME,
+        split=swebench_specs.DATASET_SPLIT,
+        revision=swebench_specs.DATASET_REVISION,
+    )
     return {str(row["instance_id"]): dict(row) for row in ds}
 
 

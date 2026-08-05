@@ -577,6 +577,13 @@ def _data_inputs() -> tuple[Path, ...]:
         config.results_csv_path(),
         config.challenges_path(),
         _REPO_ROOT / "benchmark" / "benchmark.yaml",
+        # The routing strategies and coverage read each model's canonical DEFAULT-ARM row
+        # (`flatten_default_arm`), and that default is declared in the model registry — a
+        # `default_arm` change (think -> nothink) re-picks which cached arm is the strategy
+        # input and moved every strategy number (and the complete-challenge census) without
+        # any results.csv edit. Fingerprinted here so the committed figures can never outlive
+        # the registry they were drawn from again.
+        _REPO_ROOT / "src" / "shunt" / "config" / "models.yaml",
     )
 
 

@@ -32,7 +32,7 @@ different meanings, so keep them apart (see the note below the table).
 collected*; `strategies:` (a config block) lists *the routing policies scored on that
 data*. A cheap-first cascade is a **policy you evaluate** (`knn_cascade`), never the
 way data is collected — a cascade collector would never observe the frontier on easy
-tasks and would bias the baseline (see [Deciding the kill-gate on partial frontier coverage](#deciding-the-kill-gate-on-partial-frontier-coverage)).
+tasks and would bias the baseline (see [the kill-gate and partial-coverage limits](#honest-limits)).
 
 ## Challenge source
 
@@ -148,11 +148,15 @@ It composes five existing stages in order and prints one consolidated summary:
    That verdict is cached per instance, keyed on the dataset revision, image, test command,
    selectors, the F2P/P2P lists and the replay source
    itself, so editing any of them re-measures rather than reusing. A replay that times out or
-   exits non-zero **fails the stage** — it is never silently skipped, and a trajectory whose
-   per-step diffs are missing from the local scratch fails loudly rather than being reported
-   done (only a trajectory whose header records `snapshot_steps: 0` — it captured none, so it
-   can never be replayed anywhere — is cleared instead). Skipped entirely on a simulated
-   (non-`--live`) run — there are no new live trajectories.
+    exits non-zero **fails the stage** — it is never silently skipped, and a trajectory whose
+    per-step diffs are missing from the local scratch fails loudly rather than being reported
+    done (only a trajectory whose header records `snapshot_steps: 0` — it captured none, so it
+    can never be replayed anywhere — is cleared instead). A trajectory whose header records
+    **no** `snapshot_steps` at all (a pre-backfill corpus) also refuses to restamp: a partial
+    scratch cannot be told from a complete one, so replaying what is present would mix two
+    adjudicators into a file that still passes its own hash check. Backfill the counts first
+    with `record_snapshot_provenance` on the collection host. Skipped entirely on a simulated
+    (non-`--live`) run — there are no new live trajectories.
 3. **evaluate** — `escalation.run_eval` scores the escalation detector (metrics + plots).
 4. **report** — `routing.report` regenerates the routing plots plus
    `capability_evidence.json`, `coverage_table.csv`, and `strategy_summary.csv`.
@@ -594,7 +598,7 @@ Exploration ships on ([configuration](configuration.md#tune-the-router)), so the
 obvious question is what it costs. You can answer it from the committed data alone.
 `results.csv` is a partly-dense grid of *measured* (task, model) outcomes. The replay
 runs on the largest fully dense sub-grid inside it, found greedily — currently
-**163 tasks × 2 models = 326 measured cells** against a full matrix that is 61.5%
+**165 tasks × 2 models = 330 measured cells** against a full matrix that is 62.1%
 dense. On a fully dense sub-grid, replaying a routing policy is exact rather than
 estimated: look up the model the policy picks, read the outcome that was actually
 recorded for that cell, average. Nothing is simulated and no request is sent.
@@ -609,15 +613,15 @@ off and once with it on, and writes `routing/reports/exploration_replay.png` plu
 summary to stdout. Cells the policy routes to but the benchmark never ran are
 skipped and counted, never filled in with a guess.
 
-On the 163-task dense slice, averaged over 20 seeds: exploration costs **1.27× the
-exploration-off bill** on average and **1.38× on the worst seed**. That ratio is
-paired over the 137 tasks both arms scored — the exploit-only arm drops 26 cells as
-unscorable and all 26 are `qwen3.7-plus`, a model outside the dense slice, so
+On the 165-task dense slice, averaged over 20 seeds: exploration costs **1.28× the
+exploration-off bill** on average and **1.48× on the worst seed**. That ratio is
+paired over the 138 tasks both arms scored — the exploit-only arm drops 27 cells as
+unscorable and all 27 are `qwen3.7-plus`, a model outside the dense slice, so
 comparing the arms' raw totals would compare different task sets. We previously
 published **1.65×/1.77×** from that unpaired ratio; it was ~30% too high. The paired
-per-task difference is **−2.6 pp pass rate (95% CI −3.8 to −1.4)** and **+$0.0021
-per task (95% CI +$0.0017 to +$0.0027)** — the paired numbers are the ones to read,
-since the two arms' marginal pass-rate intervals ([69%, 83%] vs [67%, 81%]) overlap
+per-task difference is **−3.2 pp pass rate (95% CI −4.8 to −1.8)** and **+$0.0023
+per task (95% CI +$0.0018 to +$0.0029)** — the paired numbers are the ones to read,
+since the two arms' marginal pass-rate intervals ([71%, 85%] vs [69%, 82%]) overlap
 heavily.
 
 Four caveats keep this honest. The replay's outcome matrix is **static**, so an
@@ -626,7 +630,7 @@ cost with its learning benefit set to zero, which is the pessimistic half of the
 ledger, not a verdict on whether exploration pays. The budget cap counts the
 router's own confidence-weighted neighbourhood costs, not realized ones, so the
 realized explore/exploit spend ratio can exceed `explore_budget_frac` on an unlucky
-seed (0.77 against a 0.4 cap here) even though the cap is doing its job. The dense
+seed (0.66 against a 0.4 cap on the worst of 20 seeds here) even though the cap is doing its job. The dense
 slice maximises *cells*, which currently favours many tasks over many models: it
 holds only the two cheapest models and **no frontier arm**, so the measured overhead
 is the cost of exploring between cheap models and is a **lower bound** on the shipped

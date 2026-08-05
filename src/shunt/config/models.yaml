@@ -48,11 +48,16 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"
       price_note: Requesty router listing (qwen3.7-plus, alibaba). $0.40/M cache-write, $0.032/M cache-read.
-    # Bracket: realizable {none,low,med,high} dedupes to {none,high}
-    # (default thinking-on ≈ max). NOTE: Qwen has a known requires_stream quirk on
-    # thinking-on requests — YAGNI for this scope, not modeled as a schema field.
+    # Bracket: realizable {none,low,med,high} dedupes to {none,high}.
+    # `default_arm: nothink` (NOT think) on purpose: the effort-escalation ladder
+    # (`effort_then_rank`) steps the SAME model's reasoning arm first because that rung is
+    # cache-safe — but it only exists if the default is NOT already the top arm. Defaulting
+    # binary-think models to think would leave the ladder nothing to climb and force a
+    # cache-breaking rank step on the first escalation. nothink is also the cheap-first pick.
+    # NOTE: Qwen has a known requires_stream quirk on thinking-on requests — YAGNI for this
+    # scope, not modeled as a schema field.
     reasoning:
-      default_arm: think
+      default_arm: nothink
       arms:
         - id: nothink
           rank: 0
@@ -135,9 +140,10 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-16"
       price_note: Requesty router listing (fireworks/glm-5.2). $0.14/M cache-read (live catalog; was 0.260, corrected 2026-07-16).
-    # Bracket: realizable {none,low,med,high} dedupes to {none,high} — default thinking-on.
+    # Bracket: realizable {none,low,med,high} dedupes to {none,high}.
+    # `default_arm: nothink` for the effort-ladder's cache-safe rung — see qwen3.7-plus.
     reasoning:
-      default_arm: think
+      default_arm: nothink
       arms:
         - id: nothink
           rank: 0
@@ -160,8 +166,9 @@ models:
       price_as_of: "2026-07-15"
       price_note: Requesty router listing (kimi-k2.5, moonshot). $0.100/M cache-read.
     # Bracket: realizable {off,on} — binary, no effort gradation.
+    # `default_arm: nothink` for the effort-ladder's cache-safe rung — see qwen3.7-plus.
     reasoning:
-      default_arm: think
+      default_arm: nothink
       arms:
         - id: nothink
           rank: 0
@@ -216,8 +223,9 @@ models:
     # reasoning_effort is the portable OpenAI-compatible knob requesty's `openai/`
     # driver passes through; Gemini's native `thinking_level` risks a 400 there.
     # UNVERIFIED against a live response — smoke-test before relying on it.
+    # `default_arm: low` for the effort-ladder's cache-safe rung — see qwen3.7-plus.
     reasoning:
-      default_arm: high
+      default_arm: low
       arms:
         - id: low
           rank: 0

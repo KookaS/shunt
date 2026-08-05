@@ -154,16 +154,21 @@ Conflating them makes every number ambiguous, so we keep them apart throughout.
 | Input | The task text, embedded | Verified failing-check ids from re-running your tests off the wire |
 | Learns from | Task outcome, pass/fail | Whether this attempt ultimately failed |
 | Today | k-nearest-neighbours over task embeddings | A recurrence rule over verified failing-check ids |
-| Status | **No measurable signal over the base rate yet** | **Policy: `OK_OFFLINE_ONLY` at high `escalate_after_n` — per-step signal, below the cost break-even; prefix model: `NO_SKILL`** |
+| Status | **No measurable signal over the base rate yet** | **Policy: `OK_OFFLINE_ONLY` — real edge at the shipped threshold once the reproduction phase is excluded (eval-only); as-shipped it fires on everything; prefix model: `NO_SKILL`** |
 | Next | bigram / linear models, calibrated classifiers, better selection rules | calibrated risk scoring, structural loop features, late fusion |
 
 The escalation model is a **first attempt**, inspired by the published
-[ACRouter](https://arxiv.org/abs/2606.22902) design. The recurrence policy
-carries a real edge only at recurrence thresholds far above the shipped default,
-and that edge is a **per-step** signal on the offline corpus: production decides
-once per session, so the measured AUROC (0.662) is an offline-only upper bound
-that sits below the cost break-even (~0.72) — a statistical signal, not a
-shippable one. The prefix risk model reads no skill, and it ships **disabled**.
+[ACRouter](https://arxiv.org/abs/2606.22902) design. The recurrence rule carries
+a real edge at the **shipped** threshold once the reproduction phase is excluded:
+gated on failures after the agent's first edit, the best cell is `escalate_after_n=3` — 358
+of 727 runs at P(fail|fired)=0.642 with AUROC 0.724 (n=2 already reads AUROC 0.711),
+clearing both the family-wise
+and length-stratified nulls. As shipped (counting every same-key failure including
+the reproduction phase) it fires on every run and reads exactly the base rate.
+Both readings are **per-step** signals on the offline corpus — production decides
+once per session, so neither is shippable as measured, and the edit-gated variant
+is eval-only (production has no per-step action stream). The prefix risk model
+reads no skill, and escalation ships **disabled**.
 We reproduced that paper and withdrew our citation of it; the write-up is in the
 [research log](docs/research-log.md).
 
@@ -296,7 +301,7 @@ they are not results about embeddings. See *Three claims we retracted* below.
 
 **1. The kill-gate figure.** Left panel: every strategy's cost against its pass
 rate, with Always-Frontier's own confidence band drawn as the "equal quality"
-zone. Right panel: the same contest restricted to the 84 tasks where both
+zone. Right panel: the same contest restricted to the 87 tasks where both
 strategies chose genuinely *measured* cells. *How to read it:* the left panel's
 dollars are roughly half projection — read the right panel before believing any
 saving.
@@ -350,8 +355,9 @@ outcomes move between challenges while the global multiset is preserved — with
 one shared shuffle scored at every swept cell and only the largest kept; dashed
 lines bound the null's central 95%. *How to read it:* for
 the policy to be doing anything, the red line must sit clearly right of the
-upper dashed line. It does: the best cell (n=30, `stale=1000`) reads AUROC
-**0.662** against the family-wise null 95% **[0.500, 0.549]**, adjusted
+upper dashed line. It does: the best cell — on the current corpus the **edit-gated
+n=3** (post-first-edit recurrence) cell — reads AUROC
+**0.724** against the family-wise null 95% **[0.500, 0.542]**, adjusted
 **p = 0.005** — that clearance is why the harness reports `OK_OFFLINE_ONLY`. The prefix risk
 model's incremental is nulled on its own path and honestly reports `NO_SKILL`;
 see the escalation results section below.
@@ -369,17 +375,23 @@ no left-alone arm and the escalated rate is the base rate by construction (lift
 
 **3. Ranking quality.** The escalation **policy**'s ROC across the swept
 recurrence thresholds: one point per `escalate_after_n` value that fired, each
-labelled with its n. As the threshold rises the policy moves up the curve — more
-precision, less recall. *Look for:* points leaving the faint 0.5 diagonal toward
+labelled with its n (the second curve, filled triangles, is the edit-gated family
+— failures before the agent's first edit excluded). As the threshold rises the
+policy moves up the curve — more precision, less recall. *Look for:* points
+leaving the faint 0.5 diagonal toward
 the top-left. The prefix risk model's curve is not drawn: its score is constant
 at the evaluated depths, so it ranks nothing.
 
 ![Escalation ROC](benchmark/escalation/reports/roc_curve.png)
 
-**4. A data gap, now closed.** Share of each model's trajectories that went
-through per-step outcome stamping. *Look for:* every bar at 1.0. All six now are.
-Three models used to sit at **zero**, leaving the recurrence trigger structurally
-dead on them; offline container replay re-stamped those runs at zero API cost.
+**4. A data gap, reduced.** Share of each model's trajectories that went
+through per-step outcome stamping (stamped/total — 0.769 to 0.937 across the six
+models, 727 of 799 overall). *Look for:* every bar as close to 1.0 as the corpus
+allows. All six are well above zero now — three models used to sit at **zero**,
+leaving the recurrence trigger structurally dead on them; offline container replay
+re-stamped those runs at zero API cost. Coverage still tracks the same
+model-correlated axis (the two formerly-zero models remain the least stamped), so
+the model/coverage confound is reduced, not gone.
 Closing the gap did not change the prefix verdict — the `NO_SKILL` on the prefix
 model stands on the complete corpus.
 
@@ -393,20 +405,21 @@ Full numbers, method, and caveats: **[docs/results.md](docs/results.md)**. The
 headline, stated plainly:
 
 > **Cheap-first routing with verified escalation reaches always-frontier quality
-> for roughly a quarter of the cost ($20.46 against $87.04) — but the machine
-> learning contributes nothing to that, and the escalation signal lives in the
-> recurrence policy at high thresholds, not in the prefix risk model.**
+> for roughly a quarter of the cost ($21.12 against $88.61) — but the machine
+> learning contributes nothing to that, and the escalation signal is real: the
+> recurrence rule separates at the shipped threshold once the reproduction phase
+> is excluded (eval-only), not in the prefix risk model.**
 > The saving is real and comes from *mechanism*, not prediction.
 
 | strategy | pass rate | total cost |
 |---|---:|---:|
-| Oracle (hindsight — not deployable) | 96.6% | $13.59 |
-| Price-Cascade | 96.6% | $20.46 |
-| kNN-cascade | 96.6% | $23.40 |
-| Always-Frontier | 96.0% | $87.04 |
-| Always-Cheap | 77.4% | $1.36 |
-| kNN | 78.5% | $10.90 |
-| Tier-Classifier | 67.8% | $9.38 |
+| Oracle (hindsight — not deployable) | 96.6% | $14.37 |
+| Price-Cascade | 96.6% | $21.12 |
+| kNN-cascade | 96.6% | $22.74 |
+| Always-Frontier | 96.0% | $88.61 |
+| Always-Cheap | 77.1% | $1.41 |
+| kNN | 81.7% | $13.34 |
+| Tier-Classifier | 67.4% | $3.77 |
 
 `Price-Cascade` uses no embeddings, no nearest neighbours, and no training. It
 tries models in ascending price order and stops at the first one whose patch
@@ -416,10 +429,10 @@ the same 96.6%.
 
 Three things we will not let you take away from that table:
 
-1. **It is part projection.** 31% of Price-Cascade's dollars and 49% of
+1. **It is part projection.** 22% of Price-Cascade's dollars and 45% of
    Always-Frontier's are imputed, and every imputed cell is filled as a **pass**.
-   On the 84 challenges where both chose genuinely measured cells, it is
-   Always-Frontier **$43.72 @ 91.7%** vs Price-Cascade **$13.42 @ 92.9%**
+   On the 87 challenges where both chose genuinely measured cells, it is
+   Always-Frontier **$46.65 @ 92.0%** vs Price-Cascade **$15.61 @ 93.1%**
    (McNemar p = 1.000) — about a third of the cost. The saving survives, but that
    subset is opportunistic, not pre-registered.
 2. **The two quality figures are not the same kind of number.** A cascade stops
@@ -496,8 +509,8 @@ So the position is neither "embeddings separate task difficulty" nor "they
 cannot". On this corpus **the question is open and currently unmeasurable**, and
 that is a third thing. What the numbers below do describe, accurately, is what
 our shipped router does when handed a 106-character label: across every variant
-it sent 172–175 of 177 tasks to the cheapest model, landed on *exactly* the
-always-cheap pass rate, and cost more doing it — $1.58–1.78 against $1.36. That
+it sent 167–175 of 175 tasks to the cheapest model, landed on *exactly* the
+always-cheap pass rate, and cost more doing it — about $1.73 at k=20 against $1.41. That
 is not a router. It is a routing tax. What it is not is a result about
 embeddings.
 
@@ -549,19 +562,20 @@ So we are withdrawing *"the escalation model does not work"* and replacing it
 with something less satisfying and more accurate: **we cannot yet tell** — at
 least not for a shallow-prefix detector, which is why that half still reads
 `NO_SKILL`; the escalation results now attribute the signal to the recurrence
-policy at high thresholds (status `OK_OFFLINE_ONLY` at `escalate_after_n=30` /
-`stale_window=1000`, see [docs/results.md](docs/results.md#escalation-results)).
+rule at the **shipped** threshold once the reproduction phase is excluded
+(eval-only; status `OK_OFFLINE_ONLY` at the edit-gated `escalate_after_n=3`,
+AUROC 0.724, see [docs/results.md](docs/results.md#escalation-results)).
 The prefix evaluation could only ever have detected a detector at AUROC ≥ 0.59.
 The raw features hint at ≈ 0.52 — squarely inside the blind spot. Resolving it
 needs roughly four times the distinct challenges (152 → ~640); more runs per
 existing challenge buy almost nothing, because the clustering already inflates
 variance ~3×.
 
-**What survives all of it:** the cascade result. Price-Cascade at $20.46 against
-Always-Frontier's $87.04 is untouched by every defect above — it uses no model,
-so there was no model to get wrong. If anything the audit sharpened it: 90.6% of
+**What survives all of it:** the cascade result. Price-Cascade at $21.12 against
+Always-Frontier's $88.61 is untouched by every defect above — it uses no model,
+so there was no model to get wrong. If anything the audit sharpened it: ~90% of
 the headroom is mechanical, which bounds the entire remaining prize for a perfect
-difficulty predictor at **$6.87 on a $20.46 base**. That number is the honest
+difficulty predictor at **about $6.9 on a $21.12 base**. That number is the honest
 answer to "how much is routing intelligence worth here", and it is small.
 
 ## Future

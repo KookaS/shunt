@@ -371,7 +371,9 @@ def test_inadmissible_instance_has_its_stale_stamps_actively_cleared(
     # short-circuited BEFORE writing, so a rejected instance kept whatever the defective replay
     # had stamped. astropy-8872 came back from a rebuild byte-identical, 100% blocking on exit-4.
     jsonl = tmp_path / "t.jsonl"
-    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1), _fabricated(2)]), jsonl)
+    schema.dump_jsonl(
+        make_trajectory([_fabricated(0), _fabricated(1), _fabricated(2)], snapshot_steps=2), jsonl
+    )
     assert _reject(monkeypatch, jsonl) is None
 
     reloaded = schema.load_jsonl(jsonl)
@@ -390,7 +392,7 @@ def test_clearing_preserves_every_non_stamp_field(
 ) -> None:
     # The agent's behaviour is not the instrument's verdict: clearing must not touch it.
     jsonl = tmp_path / "t.jsonl"
-    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1)]), jsonl)
+    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1)], snapshot_steps=2), jsonl)
     _reject(monkeypatch, jsonl)
     step = schema.load_jsonl(jsonl).steps[0]
     assert (step.action, step.args, step.observation, step.result) == (
@@ -408,7 +410,7 @@ def test_clearing_is_idempotent_and_keeps_the_manifest_consistent(
     # A rebuild re-visits a rejected instance every run. Clearing writes the file, so the manifest
     # must be rewritten with it or the corpus fails its own Layer-1 hash check.
     jsonl = tmp_path / "t.jsonl"
-    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1)]), jsonl)
+    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1)], snapshot_steps=2), jsonl)
     _reject(monkeypatch, jsonl)
     once = jsonl.read_bytes()
     manifest = json.loads((tmp_path / "manifest.json").read_text())
@@ -425,7 +427,7 @@ def test_a_rejection_is_recorded_under_its_gate_key(
 ) -> None:
     # The exclusion has to be auditable rather than silent — and the record doubles as the cache.
     jsonl = tmp_path / "t.jsonl"
-    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1)]), jsonl)
+    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1)], snapshot_steps=2), jsonl)
     _reject(monkeypatch, jsonl)
     verdicts = json.loads((tmp_path / replay_admissibility.VERDICT_FILENAME).read_text())
     record = verdicts["repo__repo-1"]
@@ -440,7 +442,7 @@ def test_admissible_instance_still_stamps_its_steps(
 ) -> None:
     # The other direction — the gate must not reject everything. A valid instrument replays.
     jsonl = tmp_path / "t.jsonl"
-    schema.dump_jsonl(make_trajectory([_unstamped(0), _unstamped(1)]), jsonl)
+    schema.dump_jsonl(make_trajectory([_unstamped(0), _unstamped(1)], snapshot_steps=2), jsonl)
     _wire_replay(monkeypatch, _LegScriptedContainer(_SYMPY_F2P_FAILS, _SYMPY_F2P_PASSES))
 
     assert offline_replay.run_offline_replay("traj-1", "repo__repo-1", jsonl) == jsonl
@@ -454,7 +456,7 @@ def test_base_leg_that_already_resolves_is_rejected_end_to_end(
     # the replay cannot tell fixed from unfixed and the instance must be rejected — even though an
     # unrelated failure makes the whole-file exit code say the leg "failed".
     jsonl = tmp_path / "t.jsonl"
-    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1)]), jsonl)
+    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1)], snapshot_steps=2), jsonl)
     container = _LegScriptedContainer(_SYMPY_BASE_ALREADY_RESOLVES, _SYMPY_F2P_PASSES)
     _wire_replay(monkeypatch, container)
     # The exit-code adjudicator would have called this leg a FAILURE and admitted the instance.
@@ -481,7 +483,7 @@ def test_a_cached_rejection_needs_no_container_at_all(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     jsonl = tmp_path / "t.jsonl"
-    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1)]), jsonl)
+    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1)], snapshot_steps=2), jsonl)
     _reject(monkeypatch, jsonl)  # first pass: measured, recorded
 
     monkeypatch.setattr(offline_replay, "instance_container", _no_container)
@@ -496,7 +498,7 @@ def test_a_verdict_measured_by_a_different_instrument_is_never_reused(
     # The whole point of the key: edit the classifier or the replay and every cached verdict is
     # invalidated automatically. A hand-bumped version constant is what goes stale silently.
     jsonl = tmp_path / "t.jsonl"
-    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1)]), jsonl)
+    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1)], snapshot_steps=2), jsonl)
     _reject(monkeypatch, jsonl)
     assert (
         replay_admissibility.cached_verdict("repo__repo-1", "some-other-instrument", tmp_path)
@@ -594,6 +596,23 @@ def test_unknown_snapshot_provenance_refuses_rather_than_clearing(
 
     with pytest.raises(offline_replay.SnapshotsMissingError):
         offline_replay.run_offline_replay("traj-1", "repo__repo-1", jsonl)
+
+
+def test_unknown_snapshot_provenance_also_refuses_a_present_scratch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The mirror case: the scratch IS present, but the header records no count, so a partial
+    # scratch cannot be told from a complete one. Replaying what is present and leaving the rest
+    # stamped would mix two adjudicators into a file that passes its own Layer-1 check — the exact
+    # defect the partial-scratch guard exists to prevent. Refuse rather than restamp blind.
+    jsonl = tmp_path / "t.jsonl"
+    schema.dump_jsonl(make_trajectory([_fabricated(0), _fabricated(1)], snapshot_steps=None), jsonl)
+    before = jsonl.read_bytes()
+    _wire_replay(monkeypatch, _LegScriptedContainer(_SYMPY_F2P_FAILS, _SYMPY_F2P_PASSES))
+
+    with pytest.raises(offline_replay.SnapshotsMissingError):
+        offline_replay.run_offline_replay("traj-1", "repo__repo-1", jsonl)
+    assert jsonl.read_bytes() == before
 
 
 def test_the_replay_exec_forces_a_utf8_stdio_encoding(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -266,13 +266,32 @@ def _crossfit_qhat(rows: Sequence[ExplorationLogRow]) -> list[dict[bool, float]]
     # scalars) but it is real and it always points the same way — a tighter interval — so it is
     # removed rather than caveated. Folds are assigned by CLUSTER, not by row, or the row's own
     # session would leak into its training half through its siblings.
+    #
+    # THE EMPTY-ARM FALLBACK IS THE ARM'S GLOBAL MEAN, NEVER 0.0 — and it is implemented HERE, at
+    # the fold boundary, so a fold whose complement holds no rows of an arm does not hand that
+    # fold's rows a fabricated zero. A zero made the DR correction `w * (r_i - 0)` manufacture
+    # variation out of the propensity weights rather than real outcome variation: measured on a
+    # constant-reward log whose escalate rows sat in one cross-fit fold, the shipped code returned
+    # `identified` with dr=0.918 and a 90% band [0.633, 1.122] off rows that carry no variation at
+    # all — the module's own documented "zero-width interval is no evidence" failure, re-entered
+    # through the model component instead of the bootstrap. With the global-mean fallback every DR
+    # term lands on the same value and the degenerate-interval guard refuses, as it should.
     keys = sorted({_cluster_key(r) for r in rows})
     fold_of_key = {key: index % _N_FOLDS for index, key in enumerate(keys)}
     folds = [fold_of_key[_cluster_key(r)] for r in rows]
-    fitted = {
-        fold: _direct_method([r for r, f in zip(rows, folds, strict=True) if f != fold])
-        for fold in set(folds)
-    }
+    global_means = _direct_method(rows)
+    fitted: dict[int, dict[bool, float]] = {}
+    for fold in set(folds):
+        complement = [r for r, f in zip(rows, folds, strict=True) if f != fold]
+        means = _direct_method(complement)
+        # A usable row's reward is never None, so arm presence in the complement is the whole
+        # test: an arm with rows has a measured mean; an arm with none falls back to its global
+        # mean over ALL usable rows (the contract `_N_FOLDS`' comment promises).
+        filled = {
+            arm: (means[arm] if any(r.escalated is arm for r in complement) else global_means[arm])
+            for arm in (True, False)
+        }
+        fitted[fold] = filled
     return [fitted[f] for f in folds]
 
 

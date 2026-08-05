@@ -345,9 +345,17 @@ def _dataset_row(instance_id: str) -> dict[str, str]:
     # One accessor for every gold field the replay needs. `swebench_test_directives` reads
     # repo+test_patch from it, the step replay reads test_patch, and the admissibility gate's
     # GOLD leg reads `patch` — so all three describe the SAME dataset revision by construction.
+    # The fetch is PINNED to `DATASET_REVISION`, the same pin `build_challenges` uses: the gate's
+    # cache key claims `spec.dataset_revision`, so the rows it is measured against must actually
+    # come from that revision, or a drift in HF's `test` split would serve a stale cached verdict
+    # for a row it was never measured on (the key is the contract; the fetch is the subject).
     from datasets import load_dataset  # noqa: PLC0415
 
-    ds = load_dataset(swebench_specs.DATASET_NAME, split=swebench_specs.DATASET_SPLIT)
+    ds = load_dataset(
+        swebench_specs.DATASET_NAME,
+        split=swebench_specs.DATASET_SPLIT,
+        revision=swebench_specs.DATASET_REVISION,
+    )
     for row in ds:
         if str(row["instance_id"]) == instance_id:
             return {field: str(row[field]) for field in _ROW_FIELDS}
@@ -470,7 +478,19 @@ def run_offline_replay(trajectory_id: str, instance_id: str, jsonl_path: Path) -
     # most of its steps still carry stamps from the adjudicator this change replaced. The committed
     # count is the only thing that can notice, so compare against it and refuse.
     captured = schema.load_jsonl(jsonl_path).header.snapshot_steps
-    if captured is not None and len(snapshots) != captured:
+    if captured is None:
+        # No count on record (the corpus predates the field, or was never backfilled) means a
+        # partial scratch cannot be told from a complete one — replaying what is present and
+        # leaving the rest stamped mixes two adjudicators, which is exactly what the guard above
+        # exists to prevent. Refusing is the real-only answer: do not restamp against unknown
+        # provenance. `record_snapshot_provenance` (collection-host only) is the backfill.
+        raise SnapshotsMissingError(
+            f"{trajectory_id} records no snapshot_steps, so a partial scratch cannot be told "
+            f"from a complete one. Refusing to replay {len(snapshots)} step(s) against unknown "
+            "provenance; backfill snapshot_steps (record_snapshot_provenance) on the collection "
+            "host before rebuilding."
+        )
+    if len(snapshots) != captured:
         raise SnapshotsMissingError(
             f"{trajectory_id} captured {captured} per-step diffs but only {len(snapshots)} are "
             f"present under {step_snapshots.snapshot_dir(trajectory_id)}; a partial replay would "

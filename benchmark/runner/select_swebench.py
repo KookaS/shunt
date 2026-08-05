@@ -112,7 +112,11 @@ def load_experiments_resolves(root: Path, subset: str = "verified") -> ResolveTa
 def _difficulty_map_from_hf() -> dict[str, str]:
     from datasets import load_dataset
 
-    ds = load_dataset(swebench_specs.DATASET_NAME, split=swebench_specs.DATASET_SPLIT)
+    ds = load_dataset(
+        swebench_specs.DATASET_NAME,
+        split=swebench_specs.DATASET_SPLIT,
+        revision=swebench_specs.DATASET_REVISION,
+    )
     return {
         str(r["instance_id"]): swebench_specs.difficulty_stratum(str(r.get("difficulty", "")))
         for r in ds

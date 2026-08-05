@@ -122,8 +122,13 @@ non-model producer: your test suite, re-run off the wire.
   leaves the key random. That key is what lets Shunt tell "the same problem again" from
   "a different failure."
 
-Human feedback (`shunt flag <id> bad`) is the other verified source and carries the
-same weight as a failing suite — a person confirming the result is ground truth.
+Human feedback (`shunt flag <id> bad`) is a verified source for the **routing** learner — a person
+confirming the result is ground truth, and it feeds the outcome index exactly like a suite. It does
+**not** feed auto-escalation's failure log. The escalation log is held in the running engine's
+memory and keyed per repo (`work_dir`); `shunt flag` runs in a separate process and writes only the
+session's outcome row, so a human-flagged failure never trips an escalation. Feeding human labels
+into escalation would need the failure log moved to the same store — a design change, not a wiring
+detail.
 
 ## Triggers — when it escalates
 
@@ -149,34 +154,46 @@ recurs:
 Escalation is keyed per **task** (the repo / `work_dir`), so a repeated failure in one
 project never escalates routing for another.
 
-### The sameness premise is untested, and this corpus cannot test it
+### The sameness premise is now testable — and the stamp is a whole-spec gate, not an error id
 
 "The same failure twice means the model is stuck" is a design assumption. The obvious way to
-check it is to compare runs that repeat one failing-check id against runs that hit several.
-That comparison is not available today. The stored trajectories in
-`benchmark/escalation/data/live/` carry per-step outcomes stamped by re-running each
-instance's target tests, and in three repositories that stamping is broken in ways that
-manufacture precisely the buckets such a comparison would use:
+check it is to compare runs that repeat one failing-check id against runs that hit several. The
+current corpus supports that comparison. The trajectories in `benchmark/escalation/data/live/`
+were re-stamped (2026-08-02) by the grader-parity container replay (`swebench_grading.GraderParity`),
+and every one of the 18 339 failing-check ids on disk is a readable test name — a FAIL_TO_PASS or
+PASS_TO_PASS id taken from the instance's own SWE-bench spec. Zero opaque `hash:…` keys remain;
+django keys are `test_x (module.Class.test_x)` ids, sympy keys are bare test names, sphinx keys
+are `file::Test::case` node ids. An earlier version of this section described a pre-rebuild corpus
+whose keys were per-instance hashes and whose sympy runs fabricated passes; that corpus is gone.
 
-- **django fabricates a single key per instance.** Its `FAIL_TO_PASS` ids have the form
-  `test_x (module.Class.test_x)`; the runner cannot address them, every step errors out, and
-  the failure detail hashes to a per-instance constant. All 108 django keys are opaque hashes,
-  not one is a real node id, and 3,266 of 3,412 django steps are stamped blocking-red whatever
-  the agent did. Those runs dominate the single-key group — 99 of its 537 members.
-- **sympy fabricates passes.** Its ids cannot address `bin/test`, so no test is selected, the
-  command exits 0, and the step is stamped a verified success. 80 of the 98 runs carrying no
-  failing-check id at all are sympy.
-- **sphinx-doc keys are 98.8% opaque hashes** rather than node ids, and it supplies 70 of the
-  156 runs with two or more distinct ids.
+What the stamp actually measures, so the premise is read correctly:
 
-A split on distinct-key count therefore sorts trajectories largely by which repository they
-came from, through three unrelated stamping defects. Any lift it shows is about the harness,
-not the agent — which is why this page reports no such number.
+- **It is a whole-spec gate, not the agent's error.** Each step replays the agent's workspace at
+  that step and runs the instance's target test files; the step is red while the F2P∪P2P set is
+  not fully green, and `failing_check_id` is the first test in that set that is still failing. A
+  `git log`, a `cat`, and a full `pytest` run are all stamped the same key while the target test
+  fails — the stamp is *state*-contingent, never *action*-contingent.
+- **Same-key recurrence is therefore a per-instance time-to-fix counter.** The F2P set is fixed
+  per instance, so a constant key from step 0 to the fix (or to the terminal step) counts how
+  many replay steps the spec stayed red. Resolved runs break the streak exactly at the fix and
+  never end red; unresolved runs repeat the same key until the terminal step. A key *change*
+  mid-run is meaningful but rare (~8% of runs): it means a different graded test now leads
+  (partial fix, or a P2P regression after the F2P set passed).
+- **The recurrence edge this produces is real but partly run-length.** Because the counter
+  starts at the first reproduction failure, the shipped `escalate_after_n: 2` fires on nearly
+  every run, and the discrimination that emerges at high thresholds trades on long runs. Measured
+  over the 727 stamped runs: the n=30 cell's AUROC 0.662 is only 0.097 above the 0.565 that run
+  length alone scores at the same flag count, and it clears a length-stratified null (0.662 against
+  [0.538, 0.583]) — so recurrence adds signal beyond length, but about 40% of the raw excess
+  over chance is the length selection. The policy sweep in
+  [Results → Escalation](results.md#escalation-results) reports both references on every cell.
 
-**The question is open.** Whether same-key recurrence, key diversity, or neither predicts
-failure cannot be settled until the corpus is re-stamped with keys that address the tests they
-name. Until then treat the same-key rule as an untested design assumption: not evidence-backed,
-and not refuted either.
+**The question is no longer untestable.** Whether same-key recurrence, key diversity, or neither
+predicts failure is what the policy sweep measures; it is not reported here as an unconditional
+"same-key wins" claim because the honest answer carries the run-length caveat above. Two residual
+defects stay on record: a step that could not be reconstructed is stamped green (unmeasured, not
+passed — ~7% of steps, on 310 of 799 runs), and the key names the spec's test, so "same error" is
+"same graded test still failing", which is the state the whole-spec gate measures.
 
 ## The ladder — effort first, then rank
 
@@ -265,8 +282,9 @@ Be honest with yourself about where this does nothing:
   it on once you have a handful of labelled sessions (roughly 5–10) so the trigger has
   something real to act on.
 - **No `work_dir`, no automatic signal.** Auto-escalation is inert until you point
-  Shunt at a repo it can test. Without that, the only verified failures are the ones
-  you enter by hand with `shunt flag <id> bad`.
+  Shunt at a repo it can test. Without that, auto-escalation has *no* signal at all: `shunt flag`
+  feeds the routing learner, not the in-process escalation log, so a repo with no `work_dir`
+  produces no verified failure the escalation rule can count.
 - **No tests, no signal — the vibecode case.** A repo with no test suite produces no
   verified outcome, so auto-escalation does nothing there. It cannot escalate on a
   signal that does not exist.
@@ -408,9 +426,27 @@ are estimated from the same resamples, so the two are comparable. Read `P(fail |
 against `base`: an interval containing the base rate is a configuration with no measured
 value, and an interval below it means firing predicts *success*. The sweep varies **both**
 `escalate_after_n` and `stale_window` — they are coupled, since reaching *n* recurrences needs
-a window at least that wide — so the grid spans `escalate_after_n` ∈ {2, 5, 8, 10, 15, 20, 30}
-× `stale_window` ∈ {10, 1000} (14 cells). The shipped configuration is guaranteed a cell and is
-reported separately, never adopted by argmax.
+a window at least that wide — so the grid spans `escalate_after_n` ∈ {1, 2, 3, 4, 5, 6, 8, 10,
+12, 15, 20, 25, 30, 40, 50} × `stale_window` ∈ {10, 1000} (30 cells). The dense ladder traces
+the full precision/recall mapping so you can pick an operating point — production should pick
+a LOW `escalate_after_n` (escalate early, before a doomed run burns its budget) — and both
+knobs are already live configuration: `escalate_after_n` and `stale_window` in the
+`escalation:` block of `src/shunt/config/router.yaml`. The shipped configuration is guaranteed
+a cell and is reported separately, never adopted by argmax.
+
+The report ALSO replays the same grid in a second family, **`count_from_first_edit`**: failures
+before the agent's first edit-like action are treated as the reproduction phase (the target bug
+at t=0) and are **not counted**. This is why the shipped threshold looks like a coin flip at all
+— the as-shipped counter trips on every run's reproduction failures — and it is where the real
+edge lives. On the current corpus the edit-gated family separates at and just above the shipped
+threshold — the best cell is n=3, firing on 358/727 runs with P(fail|fired)=0.642 (lift 1.53)
+and AUROC 0.724, clearing both the family-wise and the length-stratified nulls (n=2 already reads
+AUROC 0.711 at P=0.593); the as-shipped n=2 cell fires on 727/727 at the base rate. The two
+families are reported side by side (PR/ROC curves draw both; the edit-gated sweep gets its own
+table figure), and `best_skilled_cell` reads across them. `count_from_first_edit` is an
+**eval-only** knob: the live router has no per-step action stream to gate on, so the edit-gated
+family measures what a per-step detector could do if it only counted failures after the agent
+first tried to change the code.
 
 **2. A prefix risk model, graded against the null.** A continuous risk score — the probability
 this run ends unresolved — is fit from prefix-only features at fixed decision depths and
@@ -447,9 +483,11 @@ is recurrence *within* one session's steps, which is not the quantity the shippe
 Any `escalate_after_n` result it reports — including a cell it flags as better than the
 default — describes a per-step policy Shunt does not run.
 
-That gap is a property of the data, not a bug awaiting a patch. A session-cadence replay needs
-trajectories spanning several sessions; none of these do. Closing it takes new collection, not
-new code.
+That gap is a property of the data, not a bug awaiting a patch. A true session-cadence replay
+needs trajectories spanning several sessions; none of these do, and the report's
+`session_cadence` figure is the closest the corpus allows — it reads the several (model, arm)
+sessions per instance as repeated attempts at one task, which is observational rather than a
+causal replay. Closing the gap fully takes new collection, not new code.
 
 **It does not exercise the flake guard.** The live trigger discards any failure that did not
 reproduce on re-run (`confirmed=False`). Offline, the stamping stage sets `confirmed=True` on
@@ -465,13 +503,16 @@ What the rest of the report means:
   prefix.** A policy cell counts as skill when it (a) actually fires, (b) clears its family-wise
   permutation null — the max-over-cells (maxT) reference across the whole swept family, one
   shared shuffle scored at every cell — and (c) has a `P(fail | fired)` interval that clears
-  the base failure rate. That interval is corrected the same way: for a swept family it is the
-  family-wise max-over-cells reference built from the same challenge resamples (the distribution
-  of the family's best precision), so the precision clause pays for the same selection the null
-  does, and a single-cell call keeps its marginal bootstrap. On the current corpus that happens
-  at `escalate_after_n=30` /
-  `stale_window=1000` (AUROC 0.662 against the null 95% [0.500, 0.549], adjusted p = 0.005), so
-  the status is `OK_OFFLINE_ONLY` and the verdict names the winning cell, not a model. The policy null is a
+  the base failure rate. The family-wise correction applies to the AUROC null **only**: each
+  cell's `P(fail | fired)` interval is its OWN marginal challenge bootstrap (built from the same
+  resamples as the not-fired arm, so the two are comparable). The precision clause therefore
+  does NOT pay for the same selection the null does — the earlier design that gave every swept
+  cell the family's max-over-cells precision reference was abandoned, because it handed a cell an
+  interval that could exclude its own point estimate (the shipped cell once read
+  `0.421 [0.606, 0.788]`). On the current corpus the gate clears
+  at the **edit-gated** `escalate_after_n=3` /
+  `stale_window=1000` (AUROC 0.724 against the null 95% [0.500, 0.542], adjusted p = 0.005), so
+  the status is `OK_OFFLINE_ONLY` and the verdict names the winning cell (and its family), not a model. The policy null is a
   BLOCK permutation — whole challenge blocks are shuffled, so outcomes move between challenges
   while the global multiset is preserved — because this half's claim is unconditional and the
   exchangeable unit is the whole challenge. Only if no policy cell
@@ -508,14 +549,15 @@ What the rest of the report means:
   anti-predictive baseline must not be beatable into an apparent finding.
 - **The sweep varies `escalate_after_n` AND `stale_window` — they are coupled.** `_in_window`
   admits at most `stale_window` events, so reaching *n* recurrences needs a window at least
-  that wide. The grid spans n ∈ {2, 5, 8, 10, 15, 20, 30} × `stale_window` ∈ {10, 1000};
-  `escalate_after_n=1` is deliberately excluded (it fires on the first verified failure, which
-  is failure-biased). `ladder` is pinned: the detection metric reads whether the policy fired,
-  not which rung it climbed, so it cannot move the headline. The shipped configuration
-  (n=2, `stale=10`) is guaranteed a row, highlighted on the sweep table, and the report
-  **flags** a better cell and never changes the shipped default. On this corpus the `stale=10`
-  rows stop firing at n ≥ 15 — the window cannot hold enough recurrences — while the
-  `stale=1000` rows reach a null-clearing edge at high n.
+  that wide. The grid spans n ∈ {1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50} ×
+  `stale_window` ∈ {10, 1000}; n=1 is kept so the mapping shows the floor (it degrades to the
+  base rate), and the high end (40, 50) probes past the corpus's ~31-step median where the
+  remaining precision is run-length selection. `ladder` is pinned: the detection metric reads
+  whether the policy fired, not which rung it climbed, so it cannot move the headline. The
+  shipped configuration (n=2, `stale=10`) is guaranteed a row, highlighted on the sweep table,
+  and the report **flags** a better cell and never changes the shipped default. On this corpus
+  the `stale=10` rows stop firing at n ≥ 12 — the window cannot hold enough recurrences —
+  while the `stale=1000` rows reach a null-clearing edge at high n.
 - **Runs with no per-step verified outcomes are excluded and counted.** A trajectory the
   stamping stage never processed carries parser defaults, not evidence; including it would feed
   the model a collection-date proxy. The exclusion count appears in the JSON and in every
@@ -523,7 +565,10 @@ What the rest of the report means:
 - **Figures.** PR curve and ROC are the **policy** operating characteristics across the swept
   recurrence thresholds (one point per `escalate_after_n` value that fired; the prefix risk
   model's curves are not drawn, because its score is constant at the evaluated depths and it
-  ranks nothing), the confusion matrix at the best-separating cell with a random-at-the-same-
+  ranks nothing), the complete ROC of the continuous recurrence score (`recurrence_roc.png`,
+  whose detection floor is its own challenge-shuffle null — on this corpus the edit-gated AUROC
+  0.781 clears the null 95% [0.472, 0.540], the as-shipped 0.601 just clears it too), the
+  confusion matrix at the best-separating cell with a random-at-the-same-
   flag-rate baseline and a populated "not flagged" column, the policy's family-wise
   max-over-cells permutation-null histogram, the sweep as an interval table with the
   shipped-default row highlighted, trajectory outcomes (escalated vs left alone) at the shipped

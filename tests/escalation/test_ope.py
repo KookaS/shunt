@@ -364,6 +364,34 @@ def test_a_zero_width_interval_is_refused_rather_than_reported_as_certainty() ->
     assert result.ci_low is None and result.ci_high is None
 
 
+def test_a_fold_without_an_arm_falls_back_to_the_global_mean_not_zero() -> None:
+    from benchmark.escalation.ope import _crossfit_qhat
+
+    # Every reward identical, escalate confined to ONE session: a single constant-reward cluster.
+    # Fitted per-fold with a 0.0 empty-arm fallback, the escalate rows in fold 0 got
+    # qhat[True] = 0.0 (their complement holds none), so the DR residual `w * (r - 0)` spread the
+    # terms apart and the estimator reported `identified` off rows that carry no variation. With
+    # the global-mean fallback every term lands on the same value and the estimator must refuse.
+    rows = [
+        ExplorationLogRow(
+            checkpoint_id=f"pkg::t{i}",
+            escalated=(i < 10),
+            propensity=0.7 if i < 10 else 0.3,
+            reward=1.0,
+            randomized=True,
+            features={},
+            session_id=f"s{i // 10}",
+        )
+        for i in range(50)
+    ]
+    fitted = _crossfit_qhat(rows)
+    assert fitted[0][True] == pytest.approx(1.0)  # global mean of the escalate arm, not 0.0
+    result = estimate_policy_value(rows, always_escalate)
+    assert result.status == NOT_IDENTIFIED
+    assert "degenerate interval" in result.reason
+    assert result.dr_estimate is None
+
+
 def test_qhat_is_cross_fitted_so_a_row_never_scores_against_its_own_mean() -> None:
     from benchmark.escalation.ope import _crossfit_qhat, _direct_method
 
