@@ -81,7 +81,7 @@ class TestCensoringGuardFiresWhenImputeIsOff:
         def fake_oracle(m, task_ids, pricing):
             return [_d(t, "cheap", True, 0.1) for t in task_ids]
 
-        monkeypatch.setattr(kill_gate, "evaluate_knn_cascade", fake_router)
+        monkeypatch.setattr(kill_gate, "evaluate_router", fake_router)
         monkeypatch.setattr(kill_gate, "evaluate_test", fake_oracle)
 
         censored_cell = matrix["results"]["t1"]["frontier"]
@@ -191,7 +191,7 @@ class TestVerdictDrivenByRouter:
         def fake_oracle(m, task_ids, pricing):
             return [_d(t, "cheap", True, 0.1) for t in task_ids]
 
-        monkeypatch.setattr(kill_gate, "evaluate_knn_cascade", fake_router)
+        monkeypatch.setattr(kill_gate, "evaluate_router", fake_router)
         monkeypatch.setattr(kill_gate, "evaluate_test", fake_oracle)
 
         exit_code, report = kill_gate.run_kill_gate(
@@ -214,7 +214,7 @@ class TestVerdictDrivenByRouter:
         def boom(m, task_ids, strategy=None):
             raise RuntimeError("router exploded")
 
-        monkeypatch.setattr(kill_gate, "evaluate_knn_cascade", boom)
+        monkeypatch.setattr(kill_gate, "evaluate_router", boom)
 
         with pytest.raises(RuntimeError, match="router exploded"):
             kill_gate.run_kill_gate(
@@ -239,7 +239,7 @@ class TestVerdictDrivenByRouter:
         def fake_oracle(m, task_ids, pricing):
             return [_d(t, "cheap", True, 0.1) for t in task_ids]
 
-        monkeypatch.setattr(kill_gate, "evaluate_knn_cascade", fake_router)
+        monkeypatch.setattr(kill_gate, "evaluate_router", fake_router)
         monkeypatch.setattr(kill_gate, "evaluate_test", fake_oracle)
 
         exit_code, report = kill_gate.run_kill_gate(
@@ -266,7 +266,7 @@ class TestVerdictDrivenByRouter:
         def fake_oracle(m, task_ids, pricing):
             return [_d(t, "cheap", True, 0.1) for t in task_ids]
 
-        monkeypatch.setattr(kill_gate, "evaluate_knn_cascade", fake_router)
+        monkeypatch.setattr(kill_gate, "evaluate_router", fake_router)
         monkeypatch.setattr(kill_gate, "evaluate_test", fake_oracle)
 
         exit_code, _ = kill_gate.run_kill_gate(
@@ -293,7 +293,7 @@ class TestVerdictDrivenByRouter:
         def fake_oracle(m, task_ids, pricing):
             return [_d(t, "cheap", True, 0.1) for t in task_ids]
 
-        monkeypatch.setattr(kill_gate, "evaluate_knn_cascade", fake_router)
+        monkeypatch.setattr(kill_gate, "evaluate_router", fake_router)
         monkeypatch.setattr(kill_gate, "evaluate_test", fake_oracle)
 
         exit_code, report = kill_gate.run_kill_gate(
@@ -331,7 +331,7 @@ class TestVerdictDrivenByRouter:
         def fake_oracle(m, task_ids, pricing):
             return [_d(t, "cheap", True, 0.1) for t in task_ids]
 
-        monkeypatch.setattr(kill_gate, "evaluate_knn_cascade", fake_router)
+        monkeypatch.setattr(kill_gate, "evaluate_router", fake_router)
         monkeypatch.setattr(kill_gate, "evaluate_test", fake_oracle)
 
         exit_code, report = kill_gate.run_kill_gate(
@@ -362,7 +362,7 @@ class TestVerdictDrivenByRouter:
         def fake_oracle(m, task_ids, pricing):
             return [_d(t, "cheap", True, 0.1) for t in task_ids]
 
-        monkeypatch.setattr(kill_gate, "evaluate_knn_cascade", fake_router)
+        monkeypatch.setattr(kill_gate, "evaluate_router", fake_router)
         monkeypatch.setattr(kill_gate, "evaluate_test", fake_oracle)
 
         _, report = kill_gate.run_kill_gate(

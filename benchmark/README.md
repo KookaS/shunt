@@ -70,8 +70,11 @@ changes how you read the result · **NO** does not hold.
   stamped corpus with permutation nulls. Its report carries a `deployability` verdict, currently
   **OFFLINE-ONLY UPPER BOUND**: 2 of the 3 features (`infra_rate`, `max_action_repeat_rate`) read
   fields that do not exist at the production decision point, and the eval scores one decision per
-  step where production decides once per session (`escalation/deployability.py`). The number is
-  real; it bounds a policy production does not run.
+  step where production decides once per session (`escalation/deployability.py`). The headline
+  cell carries a **third** mismatch of its own, published as `canonical_deployability`: it is
+  scored with the `edit_gated` counter, which decides where the reproduction phase ends by reading
+  each step's `action` — a field the live decision never receives, and one no `EscalationPolicy`
+  knob can ask for. The numbers are real; they bound a policy production does not run.
 - **PARTLY — all benchmark data in git.** Tracked: `routing/results.csv`, the 500 instance
   specs, `routing/data/challenges.json`, the 799 trajectory JSONL files with their per-step
   stamps, `manifest.json`, `admissibility.json`, `stamp_ledger.json`, and the report PNGs.
@@ -115,7 +118,7 @@ benchmark/
     instrument_control.py      # Positive control + destroyed-signal null for the routing pipeline
     metrics.py                 # Metric definitions (cost, quality, trade-offs)
     report.py                  # Comparison tables and plots (derived from results.csv)
-    scripts/                   # Analysis + figure producers (read results.csv, write reports/)
+    scripts/                   # Analysis + figure producers (read results.csv, write docs/assets/figures/routing/)
       compute_costs.py         # Per-model cost/pass rollup
       embedding_compare.py     # Arctic vs Jina-code neighbourhoods
       knn_nulls.py             # Permutation nulls + the shared kNN selection rule
@@ -125,14 +128,15 @@ benchmark/
       plot_timing.py           # API calls per task, per model and per routed strategy
       threshold_sweep.py       # kNN hyperparameter held-out sweep + allocation panel
       viz_knn.py               # kNN neighbourhood / routing-map visualisations
-    reports/                   # Regenerable plots (PNG, tracked) + derived strategy_summary.csv (gitignored)
+    reports/                   # Derived strategy_summary.csv etc. (gitignored); PNGs live in docs/assets/figures/routing/
   .gitignore
   README.md                    # This file
 ```
 
-Everything except `results.csv` is derived: the per-strategy summary, plots, and
-parameter sweeps are all regenerated from it into `reports/` (the PNGs are
-tracked; the derived `strategy_summary.csv` is not) — there is a **single committed source of truth**.
+Everything except `results.csv` is derived: the per-strategy summary and parameter
+sweeps regenerate from it into `reports/` (gitignored), and the plots into
+`docs/assets/figures/<half>/` (tracked, because the docs link them) — there is a **single
+committed source of truth**.
 
 ## Run
 

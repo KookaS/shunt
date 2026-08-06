@@ -19,6 +19,12 @@ from benchmark.calibration.labeler_metrics import ConfusionMatrix, LabelerMetric
 
 # A permutation null needs enough draws that the 97.5th percentile is not itself noise.
 MIN_PERMUTATIONS = 200
+# What a REPORTED null is estimated from, which is a different question to what the estimator
+# will tolerate. While the two were the same number every published p-value was the floor
+# artifact 1/(200+1) = 0.005 — the smallest value the +1-corrected estimator can return — so
+# "p=0.005" said "we drew 200 times", not "this is how extreme the observation is". The floor
+# above stays where it is (it is a refusal, not a default); this is the default.
+DEFAULT_PERMUTATIONS = 2000
 
 Statistic = Callable[[Sequence[float], Sequence[bool]], float]
 
@@ -93,6 +99,36 @@ def auroc(scores: Sequence[float], labels: Sequence[bool]) -> float:
         index = run
     rank_sum_pos = sum(ranks[i] for i, lab in enumerate(labels) if lab)
     return (rank_sum_pos - positives * (positives + 1) / 2.0) / (positives * negatives)
+
+
+def stratified_auroc(
+    scores: Sequence[float], labels: Sequence[bool], strata: Sequence[str]
+) -> float | None:
+    """AUROC computed WITHIN each stratum and pooled by `n_pos * n_neg`, or None if none rank."""
+    # A pooled AUROC over a corpus where the stratum (model, or challenge) shifts both the score
+    # and the base rate measures the stratum as much as the score: if hard challenges both fire
+    # the trigger more and fail more, a constant-within-stratum score still scores above chance.
+    # Ranking only inside a stratum removes that channel. The weights are each stratum's number of
+    # comparable pairs, which is exactly what a pooled AUROC would have counted, so the two
+    # numbers are on one scale and the gap between them is readable as the confound's size.
+    # A single-class stratum contributes no pairs at all and is DROPPED, never scored at the 0.5
+    # `auroc` returns for it — averaging in a chance value would pull the estimate toward 0.5 and
+    # make the confound look smaller the more degenerate the strata are.
+    by_stratum: dict[str, list[int]] = {}
+    for index, stratum in enumerate(strata):
+        by_stratum.setdefault(stratum, []).append(index)
+    total_weight = 0.0
+    weighted = 0.0
+    for indices in by_stratum.values():
+        stratum_labels = [labels[i] for i in indices]
+        n_pos = sum(stratum_labels)
+        n_neg = len(stratum_labels) - n_pos
+        if not n_pos or not n_neg:
+            continue
+        weight = float(n_pos * n_neg)
+        weighted += weight * auroc([scores[i] for i in indices], stratum_labels)
+        total_weight += weight
+    return weighted / total_weight if total_weight else None
 
 
 def flag_budget(
@@ -346,6 +382,7 @@ def grouped_bootstrap_ci(
 
 
 __all__ = [
+    "DEFAULT_PERMUTATIONS",
     "MIN_PERMUTATIONS",
     "ConfusionMatrix",
     "NullResult",
@@ -363,5 +400,6 @@ __all__ = [
     "pr_operating_points",
     "prevalence",
     "roc_operating_points",
+    "stratified_auroc",
     "wilson_interval",
 ]

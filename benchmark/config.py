@@ -594,11 +594,35 @@ def _arm_key(model: str, stored: str, defaults: dict[str, str]) -> str:
     return defaults.get(model, _LEGACY_DEFAULT_REASONING)
 
 
+def row_precedence(row: dict[str, str]) -> tuple[int, str, str]:
+    """Rank two committed rows that resolve to the SAME cache cell. Higher wins.
+
+    Total and independent of file order, so the winner cannot change with row position.
+    """
+    # Two rows CAN legitimately name one cell: seven cells in the committed results.csv were
+    # measured twice, once as a legacy `reasoning="default"` placeholder (written before the
+    # arm-aware runner existed, so no `arm_hash`) and once afterwards under the explicit arm id.
+    # Both are real measurements and neither may be deleted — results.csv is real measured data —
+    # but they carry DIFFERENT costs, so something has to choose, explicitly and reproducibly.
+    #   1. A stamped `arm_hash` wins. That row's arm identity is PROVEN by the hash; the legacy
+    #      row's arm is only inferred by aliasing "default" through today's registry, which may
+    #      have moved since the row was written. Prefer the measurement that names its own arm.
+    #   2. Then the later `computed_at` — the more recent measurement of the same cell.
+    #   3. Then the row's own contents, so the order is TOTAL: two rows indistinguishable on
+    #      provenance still resolve identically whatever order the reader walks the file in.
+    return (
+        1 if (row.get("arm_hash") or "") else 0,
+        str(row.get("computed_at") or ""),
+        repr(sorted(row.items())),
+    )
+
+
 def load_results(path: str | Path | None = None) -> dict:
     """Reconstruct the outcome cache from results.csv, keyed challenge x model x arm."""
     # A legacy reasoning="default" row aliases to its model's declared default_arm
     # (falling back to the literal "default" key for a model with no declared
-    # reasoning block, or one absent from the current registry).
+    # reasoning block, or one absent from the current registry). Where that aliasing makes
+    # two rows collide on one cell, `row_precedence` — not the file's row order — decides.
     import csv
 
     from benchmark.routing import censoring
@@ -608,12 +632,17 @@ def load_results(path: str | Path | None = None) -> dict:
     if not p.exists():
         return results
     defaults = default_arm_ids()
+    kept: dict[tuple[str, str, str], tuple[int, str, str]] = {}
     with open(p, newline="") as f:
         for row in csv.DictReader(f):
             cid = row["challenge_id"]
             model = row["model"]
             stored = str(row.get("reasoning") or _LEGACY_DEFAULT_REASONING)
             arm = _arm_key(model, stored, defaults)
+            rank = row_precedence(row)
+            if rank < kept.get((cid, model, arm), rank):
+                continue  # a row already read for this cell has stronger provenance
+            kept[(cid, model, arm)] = rank
             results.setdefault(cid, {}).setdefault(model, {})[arm] = {
                 "reasoning": arm,
                 "pass": _bool_field(row.get("pass", "")),

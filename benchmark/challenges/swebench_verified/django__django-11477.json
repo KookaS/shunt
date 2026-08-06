@@ -163,5 +163,6 @@
     "test_lazy_in_settings (urlpatterns_reverse.tests.ReverseLazySettingsTest)"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-11477:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "translate_url() creates an incorrect URL when optional named groups are missing in the URL pattern\nDescription\n\t\nThere is a problem when translating urls with absent 'optional' arguments\n(it's seen in test case of the patch)\n"
 }

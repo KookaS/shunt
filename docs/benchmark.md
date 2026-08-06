@@ -494,27 +494,37 @@ for what this suite's floor turned out to be.
 
 ### Every figure explains itself
 
-You should never need this page open to read one of the benchmark's figures. Every PNG
-under `benchmark/routing/reports/` and `benchmark/escalation/reports/` carries a footer
-with a fixed five-section shape:
+A plot is a display, not a document. Every PNG under `docs/assets/figures/<half>/` carries three
+things and nothing else:
 
-| Section | What it tells you |
-|---------|-------------------|
-| **READ** | what x and y actually are, what one mark represents, and what a good or bad pattern looks like |
-| **GOAL** | what you are looking for, phrased spatially where the geometry allows ("aim top-left", "find the brightest cell") |
-| **TERMS** | plain-language definitions of the jargon on *that* figure — regret, arm, stratum, prevalence, Wilson CI |
-| **NOTE** | non-obvious facts, including numbers computed from the run itself |
-| **LIMITS** | in red: what would mislead you — small samples, uneven coverage, hindsight-only reference lines, proxy metrics |
+| On the canvas | What it tells you |
+|---------------|-------------------|
+| **Title** | the figure's claim, in a sentence — not a label |
+| **Subtitle** | the sample size, the units, and the operating point the numbers are measured at |
+| **Caveat** | in red, and only when the figure would otherwise be actively misread: the one thing that would change your conclusion |
 
-READ and GOAL are mandatory; the rest appear only when they have something to say. The
-red LIMITS line is the one to read first — it is where the figure tells you what it
-cannot support.
+Everything else a reader needs — how to read the axes, what to look for, what the jargon
+means, the method, and every limitation — lives beside the figure in
+[`routing.md`](routing.md#figures) and [`escalation.md`](escalation.md#figures), one
+section per figure. That is a deliberate split: the figures used to carry a five-section
+footer that was, on some plots, taller than the plot, and on the sweep table it collided
+with the data.
+
+The full record is not prose someone has to remember to keep. `benchmark/plot_frame.py` is
+the only code in the repo that may write a figure — a lint gate (SH007) blocks any that
+tries to skip it — and it records each figure's reading, goal, terms, notes, limitations,
+sample counts and input digest into a committed `benchmark/<half>/figures.json`. A second
+gate (SH009) then holds that manifest in a bijection with the docs: every figure has a
+section, every section has a figure, and the three on-canvas strings must match in both
+places. So a retired figure cannot leave a stale explanation behind it, which is the way
+this kind of documentation normally rots.
 
 Anything that depends on the data (how many tasks were dropped as coverage gaps, whether
 the frontier ran on a subset, whether a detector has no usable signal) is computed at
-render time rather than written into the caption, so it cannot go stale as the data
-grows. The mechanism is `benchmark/plot_frame.py`, and a lint gate (SH007) blocks any
-figure that tries to skip it.
+render time rather than written into a caption, so it cannot go stale as the data grows.
+Layout is checked the same structural way: `benchmark/plot_contract.py` measures every
+rendered artist and refuses to write a figure with an overlapping title, a table spilling
+past its axes, or a clipped tick label.
 
 ### Regret, and how to read the regret plot
 
@@ -531,7 +541,7 @@ You incur it two ways:
   have passed.
 
 `CumReg` is that per-task gap summed over the task sequence, and
-`benchmark/routing/reports/cumulative_regret.png` draws it as one climbing line per strategy.
+`docs/assets/figures/routing/oracle_gap.png` draws it as one climbing line per strategy.
 Reading it:
 
 - The oracle line is **flat at 0** by definition — it is the baseline, not a competitor.
@@ -609,7 +619,7 @@ python -m benchmark.routing.scripts.plot_exploration
 
 This replays the shipped router — the same Thompson sampler, budget cap, and
 conservative gate that run in the proxy — over the matrix, once with exploration
-off and once with it on, and writes `routing/reports/exploration_replay.png` plus a
+off and once with it on, and writes `docs/assets/figures/routing/exploration_cost.png` plus a
 summary to stdout. Cells the policy routes to but the benchmark never ran are
 skipped and counted, never filled in with a guess.
 

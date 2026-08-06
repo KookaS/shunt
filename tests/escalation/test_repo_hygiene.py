@@ -36,9 +36,15 @@ def test_escalation_data_is_tracked_not_ignored() -> None:
 
 
 @pytest.mark.skipif(not (_ROOT / ".git").exists(), reason="not a git checkout")
-def test_escalation_reports_png_shipped_intermediates_ignored() -> None:
-    assert not _check_ignore("benchmark/escalation/reports/pr_curve.png")
+def test_escalation_figures_shipped_intermediates_ignored() -> None:
+    # The PNGs moved into the published docs tree; the reports dir now holds only
+    # intermediates plus the tracked metrics.json. Both halves of that must hold, or a
+    # figure silently stops shipping.
+    assert not _check_ignore("docs/assets/figures/escalation/session_value.png")
+    assert not _check_ignore("docs/assets/figures/routing/kill_gate.png")
+    assert not _check_ignore("benchmark/escalation/reports/metrics.json")
     assert _check_ignore("benchmark/escalation/reports/scratch.csv")
+    assert _check_ignore("benchmark/escalation/reports/stray.png")
 
 
 @pytest.mark.skipif(not (_ROOT / ".git").exists(), reason="not a git checkout")

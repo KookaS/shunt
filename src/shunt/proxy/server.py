@@ -282,6 +282,14 @@ def _warm_embedder_in_background(engine: RouterEngine) -> None:
     # In a thread on purpose: the first load downloads ~600MB, and blocking startup on
     # it would mean no network → the server never starts at all, instead of starting
     # and reporting a clear error. Health stays answerable throughout.
+    if not engine.needs_embeddings:
+        # Nothing to warm, and nothing to report as "ready": the ~600MB download, its disk
+        # write and its resident memory are all skipped for a strategy that never embeds.
+        logger.info(
+            "Shunt config | embedding model NOT loaded: the active strategy does not consult "
+            "neighbours, so no embedding is ever computed (~600MB download/load skipped)."
+        )
+        return
 
     def _warm() -> None:
         try:

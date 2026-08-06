@@ -143,5 +143,6 @@
     "Tests removing and adding unique_together constraints that include"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-14434:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "Statement created by _create_unique_sql makes references_column always false\nDescription\n\t\nThis is due to an instance of Table is passed as an argument to Columns when a string is expected.\n"
 }

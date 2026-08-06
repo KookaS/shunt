@@ -80,14 +80,14 @@ benchmark/routing/strategy_summary.csv
 .DS_Store
 reports/
 
-# …but DO ship the benchmark plots — users read the routing insights from them, and
-# they are regenerable from the committed benchmark/routing/results.csv. ALL PNGs in
-# this dir are tracked; the derived intermediate CSVs stay ignored above.
-!benchmark/routing/reports/
-benchmark/routing/reports/*
-!benchmark/routing/reports/*.png
+# The benchmark PNGs are NOT here any more: they are written straight into the published
+# docs tree (`docs/assets/figures/<half>/`, never ignored), because mkdocs only copies what lives
+# under `docs_dir` and `mkdocs build --strict` fails a link it cannot resolve. Both reports
+# dirs now hold only derived intermediates, which stay ignored by the `reports/` rule above.
 
-# Same rule for the escalation detector's plots: ship the PNGs, ignore the intermediates.
+# metrics.json is the one exception and is TRACKED: it holds the exact scalars each
+# escalation figure renders, so a committed PNG can be checked against its numbers after
+# the fact. Without it the images are the only artifact and nothing can diff them.
 !benchmark/escalation/reports/
 benchmark/escalation/reports/*
-!benchmark/escalation/reports/*.png
+!benchmark/escalation/reports/metrics.json

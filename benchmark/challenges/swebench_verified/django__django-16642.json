@@ -31,5 +31,6 @@
     "test_unicode_attachment (responses.test_fileresponse.FileResponseTests.test_unicode_attachment)"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-16642:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "Improper guessing of Mime Type for \"br\" and \"Z\" file types\nDescription\n\t\nBelow FileResponse will set the content type as text/html, even if the last file extension is \"Z' or \"br\".\nFileResponse(open('test.html.Z', 'rb'))\nFileResponse(open('test.html.br', 'rb'))\n"
 }

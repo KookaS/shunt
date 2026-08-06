@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+import math
 import random
 from collections import defaultdict
 from statistics import mean
+
+
+def mcnemar_exact_p(b: int, c: int) -> float:
+    """Two-sided exact McNemar p for ``b``/``c`` discordant pairs (1.0 when none)."""
+    n = b + c
+    if n == 0:
+        return 1.0
+    k = min(b, c)
+    tail = sum(math.comb(n, i) for i in range(k + 1))
+    return min(1.0, 2.0 * tail / (2.0**n))
 
 
 def _reward(passed: bool, cost: float, gamma: float = 0.1) -> float:
@@ -262,6 +273,76 @@ def compute_cost_decomposition(
         "volume_pct": round(volume_pct, 2),
         "interaction_pct": round(ixn_pct, 2),
     }
+
+
+def cheapest_sufficient(
+    per_model: dict[str, dict],
+    models_by_price: list[str],
+) -> str | None:
+    """The cheapest model that actually solved this task — the router's correct answer.
+
+    ``None`` when no measured model passed, so the task has no correct answer to miss.
+    """
+    # The denominator of the routing error budget. Comparing the chosen model against
+    # this, rather than against "did the chosen model pass", separates the two errors a
+    # router can make: over-provisioning (a cheaper model would also have solved it) and
+    # under-provisioning (the pick failed where a dearer one would have worked).
+    for model in models_by_price:
+        cell = per_model.get(model)
+        if cell and cell.get("pass"):
+            return model
+    return None
+
+
+# Below this many co-measured task pairs a reasoning-effort contrast is a rumour, not a
+# measurement — the arm figure greys the row rather than reporting its ratio.
+MIN_ARM_PAIRS: int = 10
+# A reasoning knob has demonstrably FIRED when the high arm spends materially more output
+# tokens than the low arm on the same tasks. 1.15 is well outside the +/-5% wobble the four
+# never-fired knobs sit inside (0.99-1.02) and well below the one that did (2.92).
+ARM_FIRED_RATIO: float = 1.15
+
+
+def arm_manipulation(
+    raw: dict[str, dict[str, dict[str, dict]]],
+    pairs: list[tuple[str, str, str]],
+) -> list[dict]:
+    """Per (model, low arm, high arm): did the reasoning knob change the model's behaviour?
+
+    ``fired`` is the MANIPULATION CHECK — without it a flat pass-rate contrast is not a
+    null result, it is a knob that was never turned.
+    """
+    # Paired on co-measured tasks only, and on OUTPUT tokens rather than pass rate: output
+    # tokens are what a reasoning-effort setting mechanically controls, so they answer
+    # "was the treatment applied?" before any figure asks "did the treatment help?".
+    rows: list[dict] = []
+    for model, low, high in pairs:
+        lo_tok: list[int] = []
+        hi_tok: list[int] = []
+        for per_model in raw.values():
+            arms = per_model.get(model, {})
+            lo_cell, hi_cell = arms.get(low), arms.get(high)
+            if not lo_cell or not hi_cell:
+                continue
+            lo_tok.append(int(lo_cell.get("out_tok", 0) or 0))
+            hi_tok.append(int(hi_cell.get("out_tok", 0) or 0))
+        n = len(lo_tok)
+        lo_mean = mean(lo_tok) if n else 0.0
+        hi_mean = mean(hi_tok) if n else 0.0
+        ratio = hi_mean / lo_mean if lo_mean > 0 else float("nan")
+        rows.append(
+            {
+                "model": model,
+                "low_arm": low,
+                "high_arm": high,
+                "n_pairs": n,
+                "low_out_tok": lo_mean,
+                "high_out_tok": hi_mean,
+                "out_tok_ratio": ratio,
+                "fired": bool(n >= MIN_ARM_PAIRS and ratio == ratio and ratio >= ARM_FIRED_RATIO),
+            }
+        )
+    return rows
 
 
 def compute_pareto(strategies_metrics: dict[str, dict]) -> dict[str, bool]:

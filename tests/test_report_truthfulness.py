@@ -8,35 +8,33 @@
 
 from __future__ import annotations
 
-import numpy as np
+from pathlib import Path
+
 import pytest
 
-from benchmark.routing import report
+from benchmark import plot_frame
+from benchmark.routing import metrics, report, strategy_class
+from benchmark.routing.figures import arm_manipulation, context
 
 
 class TestHindsightIsNeverDeployable:
-    def test_every_oracle_is_hindsight(self):
+    def test_every_oracle_is_a_bound(self):
         for name in ("Oracle", "Oracle-reward", "Arm-oracle"):
-            assert report._is_hindsight(name)
+            assert strategy_class.classify(name).cls is strategy_class.StrategyClass.BOUND
+            assert not strategy_class.is_live(name)
 
-    def test_a_router_is_not(self):
-        for name in ("kNN-cascade", "Always-Frontier", "Always-Cheap", "Tier-Classifier"):
-            assert not report._is_hindsight(name)
+    def test_only_the_products_own_allowlist_is_live(self):
+        # The whole point of the module: the benchmark cannot mint its own "deployable".
+        for name in ("kNN", "Always-Frontier", "Always-Cheap"):
+            assert strategy_class.is_live(name)
+        for name in ("kNN-cascade", "Price-Cascade", "Tier-Classifier"):
+            assert not strategy_class.is_live(name)
+            assert strategy_class.classify(name).path_to_live
 
-    def test_dominance_is_judged_against_deployable_strategies_only(self):
-        # The oracle is cheaper AND better than both routers, but it cannot deploy,
-        # so neither router may be painted "dominated" because of it.
-        names = ["Oracle", "kNN-cascade", "Always-Frontier"]
-        costs = [13.6, 76.9, 87.0]
-        perfs = [96.6, 96.6, 96.0]
-        ns = [177, 177, 177]
-        assert report._deployable_pareto(names, costs, perfs, ns) == {"kNN-cascade"}
-
-    def test_a_zero_evidence_row_is_not_pareto_optimal(self):
-        # ($0, 0%) is un-dominated by construction — absence of evidence, not efficiency.
-        assert report._deployable_pareto(["Broken", "kNN"], [0.0, 5.0], [0.0, 78.0], [0, 177]) == {
-            "kNN"
-        }
+    def test_the_figures_router_is_live(self):
+        # Every caption that says "the router" resolves through this constant.
+        assert strategy_class.is_live(context.ROUTER_STRATEGY)
+        assert strategy_class.is_live(context.BASELINE_STRATEGY)
 
 
 class TestDollarsSurviveMathtext:
@@ -125,13 +123,13 @@ class TestPairedArmContrast:
 
 class TestMcNemar:
     def test_no_discordant_pairs_resolves_nothing(self):
-        assert report._mcnemar_exact_p(0, 0) == 1.0
+        assert metrics.mcnemar_exact_p(0, 0) == 1.0
 
     def test_zero_versus_one_is_not_significant(self):
-        assert report._mcnemar_exact_p(0, 1) == 1.0
+        assert metrics.mcnemar_exact_p(0, 1) == 1.0
 
     def test_a_lopsided_split_is(self):
-        assert report._mcnemar_exact_p(0, 12) < 0.01
+        assert metrics.mcnemar_exact_p(0, 12) < 0.01
 
 
 class TestMeasuredVersusImputed:
@@ -156,14 +154,6 @@ class TestMeasuredVersusImputed:
         split = report._split_measured(self._CELLS, {"t2"})
         assert split["imputed_cost"] == 3.0
         assert split["imputed_cells"] == 1.0
-
-    def test_footer_names_the_projected_share_for_every_strategy(self):
-        ann = report._measured_split_annotations(
-            {"Always-Frontier": report._split_measured(self._CELLS, set())}
-        )
-        footer = " ".join(ann.notes)
-        assert "70.0%) projected" in footer
-        assert "EVERY projected cell is filled pass=True" in footer
 
 
 class TestStrategyCellsPathAwareImputation:
@@ -253,95 +243,149 @@ class TestPairedMeasuredKillGate:
         assert paired["router_cost"] == 4.0
         assert paired["baseline_cost"] == 5.0
 
-    def test_a_zero_saving_is_reported_as_a_null_result(self):
-        by_strategy = {
-            "Always-Frontier": ({"t1": (True, 42.74, False)}, set()),
-            "kNN-cascade": ({"t1": (True, 42.87, False)}, set()),
+
+class TestAManipulationThatNeverFiredIsNotANull:
+    """A treatment that was never applied has no null effect — it has nothing to measure."""
+
+    @staticmethod
+    def _raw(low_tok: int, high_tok: int, n: int = 20) -> dict:
+        return {
+            f"t{i}": {
+                "m": {
+                    "lo": {"pass": True, "out_tok": low_tok, "real_cost": 0.01},
+                    "hi": {"pass": True, "out_tok": high_tok, "real_cost": 0.02},
+                }
+            }
+            for i in range(n)
         }
-        paired = report.paired_measured("kNN-cascade", "Always-Frontier", by_strategy)
-        ann = report._paired_annotations(paired)
-        footer = " ".join(ann.notes)
-        assert "NULL RESULT" in footer
-        assert "MORE than the baseline" in footer
 
-    def test_no_overlap_is_none_rather_than_an_empty_claim(self):
-        by_strategy = {
-            "Always-Frontier": ({"t1": (True, 1.0, True)}, set()),
-            "kNN-cascade": ({"t1": (True, 1.0, False)}, set()),
+    def test_a_flat_output_token_ratio_is_reported_as_not_fired(self):
+        rows = metrics.arm_manipulation(self._raw(1000, 1010), [("m", "lo", "hi")])
+        assert rows[0]["fired"] is False
+        assert rows[0]["out_tok_ratio"] == pytest.approx(1.01, abs=0.01)
+
+    def test_a_real_manipulation_fires(self):
+        rows = metrics.arm_manipulation(self._raw(1000, 2900), [("m", "lo", "hi")])
+        assert rows[0]["fired"] is True
+
+    def test_too_few_pairs_never_fires_however_large_the_ratio(self):
+        rows = metrics.arm_manipulation(
+            self._raw(1000, 5000, n=metrics.MIN_ARM_PAIRS - 1), [("m", "lo", "hi")]
+        )
+        assert rows[0]["fired"] is False
+
+    def test_a_row_that_did_not_fire_is_labelled_and_never_drawn_as_a_null(self):
+        rows = metrics.arm_manipulation(self._raw(1000, 1010), [("m", "lo", "hi")])
+        pairs = {
+            ("m", "lo", "hi"): {
+                "model": "m",
+                "low": "lo",
+                "high": "hi",
+                "n": 20,
+                "delta_pp": 0.0,
+                "ci": (-5.0, 5.0),
+                "cost_delta": 0.0,
+            }
         }
-        assert report.paired_measured("kNN-cascade", "Always-Frontier", by_strategy) is None
-        assert report._paired_annotations(None).notes == ()
+        totals = {"n": 20.0, "net_pp": 0.0, "p": 1.0}
+        notes = arm_manipulation._annotations(rows, pairs, totals).notes
+        assert any(arm_manipulation.NOT_A_NULL in note for note in notes)
+        # The word "null" may appear only inside that exact phrase — an unfired row
+        # described as a null result is the defect this whole figure exists to stop.
+        for note in notes:
+            if "null" in note.lower():
+                assert arm_manipulation.NOT_A_NULL in note
 
 
-class TestRegretHeadline:
-    def test_overlapping_intervals_are_not_reported_as_a_ranking(self):
-        title = report._regret_title(
-            {"kNN-cascade": 6.33, "Always-Frontier": 8.35},
-            {"kNN-cascade": (5.62, 7.02), "Always-Frontier": (6.82, 10.88)},
-            177,
+class TestCensoredCellsNeverEnterAnArmContrast:
+    """A resource-limit stop has an unknown outcome and must not score as a capability fail."""
+
+    @staticmethod
+    def _raw_with_censored() -> dict:
+        rows = {}
+        for i in range(10):
+            rows[f"t{i}"] = {
+                "m": {
+                    "lo": {"pass": True, "real_cost": 0.01},
+                    "hi": {"pass": True, "real_cost": 0.02},
+                }
+            }
+        rows["censored"] = {
+            "m": {
+                "lo": {"pass": True, "real_cost": 0.01},
+                "hi": {"pass": False, "stop_reason": "step_limit", "real_cost": 0.02},
+            }
+        }
+        return rows
+
+    def test_a_censored_high_arm_is_dropped_rather_than_counted_as_a_violation(self):
+        pair = report._arm_pair(self._raw_with_censored(), "m", "lo", "hi")
+        assert pair["n"] == 10
+        assert pair["violations"] == 0
+
+
+class TestOneStrategyHasOneCommittedNumber:
+    """Two figures reporting different (cost, pass) for one strategy is a correctness bug."""
+
+    def test_no_committed_figure_publishes_a_rival_router_number(self):
+        figures = Path("docs/assets/figures/routing")
+        if not figures.exists():
+            pytest.skip("no rendered figure set")
+        proxies = [
+            p.name
+            for p in figures.glob("*.png")
+            if p.name in {"knn_cost_comparison.png", "strategy_comparison.png"}
+        ]
+        # Those two figures published a proxy kNN router at 77.7% / $1.73 alongside the
+        # live engine's 81.71% / $13.34 in the same committed set.
+        assert proxies == []
+
+
+class TestNoReadingOrGoalStringReachesTheCanvas:
+    """`reading` and `goal` are mandatory in code and must never be drawn."""
+
+    @staticmethod
+    def _specs() -> list:
+        from benchmark.routing.figures import (
+            cache_economics,
+            complementarity,
+            cost_quality_frontier,
+            decision_audit,
+            evidence_basis,
+            kill_gate,
+            oracle_gap,
+            task_difficulty,
         )
-        assert "OVERLAPS" in title
-        assert "tracks the oracle closest" not in title
 
-    def test_separated_intervals_still_get_a_ranking(self):
-        title = report._regret_title(
-            {"kNN-cascade": 6.33, "Always-Frontier": 30.0},
-            {"kNN-cascade": (5.6, 7.0), "Always-Frontier": (25.0, 35.0)},
-            177,
-        )
-        assert "tracks the oracle closest" in title
+        return [
+            m.SPEC
+            for m in (
+                arm_manipulation,
+                cache_economics,
+                complementarity,
+                cost_quality_frontier,
+                decision_audit,
+                evidence_basis,
+                kill_gate,
+                oracle_gap,
+                task_difficulty,
+            )
+        ]
 
-    def test_an_oracle_never_takes_the_headline(self):
-        title = report._regret_title(
-            {"Oracle": 0.0, "Arm-oracle": -0.05, "kNN-cascade": 6.33},
-            {},
-            177,
-        )
-        assert "kNN-cascade" in title
-        assert "Oracle" not in title.replace("oracle closest", "")
+    def test_every_caveat_is_within_the_canvas_limit(self):
+        for spec in self._specs():
+            if spec.caveat is not None:
+                assert len(spec.caveat) <= plot_frame.MAX_CAVEAT_CHARS
 
+    def test_every_title_is_a_claim_within_the_limit(self):
+        for spec in self._specs():
+            assert spec.title.strip()
+            assert len(spec.title) <= plot_frame.MAX_TITLE_CHARS
 
-class TestDroppedTasksAreDisclosedByComposition:
-    """All 44 tasks missing from the chosen-arm cloud were frontier picks — the
-    missingness is perfectly confounded with the y axis it hides."""
-
-    def test_composition_and_true_share_are_stated(self):
-        lines = report._routing_share_lines(
-            plotted={"kimi-k3": 94, "deepseek-v4-flash": 52}, dropped={"kimi-k3": 44}
-        )
-        joined = " ".join(lines)
-        assert "kimi-k3 44" in joined
-        assert "64% of the plotted points" in joined
-        assert "73% of the true routing" in joined
-
-    def test_nothing_is_claimed_when_nothing_was_dropped(self):
-        assert report._routing_share_lines({"kimi-k3": 94}, {}) == []
-
-
-class TestHeatmapRowLabels:
-    """Every task row the canvas can fit must carry its name, and the footer must
-    only claim rows are unlabelled when they actually are."""
-
-    # The figure's own LIMITS used to state "labels are thinned to ~40 evenly spaced
-    # rows, so most rows are unlabelled" while the 32-inch canvas had 10.8 pt of pitch
-    # per row — room for all 200.
-
-    def test_the_committed_shape_labels_every_row(self):
-        step, fontsize = report._row_label_step(200, 32.0)
-        assert step == 1
-        assert 4.0 <= fontsize <= 7.0
-
-    def test_an_impossible_density_thins_and_says_so(self):
-        step, fontsize = report._row_label_step(2000, 32.0)
-        assert step > 1
-        assert fontsize == 4.0
-        limits = report._heatmap_annotations(
-            np.zeros((2000, 3)), np.array([1, 1, 1]), False, {}, False, step
-        ).limitations
-        assert any("unlabelled" in text for text in limits)
-
-    def test_no_unlabelled_claim_when_every_row_is_labelled(self):
-        limits = report._heatmap_annotations(
-            np.zeros((200, 3)), np.array([1, 1, 1]), False, {}, False, 1
-        ).limitations
-        assert not any("unlabelled" in text for text in limits)
+    def test_no_rendered_block_contains_the_reading_or_goal_text(self):
+        for spec in self._specs():
+            rendered = " ".join(
+                part for part in (spec.title, spec.subtitle, spec.caveat or "") if part
+            )
+            assert spec.reading not in rendered
+            assert spec.goal not in rendered

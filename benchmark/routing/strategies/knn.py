@@ -38,8 +38,60 @@ def _get_embedder() -> Embedder:
     return _EMBEDDER
 
 
+# A SWE-bench `problem_statement` runs to a few thousand characters, ~11x the old
+# identifier label it replaced. Transformer attention is O(batch x seq^2), so one
+# `embed_batch` over all 500 asks onnxruntime for a buffer tens of GB wide and the
+# process is SIGKILLed. The fix is a batch budget in `batch x chars^2`, not a fixed
+# batch count: a fixed count is either slow on short texts or fatal on long ones.
+# Embeddings are per-text, so regrouping and reordering is bit-identical to the single
+# call that used to fit.
+_EMBED_BUDGET: int = 32_000_000
+
+
+def _length_batches(texts: list[str]) -> list[list[int]]:
+    """Indices grouped so `len(batch) * max_chars^2` stays under the budget."""
+    order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
+    batches: list[list[int]] = []
+    current: list[int] = []
+    for i in order:
+        width = max(len(texts[i]), 1)
+        if current and (len(current) + 1) * width * width > _EMBED_BUDGET:
+            batches.append(current)
+            current = []
+        current.append(i)
+    if current:
+        batches.append(current)
+    return batches
+
+
+# The report builds several kNN-family strategies over ONE corpus, and each used to embed
+# the same texts again. That was ~free on a 106-char label and is minutes per strategy on a
+# real problem statement. Keyed by the exact text, so a corpus change misses by construction.
+# Lazily created behind an accessor for the same reason `_EMBEDDER` above is: a module-level
+# mutable literal is denied (SH001), and this mirrors the one opt-out already in this file
+# rather than inventing a second convention for the same problem.
+_EMBED_CACHE: dict[str, np.ndarray] | None = None
+
+
+def _embed_cache() -> dict[str, np.ndarray]:
+    global _EMBED_CACHE  # noqa: PLW0603, SH001 (lazy per-process embedding cache)
+    if _EMBED_CACHE is None:
+        _EMBED_CACHE = {}
+    return _EMBED_CACHE
+
+
 def _embed_texts(texts: list[str]) -> np.ndarray:
-    return np.array(_get_embedder().embed_batch(texts), dtype=np.float32)
+    if not texts:
+        return np.zeros((0, 0), dtype=np.float32)
+    cache = _embed_cache()
+    pending = [t for t in dict.fromkeys(texts) if t not in cache]
+    if pending:
+        embedder = _get_embedder()
+        for batch in _length_batches(pending):
+            vectors = embedder.embed_batch([pending[i] for i in batch])
+            for i, vector in zip(batch, vectors, strict=True):
+                cache[pending[i]] = np.asarray(vector, dtype=np.float32)
+    return np.stack([cache[t] for t in texts])
 
 
 def _build_index(embeddings: np.ndarray) -> hnswlib.Index:

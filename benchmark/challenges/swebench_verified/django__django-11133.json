@@ -74,5 +74,6 @@
     "test_urlencode_int (httpwrappers.tests.QueryDictTests)"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-11133:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "HttpResponse doesn't handle memoryview objects\nDescription\n\t\nI am trying to write a BinaryField retrieved from the database into a HttpResponse. When the database is Sqlite this works correctly, but Postgresql returns the contents of the field as a memoryview object and it seems like current Django doesn't like this combination:\nfrom django.http import HttpResponse\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t \n# String content\nresponse = HttpResponse(\"My Content\")\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\nresponse.content\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t \n# Out: b'My Content'\n# This is correct\n# Bytes content\nresponse = HttpResponse(b\"My Content\")\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t \nresponse.content\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t \n# Out: b'My Content'\n# This is also correct\n# memoryview content\nresponse = HttpResponse(memoryview(b\"My Content\"))\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t \nresponse.content\n# Out: b'<memory at 0x7fcc47ab2648>'\n# This is not correct, I am expecting b'My Content'\n"
 }

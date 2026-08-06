@@ -255,19 +255,23 @@ class TestLegacyMigration:
     def test_legacy_and_explicit_default_arm_collide_at_read_deterministically(self, tmp_path):
         # A legacy "default" row AND an explicit "high" row for the same cell both map
         # to arm key "high" at read; results.csv keeps both (distinct write keys), but
-        # load_results collapses them. Documented invariant: the resolution is
-        # deterministic and prefers the explicit arm's data (sorted-write: default<high,
-        # explicit read last-wins). No paid cell is LOST on disk (both rows persist).
+        # load_results collapses them. Documented invariant: the winner is chosen by
+        # `config.row_precedence` — the ARM-STAMPED row wins because its arm identity is
+        # proven by the hash, while the legacy row's arm is only inferred through today's
+        # registry. The old wording relied on "sorted-write, last row wins", which made a
+        # real committed COST depend on row position; both orders must now agree.
+        # No paid cell is LOST on disk (both rows persist).
         config.load("benchmark/benchmark.yaml")
         arm_map = _arm_map()
         rows = [
             self._row("default", cost="0.99"),
             self._row("high", cost="0.11", arm_hash=arm_map["deepseek-v4-flash"]["high"]),
         ]
-        p = self._legacy_csv(tmp_path, sorted(rows, key=lambda r: r["reasoning"]))
-        cache = config.load_results(p)
-        assert list(cache["c1"]["deepseek-v4-flash"]) == ["high"]
-        assert cache["c1"]["deepseek-v4-flash"]["high"]["cost"] == pytest.approx(0.11)
+        for ordered in (rows, list(reversed(rows))):
+            p = self._legacy_csv(tmp_path, ordered)
+            cache = config.load_results(p)
+            assert list(cache["c1"]["deepseek-v4-flash"]) == ["high"]
+            assert cache["c1"]["deepseek-v4-flash"]["high"]["cost"] == pytest.approx(0.11)
 
 
 # ---------------------------------------------------------------------------

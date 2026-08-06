@@ -25,10 +25,10 @@ if TYPE_CHECKING:
 #   - The recurrence trigger has a REAL, null-clearing edge in the AS-SHIPPED family only at HIGH
 #     recurrence thresholds: escalate_after_n=15 -> P(fail|fired)=0.538 (lift 1.28), n=20 -> 0.582
 #     (1.38), n=30 -> 0.706 (1.68), all outside the challenge-block permutation null (p=0.005).
-#     The shipped default n=2 fires on 727/727 trajectories (reproduction failures recur at
-#     step 1-2), so it reads precision == base rate and hides the edge. The EDIT-GATED family
-#     (failures after the agent's first edit) clears the null at and just above the shipped n=2
-#     (best cell n=3, AUROC 0.724) — see
+#     The n=2 cell (the old shipped default) fires on 727/727 trajectories (reproduction
+#     failures recur at step 1-2), so it reads precision == base rate and hides the edge. The
+#     EDIT-GATED family (failures after the agent's first edit) clears the null at and just
+#     above the n=2 cell (best cell n=3, AUROC 0.724) — see
 #     `policy_eval` and the `policy_cells_edit_gated` family in the report. A grid that stopped
 #     at n=3 could only ever measure the mask, never the signal.
 #   - `stale_window` is NOT inert at high n: `_in_window` admits at most `stale_window` events, so

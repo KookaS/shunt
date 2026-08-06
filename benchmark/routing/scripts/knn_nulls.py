@@ -41,6 +41,13 @@ _SD_EPSILON: Final[float] = 1e-12
 # A diagonal-vs-off-diagonal contrast needs at least two repos to have an off-diagonal.
 _MIN_REPOS_FOR_TRANSFER: Final[int] = 2
 
+# Minimum tasks for a repo to earn a row/column in the cross-repo grid. Raised from 8:
+# at 8 the corpus's +0.0248 diagonal advantage was carried entirely by two 8-task repos,
+# whose own diagonal cell routes off a seven-task index — a neighbourhood so thin that
+# every query gets the same pick, which reads as skill and is arithmetic. At 16 the same
+# statistic is +0.0000. The figure reports BOTH so the sensitivity is the finding.
+DEFAULT_MIN_REPO_TASKS: Final[int] = 16
+
 
 @dataclass(frozen=True)
 class Band:
@@ -217,7 +224,12 @@ def routed_pass_rate(
     k: int,
     threshold: float,
 ) -> float:
-    """Share of query tasks whose ROUTED model actually passed — the deployable score."""
+    """Share of query tasks whose ROUTED model actually passed — the leak-free score."""
+    # "leak-free", never "deployable": the query set is held out of the index, so this score
+    # carries no self-leakage. That is a LEAKAGE property. `strategy_class.StrategyClass`
+    # owns "deployable" in this repo and means something else entirely — whether the product
+    # could be configured to run the strategy at all (live / bound / control / blocked). A
+    # leak-free score can still belong to a blocked strategy, so the two must not share a word.
     if len(query_idx) == 0 or len(index_idx) == 0:
         return float("nan")
     rates = neighbourhood_rates(sims, pass_mat, query_idx, index_idx, k)
@@ -335,6 +347,92 @@ def transfer_curve(  # noqa: PLR0913 (one knob per null parameter, plus the requ
     )
 
 
+# ---------------------------------------------------------------------------
+# Per-task outcome transfer — the statistic a positive control can actually fire on.
+# ---------------------------------------------------------------------------
+
+
+def solve_rate(pass_mat: np.ndarray) -> np.ndarray:
+    """Per-task share of models that solved it — the quantity a router would predict."""
+    return pass_mat.mean(axis=1)
+
+
+def eta_squared_task(pass_mat: np.ndarray) -> float:
+    """Share of outcome variance attributable to TASK identity — the prediction ceiling."""
+    # One-way ANOVA over the (task, model) pass matrix. No per-task predictor, however
+    # good, can explain more of the outcome than task identity itself does; quoting an R^2
+    # without this ceiling makes a small number look like a failure when it may be the
+    # roof. The residual is model identity plus run-to-run noise.
+    y = np.asarray(pass_mat, dtype=float)
+    if y.size == 0:
+        return 0.0
+    grand = float(y.mean())
+    ss_total = float(((y - grand) ** 2).sum())
+    if ss_total <= 0:
+        return 0.0
+    ss_between = float((y.shape[1] * (y.mean(axis=1) - grand) ** 2).sum())
+    return ss_between / ss_total
+
+
+def loo_r2(sims: np.ndarray, target: np.ndarray, k: int) -> float:
+    """Leave-one-out R^2 predicting `target` from the mean of its k nearest neighbours."""
+    # The query is masked out of its own neighbourhood, so this is honest out-of-sample
+    # prediction and a negative value is meaningful: it says the neighbourhood mean is a
+    # WORSE predictor than the corpus mean.
+    n = len(target)
+    if n < 2:
+        return float("nan")
+    masked = np.array(sims, dtype=float, copy=True)
+    np.fill_diagonal(masked, -np.inf)
+    k_eff = max(1, min(int(k), n - 1))
+    nbrs = np.argsort(-masked, axis=1)[:, :k_eff]
+    pred = target[nbrs].mean(axis=1)
+    ss_tot = float(((target - target.mean()) ** 2).sum())
+    if ss_tot <= 0:
+        return float("nan")
+    return 1.0 - float(((target - pred) ** 2).sum()) / ss_tot
+
+
+@dataclass(frozen=True)
+class OutcomeTransfer:
+    """How well one similarity predicts per-task solve rate, against its own shuffled null."""
+
+    # Required and first, for the reason given on `TransferCurve.admissibility`.
+    admissibility: AdmissibilityResult
+    label: str
+    k: int
+    n_tasks: int
+    r2: float
+    null: Band
+
+    @property
+    def inside_null(self) -> bool:
+        return self.null.contains(self.r2)
+
+
+def outcome_transfer(  # noqa: PLR0913 (one knob per null parameter, plus the required gate)
+    sims: np.ndarray,
+    target: np.ndarray,
+    k: int,
+    *,
+    admissibility: AdmissibilityResult,
+    label: str,
+    n_perm: int = DEFAULT_PERMUTATIONS,
+    seed: int = 0,
+) -> OutcomeTransfer:
+    """`loo_r2` plus the band it takes when the targets are shuffled across tasks."""
+    rng = np.random.default_rng(seed)
+    draws = np.array([loo_r2(sims, target[rng.permutation(len(target))], k) for _ in range(n_perm)])
+    return OutcomeTransfer(
+        admissibility=admissibility,
+        label=label,
+        k=k,
+        n_tasks=len(target),
+        r2=loo_r2(sims, target, k),
+        null=band_of(draws),
+    )
+
+
 def _memorisation_rate(sims: np.ndarray, pass_mat: np.ndarray, k: int, threshold: float) -> float:
     """Routing pass-rate when each task IS in its own index — the memorisation ceiling."""
     n = pass_mat.shape[0]
@@ -388,7 +486,7 @@ def cross_repo_transfer(  # noqa: PLR0913 (one knob per null parameter, plus the
     threshold: float,
     *,
     admissibility: AdmissibilityResult,
-    min_tasks: int = 8,
+    min_tasks: int = DEFAULT_MIN_REPO_TASKS,
     n_perm: int = DEFAULT_PERMUTATIONS,
     seed: int = 0,
 ) -> CrossRepo:

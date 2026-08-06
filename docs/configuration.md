@@ -128,6 +128,31 @@ cheaper models disagree, plus a random audit); `--strategy full` runs the exhaus
 `--strategy ladder` runs cheap-first, escalating each task only until a model passes. All
 are simulated unless you pass `--live`. See [benchmark.md](benchmark.md) for the details.
 
+### Production-required model fields
+
+Not every field is optional. A model that a consumer actually *uses* — named in
+`router.yaml`'s `models:` list or in `benchmark.yaml`'s `models:` list — must carry
+the full production set, or the router cannot rank it, cost it, or climb its effort
+ladder. The schema (`src/shunt/models/config.py`, `extra="forbid"`) enforces presence
+at load and fails loudly naming the offender; the table below is the contract, and a
+test locks it (`tests/models/test_consumer_config_contract.py`).
+
+| Field | Required for | Why it matters |
+|---|---|---|
+| `model_id` + `provider` | every used model | the model is reachable and routes to the right access channel |
+| `version` | every priced model | model identity + the benchmark's staleness key (a real weight change is a new id) |
+| `supports_streaming` | every used model | wire behaviour; defaults `true` |
+| `supports_cache_control` | every used model | the cache-safety spine — over-claiming earns a 400 mid-request; defaults `false` |
+| `pricing` (`input_cost_per_1m`, `output_cost_per_1m`, `cache_read_cost_per_1m`, `price_provider`, `price_source`, `price_as_of`) | every used model | the price-implied capability-rank prior (input + output), cost scoring, and the imputation ladder; absent pricing = routable but unscored |
+| `reasoning` (`default_arm` + rank-ordered `arms`) | every used model | the escalation ladder's first step is a same-model effort raise — it only exists when `default_arm` is not the model's top arm; a model with no bracket would step rank directly and lose that cache-safe rung |
+
+The two consumers each keep their own policy on top of this shared data layer: the
+router's (`router.yaml`) selects the live model set and the escalation knobs; the
+benchmark's (`benchmark.yaml`) selects the scored model set and the arm-sampling
+weights (its escalation sweep runs from its own grid). The router never reads
+`benchmark.yaml`, and the benchmark never reads a user `router.yaml` — its escalation
+eval reads the *packaged* `router.yaml` only, as the shipped-knobs reference.
+
 ### A model id is immutable — new version, new id
 
 `version` sits on the model row, next to `provider` — not inside
@@ -378,7 +403,7 @@ router:
 | Field | Default | Meaning |
 |---|---|---|
 | `enabled` | `false` | Master switch. Off ships nothing; on wires escalation into the live decision path. |
-| `escalate_after_n` | `2` | Same-key verified failures required before a step. `1` would escalate on the first red (failure-biased). |
+| `escalate_after_n` | `2` | Same-key verified failures required before a step. `1` would escalate on the first red, which is failure-biased (intermediate fail-then-fix is normal). `2` is a **prior, not a tuned value** — under the counter the product runs, every low threshold measures at chance ([escalation](escalation.md#two-things-this-sweep-does-not-establish)), so no measurement prefers one over another. |
 | `stale_window` | `10` | A failure not recurring within this many decisions is retired from the counter. |
 | `ladder` | `effort_then_rank` | `effort_then_rank` raises reasoning effort first (cache-safe), then steps to the next-higher-rank model. `rank_only` skips the effort rung. |
 | `blocking_exit_code` | `2` | Reserved for a future hook-stream path — **not read by the current off-wire gate** (see below). |
@@ -544,7 +569,7 @@ a file. Each is read once at startup.
 | `SHUNT_COLD_START_THRESHOLD_TIER1` | `50` | Effective sample size (nₑ) of all labelled outcomes to leave cold start (either threshold ends it) |
 | `SHUNT_EMBEDDER_MODEL` | `jina-code` | Active embedding model — a key (or `repo`) from `embedding.yaml`; overrides the file. See [Choose the embedding model](#choose-the-embedding-model-and-stay-swap-safe) |
 | `SHUNT_EMBED_MAX_CHARS` | `4000` | Prompt characters fed to the embedder; overrides `embedding.yaml`'s `max_chars` |
-| `SHUNT_EMBED_CACHE_DIR` | `$SHUNT_DATA_DIR/models` | Where the ~600MB embedding model is cached. Shunt downloads it once at startup and reuses it; keep this on durable storage or every restart re-downloads it |
+| `SHUNT_EMBED_CACHE_DIR` | `$SHUNT_DATA_DIR/models` | Where the ~600MB embedding model is cached. Shunt downloads it once at startup and reuses it; keep this on durable storage or every restart re-downloads it. Not downloaded at all under a fixed strategy (`always_cheap` / `always_frontier`), which never embeds |
 | `SHUNT_RESPONSE_MODEL_LABEL` | unset | Prefix added to the response `model` field (e.g. `shunt:` → `shunt:qwen3.7-plus`), so a client shows which model actually served the turn |
 | `SHUNT_LOG_LEVEL` | `info` | Log verbosity; `debug` traces the routing decision |
 

@@ -36,5 +36,6 @@
     "test_add07 (template_tests.filter_tests.test_add.AddTests)"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-13794:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "add filter is unable to concatenate strings with lazy string\nDescription\n\t\nIf you try to concatenate a string with a lazy string with the add template filter, the result is always the empty string because the add filter generates an exception (TypeError: can only concatenate str (not \"__proxy__\") to str).\n"
 }

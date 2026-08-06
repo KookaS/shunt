@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import math
 import re
-from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final
@@ -300,14 +299,65 @@ def check_timestamp(row: dict[str, str], now: datetime) -> list[Finding]:
     return []
 
 
-def check_duplicate_keys(rows: list[dict[str, str]], default_arms: dict[str, str]) -> list[Finding]:
-    """No two rows resolve to the same (challenge, model, arm) cache key."""
-    counts = Counter(_key(r, default_arms) for r in rows)
-    return [
-        Finding(ERROR, "file.duplicate_key", key, f"{n} rows share this key")
-        for key, n in sorted(counts.items())
-        if n > 1
+def _is_legacy_alias_pair(group: list[dict[str, str]]) -> bool:
+    """Exactly one unstamped legacy ``default`` row plus one arm-stamped row for the same cell."""
+    # The shape the arm-hash migration left behind: a cell measured once under the legacy
+    # `reasoning="default"` placeholder (no arm_hash existed yet) and again under its explicit
+    # arm id. Anything else — two rows with the same spelling, two stamped rows, three rows — is
+    # not this, and stays an ERROR.
+    if len(group) != 2:
+        return False
+    legacy = [
+        r
+        for r in group
+        if (r.get("reasoning") or integrity.DEFAULT_REASONING) == integrity.DEFAULT_REASONING
+        and not (r.get("arm_hash") or "")
     ]
+    stamped = [
+        r
+        for r in group
+        if (r.get("reasoning") or integrity.DEFAULT_REASONING) != integrity.DEFAULT_REASONING
+        and (r.get("arm_hash") or "")
+    ]
+    return len(legacy) == 1 and len(stamped) == 1
+
+
+def check_duplicate_keys(rows: list[dict[str, str]], default_arms: dict[str, str]) -> list[Finding]:
+    """No two rows resolve to the same (challenge, model, arm) cache key.
+
+    A legacy-alias pair is WARN, not ERROR: it is a schema migration, not dup-evasion.
+    """
+    # ERROR remains the default, because two rows on one cell is normally either a double-append
+    # or an attempt to smuggle a second measurement in under a different spelling of the same arm.
+    # The ONE exception is the arm-hash migration pair (see `_is_legacy_alias_pair`), where both
+    # rows are genuine measurements of the same cell taken either side of a schema change. That is
+    # reported, never silently dropped — but it cannot change a number, because
+    # `config.load_results` resolves the collision through `config.row_precedence`, which is total
+    # and file-order independent. The finding names the winner so a reader sees which cost is used.
+    groups: dict[str, list[dict[str, str]]] = {}
+    for row in rows:
+        groups.setdefault(_key(row, default_arms), []).append(row)
+    out: list[Finding] = []
+    for key, group in sorted(groups.items()):
+        if len(group) < 2:
+            continue
+        if not _is_legacy_alias_pair(group):
+            out.append(
+                Finding(ERROR, "file.duplicate_key", key, f"{len(group)} rows share this key")
+            )
+            continue
+        winner = max(group, key=config.row_precedence)
+        out.append(
+            Finding(
+                WARN,
+                "file.duplicate_key",
+                key,
+                "legacy 'default' row + arm-stamped row for one cell (arm-hash migration); "
+                f"the cache uses the arm-stamped row (computed_at={winner.get('computed_at', '')}, "
+                f"cost={winner.get('cost', '')})",
+            )
+        )
+    return out
 
 
 def verify_rows(rows: list[dict[str, str]], now: datetime | None = None) -> list[Finding]:

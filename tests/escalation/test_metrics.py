@@ -225,3 +225,34 @@ def test_grouped_bootstrap_resamples_groups_not_rows() -> None:
     low, high = metrics.grouped_bootstrap_ci(scores, labels, groups, metrics.auroc, n_resamples=200)
     assert low <= metrics.auroc(scores, labels) <= high
     assert high - low > 0.05
+
+
+def test_the_reported_default_is_decoupled_from_the_estimator_floor() -> None:
+    # `permutation_null` refuses below MIN_PERMUTATIONS; that is a refusal, not a default. While
+    # the two were the same number every published p-value was 1/(200+1) = 0.005 exactly — the
+    # smallest value the +1-corrected estimator can return, i.e. a statement about the draw count
+    # rather than about the observation.
+    assert metrics.DEFAULT_PERMUTATIONS > metrics.MIN_PERMUTATIONS
+    floored = metrics.permutation_null(1.0, [0.0] * metrics.MIN_PERMUTATIONS)
+    assert floored.p_value == pytest.approx(1 / (metrics.MIN_PERMUTATIONS + 1))
+    richer = metrics.permutation_null(1.0, [0.0] * metrics.DEFAULT_PERMUTATIONS)
+    assert richer.p_value < floored.p_value
+
+
+def test_stratified_auroc_weights_by_comparable_pairs_and_drops_single_class_strata() -> None:
+    # Two strata: "a" ranks perfectly (AUROC 1.0, 2x2 = 4 pairs), "b" ranks backwards (0.0, 1x1 =
+    # 1 pair), "solo" is one class and contributes no comparable pair at all. The pooled answer
+    # must be the pair-weighted mean of the first two — 4/5 — and must NOT average "solo" in at
+    # the 0.5 `auroc` returns for a single-class vector, which would drag it toward chance.
+    scores = [4.0, 3.0, 2.0, 1.0, 0.0, 5.0, 9.0, 8.0]
+    labels = [True, True, False, False, True, False, True, True]
+    strata = ["a", "a", "a", "a", "b", "b", "solo", "solo"]
+    assert metrics.auroc(scores[:4], labels[:4]) == 1.0
+    assert metrics.auroc(scores[4:6], labels[4:6]) == 0.0
+    assert metrics.stratified_auroc(scores, labels, strata) == pytest.approx(4.0 / 5.0)
+
+
+def test_stratified_auroc_is_none_when_no_stratum_can_rank_anything() -> None:
+    # Not 0.5. A corpus where every stratum is one class has no within-stratum evidence at all,
+    # and returning chance would render as a measured "no separation" on the figure.
+    assert metrics.stratified_auroc([1.0, 2.0], [True, True], ["a", "a"]) is None

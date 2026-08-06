@@ -78,14 +78,29 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-      # SH007 keeps every benchmark figure self-sufficient: savefig lives only in
-      # benchmark/plot_frame.py, which attaches the READ/GOAL/TERMS/NOTE/LIMITS
-      # footer. A new plot that skips the frame fails the commit. BLOCKING.
+      # SH007 keeps benchmark/plot_frame.py the ONE place a figure is created, titled and
+      # saved. It reserves the title band (a caller-owned title cannot be measured before
+      # the axes rect exists, so it lands on the content), pins the named canvas sizes, runs
+      # the layout audit, and records the figure into figures.json. Tests may still build a
+      # raw figure — the layout-audit tests have to construct the defect they assert against
+      # — but may not save or title one. BLOCKING.
       - id: sh007-plot-frame
-        name: SH007 figures saved through the annotated plot frame
+        name: SH007 figures created, titled and saved through the plot frame
         entry: python tools/lint/check_plot_frame.py
         language: system
         types: [python]
+      # SH009 makes the figure set a BIJECTION: every committed PNG has a figures.json row
+      # AND a docs section, and every row/section has a live PNG — so a retired figure cannot
+      # leave a stale docs block describing a plot nobody can look at. It also holds the three
+      # on-canvas strings byte-identical between the manifest and the prose. Whole-tree scan
+      # (the SH004-SH006 shape, not SH007's file filter): the failure it catches is a
+      # DELETION, which no staged-file list ever contains. BLOCKING.
+      - id: sh009-figure-docs
+        name: SH009 every figure has a manifest row and a docs section
+        entry: python tools/lint/check_figure_docs.py
+        language: system
+        pass_filenames: false
+        always_run: true
       # SH008 makes the "real-only embeddings" rule structural instead of prose:
       # fastembed may be constructed ONLY in src/shunt/router/embedder.py (so the
       # model name, cache dir, char clip, fingerprint and test wall cannot be
@@ -97,6 +112,37 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      # SH010 parses every ```mermaid fence with mermaid's OWN grammar — the same parser
+      # the docs site and GitHub run client-side. A syntax error there is invisible to
+      # every other gate in this file: ruff/mypy/pytest pass, `mkdocs build --strict`
+      # builds clean, and the only symptom is a red "Syntax error in text" box in a
+      # reader's browser. This is the one gate that sees it. Unlike SH004-SH006/SH009 the
+      # failure it catches is an EDIT, not a deletion, so the staged-file list suffices —
+      # which keeps a commit that touches no diagram at ~0.13s (the script defers the
+      # jsdom+mermaid import until it actually finds a fence). Deps come from pre-commit's
+      # own node env: no package.json, no node_modules, nothing added to the shipped tree.
+      # Keep the pin in the same major as the mermaid the docs site loads. BLOCKING.
+      # SH011 makes strategy deployability structural. The benchmark used to carry its own
+      # idea of "deployable" — three literal sets in three files, none derived from
+      # LIVE_STRATEGIES — so a strategy the router rejects at boot was drawn as a
+      # Pareto-optimal deployable point, the public headline was built on it, and the kill
+      # gate was adjudicated on it. This asserts every registered strategy is classified,
+      # the `live` set equals the product's allowlist, and every BLOCKED entry names a
+      # path to live. Whole-tree scan (the SH004-SH006/SH009 shape): a strategy DELETED
+      # from one list and not the other is the drift, and no staged-file list sees it.
+      # BLOCKING.
+      - id: sh011-strategy-class
+        name: SH011 every strategy is classified (live/bound/control/blocked)
+        entry: python tools/lint/check_strategy_class.py
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: sh010-mermaid-parse
+        name: SH010 mermaid diagrams parse
+        entry: node tools/lint/check_mermaid.mjs
+        language: node
+        additional_dependencies: ["mermaid@11.16.1", "jsdom@30.0.1"]
+        files: \.(md|markdown)$
       - id: validate-benchmark-config
         name: validate benchmark benchmark.yaml
         # Run as a module from the repo root (pre-commit's cwd) so `from benchmark

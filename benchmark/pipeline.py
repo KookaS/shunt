@@ -2,13 +2,17 @@
 
 # One entrypoint that composes the existing stage modules (run_matrix, offline_replay,
 # escalation.run_eval, routing.report) so a single command regenerates the CORE artifacts:
-# results.csv, the stamped live trajectories, the escalation metrics + plots, and the
-# routing.report figures (pareto_scatter, cost_savings, cost_quality_equal, cumulative_regret,
-# the heatmap, capability_evidence.json, and the coverage/summary CSVs).
+# results.csv, the stamped live trajectories, the escalation metrics + figures, and the
+# routing.report figures (the kill gate, the cost-quality frontier, the evidence basis, the
+# oracle gap, cache economics, task difficulty, arm manipulation) plus
+# capability_evidence.json and the coverage/summary CSVs.
 # The standalone plots under benchmark/routing/scripts/ run in the FIGURES stage (see
 # STANDALONE_FIGURES): they are heavy — several load the real fastembed embedder — so they
 # are not part of a --live collection run, but `--from figures` refreshes all of them and
 # `--check-figures` proves the committed PNGs are not stale without regenerating anything.
+# FIGURE_JOBS is the wider set the freshness gate covers: the standalone jobs PLUS the report
+# and escalation figures, which are drawn by their own stages and previously had no gate at
+# all — 22 of the 34 committed PNGs could outlive the data they were drawn from.
 # Each stage shells out to its module unchanged; this file only orchestrates them.
 
 from __future__ import annotations
@@ -61,6 +65,14 @@ DEFAULT_REPLAY_TIMEOUT = 3600.0
 # admissibility gate CLEARED apart from one the stamping stage never reached — both look
 # identical on disk (`confirmed=False`, `exit_code=None`) by design.
 STAMP_LEDGER_NAME = "stamp_ledger.json"
+# The PNGs live inside the published docs tree so `docs/*.md` can link them relatively —
+# mkdocs only copies what is under `docs_dir`, and `mkdocs build --strict` fails a link it
+# cannot resolve. One subdirectory PER HALF, so the directory itself says which half owns a
+# figure instead of leaving that to figures.json alone. The reports dirs keep the NON-image
+# artifacts (routing's CSV/JSON, escalation's metrics.json).
+_FIGURES_DIR = Path("docs/assets/figures")
+_ROUTING_FIGURES_DIR = _FIGURES_DIR / "routing"
+_ESCALATION_FIGURES_DIR = _FIGURES_DIR / "escalation"
 _ROUTING_REPORTS_DIR = Path("benchmark/routing/reports")
 _ESCALATION_PLOTS_DIR = Path("benchmark/escalation/reports")
 
@@ -450,7 +462,12 @@ def stage_stamp(args: argparse.Namespace, _state: PipelineState) -> None:
 
 def stage_evaluate(_args: argparse.Namespace, state: PipelineState) -> None:
     """Score the escalation detector (metrics + plots); keep stdout for the summary status."""
-    argv = ["--plots-dir", str(_ESCALATION_PLOTS_DIR)]
+    argv = [
+        "--plots-dir",
+        str(_ESCALATION_FIGURES_DIR),
+        "--metrics-dir",
+        str(_ESCALATION_PLOTS_DIR),
+    ]
     result = run_module(ESCALATION_EVAL, argv, capture=True)
     if result.stdout:
         print(result.stdout, end="")  # noqa: T201
@@ -463,7 +480,10 @@ def stage_evaluate(_args: argparse.Namespace, state: PipelineState) -> None:
 
 def stage_report(_args: argparse.Namespace, _state: PipelineState) -> None:
     """Regenerate the routing plots + capability_evidence.json + coverage/summary CSVs."""
-    result = run_module(ROUTING_REPORT, ["--out-dir", str(_ROUTING_REPORTS_DIR)])
+    result = run_module(
+        ROUTING_REPORT,
+        ["--out-dir", str(_ROUTING_REPORTS_DIR), "--figures-dir", str(_ROUTING_FIGURES_DIR)],
+    )
     if result.returncode != 0:
         raise StageError(f"{ROUTING_REPORT} exited {result.returncode}")
 
@@ -471,7 +491,7 @@ def stage_report(_args: argparse.Namespace, _state: PipelineState) -> None:
 # ---------------------------------------------------------------------------
 # The standalone figures + their staleness gate.
 #
-# Every committed PNG under benchmark/routing/reports/ that report.py does NOT write is
+# Every committed PNG under docs/assets/figures/<half>/ that report.py does NOT write is
 # produced by one of the modules below. They used to sit on no refresh path at all, which
 # is how timing_comparison.png shipped for a release cycle without the Price-Cascade bar
 # and with a 57%-wrong denominator: the strategy was added, nothing re-ran the producer,
@@ -500,6 +520,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _ROUTING = _REPO_ROOT / "benchmark" / "routing"
 _SCRIPTS = _ROUTING / "scripts"
 _STRATEGIES = _ROUTING / "strategies"
+_ESCALATION = _REPO_ROOT / "benchmark" / "escalation"
 FIGURE_MANIFEST = _ROUTING / "figure_inputs.json"
 
 
@@ -528,6 +549,8 @@ _ROUTING_ANALYSIS: Final[tuple[str, ...]] = (
     "benchmark.plot_frame",
     "benchmark.routing",
     "benchmark.routing.censoring",
+    "benchmark.routing.figures",
+    "benchmark.routing.figures.context",
     "benchmark.routing.impute",
     "benchmark.routing.instrument_control",
     "benchmark.routing.metrics",
@@ -560,19 +583,52 @@ def _figure_inputs(*paths: Path, analysis: tuple[str, ...]) -> tuple[Path, ...]:
 
 @dataclass(frozen=True)
 class FigureJob:
-    """One standalone figure producer: the module to run, what it writes, what it reads."""
+    """One figure producer: the module to run, what it writes, what it reads."""
 
     module: str
     outputs: tuple[str, ...]
     inputs: tuple[Path, ...]
+    # Which pipeline stage regenerates this job. Only FIGURES jobs are re-run by
+    # `stage_figures`; the report and escalation figures are drawn by their own stages.
+    # They are still DIGESTED here, which is the point — 22 of the 34 committed figures
+    # previously had no freshness gate at all.
+    stage: str = FIGURES
+    # Two homes, because the outputs are two kinds of thing: PNGs are published assets and
+    # live under `docs/assets/figures/<half>/`, everything else is a derived data artifact and
+    # stays in `reports_dir`. `output_dir` is the one place that decides which.
+    figures_dir: Path = _REPO_ROOT / _ROUTING_FIGURES_DIR
+    reports_dir: Path = _REPO_ROOT / _ROUTING_REPORTS_DIR
+    half: str = "routing"
+    # Outputs the producer legitimately skips when the data does not support them.
+    optional_outputs: tuple[str, ...] = ()
 
     @property
     def name(self) -> str:
         return self.module.rsplit(".", 1)[-1]
 
+    @property
+    def required_outputs(self) -> tuple[str, ...]:
+        return tuple(o for o in self.outputs if o not in self.optional_outputs)
 
-def _data_inputs() -> tuple[Path, ...]:
-    """The measured outcomes + task set every routing figure is derived from."""
+    def output_dir(self, out: str) -> Path:
+        """Where one declared output lands: images ship with the docs, data stays put."""
+        return self.figures_dir if out.endswith(".png") else self.reports_dir
+
+
+def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
+    """The measured outcomes + task set a half's figures are derived from."""
+    if half == "escalation":
+        return (
+            # The corpus manifest, not the trajectory directory: `_digest` expands a
+            # directory to its *.py, so pointing it at 799 .jsonl files would hash nothing.
+            # manifest.json already carries a content_sha256 per trajectory, so it moves
+            # whenever the corpus does and costs one file read instead of 88MB.
+            _ESCALATION / "data" / "live" / "manifest.json",
+            _REPO_ROOT / "benchmark" / "benchmark.yaml",
+            # `_shipped_escalation()` reads the packaged router config, so a knob change
+            # (escalate_after_n 2 -> 3) silently invalidates every escalation figure.
+            _REPO_ROOT / "src" / "shunt" / "config" / "router.yaml",
+        )
     return (
         config.results_csv_path(),
         config.challenges_path(),
@@ -587,16 +643,10 @@ def _data_inputs() -> tuple[Path, ...]:
     )
 
 
-STANDALONE_FIGURES: Final[tuple[FigureJob, ...]] = (
+_STANDALONE: Final[tuple[FigureJob, ...]] = (
     FigureJob(
         "benchmark.routing.scripts.viz_knn",
-        (
-            "knn_cost_comparison.png",
-            "knn_pca_scatter.png",
-            "model_allocation.png",
-            "model_performance_descriptive.png",
-            "neighborhood_purity.png",
-        ),
+        ("knn_calibration.png",),
         _figure_inputs(
             _SCRIPTS / "viz_knn.py",
             _SCRIPTS / "knn_nulls.py",
@@ -605,7 +655,7 @@ STANDALONE_FIGURES: Final[tuple[FigureJob, ...]] = (
     ),
     FigureJob(
         "benchmark.routing.scripts.plot_knn_nulls",
-        ("knn_cross_repo_transfer.png", "knn_transfer_curve.png"),
+        ("embedding_signal.png",),
         _figure_inputs(
             _SCRIPTS / "plot_knn_nulls.py",
             _SCRIPTS / "knn_nulls.py",
@@ -615,41 +665,101 @@ STANDALONE_FIGURES: Final[tuple[FigureJob, ...]] = (
     ),
     FigureJob(
         "benchmark.routing.scripts.threshold_sweep",
-        ("threshold_sweep_heatmap.png",),
+        ("sweep_regimes.png",),
         _figure_inputs(_SCRIPTS / "threshold_sweep.py", analysis=_ROUTING_ANALYSIS),
     ),
     FigureJob(
         "benchmark.routing.scripts.plot_exploration",
-        ("exploration_replay.png",),
+        ("exploration_cost.png",),
         _figure_inputs(
             _SCRIPTS / "plot_exploration.py",
             _ROUTING / "exploration_replay.py",
             analysis=_ROUTING_ANALYSIS,
         ),
     ),
-    FigureJob(
-        "benchmark.routing.scripts.embedding_compare",
-        ("embedding_compare.png",),
-        _figure_inputs(_SCRIPTS / "embedding_compare.py", analysis=_ROUTING_ANALYSIS),
+)
+
+# The report and escalation figures are drawn by `stage_report` / `stage_evaluate`, so they
+# are not re-run by `stage_figures` — but they ARE digested, which is new. Until this landed,
+# 22 of the 34 committed PNGs sat outside every freshness and missing-output check, and a
+# report figure could outlive the data it was drawn from with nothing to say so.
+_REPORT_JOB: Final[FigureJob] = FigureJob(
+    "benchmark.routing.report",
+    (
+        "arm_manipulation.png",
+        "cache_economics.png",
+        "complementarity.png",
+        "cost_quality_frontier.png",
+        "evidence_basis.png",
+        "kill_gate.png",
+        "live_gap.png",
+        "oracle_gap.png",
+        # Drawn here, not by viz_knn, because it audits the SHIPPED strategies' picks.
+        # viz_knn could only publish its kNN proxy's picks, which is how the report set
+        # ended up quoting two different (cost, pass) pairs for one strategy name.
+        "routing_decision_audit.png",
+        "task_difficulty.png",
     ),
-    FigureJob(
-        "benchmark.routing.scripts.plot_strategies",
-        ("strategy_comparison.png",),
-        _figure_inputs(
-            _SCRIPTS / "plot_strategies.py",
-            _STRATEGIES,
-            analysis=_ROUTING_ANALYSIS,
-        ),
+    _figure_inputs(
+        _ROUTING / "report.py",
+        # The per-figure draw modules. A directory, so `_digest` expands it to its sorted
+        # *.py — a new figure module joins the digest without anyone remembering to list it.
+        _ROUTING / "figures",
+        _REPO_ROOT / "benchmark" / "runner" / "kill_gate.py",
+        _STRATEGIES,
+        analysis=_TIMING_ANALYSIS,
     ),
-    FigureJob(
-        "benchmark.routing.scripts.plot_timing",
-        ("timing_comparison.png",),
-        _figure_inputs(
-            _SCRIPTS / "plot_timing.py",
-            _STRATEGIES,
-            analysis=_TIMING_ANALYSIS,
-        ),
+    stage=REPORT,
+)
+
+_ESCALATION_ANALYSIS: Final[tuple[str, ...]] = (
+    "benchmark.admissibility",
+    "benchmark.config",
+    "benchmark.plot_contract",
+    "benchmark.plot_frame",
+    "benchmark.escalation",
+    "benchmark.escalation.datasets",
+    "benchmark.escalation.deployability",
+    "benchmark.escalation.features",
+    "benchmark.escalation.metrics",
+    "benchmark.escalation.ope",
+    "benchmark.escalation.plots",
+    "benchmark.escalation.policy_eval",
+    "benchmark.escalation.prefix_eval",
+    "benchmark.escalation.replay",
+    "benchmark.escalation.run_eval",
+    "benchmark.escalation.schema",
+    "benchmark.escalation.session_eval",
+)
+
+_ESCALATION_JOB: Final[FigureJob] = FigureJob(
+    "benchmark.escalation.run_eval",
+    (
+        "corpus_and_coverage.png",
+        "escalation_budget.png",
+        "escalation_decision.png",
+        "metrics.json",
+        "operating_point.png",
+        "policy_sweep.png",
+        "session_value.png",
     ),
+    _figure_inputs(
+        _REPO_ROOT / "src" / "shunt" / "router" / "escalation.py",
+        analysis=_ESCALATION_ANALYSIS,
+    ),
+    stage=EVALUATE,
+    figures_dir=_REPO_ROOT / _ESCALATION_FIGURES_DIR,
+    reports_dir=_REPO_ROOT / _ESCALATION_PLOTS_DIR,
+    half="escalation",
+    # Skipped when no instance has both a cheap-retry and a frontier session to compare.
+    optional_outputs=("session_value.png",),
+)
+
+FIGURE_JOBS: Final[tuple[FigureJob, ...]] = (*_STANDALONE, _REPORT_JOB, _ESCALATION_JOB)
+# Kept as the name `stage_figures` and benchmark/tests/test_pipeline.py already use: the
+# subset this pipeline stage actually regenerates.
+STANDALONE_FIGURES: Final[tuple[FigureJob, ...]] = tuple(
+    job for job in FIGURE_JOBS if job.stage == FIGURES
 )
 
 
@@ -665,9 +775,8 @@ def _digest(paths: tuple[Path, ...]) -> str:
 
 
 def figure_digests() -> dict[str, str]:
-    """Current input digest per standalone figure job."""
-    data = _data_inputs()
-    return {job.name: _digest((*data, *job.inputs)) for job in STANDALONE_FIGURES}
+    """Current input digest per figure job — every committed figure, not only standalone ones."""
+    return {job.name: _digest((*_data_inputs(job.half), *job.inputs)) for job in FIGURE_JOBS}
 
 
 def write_figure_manifest(path: Path = FIGURE_MANIFEST) -> Path:
@@ -679,21 +788,21 @@ def write_figure_manifest(path: Path = FIGURE_MANIFEST) -> Path:
 def stale_figures(path: Path = FIGURE_MANIFEST) -> list[str]:
     """Figure jobs whose inputs changed since the committed PNGs were produced."""
     if not path.exists():
-        return [job.name for job in STANDALONE_FIGURES]
+        return [job.name for job in FIGURE_JOBS]
     try:
         recorded = json.loads(path.read_text())
     except ValueError:
-        return [job.name for job in STANDALONE_FIGURES]
+        return [job.name for job in FIGURE_JOBS]
     return [name for name, digest in figure_digests().items() if recorded.get(name) != digest]
 
 
-def missing_figures(reports_dir: Path = _REPO_ROOT / _ROUTING_REPORTS_DIR) -> list[str]:
+def missing_figures(jobs: tuple[FigureJob, ...] = FIGURE_JOBS) -> list[str]:
     """Declared outputs that are not on disk — a producer that 'succeeded' writing nothing."""
     return [
         f"{job.name}:{out}"
-        for job in STANDALONE_FIGURES
-        for out in job.outputs
-        if not (reports_dir / out).exists()
+        for job in jobs
+        for out in job.required_outputs
+        if not (job.output_dir(out) / out).exists()
     ]
 
 
@@ -705,7 +814,7 @@ def stage_figures(_args: argparse.Namespace, _state: PipelineState) -> None:
         result = run_module(job.module, [])
         if result.returncode != 0:
             failed.append(f"{job.module} exited {result.returncode}")
-    absent = missing_figures()
+    absent = missing_figures(STANDALONE_FIGURES)
     if absent:
         failed.append(f"declared figures never written: {', '.join(absent)}")
     if failed:
@@ -802,7 +911,14 @@ def _escalation_status(state: PipelineState) -> tuple[str, str]:
         try:
             text = (
                 run_module(
-                    ESCALATION_EVAL, ["--plots-dir", str(_ESCALATION_PLOTS_DIR)], capture=True
+                    ESCALATION_EVAL,
+                    [
+                        "--plots-dir",
+                        str(_ESCALATION_FIGURES_DIR),
+                        "--metrics-dir",
+                        str(_ESCALATION_PLOTS_DIR),
+                    ],
+                    capture=True,
                 ).stdout
                 or ""
             )
@@ -941,7 +1057,8 @@ def check_figures() -> int:
     for name in absent:
         print(f"MISSING: {name}")  # noqa: T201
     if not stale and not absent:
-        print(f"Figures current: {len(STANDALONE_FIGURES)} standalone jobs.")  # noqa: T201
+        pngs = sum(len(job.outputs) for job in FIGURE_JOBS)
+        print(f"Figures current: {len(FIGURE_JOBS)} jobs, {pngs} outputs.")  # noqa: T201
         return 0
     print(  # noqa: T201
         "Regenerate with: make benchmark-figures "

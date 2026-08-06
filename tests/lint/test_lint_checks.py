@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -231,3 +232,196 @@ def test_sh008_default_tree_is_clean() -> None:
     # The default scan IS the coverage (the hook passes no filenames), and this is the
     # assertion that knn_cascade.py's raw TextEmbedding stays gone.
     assert _run("check_embedder_isolation.py") == 0
+
+
+# --- SH009: the figure <-> manifest <-> docs bijection ----------------------------------
+
+
+def _figure_tree(
+    tmp_path: Path,
+    *,
+    pngs: tuple[str, ...] = ("kill_gate.png",),
+    manifest: tuple[str, ...] | None = None,
+    section_slugs: tuple[str, ...] | None = None,
+    title: str = "The gate is untested",
+) -> Path:
+    """A minimal repo shaped like shunt: one routing figure, its row, and its section."""
+    # One PNG directory per half inside the docs tree, so a figure's home and its
+    # figures.json row both have to name the same half.
+    figures = tmp_path / "docs" / "assets" / "figures" / "routing"
+    figures.mkdir(parents=True)
+    (tmp_path / "docs" / "assets" / "figures" / "escalation").mkdir()
+    (tmp_path / "benchmark" / "routing").mkdir(parents=True)
+    for png in pngs:
+        (figures / png).write_bytes(b"\x89PNG")
+    rows = {
+        name: {
+            "title": title,
+            "subtitle": "175 tasks",
+            "caveat": None,
+            "reading": "x is cost.",
+            "goal": "Aim top-left.",
+            "limitations": [],
+        }
+        for name in (manifest if manifest is not None else pngs)
+    }
+    (tmp_path / "benchmark" / "routing" / "figures.json").write_text(
+        json.dumps({"schema": 1, "half": "routing", "figures": rows})
+    )
+    docs = tmp_path / "docs"
+    slugs = (
+        section_slugs
+        if section_slugs is not None
+        else tuple(s[:-4].replace("_", "-") for s in pngs)
+    )
+    body = "\n".join(
+        f"""
+### {title} {{#fig-{slug}}}
+
+![Cost versus quality](assets/figures/routing/{slug.replace("-", "_")}.png)
+
+*175 tasks*
+
+**Reading.** x is cost.
+
+**What to look for.** Aim top-left.
+"""
+        for slug in slugs
+    )
+    (docs / "routing.md").write_text(f"# Routing\n\n## Figures\n{body}\n")
+    (docs / "escalation.md").write_text("# Escalation\n")
+    (tmp_path / "benchmark" / "escalation").mkdir(parents=True)
+    return tmp_path
+
+
+def test_sh009_accepts_a_complete_bijection(tmp_path: Path) -> None:
+    assert _run("check_figure_docs.py", "--root", str(_figure_tree(tmp_path))) == 0
+
+
+def test_sh009_catches_a_png_with_no_manifest_row(tmp_path: Path) -> None:
+    root = _figure_tree(tmp_path, pngs=("kill_gate.png",), manifest=())
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_catches_a_retired_figure_left_in_the_manifest(tmp_path: Path) -> None:
+    """The one-way check misses this, and it is the failure that actually bites."""
+    root = _figure_tree(tmp_path, pngs=("kill_gate.png",), manifest=("kill_gate.png", "gone.png"))
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_catches_a_retired_figure_left_in_the_docs(tmp_path: Path) -> None:
+    root = _figure_tree(tmp_path, section_slugs=("kill-gate", "cumulative-regret"))
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_catches_a_figure_with_no_docs_section(tmp_path: Path) -> None:
+    root = _figure_tree(tmp_path, section_slugs=())
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_catches_a_heading_that_does_not_quote_the_canvas_title(tmp_path: Path) -> None:
+    root = _figure_tree(tmp_path)
+    doc = root / "docs" / "routing.md"
+    doc.write_text(doc.read_text().replace("### The gate is untested", "### Cost vs quality"))
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_catches_a_missing_required_block(tmp_path: Path) -> None:
+    root = _figure_tree(tmp_path)
+    doc = root / "docs" / "routing.md"
+    doc.write_text(doc.read_text().replace("**What to look for.** Aim top-left.\n", ""))
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_catches_a_png_left_outside_every_halfs_directory(tmp_path: Path) -> None:
+    """The regression the per-half split can cause: a producer still writing to the flat root."""
+    root = _figure_tree(tmp_path)
+    (root / "docs" / "assets" / "figures" / "kill_gate.png").write_bytes(b"\x89PNG")
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_catches_a_png_in_the_wrong_halfs_directory(tmp_path: Path) -> None:
+    root = _figure_tree(tmp_path)
+    (root / "docs" / "assets" / "figures" / "escalation" / "kill_gate.png").write_bytes(b"\x89PNG")
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_catches_a_docs_link_that_skips_the_halfs_directory(tmp_path: Path) -> None:
+    root = _figure_tree(tmp_path)
+    doc = root / "docs" / "routing.md"
+    doc.write_text(doc.read_text().replace("assets/figures/routing/", "assets/figures/"))
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+# --- SH007: the frame owns figure creation, titling and saving ---------------------------
+
+
+def _py(tmp_path: Path, body: str, name: str = "mod.py") -> Path:
+    f = tmp_path / name
+    f.write_text(body)
+    return f
+
+
+def test_sh007_catches_a_bare_savefig(tmp_path: Path) -> None:
+    f = _py(tmp_path, "import matplotlib.pyplot as plt\nfig = object()\nfig.savefig('x.png')\n")
+    assert _run("check_plot_frame.py", str(f)) == 1
+
+
+def test_sh007_catches_the_bare_name_import_bypass(tmp_path: Path) -> None:
+    f = _py(tmp_path, "from matplotlib.pyplot import savefig\nsavefig('x.png')\n")
+    assert _run("check_plot_frame.py", str(f)) == 1
+
+
+def test_sh007_catches_a_raw_pyplot_figure(tmp_path: Path) -> None:
+    """An ad-hoc figsize with no layout engine is how the set got 15 canvas sizes."""
+    f = _py(tmp_path, "import matplotlib.pyplot as plt\nfig, ax = plt.subplots(figsize=(9, 5))\n")
+    assert _run("check_plot_frame.py", str(f)) == 1
+
+
+def test_sh007_catches_a_caller_owned_title(tmp_path: Path) -> None:
+    """A title the frame cannot measure is a title drawn over the content."""
+    f = _py(tmp_path, "def draw(ax):\n    ax.set_title('mine')\n")
+    assert _run("check_plot_frame.py", str(f)) == 1
+    g = _py(tmp_path, "def draw(fig):\n    fig.suptitle('mine')\n", name="mod2.py")
+    assert _run("check_plot_frame.py", str(g)) == 1
+
+
+def test_sh007_allows_subplots_on_a_frame_made_figure(tmp_path: Path) -> None:
+    """`fig.subplots(...)` is the supported way to lay panels out inside the frame."""
+    f = _py(tmp_path, "def draw(fig):\n    axes = fig.subplots(2, 2)\n    return axes\n")
+    assert _run("check_plot_frame.py", str(f)) == 0
+
+
+def test_sh007_lets_tests_build_a_deliberately_broken_figure(tmp_path: Path) -> None:
+    """The layout-audit tests must be able to construct the defect they assert against."""
+    f = _py(tmp_path, "import matplotlib.pyplot as plt\nfig = plt.figure()\n", name="test_x.py")
+    assert _run("check_plot_frame.py", str(f)) == 0
+
+
+def test_sh007_still_blocks_a_test_that_writes_a_png(tmp_path: Path) -> None:
+    """The creation exemption is not a savefig exemption."""
+    f = _py(tmp_path, "def test_x(fig):\n    fig.savefig('x.png')\n", name="test_y.py")
+    assert _run("check_plot_frame.py", str(f)) == 1
+
+
+def test_sh007_default_tree_is_clean() -> None:
+    import subprocess as _sp
+
+    files = _sp.run(
+        ["git", "ls-files", "*.py"], cwd=_ROOT, capture_output=True, text=True, check=True
+    ).stdout.split()
+    assert _run("check_plot_frame.py", *files) == 0
+
+
+def test_sh009_an_empty_half_does_not_silently_pass(tmp_path: Path) -> None:
+    """Deleting every figure must not retire the docs requirement along with them."""
+    root = _figure_tree(tmp_path)
+    for png in (root / "docs" / "assets" / "figures").rglob("*.png"):
+        png.unlink()
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_a_genuinely_empty_half_is_fine(tmp_path: Path) -> None:
+    """A half with no figures, no manifest rows and no sections is consistent."""
+    root = _figure_tree(tmp_path, pngs=(), manifest=(), section_slugs=())
+    assert _run("check_figure_docs.py", "--root", str(root)) == 0

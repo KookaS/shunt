@@ -165,6 +165,54 @@ def test_an_undeclared_feature_fails_closed() -> None:
     assert verdict.unsupported == ("mystery_column",)
 
 
+# ── the counting mode: the third mismatch, derived from the same context map ────────
+
+
+def test_every_counting_mode_declares_its_sources() -> None:
+    # Same drift guard as the features one. `assess` fails closed on an unmapped mode, but a mode
+    # added to the enum without a source declaration is drift worth catching where it happens.
+    assert set(deployability.COUNTING_SOURCES) == set(deployability.CountingMode)
+
+
+def test_the_shipped_counter_reads_nothing_production_lacks() -> None:
+    # The pass direction. `counts_as_failure` gates on the FailureEvent alone, so the as-shipped
+    # counter adds no mismatch — a verdict that failed here would be gating on nothing real.
+    verdict = deployability.assess(
+        _PROJECTABLE,
+        deployability.Cadence.SESSION,
+        counting=deployability.CountingMode.AS_SHIPPED,
+    )
+    assert verdict.deployable
+    assert verdict.counting_unsupported == ()
+
+
+def test_the_edit_gated_counter_alone_sinks_an_otherwise_deployable_result() -> None:
+    # THE DEFECT THIS GATE EXISTS FOR. Features projectable, cadence production's — and still not
+    # deployable, because the edit gate decides on `StepView.action`, which no production decision
+    # holds and no EscalationPolicy knob can ask for. Before this, the headline number's only
+    # marker that it described a configuration the product cannot run was prose in seven files.
+    verdict = deployability.assess(
+        _PROJECTABLE,
+        deployability.Cadence.SESSION,
+        counting=deployability.CountingMode.EDIT_GATED,
+    )
+    assert not verdict.deployable
+    assert verdict.label == "OFFLINE-ONLY UPPER BOUND"
+    assert verdict.counting_unsupported == ("action",)
+    assert verdict.unsupported == ()
+    assert verdict.starved == ()
+    assert "no such counting mode" in verdict.reason
+    assert verdict.to_dict()["counting"] == "edit_gated"
+
+
+def test_the_counting_verdict_is_derived_from_the_context_map_not_restated() -> None:
+    # The classification is not a second opinion: `action` is unsupported precisely because it is
+    # absent from OFFLINE_SOURCE's values, the same reference the feature check uses. If `action`
+    # ever became part of the production context, this mode would clear on its own.
+    assert "action" in deployability.COUNTING_SOURCES[deployability.CountingMode.EDIT_GATED]
+    assert "action" not in set(deployability.OFFLINE_SOURCE.values())
+
+
 def test_an_empty_feature_set_is_not_a_free_pass_at_the_wrong_cadence() -> None:
     # Degenerate input must not sneak through: no features to disqualify, but the cadence still is.
     assert not deployability.assess((), deployability.Cadence.STEP).deployable
@@ -215,6 +263,42 @@ def test_the_verdict_reaches_the_json_report() -> None:
     assert block["cadence"] == "step"
     assert block["production_cadence"] == "session"
     assert sorted(block["unsupported_features"]) == ["infra_rate", "max_action_repeat_rate"]  # type: ignore[arg-type]
+
+
+def test_the_canonical_cells_own_verdict_reaches_the_json_report() -> None:
+    # The shipped counter's verdict is not a stand-in for the canonical cell's: it names two
+    # mismatches where the canonical cell has three. Both blocks are published so a reader
+    # comparing the two families cannot take one scope statement for both.
+    report = run_eval.EvalReport(
+        status="OK",
+        reason="hand-built",
+        n_trajectories=1,
+        n_stamped=1,
+        n_multistep=1,
+        authenticity_errors=0,
+        policy_cells=[],
+        depth_reports=[],
+        coverage=[],
+        deployability=deployability.assess(features.FEATURE_NAMES, deployability.Cadence.STEP),
+        canonical_deployability=deployability.assess(
+            features.FEATURE_NAMES,
+            deployability.Cadence.STEP,
+            counting=deployability.CountingMode.EDIT_GATED,
+        ),
+    )
+    block = report.to_dict()["canonical_deployability"]
+    assert isinstance(block, dict)
+    assert block["counting"] == "edit_gated"
+    assert block["counting_unsupported_fields"] == ["action"]
+    # And it lands on the canvases drawn from that cell, as a limitation, not only in the JSON.
+    limits = run_eval._canonical_annotations(report).limitations
+    assert any("EVAL-ONLY COUNTER" in lim for lim in limits)
+
+
+def test_a_figure_drawn_from_the_shipped_counter_carries_no_eval_only_line() -> None:
+    # The other direction. If this fired unconditionally it would be decoration, not a gate.
+    report = _report(deployability.assess(features.FEATURE_NAMES, deployability.Cadence.STEP))
+    assert run_eval._canonical_annotations(report).limitations == ()
 
 
 def test_the_verdict_reaches_every_figure_footer() -> None:

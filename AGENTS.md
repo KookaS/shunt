@@ -32,7 +32,7 @@ so it stays correct as the codebase grows.
 | The benchmark / eval harness | `docs/benchmark.md`, `docs/benchmark-design.md`, `benchmark/` |
 | Add a routing strategy | `benchmark/routing/strategies/_template.py` — copy it, don't invent structure |
 | The exact lint / type ceilings | `pyproject.toml` (the one manifest) |
-| The custom AST gates (`SH0xx`) | `tools/lint/` |
+| The custom lint gates (`SH0xx`) | `tools/lint/` |
 | Secret scanning rules (gitleaks allowlist) | `.gitleaks.toml` |
 
 New area? Add a row here pointing at its entrypoint — never restate what the
@@ -44,7 +44,7 @@ entrypoint already says.
 - `benchmark/` — the eval harness (not installed; tests reach it via pytest
   `pythonpath = ["."]`). Absolute imports only: `from benchmark import config`,
   never `sys.path` hacks.
-- `tools/lint/` — custom `SH0xx` AST checks · `tests/` — pytest suite · `examples/`
+- `tools/lint/` — custom `SH0xx` gates (AST checks, plus SH010 mermaid) · `tests/` — pytest suite · `examples/`
   — provider + integration configs.
 
 Install once: `pip install -e '.[dev,benchmark]'` — then `benchmark` imports resolve

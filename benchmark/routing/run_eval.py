@@ -17,6 +17,7 @@ from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
 from benchmark.routing.strategies.oracle import Oracle, OracleRewardAware
 from benchmark.routing.strategies.price_cascade import PriceCascade
 from benchmark.routing.strategies.tier_classifier import TierClassifier
+from benchmark.routing.strategy_class import is_live
 
 
 def _results_file(base_dir: Path, k: int, success_rate: float, min_samples: int) -> Path:
@@ -39,6 +40,9 @@ def get_strategies(
     strat_cfg = config.strategies()
     enabled = strat_cfg.get("enabled", [])
     if not enabled:
+        # The no-config fallback means "every registered strategy". It has to stay in step
+        # with `registry` below — it silently omitted tier_classifier, so a run with no
+        # config scored one fewer strategy than a reader of this list would expect.
         enabled = [
             "oracle",
             "oracle_reward",
@@ -48,6 +52,7 @@ def get_strategies(
             "knn",
             "knn_cascade",
             "price_cascade",
+            "tier_classifier",
         ]
 
     knn_p = dict(strat_cfg.get("knn", {}))
@@ -285,18 +290,25 @@ def _print_frontier_gate(gate: dict) -> None:
 # thin to trust — refuse the headline rather than print a bogus number (design R1).
 _MIN_PAIRED: Final[int] = 10
 
+# The fixed-frontier comparison arm, by display name.
+_BASELINE_STRATEGY: Final[str] = "Always-Frontier"
+
 
 def _pick_router(rows: list[dict]) -> str | None:
-    """Best deployable router by Reward (oracles + the frontier baseline excluded)."""
-    deployable = [
+    """Best LIVE router by Reward — the headline must name something an operator can run."""
+    # `is_live` is the product's own allowlist, so this can no longer drift from it. The
+    # frontier baseline IS live; it is excluded because it is the thing being compared
+    # against, not a candidate router.
+    candidates = [
         r
         for r in rows
-        if r["strategy"] not in ("Oracle", "Oracle-reward", "Always-Frontier")
+        if is_live(str(r["strategy"]))
+        and str(r["strategy"]) != _BASELINE_STRATEGY
         and int(r.get("n_tasks", 0) or 0) > 0
     ]
-    if not deployable:
+    if not candidates:
         return None
-    return str(max(deployable, key=lambda r: float(r.get("Reward", 0)))["strategy"])
+    return str(max(candidates, key=lambda r: float(r.get("Reward", 0)))["strategy"])
 
 
 def _strategy_named(strategies: list, name: str) -> object | None:

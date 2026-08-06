@@ -243,6 +243,29 @@ class TestDuplicateKeys:
         findings = auth.verify_rows([alias, dict(valid_row)], _NOW)
         assert "file.duplicate_key" in _rules(findings)
 
+    def test_exact_duplicate_is_an_error_not_a_migration_pair(self, valid_row):
+        # Two rows with the SAME spelling cannot be the arm-hash migration, so the severity
+        # stays ERROR: this is the double-append / dup-evasion case the check was written for.
+        findings = auth.verify_rows([dict(valid_row), dict(valid_row)], _NOW)
+        assert "file.duplicate_key" in _rules(auth.errors(findings))
+
+    def test_legacy_alias_migration_pair_warns_and_names_the_winning_row(self, valid_row):
+        # A legacy unstamped "default" row beside its arm-stamped remeasurement is a schema
+        # migration, not fabrication: both are real. It is reported (never dropped) at WARN,
+        # and the detail must name the row `config.load_results` actually uses, so a reader
+        # can see which cost is in play without reading the resolution code.
+        legacy = {**valid_row, "reasoning": integrity.DEFAULT_REASONING, "arm_hash": ""}
+        findings = auth.verify_rows([legacy, dict(valid_row)], _NOW)
+        assert "file.duplicate_key" not in _rules(auth.errors(findings))
+        dupes = [f for f in auth.warnings(findings) if f.rule == "file.duplicate_key"]
+        assert len(dupes) == 1
+        assert "arm-stamped row" in dupes[0].detail
+        # Order-independent: swapping the rows must not change the reported winner.
+        swapped = auth.verify_rows([dict(valid_row), legacy], _NOW)
+        assert [f.detail for f in auth.warnings(swapped) if f.rule == "file.duplicate_key"] == [
+            dupes[0].detail
+        ]
+
 
 class TestCommittedResultsCsv:
     def test_committed_results_yield_zero_errors(self):

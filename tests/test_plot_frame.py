@@ -1,6 +1,8 @@
-"""The shared figure frame: mandatory sections, runtime merge, and layout safety."""
+"""The shared figure frame: what reaches the canvas, what reaches the manifest."""
 
 from __future__ import annotations
+
+import json
 
 import matplotlib
 
@@ -8,17 +10,26 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 import pytest  # noqa: E402
+from PIL import Image  # noqa: E402
 
 from benchmark import plot_frame  # noqa: E402
 
 _SPEC = plot_frame.FigureSpec(
+    title="Cheap-first routing does not beat always-frontier at equal quality",
+    subtitle="175 tasks · total USD per strategy · 95% Wilson bands",
     reading="x = cost in USD, y = pass rate in %; each dot is one strategy.",
     goal="Aim top-left: highest pass rate for the least money.",
 )
 
 
+def _draw(ax) -> None:
+    ax.plot([1, 2], [1, 2])
+    ax.set_xlabel("cost (USD)")
+    ax.set_ylabel("pass rate (%)")
+
+
 class TestMandatorySections:
-    """READ and GOAL are the contract — a figure cannot opt out of being readable."""
+    """`reading` and `goal` are the docs record — a figure cannot opt out of being explained."""
 
     def test_blank_reading_rejected(self):
         with pytest.raises(ValueError):
@@ -28,35 +39,43 @@ class TestMandatorySections:
         with pytest.raises(ValueError):
             plot_frame.FigureSpec(reading="x = cost.", goal="")
 
-    def test_minimal_spec_renders_two_blocks(self):
-        labels = [label for label, _body, _color in plot_frame.footer_blocks(_SPEC)]
-        assert labels == ["READ", "GOAL"]
+    def test_over_long_title_rejected(self):
+        with pytest.raises(ValueError, match="max 90"):
+            plot_frame.FigureSpec(title="x" * 91, reading="x = cost.", goal="Aim top-left.")
 
 
-class TestOptionalSections:
-    def test_sections_render_in_fixed_order_when_present(self):
-        spec = plot_frame.FigureSpec(
-            reading="x = cost.",
-            goal="Aim top-left.",
-            definitions=(("regret", "reward lost vs the best possible choice"),),
-            notes=("Scored on the completed matrix.",),
-            limitations=("Only 43 tasks.",),
+class TestCaveat:
+    """One red line, or none. A truncated caveat ships half a sentence."""
+
+    def test_over_long_caveat_raises_rather_than_truncating(self):
+        with pytest.raises(ValueError, match="max 120"):
+            plot_frame.FigureSpec(caveat="x" * 121, reading="x = cost.", goal="Aim top-left.")
+
+    def test_blank_caveat_rejected(self):
+        with pytest.raises(ValueError, match="pass None"):
+            plot_frame.FigureSpec(caveat="  ", reading="x = cost.", goal="Aim top-left.")
+
+    def test_multiline_caveat_rejected(self):
+        with pytest.raises(ValueError, match="single line"):
+            plot_frame.FigureSpec(caveat="a\nb", reading="x = cost.", goal="Aim top-left.")
+
+    def test_runtime_caveat_only_fills_an_empty_one(self):
+        assert _SPEC.merged(plot_frame.Annotations(caveat="corpus failed")).caveat == (
+            "corpus failed"
         )
-        labels = [label for label, _body, _color in plot_frame.footer_blocks(spec)]
-        assert labels == ["READ", "GOAL", "TERMS", "NOTE", "LIMITS"]
 
-    def test_limitations_are_red(self):
+    def test_static_caveat_outranks_the_runtime_one(self):
         spec = plot_frame.FigureSpec(
-            reading="x = cost.", goal="Aim top-left.", limitations=("Only 43 tasks.",)
+            caveat="imputed cells included", reading="x = cost.", goal="Aim top-left."
         )
-        colors = {label: color for label, _body, color in plot_frame.footer_blocks(spec)}
-        assert colors["LIMITS"] == plot_frame.LIMIT_RED
+        merged = spec.merged(plot_frame.Annotations(caveat="corpus failed"))
+        assert merged.caveat == "imputed cells included"
 
 
 class TestRuntimeMerge:
-    """Data-derived caveats come through the callback, never as stale prose."""
+    """Data-derived content comes through the callback, never as stale prose."""
 
-    def test_runtime_annotations_append(self):
+    def test_runtime_limitations_append(self):
         spec = _SPEC.merged(plot_frame.Annotations(limitations=("7 of 188 tasks uncovered.",)))
         assert spec.limitations == ("7 of 188 tasks uncovered.",)
 
@@ -70,43 +89,9 @@ class TestRuntimeMerge:
     def test_merge_without_extra_is_identity(self):
         assert _SPEC.merged(None) is _SPEC
 
-
-class TestRendering:
-    def test_render_writes_a_png(self, tmp_path):
-        out = plot_frame.render(
-            tmp_path / "sub" / "fig.png", _SPEC, lambda ax: ax.plot([1, 2], [1, 2]) and None
-        )
-        assert out.exists() and out.stat().st_size > 0
-
-    def test_render_closes_the_figure(self, tmp_path):
-        plt.close("all")
-        plot_frame.render(tmp_path / "fig.png", _SPEC, lambda ax: None)
-        assert not plt.get_fignums()
-
-    def test_narrow_figure_shrinks_font_but_not_below_floor(self):
-        assert plot_frame._fontsize(4.0) == plot_frame._MIN_FONTSIZE
-        assert plot_frame._fontsize(10.0) == plot_frame._BASE_FONTSIZE
-
-    def test_wrap_columns_scale_with_width(self):
-        narrow = plot_frame._wrap_columns(6.0, 7.5)
-        wide = plot_frame._wrap_columns(14.0, 7.5)
-        assert 40 <= narrow < wide
-
-    def test_long_unbroken_body_still_wraps_to_multiple_lines(self):
-        body = "word " * 200
-        lines = plot_frame._wrapped_lines("READ", body.strip(), 120)
-        assert len(lines) > 1
-        assert all(len(line) <= 122 for line in lines)
-
-
-class TestRuntimeDefinitions:
-    """A term that only exists on some renders can be defined at runtime."""
-
-    def test_runtime_definition_appears(self):
-        merged = _SPEC.merged(
-            plot_frame.Annotations(definitions=(("cascade", "try cheap, verify, escalate"),))
-        )
-        assert ("cascade", "try cheap, verify, escalate") in merged.definitions
+    def test_subtitle_facts_append_to_the_static_subtitle(self):
+        merged = _SPEC.merged(plot_frame.Annotations(subtitle_facts=("status=OK",)))
+        assert merged.subtitle.endswith("· status=OK")
 
     def test_static_definition_wins_on_conflict(self):
         base = plot_frame.FigureSpec(
@@ -114,6 +99,122 @@ class TestRuntimeDefinitions:
         )
         merged = base.merged(plot_frame.Annotations(definitions=(("arm", "runtime meaning"),)))
         assert merged.definitions == (("arm", "static meaning"),)
+
+
+class TestCanvasCarriesOnlyTheClaim:
+    """READ / GOAL / TERMS / NOTE / LIMITS are records, not ink."""
+
+    def test_the_explanatory_sections_are_never_drawn(self, tmp_path):
+        spec = plot_frame.FigureSpec(
+            title="A claim",
+            subtitle="n=175",
+            reading="THIS_MUST_NOT_BE_DRAWN",
+            goal="NOR_THIS",
+            definitions=(("term", "NOR_THIS_EITHER"),),
+            notes=("NOR_THIS_NOTE",),
+            limitations=("NOR_THIS_LIMIT",),
+        )
+        fig = plot_frame.new_figure(plot_frame.SINGLE)
+        _draw(fig.subplots())
+        plot_frame.attach_band(fig, spec)
+        drawn = " ".join(t.get_text() for t in fig.texts)
+        plt.close(fig)
+        assert "A claim" in drawn and "n=175" in drawn
+        assert "MUST_NOT" not in drawn and "NOR_THIS" not in drawn
+
+    def test_band_grows_with_a_caveat(self):
+        without = plot_frame.band_height_inches(_SPEC, 10.0)
+        with_caveat = plot_frame.band_height_inches(
+            plot_frame.FigureSpec(
+                title=_SPEC.title,
+                subtitle=_SPEC.subtitle,
+                caveat="Imputed cells are included in every height on this chart.",
+                reading=_SPEC.reading,
+                goal=_SPEC.goal,
+            ),
+            10.0,
+        )
+        assert with_caveat > without > 0.0
+
+
+class TestRendering:
+    def test_render_writes_a_png(self, tmp_path):
+        out = plot_frame.render(tmp_path / "sub" / "fig.png", _SPEC, _draw)
+        assert out.exists() and out.stat().st_size > 0
+
+    def test_png_pixels_are_exactly_the_named_size(self, tmp_path):
+        """`bbox_inches='tight'` is gone, so the canvas is the size we asked for."""
+        out = plot_frame.render(tmp_path / "fig.png", _SPEC, _draw, size=plot_frame.WIDE)
+        assert Image.open(out).size == (
+            round(plot_frame.WIDE.width_in * plot_frame.DPI),
+            round(plot_frame.WIDE.height_in * plot_frame.DPI),
+        )
+
+    def test_render_closes_the_figure(self, tmp_path):
+        plt.close("all")
+        plot_frame.render(tmp_path / "fig.png", _SPEC, _draw)
+        assert not plt.get_fignums()
+
+    def test_table_size_grows_with_rows(self):
+        assert table_h(4) < table_h(30) <= 13.0
+
+    def test_every_named_size_is_registered(self):
+        assert set(plot_frame.SIZES) == {"single", "single_tall", "square", "wide", "wide_tall"}
+
+
+def table_h(rows: int) -> float:
+    return plot_frame.table_size(rows).height_in
+
+
+class TestManifest:
+    """The record the canvas no longer carries has to land somewhere checkable."""
+
+    def _prov(self, tmp_path) -> plot_frame.Provenance:
+        return plot_frame.Provenance(
+            generator="benchmark.routing.report",
+            data_digest="deadbeef",
+            manifest=tmp_path / "figures.json",
+        )
+
+    def test_save_records_the_full_spec(self, tmp_path):
+        plot_frame.render(
+            tmp_path / "fig.png",
+            _SPEC,
+            _draw,
+            provenance=self._prov(tmp_path),
+        )
+        row = json.loads((tmp_path / "figures.json").read_text())["figures"]["fig.png"]
+        assert row["reading"] == _SPEC.reading
+        assert row["goal"] == _SPEC.goal
+        assert row["title"] == _SPEC.title
+        assert row["generator"] == "benchmark.routing.report"
+
+    def test_upsert_leaves_other_entries_alone(self, tmp_path):
+        """Eight processes write routing figures — a truncating write would lose seven."""
+        prov = self._prov(tmp_path)
+        plot_frame.render(tmp_path / "a.png", _SPEC, _draw, provenance=prov)
+        plot_frame.render(tmp_path / "b.png", _SPEC, _draw, provenance=prov)
+        figures = json.loads((tmp_path / "figures.json").read_text())["figures"]
+        assert set(figures) == {"a.png", "b.png"}
+
+    def test_no_timestamp_makes_regeneration_a_no_op_diff(self, tmp_path):
+        prov = self._prov(tmp_path)
+        plot_frame.render(tmp_path / "a.png", _SPEC, _draw, provenance=prov)
+        first = (tmp_path / "figures.json").read_text()
+        plot_frame.render(tmp_path / "a.png", _SPEC, _draw, provenance=prov)
+        assert (tmp_path / "figures.json").read_text() == first
+
+    def test_prune_drops_rows_whose_png_is_gone(self, tmp_path):
+        prov = self._prov(tmp_path)
+        plot_frame.render(tmp_path / "a.png", _SPEC, _draw, provenance=prov)
+        plot_frame.render(tmp_path / "b.png", _SPEC, _draw, provenance=prov)
+        assert plot_frame.prune(tmp_path / "figures.json", ["a.png"]) == ["b.png"]
+        figures = json.loads((tmp_path / "figures.json").read_text())["figures"]
+        assert set(figures) == {"a.png"}
+
+    def test_no_manifest_written_without_provenance(self, tmp_path):
+        plot_frame.render(tmp_path / "a.png", _SPEC, _draw)
+        assert not (tmp_path / "figures.json").exists()
 
 
 class TestFailureIsClean:
@@ -131,7 +232,8 @@ class TestFailureIsClean:
 
     def test_save_failure_closes_the_figure(self, tmp_path):
         plt.close("all")
-        fig, _ = plt.subplots()
+        fig = plot_frame.new_figure(plot_frame.SINGLE)
+        _draw(fig.subplots())
         target = tmp_path / "ro"
         target.mkdir()
         target.chmod(0o500)
@@ -143,9 +245,64 @@ class TestFailureIsClean:
             target.chmod(0o700)
 
 
-class TestFooterCannotStretchTheCanvas:
-    """bbox_inches='tight' sizes the PNG to the widest artist — including the footer."""
+class TestBandNeverOverflowsTheCanvas:
+    """The wrap column is an estimate, and a wrong estimate runs text off the PNG."""
 
-    def test_long_unbreakable_token_is_broken(self):
-        lines = plot_frame._wrapped_lines("READ", "x" * 400, 120)
-        assert max(len(line) for line in lines) <= 122
+    _WORST = (
+        ("narrow glyphs", ("x" * 9 + " ") * 30),
+        (
+            "real subtitle",
+            "escalate_after_n=3, stale_window=10 · base 0.421 · fires 726/727 · 727/799 scored",
+        ),
+        (
+            "capitalised",
+            "MEASURED ONLY NO IMPUTED CELL ON EITHER SIDE N=87 WILSON BANDS MCNEMAR EXACT " * 4,
+        ),
+    )
+
+    @pytest.mark.parametrize("label,subtitle", _WORST)
+    @pytest.mark.parametrize(
+        "size",
+        [
+            plot_frame.SINGLE,
+            plot_frame.SINGLE_TALL,
+            plot_frame.SQUARE,
+            plot_frame.WIDE,
+            plot_frame.WIDE_TALL,
+            plot_frame.table_size(30),
+            plot_frame.table_size(30, width_in=16.0),
+        ],
+        ids=lambda s: s.name,
+    )
+    def test_worst_case_band_stays_inside_every_size(self, size, label, subtitle):
+        from benchmark import plot_contract
+
+        spec = plot_frame.FigureSpec(
+            title="A CLAIM ABOUT THE DATA THAT IS FAIRLY LONG AND CAPITALISED HERE",
+            subtitle=subtitle[:260],
+            # Bold, and 12% wider per glyph than the regular subtitle above it — the case a
+            # single weight-blind advance constant silently overflowed.
+            caveat="MEASURED ONLY - EVERY IMPUTED CELL IS PASS=TRUE SO EVERY HEIGHT IS BIASED UP",
+            reading="x is cost.",
+            goal="Aim top-left.",
+        )
+        fig = plot_frame.new_figure(size)
+        fig.subplots().plot([1, 2], [1, 2])
+        try:
+            band_top = plot_frame.attach_band(fig, spec)
+            assert plot_contract.audit(fig, band_top_px=band_top) == []
+        finally:
+            plt.close(fig)
+
+    def test_bold_wraps_narrower_than_regular(self):
+        """Bold is measurably wider, so it must get fewer columns at the same size."""
+        assert plot_frame._GLYPH_ADVANCE_BOLD > plot_frame._GLYPH_ADVANCE
+        text = "w " * 400
+        regular = max(len(line) for line in plot_frame._wrap(text, 10.0, 9.0))
+        bold = max(len(line) for line in plot_frame._wrap(text, 10.0, 9.0, bold=True))
+        assert bold < regular
+
+    def test_wrap_leaves_a_margin_on_both_sides(self):
+        """Sizing the wrap to the FULL width was the original overflow bug."""
+        columns = len(plot_frame._wrap("w " * 400, 10.0, 9.0)[0])
+        assert columns < int(10.0 * 72.0 / (9.0 * plot_frame._GLYPH_ADVANCE))

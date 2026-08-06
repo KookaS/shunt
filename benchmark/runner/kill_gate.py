@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kill-gate automation: compare Shunt routing (blind cascade) against the
+"""Kill-gate automation: compare the SHIPPED kNN router against the
 fixed-frontier baseline on N tasks (cost-at-equal-quality + pass-rate deltas,
 bootstrap CIs). Exit: 0 PASS, 1 FAIL, 2 INCONCLUSIVE (CI crosses zero).
 """
@@ -10,13 +10,15 @@ import argparse
 import math
 import random
 import sys
+from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from benchmark import config, validate_results
 from benchmark.routing import censoring, summary
 from benchmark.routing.metrics import compute_cost_decomposition as _compute_cost_decomposition
-from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
+from benchmark.routing.strategies.knn import kNNStrategy
 
 # ---------------------------------------------------------------------------
 # I/O
@@ -122,16 +124,20 @@ def evaluate_test(
     return decisions
 
 
-def evaluate_knn_cascade(
+def evaluate_router(
     matrix: dict[str, Any],
     task_ids: list[str],
-    strategy: kNNCascadeStrategy | None = None,
+    strategy: kNNStrategy | None = None,
 ) -> list[Decision]:
+    """The VERDICT arm: the shipped single-shot kNN router, one decision per task."""
+    # It used to be kNN-cascade, which `LIVE_STRATEGIES` rejects at boot — the gate was
+    # adjudicating "should we ship this" on a strategy the product will not run. The
+    # cascade's mid-session verify-and-escalate is not cache-safe; see
+    # benchmark/routing/strategy_class.py for the blocker and its path to live.
     if strategy is None:
         knn = config.knn_params()
-        strategy = kNNCascadeStrategy(
+        strategy = kNNStrategy(
             k=knn.get("k", 20),
-            max_tries=knn.get("max_tries", 3),
             success_rate_threshold=knn.get("success_rate_threshold", 0.6),
             min_samples=knn.get("min_samples", 3),
         )
@@ -139,20 +145,7 @@ def evaluate_knn_cascade(
     for tid in task_ids:
         task_meta = matrix.get("tasks", {}).get(tid, {})
         model = strategy.select(tid, task_meta, matrix)
-        outcome = _get_outcome(matrix, tid, model)
-        cost = strategy.cascade_total_cost
-        decisions.append(
-            (
-                tid,
-                model,
-                outcome.get("pass", False),
-                cost,
-                outcome.get("in_tok", 0) if outcome else 0,
-                outcome.get("out_tok", 0) if outcome else 0,
-                outcome.get("calls", 0) if outcome else 0,
-                strategy.cascade_scorable and not censoring.is_censored(outcome),
-            )
-        )
+        decisions.append(_make_decision(tid, model, _get_outcome(matrix, tid, model)))
     return decisions
 
 
@@ -161,22 +154,89 @@ def evaluate_knn_cascade(
 # ---------------------------------------------------------------------------
 
 
+MEASURED: Final[str] = "measured"
+ASSUMED: Final[str] = "assumed"
+
+# No run in this corpus records a per-turn cache-hit ratio, so the hit rate is the one
+# genuinely invented number left in the cache-aware criterion. It stays a named constant
+# with an ``assumed`` flag rather than a literal buried in a default argument, and
+# `cache_economics.png` draws the gate's sensitivity to it.
+ASSUMED_CACHE_HIT_RATE: Final[float] = 0.9
+# Fallback discount for a model whose registry entry carries no cache-read price. Kept
+# deliberately conservative-for-the-router: it neither invents a discount the provider
+# does not offer nor assumes the worst.
+ASSUMED_CACHE_DISCOUNT: Final[float] = 0.5
+
+
+@dataclass(frozen=True)
+class CachePrice:
+    """One model's cache economics, and whether the registry measured them or we assumed."""
+
+    model: str
+    input_share: float
+    discount: float
+    hit_rate: float
+    provenance: str
+
+    @property
+    def saving_fraction(self) -> float:
+        """Share of a turn's cost a cache hit removes, at this model's input share."""
+        return self.input_share * self.hit_rate * self.discount
+
+
+def cache_prices(models: Iterable[str]) -> dict[str, CachePrice]:
+    """Per-model cache discount read off the shipped registry, flagged measured|assumed."""
+    # The gate's headline cache-aware ratio used to be computed from two literals
+    # (hit=0.9, discount=0.5) applied uniformly to every model, which is a claim about
+    # six providers' billing made from nothing. The discount is recoverable exactly:
+    # a registry row carrying `cache_read_cost_per_1m` states what a cached input token
+    # is billed at, so the discount is 1 - cache_read/input for that model and nobody
+    # else's.
+    pricing = config.load_pricing()
+    out: dict[str, CachePrice] = {}
+    for model in models:
+        info = pricing.get(model)
+        share = _input_share_from_config(model)
+        discount, provenance = ASSUMED_CACHE_DISCOUNT, ASSUMED
+        if isinstance(info, dict):
+            read = info.get("cache_read_cost_per_1m")
+            inp = info.get("input_cost_per_1m")
+            if (
+                isinstance(read, int | float)
+                and isinstance(inp, int | float)
+                and inp > 0
+                and 0 <= read < inp
+            ):
+                discount, provenance = 1.0 - read / inp, MEASURED
+        out[model] = CachePrice(
+            model=model,
+            input_share=share,
+            discount=discount,
+            hit_rate=ASSUMED_CACHE_HIT_RATE,
+            provenance=provenance,
+        )
+    return out
+
+
 def compute_cache_costs(
     decisions: list[Decision],
     pricing: dict[str, Any],
-    cache_hit_rate: float = 0.9,
-    cache_discount: float = 0.5,
+    prices: dict[str, CachePrice] | None = None,
 ) -> tuple[float, float]:
+    """(naive, cache-aware) total cost — a repeat of the same model banks its discount."""
     naive = sum(d[3] for d in decisions)
     if not decisions:
         return (0.0, 0.0)
+    if prices is None:
+        prices = cache_prices(sorted({d[1] for d in decisions} | set(pricing)))
 
     savings = 0.0
     prev_model: str | None = None
     for model, cost in ((d[1], d[3]) for d in decisions):
         if prev_model is not None and model == prev_model:
-            share = _input_share_from_config(model)
-            savings += cost * share * cache_hit_rate * cache_discount
+            price = prices.get(model)
+            if price is not None:
+                savings += cost * price.saving_fraction
         prev_model = model
 
     return (naive, naive - savings)
@@ -470,7 +530,7 @@ def _format_report(  # noqa: PLR0913
 
     lines.append(_arm_line("Control", control_pass, control_naive, control_cache, control_switches))
     lines.append(
-        _arm_line("Router (kNN-casc)", router_pass, router_naive, router_cache, router_switches)
+        _arm_line("Router (kNN, live)", router_pass, router_naive, router_cache, router_switches)
     )
     lines.append(
         _arm_line("Oracle (ref)", oracle_pass, oracle_naive, oracle_cache, oracle_switches)
@@ -587,10 +647,10 @@ def run_kill_gate(
 ) -> tuple[int, str]:
     control = evaluate_control(matrix, task_ids, frontier_model)
 
-    # The shipped kNN-cascade router is the VERDICT arm: the gate asks whether the
-    # real router beats fixed-frontier-with-caching at equal quality. A router error
-    # must surface as a real failure — no try/except swallowing it into a warning.
-    router = evaluate_knn_cascade(matrix, task_ids)
+    # The shipped kNN router is the VERDICT arm: the gate asks whether the LIVE router
+    # beats fixed-frontier-with-caching at equal quality. A router error must surface as
+    # a real failure — no try/except swallowing it into a warning.
+    router = evaluate_router(matrix, task_ids)
 
     # Oracle (cheapest-passing) is a labelled reference upper bound only — it does
     # NOT drive the verdict.

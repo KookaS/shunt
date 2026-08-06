@@ -4,11 +4,13 @@ and every figure is written through the annotated frame.
 
 from __future__ import annotations
 
+import json
 import random
 from dataclasses import replace
 from typing import Final
 
 import pytest
+from PIL import Image
 
 from benchmark.escalation import (
     deployability,
@@ -26,16 +28,12 @@ _PERMUTATIONS = 200
 _DEPTHS: Final[tuple[int, ...]] = (5,)
 _FIGURES: Final[frozenset[str]] = frozenset(
     {
-        "pr_curve.png",
-        "roc_curve.png",
-        "recurrence_roc.png",
-        "confusion_matrix.png",
-        "permutation_null.png",
-        "sweep_table.png",
-        "trajectory_outcomes.png",
-        "failure_capture_coverage.png",
-        "edit_gated_sweep_table.png",
-        "session_cadence.png",
+        "escalation_decision.png",
+        "operating_point.png",
+        "policy_sweep.png",
+        "session_value.png",
+        "corpus_and_coverage.png",
+        "escalation_budget.png",
     }
 )
 
@@ -525,14 +523,166 @@ def test_main_writes_every_figure_through_the_frame(tmp_path, capsys) -> None:
         ]
     )
     assert rc == 0
-    # `session_cadence.png` is absent because this synthetic corpus uses model "m", which is not
+    # `session_value.png` is absent because this synthetic corpus uses model "m", which is not
     # in the price registry — no task has both >=2 cheap sessions AND a frontier session, so the
     # session-cadence estimate is "not supported" (None) and the figure is skipped, exactly as
     # the run_eval contract says it should be.
-    assert {p.name for p in plots_dir.glob("*.png")} == _FIGURES - {"session_cadence.png"}
-    # dpi 150 at (9, 5.5) plus the footer: a bare dpi=80 figure never reaches this size.
-    assert all(p.stat().st_size > 20_000 for p in plots_dir.glob("*.png"))
+    assert {p.name for p in plots_dir.glob("*.png")} == _FIGURES - {"session_value.png"}
+    manifest = json.loads((plots_dir.parent / "figures.json").read_text())["figures"]
+    for path in sorted(plots_dir.glob("*.png")):
+        row = manifest[path.name]
+        # EXACT pixels, not a file-size floor. The old `st_size > 20_000` assertion tested that a
+        # figure was not rendered at dpi 80, and it could only ever be a proxy because
+        # `bbox_inches="tight"` made the canvas whatever the widest artist needed. With that gone
+        # the PNG is size x dpi to the pixel, which is directly assertable — and it is the one
+        # check that proves `bbox_inches` really is gone.
+        width, height = row["figsize"]
+        # +/-1px: matplotlib truncates the device size, so a 10.45in canvas at 150dpi is 1567
+        # rather than 1568. A tight-bbox canvas misses by hundreds, so the proof still holds.
+        rendered = Image.open(path).size
+        assert abs(rendered[0] - width * row["dpi"]) <= 1
+        assert abs(rendered[1] - height * row["dpi"]) <= 1
+        # The canvas carries a claim and its operating point, and at most one red line.
+        assert row["title"].strip()
+        assert row["subtitle"].strip()
+        assert len(row["caveat"] or "") <= 120
+        assert row["reading"].strip() and row["goal"].strip()
+    # The scalars behind those canvases are committed, so a number can be checked after the fact.
+    metrics_payload = json.loads((plots_dir / "metrics.json").read_text())
+    assert metrics_payload["run"]["canonical_counting"] == run_eval.CANONICAL_COUNTING
+    assert metrics_payload["run"]["shipped_escalation"] == {
+        "escalate_after_n": run_eval.SHIPPED_ESCALATE_AFTER_N,
+        "stale_window": run_eval.SHIPPED_STALE_WINDOW,
+        "ladder": run_eval.SHIPPED_LADDER,
+    }
+    assert set(_FIGURES) <= set(metrics_payload)
     assert '"prefix_model"' in capsys.readouterr().out
+
+
+def test_the_canonical_cell_is_edit_gated_at_the_shipped_knobs_never_an_argmax(
+    signal_report: run_eval.EvalReport,
+) -> None:
+    # THE CHANGE THIS PINS. Per-cell figures used to read `_best_separating_cell` — an argmax over
+    # 60 swept cells presented as an operating point — while the outcome bars read the shipped
+    # default and the ROC read a third thing. Every per-cell figure now reads ONE point: the
+    # shipped knobs with edit-gated counting, so exactly one eval-only thing varies.
+    assert run_eval.CANONICAL_COUNTING == "edit_gated"
+    cell = run_eval.canonical_cell(signal_report)
+    assert cell is not None
+    knobs = (cell.escalate_after_n, cell.stale_window, cell.ladder)
+    assert knobs == (
+        run_eval.SHIPPED_ESCALATE_AFTER_N,
+        run_eval.SHIPPED_STALE_WINDOW,
+        run_eval.SHIPPED_LADDER,
+    )
+    # It comes from the edit-gated family, by identity — the as-shipped row at the same knobs is a
+    # different cell and is what `headline_cell` returns.
+    assert any(cell is c for c in signal_report.policy_cells_edit_gated)
+    assert not any(cell is c for c in signal_report.policy_cells)
+    published = signal_report.to_dict()["canonical_policy_cell"]
+    assert published is not None
+    # Field-by-field on the identity columns; a whole-dict compare trips on the NaN interval a
+    # never-firing arm honestly carries (nan != nan), which is not what this test is about.
+    assert published["escalate_after_n"] == cell.escalate_after_n  # type: ignore[index]
+    assert published["n_escalated"] == cell.n_escalated  # type: ignore[index]
+    assert signal_report.to_dict()["canonical_counting"] == "edit_gated"
+
+
+def test_the_argmax_operating_point_is_gone() -> None:
+    assert not hasattr(run_eval, "_best_separating_cell")
+    # ...while the maxT-corrected `status` driver, a legitimately different job, stays.
+    assert hasattr(run_eval, "_best_skilled_cell")
+
+
+def test_the_budget_aggregates_are_measured_and_never_per_run_arrays(
+    signal_report: run_eval.EvalReport,
+) -> None:
+    # `ReplayDecision.first_escalation_index` was computed on every replay and thrown away, so the
+    # question "what does firing pre-empt" had no data behind it. It is summarised, never stored
+    # per run — the same reasoning that deleted `lead_times_*`.
+    cell = next(c for c in signal_report.policy_cells if c.n_escalated)
+    budget = cell.budget
+    assert budget.n_fired_positioned == cell.n_escalated
+    total_after = budget.steps_after_fire_failed + budget.steps_after_fire_resolved
+    assert total_after >= 0
+    assert budget.fire_step_median is not None
+    assert 0 <= len(budget.fire_fraction_deciles_failed) <= 11
+    for value in (
+        budget.fire_fraction_median_failed,
+        budget.fire_fraction_median_resolved,
+    ):
+        assert value is None or 0.0 <= value <= 1.0
+    assert not any(isinstance(getattr(budget, name), list) for name in vars(budget)), (
+        "aggregates only — no per-run array may be retained"
+    )
+    assert "budget" in cell.to_dict()
+
+
+def test_the_deployability_line_no_longer_caveats_every_figure(
+    signal_report: run_eval.EvalReport,
+) -> None:
+    # THE CORRECTNESS BUG THIS PINS. `_run_annotations` appended the deployability sentence to
+    # EVERY figure's limitations, telling readers the recurrence ROC depends on features
+    # production lacks. The recurrence score reads `failing_check_id` and `success`, both of which
+    # production holds. The run-level canvas caveat is now severity-ordered and at most one line.
+    annotations = run_eval._run_annotations(signal_report)
+    assert len(annotations.caveat or "") <= 120
+    assert not any("does not hold" in lim for lim in annotations.limitations)
+    # ...and the deployability record itself is still carried, off-canvas, for the manifest.
+    assert any(signal_report.deployability.label in note for note in annotations.notes)
+
+
+def test_the_run_caveat_is_severity_ordered_and_singular(
+    null_report: run_eval.EvalReport,
+) -> None:
+    caveat = run_eval._run_caveat(null_report)
+    assert caveat is not None
+    assert "NO USABLE SIGNAL" in caveat
+    # Integrity failure outranks a no-skill verdict: a corpus that fails its own recompute makes
+    # every number on the canvas untrustworthy, including the one the no-skill line is about.
+    tampered = replace(null_report, status="AUTHENTICITY_FAILED", authenticity_errors=3)
+    tampered_caveat = run_eval._run_caveat(tampered)
+    assert tampered_caveat is not None
+    assert "INTEGRITY" in tampered_caveat
+
+
+def test_the_prefix_null_is_published_as_a_coverage_gap_not_a_falsification(
+    null_report: run_eval.EvalReport,
+) -> None:
+    # A null on an instrument never shown to detect a positive is a coverage gap, and this one is
+    # also measured on a different, length-selected population from the corpus it is quoted for.
+    assert null_report.status == "NO_SKILL"
+    assert "COVERAGE-LIMITED NULL, NOT A FALSIFICATION" in null_report.reason
+    admission = null_report.prefix_admission
+    assert admission is not None
+    assert (
+        admission.n_admitted + admission.n_excluded_too_short + (admission.n_excluded_by_margin)
+        == admission.n_stamped
+    )
+    published = null_report.to_dict()["prefix_admission"]
+    assert published is not None
+    assert published["admitted_base_rate"] is not None  # type: ignore[index]
+
+
+def test_the_reported_p_value_is_no_longer_pinned_to_the_estimator_floor() -> None:
+    # While the default equalled the floor, every published p was 1/(200+1) = 0.005 — the smallest
+    # value the +1-corrected estimator can return, i.e. a statement about the draw count rather
+    # than about the observation.
+    assert metrics.DEFAULT_PERMUTATIONS > metrics.MIN_PERMUTATIONS
+    assert run_eval._build_parser().parse_args([]).permutations == metrics.DEFAULT_PERMUTATIONS
+
+
+def test_the_window_sensitivity_pair_is_recorded_so_the_headline_cannot_conflate_two_knobs(
+    signal_report: run_eval.EvalReport,
+) -> None:
+    # The headline gap is quoted at a FIXED stale_window. Publishing the window's own effect is
+    # what stops a reader crediting the counting change with a window change.
+    sensitivity = signal_report.window_sensitivity
+    assert sensitivity
+    assert any(f"stale_window_{run_eval.SHIPPED_STALE_WINDOW}" in k for k in sensitivity)
+    assert signal_report.to_dict()["window_sensitivity"] == {
+        k: round(v, 4) for k, v in sensitivity.items()
+    }
 
 
 def test_authenticity_errors_gate_the_status_they_were_collected_for() -> None:

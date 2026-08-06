@@ -334,5 +334,6 @@
     "test_view_subtitle_per_object (admin_views.tests.AdminViewBasicTest)"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-14404:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "catch_all_view() does not support FORCE_SCRIPT_NAME.\nDescription\n\t \n\t\t(last modified by SlavaSkvortsov)\n\t \ncatch_all_view returns redirect to '%s/' % request.path_info (script name cut off there) instead of '%s/' % request.path (with the script name)\nPatch - \u200bhttps://github.com/django/django/pull/14404\n"
 }

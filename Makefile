@@ -16,6 +16,7 @@
 #   make replay-inputs  List every replay input this checkout still lacks (fails if any)
 #   make routing-report Regenerate the routing backtest plots/report (no spend)
 #   make benchmark-figures Regenerate the standalone routing figures + their manifest (no spend)
+#                       (every figure lands in docs/assets/figures/routing/)
 #   make check-figures  Prove the committed standalone figures are not stale (seconds, no spend)
 #   make reconcile-cost Reconcile tracked benchmark cost against the billed bill (no spend)
 #
@@ -89,7 +90,7 @@ offline-replay:
 	$(BENCH) benchmark.runner.offline_replay $(ARGS)
 
 escalation-eval:
-	$(BENCH) benchmark.escalation.run_eval $(ARGS)
+	SHUNT_PLOT_STRICT=1 $(BENCH) benchmark.escalation.run_eval $(ARGS)
 
 # Reads the committed corpora only. Exits nonzero when a model listed in `models:` has too little
 # collected data to be evaluated — the signal that a live collection is incomplete, not finished.
@@ -130,12 +131,16 @@ replay-inputs:
 	$(BENCH) benchmark.runner.snapshot_archive requirements $(ARGS)
 
 routing-report:
-	$(BENCH) benchmark.routing.report $(ARGS)
+	SHUNT_PLOT_STRICT=1 $(BENCH) benchmark.routing.report $(ARGS)
 
-# The 12 figures under benchmark/routing/scripts/. Heavy (real fastembed), so they are a
-# deliberate target rather than a pre-commit hook — `make check-figures` is the cheap gate.
+# The standalone figures under benchmark/routing/scripts/, written to docs/assets/figures/routing/ so
+# the docs can link them relatively. Heavy (real fastembed), so they are
+# a deliberate target rather than a pre-commit hook — `make check-figures` is the cheap gate.
+# SHUNT_PLOT_STRICT makes benchmark/plot_contract.py refuse to write a figure with an
+# overlapping or clipped artist, so a broken layout fails the regeneration instead of being
+# committed and found later by whoever opens the PNG.
 benchmark-figures:
-	$(BENCH) benchmark.pipeline --from figures $(ARGS)
+	SHUNT_PLOT_STRICT=1 $(BENCH) benchmark.pipeline --from figures $(ARGS)
 
 check-figures:
 	$(BENCH) benchmark.pipeline --check-figures $(ARGS)

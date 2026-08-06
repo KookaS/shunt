@@ -19,5 +19,5 @@ services:
     volumes:
       - ../:/app:ro
       - ../benchmark/routing/results.csv:/app/benchmark/routing/results.csv:rw
-      - ../benchmark/routing/reports:/app/benchmark/routing/reports:rw
+      - ../docs/assets/figures:/app/docs/assets/figures:rw
     command: ["--no-summary"]

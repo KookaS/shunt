@@ -36,8 +36,9 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+import statistics
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
@@ -47,6 +48,51 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from benchmark.escalation.schema import Trajectory
+
+# The smallest arm a rate may be READ off. It changes no statistic — `p_fail_given_quiet` still
+# reports 0/1 = 0.000 for a one-row arm, because that IS the arithmetic — but a figure renders an
+# arm below this as an explicit "undefined (n=k)" placeholder rather than a bar. The as-shipped
+# cell at the shipped knobs fires on 726 of 727 runs, so its quiet arm is a single trajectory and
+# the committed figure drew its 0/1 as a measured "escalating never predicts failure". Corrupting
+# the statistic to fix the figure would be the wrong layer; the floor lives where the reading is.
+MIN_ARM: Final[int] = 10
+# Quantile grid for the fire-position ECDF. An 11-point summary, never the per-run array: see the
+# NO ESCALATION-TIMING ARRAYS note on `PolicyCell`.
+_ECDF_QUANTILES: Final[tuple[float, ...]] = tuple(i / 10.0 for i in range(11))
+
+
+@dataclass(frozen=True)
+class BudgetAggregates:
+    """What firing costs, summarised — never the per-run arrays those summaries come from."""
+
+    # Fired runs whose trigger point is known (every fired run, on a real replay; a hand-built
+    # cell carries 0 and every figure reading this renders "not measured" rather than a zero).
+    n_fired_positioned: int = 0
+    # Steps that sit AFTER the trigger point, totalled over fired runs, split by terminal outcome.
+    steps_after_fire_failed: int = 0
+    steps_after_fire_resolved: int = 0
+    # Median of fire_index / n_steps — WHERE in a run the trigger lands, on a 0-1 scale, so runs
+    # of very different lengths are comparable. None when that arm has no positioned fire.
+    fire_fraction_median_failed: float | None = None
+    fire_fraction_median_resolved: float | None = None
+    # The same fraction at deciles 0.0 … 1.0, which is what the ECDF panel steps through. Eleven
+    # floats is a summary; the per-run vector it summarises is deliberately not kept.
+    fire_fraction_deciles_failed: tuple[float, ...] = ()
+    fire_fraction_deciles_resolved: tuple[float, ...] = ()
+    # Absolute position, for the one sentence a reader wants in steps rather than fractions.
+    fire_step_median: float | None = None
+    run_length_median: float | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "n_fired_positioned": self.n_fired_positioned,
+            "steps_after_fire_failed": self.steps_after_fire_failed,
+            "steps_after_fire_resolved": self.steps_after_fire_resolved,
+            "fire_fraction_median_failed": _rounded(self.fire_fraction_median_failed),
+            "fire_fraction_median_resolved": _rounded(self.fire_fraction_median_resolved),
+            "fire_step_median": _rounded(self.fire_step_median),
+            "run_length_median": _rounded(self.run_length_median),
+        }
 
 
 @dataclass(frozen=True)
@@ -96,6 +142,13 @@ class PolicyCell:
     # separates the recurrence-specific share.
     length_baseline_auroc: float | None = None
     null_auroc_length: metrics.NullResult | None = None
+    # ── WHAT FIRING WOULD HAVE COST, in aggregate ──
+    # AGGREGATES ONLY — see the NO ESCALATION-TIMING ARRAYS note below. `steps_after_fire_*` is
+    # the total agent work that sits after the trigger point, split by how the run ended: on a
+    # FAILED run those steps were spent and lost, so escalating there PRE-EMPTS them; on a
+    # RESOLVED run the agent went on to fix it, so escalating INTERRUPTS work that was going to
+    # pay off. The ratio between the two is the trigger's budget case, and no figure had it.
+    budget: BudgetAggregates = field(default_factory=lambda: BudgetAggregates())
 
     @property
     def gate_null(self) -> metrics.NullResult:
@@ -172,6 +225,8 @@ class PolicyCell:
             "null_auroc_length_stratified": (
                 None if self.null_auroc_length is None else self.null_auroc_length.to_dict()
             ),
+            # What firing costs and pre-empts, in aggregate — the budget figure's whole input.
+            "budget": self.budget.to_dict(),
             "has_skill": self.has_skill,
         }
 
@@ -192,6 +247,10 @@ class _Scored:
     # firing at escalate_after_n=N needs >= N same-key failing steps, so a cell's fired vector is
     # mechanically correlated with length, and run length is outcome-correlated on this corpus.
     lengths: Sequence[int]
+    # Step index the policy first fired at, or None where it never fired. `replay_config` has
+    # always computed this and every caller threw it away, so the one question a reader asks
+    # after "does it fire" — WHEN, and what does that pre-empt — had no data behind it.
+    fire_indices: Sequence[int | None]
 
 
 def _scored_for(
@@ -205,6 +264,7 @@ def _scored_for(
     failed: list[bool] = []
     groups: list[str] = []
     lengths: list[int] = []
+    fire_indices: list[int | None] = []
     for traj in trajectories:
         decision = replay.replay_config(
             traj, point.to_config(), count_from_first_edit=count_from_first_edit
@@ -212,10 +272,11 @@ def _scored_for(
         fired.append(decision.escalated)
         failed.append(not traj.header.terminal_resolved)
         lengths.append(traj.header.n_steps)
+        fire_indices.append(decision.first_escalation_index)
         # The SAME grouping key the prefix half's grouped CV uses (challenge, i.e. instance id):
         # the two halves must not disagree about what an independent observation is.
         groups.append(features.group_of(traj))
-    return _Scored(fired, failed, groups, lengths)
+    return _Scored(fired, failed, groups, lengths, fire_indices)
 
 
 def evaluate_cell(
@@ -272,7 +333,48 @@ def _cell(
         null_auroc_length=_length_stratified_null(
             scores, failed, s.lengths, n_permutations=n_permutations, seed=seed
         ),
+        budget=_budget_aggregates(s),
     )
+
+
+def _budget_aggregates(s: _Scored) -> BudgetAggregates:
+    """Total the work sitting after the trigger point, split by how the run ended."""
+    after: dict[bool, int] = {True: 0, False: 0}
+    fractions: dict[bool, list[float]] = {True: [], False: []}
+    fire_steps: list[int] = []
+    positioned = 0
+    for index, fire in enumerate(s.fire_indices):
+        if fire is None:
+            continue
+        positioned += 1
+        length = s.lengths[index]
+        outcome = bool(s.failed[index])
+        after[outcome] += max(0, length - fire - 1)
+        if length > 0:
+            fractions[outcome].append(fire / length)
+        fire_steps.append(fire)
+    return BudgetAggregates(
+        n_fired_positioned=positioned,
+        steps_after_fire_failed=after[True],
+        steps_after_fire_resolved=after[False],
+        fire_fraction_median_failed=_median(fractions[True]),
+        fire_fraction_median_resolved=_median(fractions[False]),
+        fire_fraction_deciles_failed=_deciles(fractions[True]),
+        fire_fraction_deciles_resolved=_deciles(fractions[False]),
+        fire_step_median=_median([float(v) for v in fire_steps]),
+        run_length_median=_median([float(v) for v in s.lengths]),
+    )
+
+
+def _median(values: Sequence[float]) -> float | None:
+    return statistics.median(values) if values else None
+
+
+def _deciles(values: Sequence[float]) -> tuple[float, ...]:
+    """The ECDF's eleven summary points, or empty when the arm has nothing in it."""
+    if not values:
+        return ()
+    return tuple(float(np.percentile(values, q * 100.0)) for q in _ECDF_QUANTILES)
 
 
 def _permute_clusters(
@@ -534,4 +636,12 @@ def evaluate(
     ]
 
 
-__all__ = ["PolicyCell", "evaluate", "evaluate_cell", "family_null_draws", "null_roc_band"]
+__all__ = [
+    "MIN_ARM",
+    "BudgetAggregates",
+    "PolicyCell",
+    "evaluate",
+    "evaluate_cell",
+    "family_null_draws",
+    "null_roc_band",
+]

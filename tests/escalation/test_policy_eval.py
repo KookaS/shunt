@@ -8,9 +8,9 @@ import random
 
 import pytest
 
-from benchmark.escalation import datasets, metrics, policy_eval, replay
+from benchmark.escalation import datasets, metrics, policy_eval, replay, run_eval
 from benchmark.escalation.schema import Trajectory
-from tests.escalation.factories import make_step, make_trajectory
+from tests.escalation.factories import make_null, make_step, make_trajectory
 
 _PERMUTATIONS = 200
 
@@ -268,9 +268,11 @@ def test_default_grid_sweeps_both_knobs_and_guarantees_the_shipped_cell() -> Non
     ]
     assert sorted({p.stale_window for p in datasets.DEFAULT_GRID}) == [10, 1000]
     assert len({p.ladder for p in datasets.DEFAULT_GRID}) == 1
-    # The shipped configuration (escalate_after_n=2, stale_window=10) must be in-grid so the
-    # report measures what ships, never only what scores better.
-    assert any(p.escalate_after_n == 2 and p.stale_window == 10 for p in datasets.DEFAULT_GRID)
+    # The shipped configuration must be in-grid so the report measures what ships, never only
+    # what scores better. Read off the packaged router.yaml rather than restated as a literal:
+    # a hardcoded 3 here kept passing while the shipped default moved, which is exactly the
+    # drift this assertion exists to catch.
+    assert run_eval.shipped_grid_point() in datasets.DEFAULT_GRID
 
 
 def test_policy_null_uses_block_permutation_not_within_challenge_shuffles() -> None:
@@ -300,3 +302,55 @@ def test_policy_null_uses_block_permutation_not_within_challenge_shuffles() -> N
                 changed_any = True
                 break
     assert changed_any
+
+
+def test_the_budget_aggregates_come_from_the_fire_index_the_replay_already_computed() -> None:
+    # `ReplayDecision.first_escalation_index` was computed on every replay and discarded, so the
+    # question "what does firing pre-empt" had no data behind it. It is summarised here — never
+    # kept per run, for the same reason `lead_times_*` was deleted.
+    corpus = []
+    for i in range(12):
+        thrash = [
+            make_step(step_index=j, decision_index=j, success=False, failing_check_id="k")
+            for j in range(8)
+        ]
+        quiet = [make_step(step_index=j, decision_index=j) for j in range(8)]
+        corpus.append(make_trajectory(thrash, trajectory_id=f"a{i}", terminal_resolved=False))
+        corpus.append(make_trajectory(quiet, trajectory_id=f"b{i}", terminal_resolved=True))
+    cell = policy_eval.evaluate_cell(corpus, replay.GridPoint(2, 5), n_permutations=200)
+    budget = cell.budget
+    assert budget.n_fired_positioned == cell.n_escalated == 12
+    # Only the thrashing (failed) runs fire, so every post-trigger step lands on the failed side.
+    assert budget.steps_after_fire_failed > 0
+    assert budget.steps_after_fire_resolved == 0
+    assert budget.fire_fraction_median_failed is not None
+    assert 0.0 <= budget.fire_fraction_median_failed <= 1.0
+    assert budget.fire_fraction_median_resolved is None
+    assert len(budget.fire_fraction_deciles_failed) == 11
+    assert budget.fire_fraction_deciles_resolved == ()
+    assert budget.run_length_median == 8.0
+    assert cell.to_dict()["budget"]["n_fired_positioned"] == 12
+
+
+def test_the_min_arm_floor_is_a_reporting_rule_not_a_statistic() -> None:
+    # `p_fail_given_quiet` still reports 0/1 = 0.0 for a one-row arm, because that IS the
+    # arithmetic. Corrupting a statistic to fix a figure is the wrong layer; the floor is a
+    # constant the FIGURE reads.
+    assert policy_eval.MIN_ARM == 10
+    thin = policy_eval.PolicyCell(
+        escalate_after_n=3,
+        stale_window=10,
+        ladder="effort_then_rank",
+        n_trajectories=727,
+        n_escalated=726,
+        tp=306,
+        fp=420,
+        fn=0,
+        tn=1,
+        base_failure_rate=0.4209,
+        precision_ci=(0.38, 0.46),
+        quiet_ci=(float("nan"), float("nan")),
+        null_auroc=make_null(0.5012, 0.5),
+    )
+    assert thin.p_fail_given_quiet == 0.0
+    assert thin.fn + thin.tn < policy_eval.MIN_ARM

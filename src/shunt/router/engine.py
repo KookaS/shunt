@@ -948,8 +948,17 @@ class RouterEngine:
         with self._lock:
             return self._cache.get(session_id)
 
+    @property
+    def needs_embeddings(self) -> bool:
+        """Whether the active strategy ever embeds (fixed strategies never do)."""
+        return self._strategy.consults_neighbors
+
     def warm(self) -> None:
         """Pre-load the embedding model so the first request does not pay for it."""
+        # A fixed strategy routes from the pool alone (see decide()'s consults_neighbors
+        # short-circuit), so warming would download and hold ~600MB that is never read.
+        if not self.needs_embeddings:
+            return
         warm = getattr(self._embedder, "warm", None)
         if callable(warm):
             warm()

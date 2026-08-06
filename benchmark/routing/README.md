@@ -20,19 +20,26 @@ routing/
   instrument_control.py       # Positive control + destroyed-signal null (both selection rules)
   sensitivity.py              # Minimum detectable effect — how weak a signal the corpus can see
   metrics.py                  # Metric definitions
-  report.py                   # Comparison tables and plots (derived from results.csv)
-  scripts/                    # Analysis + figure producers (all read results.csv, write reports/)
+  report.py                   # Drives the nine report figures (derived from results.csv)
+  figures/                    # One module per report figure; `context.py` loads the corpus once
+    kill_gate.py              # Pre-registered delta=5pp non-inferiority forest + paired cost
+    cost_quality_frontier.py  # The one cost-quality plane (replaced four)
+    evidence_basis.py         # Measured vs imputed, on dollars AND passes, plus per band
+    oracle_gap.py             # Oaxaca cost split, regret ladder, gamma-invariance
+    cache_economics.py        # List price vs the invoice against the gate's cache model
+    decision_audit.py         # Chosen x cheapest-sufficient: the over/under-provisioning budget
+    complementarity.py        # Tri-state grid, coverage range, and the routing ceiling
+    task_difficulty.py        # Capability bands + what the cascade picked, by difficulty
+    arm_manipulation.py       # Manipulation check FIRST, then the reasoning-arm contrast
+  scripts/                    # Analysis + figure producers (read results.csv, write docs/assets/figures/routing/)
     compute_costs.py          # Per-model cost/pass rollup from the outcome cache
-    embedding_compare.py      # Arctic vs Jina-code neighbourhoods (retrieval quality)
     knn_nulls.py              # Permutation nulls + the shared kNN selection rule (no plotting)
-    plot_exploration.py       # Exploit-only vs exploit+exploration cost/quality + explore share
-    plot_knn_nulls.py         # Leave-one-task-out transfer curve + cross-repo transfer matrix
-    plot_strategies.py        # Strategy Pareto scatter (plotted FROM strategy_summary.csv)
-    plot_timing.py            # API calls per task, per model and per routed strategy
-    threshold_sweep.py        # kNN (k, success_rate, min_samples) held-out sweep + allocation
-    viz_knn.py                # kNN neighbourhood / routing-map visualisations
+    plot_exploration.py       # Exploration cost/quality and where the budget went
+    plot_knn_nulls.py         # embedding_signal: transfer curve, positive control, cross-repo
+    threshold_sweep.py        # kNN sweep with real outer-loop CV -> the regime map
+    viz_knn.py                # knn_calibration: reliability of the weighted neighbour rate
   artifacts/                  # gitignored — parameterized run_eval outputs + embedding cache
-  reports/                    # regenerable plots (PNG, tracked) + derived strategy_summary.csv
+  reports/                    # derived CSV/JSON only (gitignored); the PNGs live in docs/assets/figures/routing/
 benchmark/
   challenges/
     swebench_verified/        # The 500 instance specs (the sole challenge source)
@@ -44,13 +51,15 @@ There is a **single committed data source of truth**:
 regenerable, never committed**: the **per-strategy** summary
 (`strategy_summary.csv`) is computed in-memory by `summary.py` (used by
 `report.py`, `run_matrix.py`, `run_eval.py`) and written to the gitignored
-`reports/` dir; plots and parameter sweeps likewise regenerate from `results.csv`.
+`reports/` dir; plots (into `docs/assets/figures/routing/`) and parameter sweeps likewise
+regenerate from `results.csv`.
 
-`plot_strategies.py` **reads** `reports/strategy_summary.csv` rather than re-deriving
-the rows, so the scatter and the summary table cannot disagree (they once differed on
-every point, the worst by 174% on cost). Generate the summary first — `python -m
-benchmark.routing.report` — or the script exits with that instruction; it also refuses
-to vouch for a summary older than `results.csv`.
+**One strategy, one committed number.** `cost_quality_frontier.png` is drawn from the
+same in-memory rows `strategy_summary.csv` is written from, so the scatter and the table
+cannot disagree. The retired `knn_cost_comparison.png` published a *second* (cost, pass)
+pair for the kNN router — a proxy 77.7% at \$1.73 against the live engine's number in the
+same report set — which is a correctness bug, not a second view. The proxy publisher was
+deleted; `strategy_summary.csv` is now the single producer of every strategy's (cost, pass).
 
 ## Instrument validity (`instrument_control.py`) — run this before quoting anything
 
@@ -298,7 +307,8 @@ python3 -m benchmark.runner.check_integrity --check-derived
 ## Container
 
 A reproducible image (`benchmark/Dockerfile`) runs the loop identically anywhere.
-Code is mounted **read-only**; only `results.csv` and `reports/` are
+Code is mounted **read-only**; only `results.csv` and `docs/assets/figures/` (both halves'
+subdirectories) are
 writable. Build from the repo root (BuildKit reads `benchmark/Dockerfile.dockerignore`):
 
 ```sh

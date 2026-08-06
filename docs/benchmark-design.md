@@ -88,7 +88,7 @@ optimal baseline (the Oracle, which routes with perfect hindsight). Per task it 
 `oracle_reward − strategy_reward`; match the oracle's pick and it is 0. A strategy accumulates
 regret two ways — **quality regret** (it failed a task the oracle solved) and **cost regret**
 (it passed, but paid for a bigger model than the task needed). `CumReg` is that gap summed over
-the task sequence, and `cumulative_regret.png` draws it as one line per strategy; the slope is
+the task sequence, and `oracle_gap.png` reports the regret totals; the retired per-task line figure's slope was
 average regret per task, so a lower, flatter curve means routing closer to optimal.
 
 Cost is recorded from actual model API responses: the provider-returned cache-aware `usage.cost` when present (e.g. Requesty-routed models, including cache-aware rates), falling back to litellm's computed cost otherwise (e.g. direct routes litellm can price, such as deepseek). For offline eval, costs come from the cached `results.csv` (recorded during live benchmark matrix runs). Recording per-request API cost on the live proxy path is roadmap, not a current feature.

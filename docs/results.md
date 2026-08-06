@@ -59,8 +59,21 @@ The two come apart, which is the whole reason routing might be worth doing:
 not buy capability monotonically. A model is only worth its price if it earns it
 on *your* tasks. (These rates are each model's marginal rate over the tasks it
 actually ran; coverage is adaptive, so they are not cross-comparable at face
-value. The common-coverage view is in
-[the descriptive figure](#per-model-descriptive-view).)
+value. On the 69 tasks **all six** models ran, the ordering barely survives — and
+the cheapest model is the most flattered by adaptive coverage:
+
+| model | pass rate, own coverage | pass rate, common 69 | pooling bias |
+|---|---:|---:|---:|
+| deepseek-v4-flash | 68.3% | 44.9% | +23.4pp |
+| gpt-5-mini | 54.5% | 37.7% | +16.8pp |
+| zai-glm-5.2 | 55.7% | 49.3% | +6.4pp |
+| kimi-k2.5 | 50.9% | 44.9% | +5.9pp |
+| kimi-k3 | 84.1% | 78.3% | +5.9pp |
+| qwen3.7-plus | 45.1% | 43.5% | +1.6pp |
+
+That 23.4pp is over four times the 5pp non-inferiority margin the kill gate is
+judged at, so read any single-model rate as a marginal over its own task subset,
+never as a comparison.)
 
 ## The dataset
 
@@ -100,19 +113,19 @@ fills every unmeasured cell, and every imputed cell is filled `pass=True`.
 
 ## Routing results
 
-**Every embedding-based number below predates a fix and is pending re-measurement.**
-The kNN strategies embed the manifest `description` —
-`<repo>@<commit12> - resolve <test-node-id>`, median 106 characters, of which the repo
-name is 14% and a per-task random commit prefix another 12% — while the agent is
-handed the upstream `problem_statement`. The router and the work it routed never saw
-the same text, so the neighbourhood was built over filenames and repo names rather
-than task content. `routing_text()` now *prefers* `problem_statement`, but the key is
-absent from all 500 committed challenge specs and all 500 manifest `tasks` entries, so
-every row below was still computed on the `description` label. The figures, the
-kNN/kNN-cascade/Tier-Classifier rows below, and the kill-gate verdict are regenerated
-on a manifest that carries the statement before any of them is quoted again. The
-zero-ML rows (Oracle, Price-Cascade, Always-Cheap, Always-Frontier) use no embeddings
-and are unaffected.
+**The embedding numbers below have now been re-measured, and they got worse.** The kNN
+strategies used to embed the manifest `description` — `<repo>@<commit12> - resolve
+<test-node-id>`, median 106 characters — while the agent was handed the upstream
+`problem_statement`. The router and the work it routed never saw the same text. The
+manifest has been rebuilt with the real statements (median 1185 characters),
+`routing_text()` prefers them, and every row below is recomputed on that basis.
+
+Routing quality **fell**: kNN went from 81.71% to **78.29%**, which is inside noise of
+Always-Cheap's 77.14%, and Tier-Classifier from 67.43% to **65.71%**. The 106-character
+label was not merely uninformative — it was mildly *leaky*, because the repo name it
+carried is a weak proxy for task difficulty. Given the correct input, the learned router
+is not distinguishable from the trivial policy. The zero-ML rows (Oracle, Price-Cascade,
+Always-Cheap, Always-Frontier) use no embeddings and are unchanged.
 
 Seven strategies, scored on the same 175 tasks (25 unscorable), from
 [`strategy_summary.csv`](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/strategy_summary.csv):
@@ -121,11 +134,11 @@ Seven strategies, scored on the same 175 tasks (25 unscorable), from
 |---|---:|---:|---|---:|---:|---:|
 | Oracle (hindsight, not deployable) | 169 | 96.57% | 93.71–98.86 | $14.37 | $0.0821 | 0.00 |
 | Price-Cascade | 169 | 96.57% | 93.71–98.86 | $21.12 | $0.1207 | 0.68 |
-| kNN-cascade | 169 | 96.57% | 93.71–98.86 | $22.74 | $0.1300 | 0.84 |
+| kNN-cascade | 169 | 96.57% | 93.71–98.86 | $23.72 | $0.1355 | 0.94 |
 | Always-Frontier | 168 | 96.00% | 93.14–98.86 | $88.61 | $0.5063 | 8.42 |
-| kNN | 143 | 81.71% | 76.00–87.43 | $13.34 | $0.0763 | 25.90 |
+| kNN | 137 | 78.29% | 72.00–84.00 | $10.29 | $0.0588 | 31.59 |
 | Always-Cheap | 135 | 77.14% | 70.86–83.43 | $1.41 | $0.0080 | 32.70 |
-| Tier-Classifier | 118 | 67.43% | 60.57–74.29 | $3.77 | $0.0216 | 49.94 |
+| Tier-Classifier | 115 | 65.71% | 58.86–72.57 | $3.52 | $0.0201 | 52.91 |
 
 ### The result that matters is which strategy gets there
 
@@ -134,7 +147,7 @@ tries the models in ascending price order and stops at the first one whose patch
 passes. Of the deployable strategies whose quality interval overlaps
 Always-Frontier's, it is the cheapest in the table.
 
-The learned `kNN-cascade` costs **more** for the same 96.57%. The machine
+The learned `kNN-cascade` costs **more** ($23.72 against $21.12) for the same 96.57%. The machine
 learning is not paying for itself. What buys the quality back is **verified
 escalation**.
 
@@ -330,7 +343,7 @@ tuned against that was tuned against a clock.
 
 ### The shipped threshold is a coin flip — because it counts the reproduction phase
 
-The shipped default (`escalate_after_n=2`, `stale_window=10`) fires on **727 of
+The shipped default (`escalate_after_n=3`, `stale_window=10`) fires on **726 of
 727** trajectories: P(fail | fired) = **0.421** — exactly the
 base rate, lift 1.00, no edge. This is not a tuning accident: every run, resolved or not,
 starts by reproducing the bug, so the first one or two replayed steps are red on the target
@@ -354,12 +367,16 @@ and strongly:
 | n=10 | 186/727 | 0.812 [0.745, 0.872] | 1.93 | 0.705 | 0.565 |
 | n=20 | 117/727 | 0.838 [0.760, 0.903] | 1.99 | 0.638 | 0.565 |
 
-Rows are the `stale_window=1000` cells (a window wide enough to hold n recurrences; the n=2 row is
+These rows are the `stale_window=1000` cells — a window wide enough to hold n recurrences, and
+the family the *status verdict* is selected from. They are **not** the shipped configuration:
+Shunt ships `stale_window=10`, and every committed figure draws that cell (edit-gated n=3:
+fires 356/727, P(fail|fired)=0.640, AUROC 0.721). The two differ by 0.003 AUROC; quote whichever
+you mean, and say which. (The n=2 row is
 identical across windows). The full 30-cell-per-family grid — every `escalate_after_n` from 1 to
 50 at both windows — is on the sweep-table figures and in the report JSON.
 
 The n=3 cell clears the family-wise permutation null (AUROC **0.724** against [0.500, 0.542],
-adjusted p = 0.005) **and** the length-stratified null (0.724 against [0.498, 0.563]) — so the
+adjusted p = 0.0005 over 2000 permutations) **and** the length-stratified null (0.724 against [0.498, 0.563]) — so the
 edge is recurrence beyond run length, not the length of the runs it selects. It fires on 358 of
 727 runs — a useful fraction, not a tail. This is the honest read of the escalation idea:
 **looking for repeated failures is the right approach; the shipped implementation was counting
@@ -376,9 +393,9 @@ recurrences needs a window at least that wide, and the grid sweeps the window
 over {10, 1000}. Its only edge sits at thresholds no one would ship (see the edit-gated family
 above for the same mechanism at the shipped threshold):
 
-- The shipped default (`escalate_after_n=2`, `stale_window=10`) fires on **727 of
+- The shipped default (`escalate_after_n=3`, `stale_window=10`) fires on **726 of
   727** trajectories: P(fail | fired) = **0.421** — exactly the
-  base rate, lift 1.00, no edge. It fires on everything because reproduction
+  base rate, lift 1.00, no edge. It fires on essentially everything because reproduction
   failures recur at step 1–2.
 - As the threshold rises, precision separates from the base rate: n=5 reads 0.426, n=8
   0.453, n=10 0.482–0.484, n=15 (`stale=1000`) **0.538** (lift
@@ -390,7 +407,9 @@ above for the same mechanism at the shipped threshold):
   the numbers quoted against it are the ones the report prints.
 - The n=30 cell clears the gate outright: AUROC **0.662** against the
   max-over-cells family-wise null 95% **[0.500, 0.549]**, adjusted **p = 0.005**.
-  That clearance is why the harness reports `OK_OFFLINE_ONLY`; the gate itself is described on
+  The harness's `OK_OFFLINE_ONLY` badge, however, is carried by the edit-gated n=3 cell above
+  (AUROC 0.724 at stale_window=1000 — the best SKILLED cell, selected across both families and maxT-corrected, which is NOT the shipped cell the figures draw), not by this one; the gate itself is
+  described on
   [the offline-eval page](escalation.md#evaluating-the-detector-offline).
 - **About 40% of that excess over chance is run-length selection, and the report now says so.**
   Firing at n=30 requires ≥30 same-key failing steps, which requires a long run, and run length
@@ -470,7 +489,7 @@ the recurrence rule at the shipped threshold once the reproduction phase is
 excluded. As shipped the counter counts every same-key failure including the
 reproduction phase — it fires on everything and reads the base rate — and the
 prefix model remains `NO_SKILL`, but the recurrence mechanism, gated on failures
-after the agent's first edit, now clears its gate at `escalate_after_n=2`.
+after the agent's first edit, now clears its gate at `escalate_after_n=3`.
 
 ### Two caveats that make it harder than it looks
 
@@ -501,329 +520,49 @@ flagged checkpoints with logged propensities.
 
 ## Figures
 
-Every benchmark figure carries its own READ / GOAL / TERMS / NOTE / LIMITS
-footer on the canvas, so it stands alone without this page open. The figures
-live under `benchmark/routing/reports/` and `benchmark/escalation/reports/`,
-which sit **outside** the published docs tree, so this page **links** to them on
-GitHub rather than embedding them. Nothing in `docs/` embeds benchmark images.
-Read the red LIMITS line first; it is where each figure tells you what it cannot
-support.
+This page is the narrative — what we found and what it means. The figures
+themselves are documented one by one, with how to read each axis and what each
+one cannot support, in [Routing → Figures](routing.md#figures) and
+[Escalation → Figures](escalation.md#figures). Each PNG carries only its claim,
+its sample size, and — where a reader could be actively misled — one red line;
+see [how the figures are built](benchmark.md#every-figure-explains-itself).
 
 ### Routing
 
-Every embedding-based reading here was computed on the 106-character
-`description` label, not the problem statement — see the caveat opening
-[Routing results](#routing-results). The on-canvas footers now say so themselves:
-every figure that reports a difficulty-separability null
-(`embedding_routing_map`, `knn_pca_scatter`, `knn_transfer_curve`,
-`chosen_arm_vs_difficulty`) names the string it encoded and marks that null a
-coverage gap rather than a falsification, so a PNG lifted out of this page still
-carries the caveat.
+Earlier versions of these figures encoded a 106-character `description` label
+rather than the SWE-bench problem statement, and every embedding null was
+reported as a coverage gap for that reason. That excuse is gone: the task
+manifest was rebuilt with the real problem statements (median 1185 characters),
+the router embeds them, and the null did not move. Predicting per-task
+solvability over 190 tasks with ≥2 measured models, leave-one-out, real jina
+embeddings, k=20:
 
-**[strategy_comparison.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/strategy_comparison.png)**
-— pass rate against total cost, one mark per strategy, cost on a log axis. Aim
-top-left: at or above the best-pass-rate guide and well left of the
-frontier-cost line. Points are read straight from `strategy_summary.csv`, so
-figure and table cannot disagree. Pareto membership here is relative to the
-plotted set, and cost carries no interval.
+| Input to the encoder | LOO R² |
+|---|---|
+| 106-char identifier label (old) | −0.0712 |
+| Real problem statement (new) | −0.0662 |
+| SWE-bench human difficulty tag | **+0.1876** |
+| Shuffled-outcome null, 95% | [−0.1128, +0.0172] |
 
-**[cost_quality_equal.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/cost_quality_equal.png)**
-— the kill-gate figure, two panels. Left: every strategy against Always-Frontier's
-own Wilson band, blue where its interval overlaps that band. Right: the paired,
-measured-only contrast on the 87 co-measured tasks, $15.61 @ 93.1% against
-$46.65 @ 92.0%, McNemar p = 1.000. Read the right panel before believing the left
-one. The left panel's dollars are roughly half projection; the right panel is an
-opportunistic subset that was never designed to answer the gate.
+The embedding sits inside the null band on the correct input, while a three-level
+human tag clears it on the same pipeline, the same n and the same null. That is a
+working positive control beside a negative result, so this is a **falsification**,
+not a coverage gap: on this corpus, embedding similarity carries no per-task
+outcome signal. See [`embedding_signal.png`](routing.md#fig-embedding-signal).
 
-**[measured_vs_imputed_cost.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/measured_vs_imputed_cost.png)**
-— each strategy's total split into dollars a provider actually billed (solid) and
-dollars projected for cells never run (hatched). The hatched fraction is how much
-of the headline is inference. Where a bar is about half hatched, any saving
-computed against it means "what we expect if the ordering holds", never "what we
-measured". The projected segment carries no uncertainty at all.
+Each figure is documented individually — how to read its axes, what to look for, and
+what it cannot support — beside the mechanism it illustrates:
 
-**[cost_savings.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/cost_savings.png)**
-— total cost per strategy, cheapest first, with each pass rate and its 95% Wilson
-interval bracketed above the bar. Look for a short **solid** bar whose interval
-still overlaps Always-Frontier's; a hatched bar is a hindsight oracle and not an
-option. Bar height alone answers nothing, since the cheapest bar is usually the
-worst router.
+- **Routing** (14 figures): [routing.md → Figures](routing.md#figures)
+- **Escalation** (6 figures): [escalation.md → Figures](escalation.md#figures)
 
-**[pareto_scatter.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/pareto_scatter.png)**
-— the deployable Pareto frontier as a convex hull, with hindsight oracles drawn
-as grey stars and excluded. The shaded region is what a router mixing two
-deployable strategies can reach. The AIQ number is normalised by the widest cost
-plotted, so it is readable within one figure and meaningless across figures.
-
-**[cumulative_regret.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/cumulative_regret.png)**
-— per task, the oracle's reward minus this strategy's, summed left to right.
-Look for the lowest, flattest curve, then check the end brackets before believing
-the ordering. Price-Cascade's total (0.69) is lowest, but its interval overlaps
-kNN-cascade's, so the ranking is a leading hypothesis. The bracket bounds the
-total only, never the curve at an intermediate index.
-
-**[arm_monotonicity.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/arm_monotonicity.png)**
-— the imputation assumption, tested. One row per within-model arm pair,
-restricted to tasks where both arms actually ran. Look for a row whose interval
-clears zero. None does. Pooled over 478 co-measured pair-observations the effect
-is +1.7pp, McNemar p = 0.428, with 7.3% of pairs violating monotonicity.
-
-**[knn_transfer_curve.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/knn_transfer_curve.png)**
-— routing pass rate against *k*, leave-one-task-out (deployable) against three
-reference lines: a memorisation curve that lets each task see itself, the best
-constant policy, and the shuffled-outcome null band. The only claim this figure
-can support is blue above the grey band **and** above the green line. Blue sits
-inside the band at every *k*.
-
-**[knn_cross_repo_transfer.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/knn_cross_repo_transfer.png)**
-— rows are the tasks being routed, columns are the only repo the router may vote
-over. A router that learned something generalisable looks flat. Read across a
-row, never down a column, because repos differ in intrinsic difficulty. The
-diagonal advantage is +0.0330 against a null band of [−0.0176, 0.0236],
-z = +2.93.
-
-**[neighborhood_purity.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/neighborhood_purity.png)**
-— the task-by-task cosine similarity matrix over the real 768-d jina embeddings,
-plus observed neighbourhood purity against its permutation null. The only reading
-that supports the router is the blue marker above the grey band. Purity near 1.0
-is meaningless on its own: a constant router scores it by construction, and so
-does the null.
-
-**[embedding_routing_map.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/embedding_routing_map.png)**
-— 2-D PCA of the shipped jina embeddings, each task coloured by measured
-`p_solve`. Look for separated dark and bright regions. None appear. PCA is linear
-and unsupervised, so absence of clusters is suggestive rather than conclusive,
-and the two components carry only 15.1% of the variance.
-
-**[knn_pca_scatter.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/knn_pca_scatter.png)**
-— the same space with colour as measured difficulty and marker shape as the
-router's pick. Colour varies across the cloud, so difficulty *is* present. One
-marker shape covers nearly the whole cloud: 95.4% of tasks get the same pick,
-which is what a constant function looks like.
-
-**[knn_cost_comparison.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/knn_cost_comparison.png)**
-— the router against every always-one-model policy, with the fixed-frontier
-kill-gate baseline drawn as a dashed cross. The router earns its existence only
-by landing **outside** the constant-policy staircase. It does not: always
-`deepseek-v4-flash` matches it on both axes for less.
-
-**[model_allocation.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/model_allocation.png)**
-— how many tasks the router sends to each model against what always-cheapest
-would send. Where the two profiles coincide, the router is always-cheapest under
-a different name. 167 of 175 coincide.
-
-**[threshold_sweep_heatmap.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/threshold_sweep_heatmap.png)**
-— held-out pass rate and frontier-share over the same *k* × threshold grid. Read
-both panels together: a cell only counts as a routing result if it is bright on
-the left while **not** saturated on the right. Bright-left plus bright-right
-means the pass rate was bought with money, and a fixed policy would have done the
-same for the same price.
-
-**[capability_distribution.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/capability_distribution.png)**
-— where the suite's difficulty lives, as the weakest capability band that solves
-each task. 109 of 175 tasks (62%) fall in band 1, 6 (3%) are solved by nothing.
-This is a **capability** ordering, not a price ordering: the cheapest model in the
-registry sits in band 2, so left-hand mass does not by itself mean "routes
-cheaply".
-
-**[per_stratum_winrate.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/per_stratum_winrate.png)**
-— mean reward per strategy within each difficulty stratum, every bar in a group
-scored on the same tasks. If the tallest bar changes across groups, that
-difference is the routing headroom. In strata 1, 2, 3, 4 and unsolvable the top
-two intervals overlap, so no leader is resolved.
-
-**[model_performance_descriptive.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/model_performance_descriptive.png)**
-<a id="per-model-descriptive-view"></a> — per-model pass rate on the full
-measured set against the 69-task common-coverage subset, plus mean real cost per
-task on a log axis. **Rank models on the solid common-subset bars only.** Full-set
-and common-subset rates differ by up to 23.4pp, a large pooling bias, because
-coverage is adaptive.
-
-**[arm_cost_quality_cloud.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/arm_cost_quality_cloud.png)**
-— one marker per measured (model, arm) cell, average cost per task against pass
-rate. Aim top-left. Hollow markers rest on fewer than 30 tasks and are excluded
-from the hull. Each pass rate is a marginal over the tasks that cell happened to
-run, and those subsets differ in difficulty.
-
-**[model_complementarity_heatmap.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/model_complementarity_heatmap.png)**
-— the raw task × (model, arm) outcome grid: green pass, red fail, grey never
-sampled. Scan across a row for complementarity, meaning a task one column solved
-and another did not. Grey is missing data, never a failure. Coverage is uneven by
-design, so the "columns disagree" count understates real disagreement.
-
-**[chosen_arm_vs_difficulty.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/chosen_arm_vs_difficulty.png)**
-— what kNN-cascade selects, chosen-cell cost against how many sampled arms solved
-the task. A router adapting to difficulty pushes cost down as you move right. The
-cloud is flat. 43 tasks are missing because the chosen cell was never measured,
-and they are not a random sample.
-
-**[exploration_replay.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/exploration_replay.png)**
-— the shipped exploration policy replayed exactly against the recorded matrix, no
-live calls. Read the boxed paired difference, not the overlapping marginal
-intervals: pass −3.2% [−4.8, −1.8], cost +$0.0023 per task, 1.28× the
-exploration-off bill (worst seed 1.48×). The outcome matrix is static, so an
-exploratory pull can never improve a later decision. This measures exploration's
-cost with its learning benefit set to zero, which is the pessimistic half of the
-ledger. The overhead is paired over the 138 tasks both arms scored: the
-exploit-only arm drops 27 cells as unscorable and every one of them is
-`qwen3.7-plus`, a model outside this dense slice, so the two arms do not cover
-the same tasks and a ratio of their raw totals would have compared different
-task sets. We published 1.65× from that unpaired ratio; it was ~30% too high.
-
-**[embedding_compare.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/embedding_compare.png)**
-— general-purpose (arctic) against code-specific (jina) neighbourhoods. The two
-spaces agree on only 0.33 (k=5) and 0.41 (k=10) of their neighbour sets, so the
-embedder is a real design decision. The right panel is a ceiling on kNN routing,
-not routing accuracy: a model in the neighbourhood does not mean any threshold
-rule picks it.
-
-**[timing_comparison.png](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/timing_comparison.png)**
-— API calls per task as a coarse latency proxy. We do not record wall-clock time.
-Read the bars as ordinal, never as measured latency, and note that each left-hand
-bar pools whatever arm mix that model ran.
-
-### Escalation
-
-**[permutation_null.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/permutation_null.png)**
-— the headline null, now for the escalation **policy**. Grey is the maximum AUROC
-the swept policy reaches under **block permutation** — whole challenge blocks
-shuffled, so outcomes move between challenges while the global multiset is
-preserved — with one shared shuffle scored at every swept cell and only the
-largest kept — the family-wise (maxT) null across the whole sweep; dashed lines bound its
-central 95%. The red line is the real, unshuffled AUROC at the cell that
-separates best — on the current corpus the **edit-gated n=3** cell (post-first-edit
-recurrence): **0.724**, clearly right of the upper dashed
-bound **[0.500, 0.542]**, adjusted **p = 0.005**. The null is the gate — a point
-estimate above chance is not skill on its own — and this clearance is one half of
-the `OK_OFFLINE_ONLY` verdict: the precision interval must also clear the base rate (see the
-confusion figure). A cell that never fires has AUROC 0.5 by definition and
-contributes nothing to the max. The old figure nulled the prefix risk model's
-incremental; that instrument now reports `NO_SKILL` on its own path, and this
-panel plots the policy that carries the edge.
-
-**[roc_curve.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/roc_curve.png)**
-— the escalation **policy**'s ROC across the swept recurrence thresholds: one
-point per `escalate_after_n` value that fired, each labelled with its n. As the
-threshold rises the policy moves up the curve — more precision, less recall. A
-SECOND curve (filled triangles) is the **edit-gated** family — the same recurrence
-rule with failures before the agent's first edit excluded from the counter — and
-it dominates the as-shipped curve (higher true-positive rate at the same
-false-positive rate). The
-faint dotted diagonal at 0.5 is chance and orientation only. The prefix risk
-model's ROC is not drawn: its score is constant at the evaluated depths, so it
-ranks nothing. Look for points leaving the diagonal toward the top-left. Auxiliary
-to the PR view.
-
-**[recurrence_roc.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/recurrence_roc.png)**
-— the complete ROC of the recurrence "stuck depth" score. Each run gets a score
-= the largest number of times the same failing-check id recurred in the shipped
-window, and the curve sweeps that score over **all** thresholds — so it has a
-point at every possible `escalate_after_n`, not just the swept grid, and its AUROC
-bounds what *any* single threshold can achieve. Two curves: as-shipped (AUROC
-**0.601**) and edit-gated (AUROC **0.781**). The shaded band is the score's own detection floor:
-the central 95% of AUROCs the score reaches when terminal outcomes are shuffled across challenges
-(**null 95% [0.472, 0.540]**) — both curves clear it, so the recurrence signal is real, and the
-edit-gated AUROC clears it by the larger margin. The gap between them is the
-reproduction phase masking the signal: the as-shipped score counts every run's
-step-1-2 reproduction failures, so it hugs the diagonal until the score gets
-large, while the edit-gated score (failures before the agent's first edit
-excluded) separates immediately. The continuous edit-gated AUROC (0.781) exceeds
-the best swept cell's operating-point AUROC (0.724 at edit-gated n=3) — the
-threshold-free score ranks runs better than any single fixed threshold.
-
-**[pr_curve.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/pr_curve.png)**
-— precision against recall over the **swept escalation policy**: one point per
-`escalate_after_n` value that fired — a discrete operating characteristic, not a
-continuous score sweep. The dashed line is the corpus base failure rate — the
-no-skill precision a random flagger reaches. As the threshold rises, precision
-climbs from the base rate toward 0.88 (the as-shipped n=50 tail) while recall
-falls; a point above the line whose interval excludes the base rate is a measured
-operating point. The
-**edit-gated** family is the second curve (filled triangles) and sits above and to
-the right of the as-shipped one: n=2 already reads P(fail|fired)=0.593 (lift 1.41)
-at recall 0.843, where the as-shipped n=2 reads the base rate at recall 1.0. The prefix
-risk model's PR curve is not drawn (its score is constant at the evaluated
-depths). This shows the detector's operating points, NOT what escalating would
-have **changed**; the permutation-null figure is where a clearance is scored.
-
-**[confusion_matrix.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/confusion_matrix.png)**
-— the escalation **policy**'s 2×2 at the swept cell that separates best — on the
-current corpus the **edit-gated n=3** cell (rows:
-run failed / resolved; columns: flagged / not flagged). Each cell prints the
-observed count, in brackets what a random flagger at the same flag rate would
-produce, and the excess. Want the top-left count well above its bracketed
-counterpart; that single excess is the whole figure — with the flag count fixed,
-the other three cells are the same number with a sign. The cell fill is a
-diverging heatmap on that excess (red above the random baseline, blue below,
-white at it), so the two hues restate the one fact rather than carry four.
-Unlike the old figure, the **"not flagged" column is
-populated**: the previous empty 0/0 column was the degenerate prefix score
-flagging everything, whereas the best-separating policy cell leaves runs alone.
-One operating point, not a sweep — the PR/ROC figures and the sweep table show
-the rest.
-
-**[sweep_table.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/sweep_table.png)**
-— the policy sweep over `escalate_after_n` × `stale_window` (30 cells). Read
-P(fail | fired) against the base-rate column: an interval containing the base
-rate is a configuration with no measured value. Each cell prints its OWN marginal
-challenge-grouped bootstrap interval — the family-wise maxT correction applies to
-the AUROC null only, never to a precision interval — so [0.606, 0.788] is
-specifically the n=30 (`stale=1000`) cell's interval, and the separating facts
-are the point estimates with their own intervals: n=15 (`stale=1000`) 0.538, n=20
-0.582, n=30 0.706 — while the shipped
-default (n=2, `stale=10`) fires on all 727 trajectories and reads the base rate
-0.421. The
-shipped-default row is highlighted (bold on a shaded background). Both knobs are
-swept because they are coupled: reaching n recurrences needs a window at least
-that wide, so the `stale=10` rows stop firing at n ≥ 12. The intervals are
-challenge-level bootstraps.
-
-**[edit_gated_sweep_table.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/edit_gated_sweep_table.png)**
-— the SAME recurrence sweep replayed with the reproduction phase excluded
-(`count_from_first_edit`): failures before the agent's first edit-like action are
-not counted. Read P(fail | fired) and the AUROC against the len-only column. The
-n=3 row fires on **358/727** runs at P(fail|fired)=**0.642** (lift 1.53) with AUROC
-**0.724** against a run-length baseline of 0.579 — the as-shipped n=2 row (main
-table) fires on 727/727 at the base rate. The gap between the two tables is the
-reproduction phase masking the recurrence signal. This is an eval-only knob:
-production has no per-step action stream to gate on, so it measures what a per-step
-detector could do, not what ships.
-
-**[trajectory_outcomes.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/trajectory_outcomes.png)**
-— failure rate among runs the policy escalated against runs it left alone. Want
-the escalated bar clearly above both the base rate and the other bar. On this
-corpus there is no other bar: the policy escalates every scored trajectory, so
-the escalated rate is the base rate 0.421 by construction and the comparison
-carries no information. This is association only. No stored trajectory contains an
-escalation that actually happened, so the figure cannot say what escalating would
-have **changed**.
-
-**[failure_capture_coverage.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/failure_capture_coverage.png)**
-— the reduced data gap, per model. Each bar is the share of that model's
-trajectories that went through per-step verified-outcome stamping. The bars are
-stamped/total, not 1.0: deepseek-v4-flash 248/268 (0.925), gpt-5-mini 266/284
-(0.937), kimi-k2.5 94/105 (0.895), kimi-k3 52/56 (0.929), qwen3.7-plus 47/60
-(0.783), zai-glm-5.2 20/26 (0.769) — 72 of 799 trajectories carry no per-step
-verified outcomes. (The `capture_rate` field, by contrast, is 1.000 for every
-model BY CONSTRUCTION: the normalizer writes `success`, `failing_check_id` and
-`blocking` in one assignment, so it is a different quantity and not the bar.) The
-three models that previously sat at zero were
-re-stamped by offline container replay, but coverage STILL tracks the
-model-correlated axis: the two formerly-zero models remain the least stamped, so
-model and coverage are still confounded on this corpus (see the figure's red
-LIMITS line — that caveat is live, not vestigial).
-
-**[session_cadence.png](https://github.com/KookaS/shunt/blob/main/benchmark/escalation/reports/session_cadence.png)**
-— the value of the ladder at the cadence production actually runs. The corpus holds
-several (model, arm) sessions per task, read here as repeated attempts: after a
-CHEAP session failed, a FRONTIER session on the same task resolved it **56.8%** of
-the time (21/37) against a same-cost cheap retry's **22.6%** (7/31) — a **2.5×**
-lift, measured on the overlap subset (tasks with ≥2 cheap sessions AND a frontier
-session, so the two arms are read on the same tasks). Observational, not causal:
-the arms ran in parallel and coverage was adaptive, and the samples are small — the
-intervals nearly touch but do not overlap ([0.409, 0.713] against [0.114, 0.398]).
-It answers "is the ladder pointed the right way",
-not "is the trigger well-tuned".
+The figures live under `docs/assets/figures/`, one subdirectory per half
+(`routing/`, `escalation/`), inside the published docs tree, which is
+why the pages above can link them relatively. A committed `figures.json` per half — beside
+the code that writes it, in `benchmark/routing/` and `benchmark/escalation/` — records every
+figure's full record and its input digest, and a lint gate (SH009) holds that manifest in
+bijection with the sections above — so a retired figure cannot leave a stale description
+behind it, and a documented figure cannot go missing.
 
 ## Where this leaves the project
 
@@ -836,10 +575,10 @@ models (bigram and linear, calibrated classifiers, better selection rules)
 evaluated against the same nulls.
 
 Escalation: the recurrence mechanism works, and the shipped implementation was
-counting the wrong failures. As shipped, `escalate_after_n=2` counts the
+counting the wrong failures. As shipped, `escalate_after_n=3` counts the
 reproduction phase — every run's first reds are the target bug at t=0 — so it
-fires on 727/727 runs and reads exactly the base rate: a coin flip. Gated on
-failures after the agent's first edit, the same rule separates just above the
+fires on 726/727 runs and reads the base rate: a coin flip. Gated on
+failures after the agent's first edit, the same rule separates at the
 shipped threshold (n=3: AUROC 0.724, P(fail|fired)=0.642, fires on 358/727; n=2
 already reads AUROC 0.711 at P=0.593), clearing both
 the family-wise and the length-stratified nulls. At the session cadence the

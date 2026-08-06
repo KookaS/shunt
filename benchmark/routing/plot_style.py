@@ -27,9 +27,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 import numpy as np
+from matplotlib.text import Annotation
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
+    from matplotlib.text import Text
 
 Point = tuple[float, float]
 # challenge_id -> model -> arm_id -> outcome row (config.load_results() shape).
@@ -138,37 +140,259 @@ TRISTATE_FAIL: Final[str] = "#C62828"
 TRISTATE_UNSAMPLED: Final[str] = "#BDBDBD"
 
 
-def label_points_with_leaders(
+# Candidate label offsets in POINTS, ordered cheapest-first: right, left, above,
+# below, then the four diagonals, then the same eight at 2x and 3x radius. A label
+# is placed at the first candidate that collides with nothing already on the axes.
+_LABEL_DIRECTIONS: Final[tuple[tuple[float, float], ...]] = (
+    (1.0, 0.0),
+    (-1.0, 0.0),
+    (0.0, 1.0),
+    (0.7, 0.7),
+    (-0.7, 0.7),
+    (0.0, -1.0),
+    (0.7, -0.7),
+    (-0.7, -0.7),
+)
+_LABEL_RADII: Final[tuple[float, ...]] = (9.0, 18.0, 30.0)
+# Rough DejaVu Sans advance + line height as a fraction of the point size. Only used
+# to reserve a rectangle for a label that has not been drawn yet, so an estimate is
+# what is wanted: measuring would need a renderer, and there isn't one until save().
+_LABEL_ADVANCE: Final[float] = 0.60
+_LABEL_HEIGHT: Final[float] = 1.25
+_LABEL_PAD_PT: Final[float] = 2.0
+
+
+@dataclass(frozen=True)
+class LabelPoint:
+    """One point to direct-label, with the half-height of its error bar (0 when none)."""
+
+    x: float
+    y: float
+    text: str
+    yerr_lo: float = 0.0
+    yerr_hi: float = 0.0
+
+
+def _rects_overlap(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> bool:
+    return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+
+def _label_rect(
+    cx: float, cy: float, dx: float, dy: float, text: str, fontsize: float
+) -> tuple[float, float, float, float]:
+    """Pixel rect a label would occupy, anchored so it grows away from its point."""
+    w = len(text) * fontsize * _LABEL_ADVANCE + 2 * _LABEL_PAD_PT
+    h = fontsize * _LABEL_HEIGHT + 2 * _LABEL_PAD_PT
+    x0 = cx + dx - (0.0 if dx > 0 else w if dx < 0 else w / 2.0)
+    y0 = cy + dy - (0.0 if dy > 0 else h if dy < 0 else h / 2.0)
+    return (x0, y0, x0 + w, y0 + h)
+
+
+def _data_anchored(ax: Axes, text: Text) -> bool:
+    """Is this text pinned to a data x, so that widening the axis actually moves it?"""
+    # An axes-fraction or figure-anchored label cannot be pulled inside by widening, and
+    # chasing one would grow the axis every round without ever converging. An Annotation
+    # is data-anchored through its `xy`, not its transform, so it needs its own test.
+    if isinstance(text, Annotation):
+        return text.xycoords == "data"
+    return bool(text.get_transform() is ax.transData)
+
+
+def fit_end_labels(ax: Axes, *, pad_px: float = 10.0) -> None:
+    """Widen the x-axis once so every data-anchored text on it ends inside the axes."""
+    # An end-of-bar value label is placed in DATA coordinates but sized in points, so no
+    # xlim multiplier picked at authoring time can be right: it depends on the panel's
+    # rendered width and the label's character count. `plot_contract` cannot see this
+    # class of overflow, so it is measured here instead of guessed.
+    #
+    # Exactly ONE layout pass, and the widening solved in closed form rather than iterated:
+    # a text's pixel WIDTH does not change when the axis widens, only its left edge moves,
+    # so the needed span factor follows directly. Iterating meant re-running constrained
+    # layout several times per panel, and that is not idempotent — it drifted an axes off
+    # the canvas.
+    scale = ax.get_xscale()
+    fig = ax.get_figure(root=True)
+    if fig is None or scale not in ("linear", "log"):
+        return
+    fig.draw_without_rendering()
+    box = ax.get_window_extent()
+    width = box.width
+    if width <= 1.0:
+        return
+    factor = 1.0
+    for text in ax.texts:
+        if not _data_anchored(ax, text):
+            continue
+        extent = text.get_window_extent()
+        room = width - extent.width - pad_px
+        if room <= 0.0:
+            # Wider than the whole panel: no axis limit can pull it in, and pretending
+            # otherwise would squash the bars into the left margin for nothing.
+            continue
+        factor = max(factor, (extent.x0 - box.x0) / room)
+    if factor <= 1.0:
+        return
+    forward = math.log10 if scale == "log" else (lambda v: v)
+    back = (lambda v: 10.0**v) if scale == "log" else (lambda v: v)
+    lo, hi = ax.get_xlim()
+    # Grow the span in the axis's OWN coordinate, so a log panel widens by a factor
+    # rather than by an additive amount that a decade would swallow.
+    ax.set_xlim(lo, back(forward(lo) + (forward(hi) - forward(lo)) * factor))
+
+
+def _owns(
+    rect: tuple[float, float, float, float],
+    own: tuple[float, float],
+    markers: Sequence[tuple[float, float]],
+) -> bool:
+    """Is this label's own marker the nearest one to where the text would sit?"""
+    # Not-overlapping is not the same as not-ambiguous. A label placed clear of every
+    # obstacle can still land beside a DIFFERENT marker than its own, and a reader
+    # assigns a floating name to whatever it is nearest. Rejecting those candidates
+    # sends the point to the leader-line fallback, where the arrow says who owns it.
+    cx, cy = (rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0
+    mine = (cx - own[0]) ** 2 + (cy - own[1]) ** 2
+    return all((cx - mx) ** 2 + (cy - my) ** 2 >= mine for mx, my in markers)
+
+
+def place_labels(
     ax: Axes,
-    points: Sequence[tuple[float, float, str]],
-    fontsize: float = 8,
+    points: Sequence[LabelPoint],
+    fontsize: float = 8.0,
     color: str = "#333333",
-    margin_x: float = 1.02,
+    marker_pad_pt: float = 9.0,
 ) -> None:
-    """Direct-label points via a leader-line column in the right margin."""
-    # Robust to clustering (tightly-packed or identical points never stack raw
-    # text on top of itself, the anti-pattern this replaces): labels are
-    # ordered top-to-bottom by y descending and spread evenly down the margin,
-    # each connected to its point by a thin leader line.
+    """Direct-label points at the nearest free offset; a leader line only as a fallback."""
+    # Replaces a margin-column labeller that spread EVERY label down the right edge
+    # regardless of where its point sat, so a point on the left of the panel got a
+    # leader line crossing the whole figure. Here a label is tried at eight
+    # directions x three radii and taken at the first that hits neither another
+    # label, nor a marker, nor an error bar; only a point with no free slot at all
+    # falls back to a leader line, which is then the exception it was meant to be.
     if not points:
         return
-    ordered = sorted(points, key=lambda p: -p[1])
-    n = len(ordered)
-    for i, (x, y, name) in enumerate(ordered):
-        frac_y = 1.0 - (i + 0.5) / n
-        ax.annotate(
-            name,
-            xy=(x, y),
-            xycoords="data",
-            xytext=(margin_x, frac_y),
-            textcoords=("axes fraction", "axes fraction"),
-            fontsize=fontsize,
-            va="center",
-            ha="left",
-            color=color,
-            annotation_clip=False,
-            arrowprops=dict(arrowstyle="-", color="#999999", lw=0.6, shrinkA=2, shrinkB=2),
+    trans = ax.transData
+    # `transform` returns DISPLAY PIXELS while the offsets and font size are in POINTS,
+    # and the figure renders at 150 dpi — so every rectangle below was reserved a bit
+    # under half its true size and the collision test passed candidates that visibly
+    # collide. Everything in this function is done in pixels; only the final `annotate`
+    # offset goes back to points.
+    fig = ax.get_figure(root=True)
+    scale = (fig.dpi if fig is not None else 72.0) / 72.0
+    pad_px = marker_pad_pt * scale
+    taken: list[tuple[float, float, float, float]] = []
+    # Every marker and every error bar is an obstacle, including those of points
+    # that have not been labelled yet — otherwise the first label placed wins a slot
+    # the second point's own error bar occupies.
+    for p in points:
+        px, py = trans.transform((p.x, p.y))
+        _, lo_py = trans.transform((p.x, p.y - p.yerr_lo))
+        _, hi_py = trans.transform((p.x, p.y + p.yerr_hi))
+        taken.append(
+            (
+                px - pad_px,
+                min(lo_py, py) - pad_px,
+                px + pad_px,
+                max(hi_py, py) + pad_px,
+            )
         )
+
+    markers: list[tuple[float, float]] = []
+    for q in points:
+        qx, qy = trans.transform((q.x, q.y))
+        markers.append((float(qx), float(qy)))
+    for p in sorted(points, key=lambda q: -q.y):
+        px, py = trans.transform((p.x, p.y))
+        placed: tuple[float, float] | None = None
+        for radius in _LABEL_RADII:
+            for dirx, diry in _LABEL_DIRECTIONS:
+                # Never annotate below a point that carries a lower error bar: the
+                # label would sit on the whisker it is meant to describe.
+                if diry < 0 and p.yerr_lo > 0:
+                    continue
+                dx, dy = dirx * radius, diry * radius
+                rect = _label_rect(px, py, dx * scale, dy * scale, p.text, fontsize * scale)
+                if any(_rects_overlap(rect, t) for t in taken):
+                    continue
+                own = (float(px), float(py))
+                if not _owns(rect, own, [m for m in markers if m != own]):
+                    continue
+                placed = (dx, dy)
+                taken.append(rect)
+                break
+            if placed is not None:
+                break
+        if placed is None:
+            _leader_label(ax, p, fontsize, color, taken, scale)
+            continue
+        dx, dy = placed
+        # A label pushed past the first ring is far enough from its marker that a reader
+        # in a crowded region will attach it to a NEIGHBOUR — which is exactly the defect
+        # the margin-column labeller produced at scale. Past the first ring the label
+        # therefore earns a leader; inside it, proximity is unambiguous on its own.
+        far = max(abs(dx), abs(dy)) > _LABEL_RADII[0] + 1e-6
+        ax.annotate(
+            p.text,
+            xy=(p.x, p.y),
+            xycoords="data",
+            xytext=(dx, dy),
+            textcoords="offset points",
+            fontsize=fontsize,
+            color=color,
+            ha="left" if dx > 0 else "right" if dx < 0 else "center",
+            va="bottom" if dy > 0 else "top" if dy < 0 else "center",
+            annotation_clip=True,
+            arrowprops=(
+                dict(arrowstyle="-", color="#aaaaaa", lw=0.6, shrinkA=1, shrinkB=3) if far else None
+            ),
+        )
+
+
+_LEADER_SLOTS: Final[tuple[tuple[float, float], ...]] = (
+    (34.0, 12.0),
+    (34.0, -12.0),
+    (34.0, 30.0),
+    (34.0, -30.0),
+    (-34.0, 12.0),
+    (-34.0, -12.0),
+)
+
+
+def _leader_label(
+    ax: Axes,
+    p: LabelPoint,
+    fontsize: float,
+    color: str,
+    taken: list[tuple[float, float, float, float]],
+    scale: float,
+) -> None:
+    """The genuine fallback: a short leader to the first slot the crowd leaves free."""
+    # A single fixed slot put every fallback label at the same offset from its own point,
+    # so two neighbouring crowded points printed their names on top of each other — the
+    # collision the fallback exists to avoid.
+    px, py = ax.transData.transform((p.x, p.y))
+    dx, dy = _LEADER_SLOTS[0]
+    for cand_x, cand_y in _LEADER_SLOTS:
+        rect = _label_rect(px, py, cand_x * scale, cand_y * scale, p.text, fontsize * scale)
+        if not any(_rects_overlap(rect, t) for t in taken):
+            dx, dy = cand_x, cand_y
+            taken.append(rect)
+            break
+    ax.annotate(
+        p.text,
+        xy=(p.x, p.y),
+        xycoords="data",
+        xytext=(dx, dy),
+        textcoords="offset points",
+        fontsize=fontsize,
+        color=color,
+        ha="left" if dx > 0 else "right",
+        va="center",
+        annotation_clip=True,
+        arrowprops=dict(arrowstyle="-", color="#999999", lw=0.6, shrinkA=2, shrinkB=2),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -200,11 +424,17 @@ def _cross(o: Point, a: Point, b: Point) -> float:
 
 
 def upper_hull(points: Sequence[Point]) -> list[Point]:
-    """Upper convex hull of (cost, pass_rate) points, cost ascending."""
-    # This is the achievable region a mixture router reaches by
-    # probabilistically interpolating between two strategies' (cost, pass)
-    # points — the honest cost-quality frontier, not a keep-max staircase that
-    # ignores mixtures. Duplicate costs keep only the highest rate.
+    """Upper convex hull of (cost, pass_rate) points, cost ascending.
+
+    THE CALLER MUST PRE-FILTER to live strategies — see `strategy_class.live_rows`.
+    """
+    # A mixture router reaches this region by probabilistically interpolating between two
+    # strategies' (cost, pass) points — the honest cost-quality frontier, not a keep-max
+    # staircase that ignores mixtures. Duplicate costs keep only the highest rate.
+    #
+    # "Achievable" is a property of the INPUT, not of this function: it takes bare points
+    # and cannot tell a shipped router from an oracle that read the answer. Handing it every
+    # strategy is how a hull got anchored on Price-Cascade, which the router rejects at boot.
     by_cost: dict[float, float] = {}
     for cost, rate in points:
         if cost not in by_cost or rate > by_cost[cost]:

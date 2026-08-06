@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
@@ -65,6 +66,22 @@ class SessionCadenceReport:
     n_frontier_after_fail_resolved: int
     frontier_after_fail_rate: float
     cheap_base_rate: float
+    # THE PAIRED CONTRAST. Two marginal intervals failing to overlap is a conservative test of a
+    # difference; it is not a test OF the difference, and it is not what the figure claims. Both
+    # arms are read on the same instances, so the difference is estimable draw-for-draw on one
+    # set of instance resamples, and that is the number with a CI a reader can act on.
+    diff_estimate: float = float("nan")
+    diff_ci: tuple[float, float] = (float("nan"), float("nan"))
+    diff_draws: tuple[float, ...] = ()
+    n_instances_resampled: int = 0
+
+    @property
+    def diff_excludes_zero(self) -> bool:
+        """Whether the paired difference's 95% interval is entirely on one side of zero."""
+        low, high = self.diff_ci
+        if math.isnan(low) or math.isnan(high):
+            return False
+        return low > 0.0 or high < 0.0
 
     @property
     def lift(self) -> float | None:
@@ -89,6 +106,12 @@ class SessionCadenceReport:
                 "ci95": [round(v, 4) for v in self.retry_ci],
             },
             "lift": _rounded(self.lift),
+            "paired_difference": {
+                "estimate": _rounded(self.diff_estimate),
+                "ci95": [_rounded(v) for v in self.diff_ci],
+                "excludes_zero": self.diff_excludes_zero,
+                "n_instances": self.n_instances_resampled,
+            },
             "context": {
                 "n_frontier_after_fail": self.n_frontier_after_fail,
                 "n_frontier_after_fail_resolved": self.n_frontier_after_fail_resolved,
@@ -161,49 +184,96 @@ def session_cadence(trajectories: Sequence[Trajectory]) -> SessionCadenceReport 
     # The controlled subset: instances with BOTH >=2 cheap sessions AND a frontier session, so
     # the escalate and retry arms are read on the same instances (adaptive-coverage selection
     # removed as far as this corpus allows).
-    escalate_outcomes: list[bool] = []
-    retry_outcomes: list[bool] = []
-    n_overlap = 0
-    for inst in by_instance.values():
+    arms: list[_InstanceArms] = []
+    for instance, inst in by_instance.items():
         cheap = [s for s in inst if bucket(s) == "cheap"]
         frontier = [s for s in inst if bucket(s) == "frontier"]
         if len(cheap) < 2 or not frontier:
             continue
-        n_overlap += 1
+        escalate: list[bool] = []
         if any(not s.header.terminal_resolved for s in cheap):
-            escalate_outcomes.extend(s.header.terminal_resolved for s in frontier)
+            escalate = [s.header.terminal_resolved for s in frontier]
+        retry: list[bool] = []
         cheap_by_length = sorted(cheap, key=lambda s: s.header.n_steps)
         for i in range(1, len(cheap_by_length)):
             if not cheap_by_length[i - 1].header.terminal_resolved:
-                retry_outcomes.append(cheap_by_length[i].header.terminal_resolved)
+                retry.append(cheap_by_length[i].header.terminal_resolved)
+        arms.append(_InstanceArms(instance=instance, escalate=escalate, retry=retry))
 
-    if not n_overlap:
+    if not arms:
         # No task carries both a retry arm and a frontier arm: neither rate is estimable and the
         # contrast is meaningless, so report "not supported" rather than NaN bars.
         return None
 
+    escalate_outcomes = [o for a in arms for o in a.escalate]
+    retry_outcomes = [o for a in arms for o in a.retry]
+    escalate_ci, retry_ci, diff_draws = _instance_intervals(arms)
     return SessionCadenceReport(
-        n_overlap_instances=n_overlap,
+        n_overlap_instances=len(arms),
         n_escalated=len(escalate_outcomes),
         n_escalated_resolved=sum(escalate_outcomes),
         escalate_rate=metrics.prevalence(escalate_outcomes),
-        escalate_ci=(
-            metrics.wilson_interval(sum(escalate_outcomes), len(escalate_outcomes))
-            if escalate_outcomes
-            else (float("nan"), float("nan"))
-        ),
+        escalate_ci=escalate_ci,
         n_retried=len(retry_outcomes),
         n_retried_resolved=sum(retry_outcomes),
         retry_rate=metrics.prevalence(retry_outcomes),
-        retry_ci=(
-            metrics.wilson_interval(sum(retry_outcomes), len(retry_outcomes))
-            if retry_outcomes
-            else (float("nan"), float("nan"))
-        ),
+        retry_ci=retry_ci,
         n_frontier_after_fail=len(frontier_after_fail),
         n_frontier_after_fail_resolved=sum(frontier_after_fail),
         frontier_after_fail_rate=metrics.prevalence(frontier_after_fail),
         cheap_base_rate=cheap_base,
+        diff_estimate=(
+            metrics.prevalence(escalate_outcomes) - metrics.prevalence(retry_outcomes)
+            if escalate_outcomes and retry_outcomes
+            else float("nan")
+        ),
+        diff_ci=metrics.bootstrap_ci(diff_draws),
+        diff_draws=tuple(diff_draws),
+        n_instances_resampled=len(arms),
+    )
+
+
+@dataclass(frozen=True)
+class _InstanceArms:
+    """One overlap instance's two arms, kept together so a resample moves both at once."""
+
+    instance: str
+    escalate: list[bool]
+    retry: list[bool]
+
+
+def _instance_intervals(
+    arms: Sequence[_InstanceArms],
+) -> tuple[tuple[float, float], tuple[float, float], list[float]]:
+    """Both marginal intervals and the PAIRED difference draws, from one instance resample set."""
+    # Wilson over SESSIONS treated several frontier sessions on one instance as independent draws.
+    # They are not: the same task, the same repo, the same target test — the instance is the
+    # exchangeable unit, exactly as the challenge is in the per-step half. `grouped_resamples`
+    # already resamples whole groups, so it is reused here rather than re-derived; the group key
+    # is the instance and each group's "rows" are its own sessions.
+    #
+    # The difference is computed INSIDE the loop, on the same resampled instances that produced
+    # the two marginals, which is what makes it paired: an instance that enters a draw contributes
+    # to both arms or to neither, so the between-instance variance that both arms share cancels
+    # instead of being counted twice.
+    groups = [a.instance for a in arms]
+    escalate_draws: list[float] = []
+    retry_draws: list[float] = []
+    diff_draws: list[float] = []
+    for picked in metrics.grouped_resamples(groups):
+        chosen = [arms[i] for i in picked]
+        escalate = [o for a in chosen for o in a.escalate]
+        retry = [o for a in chosen for o in a.retry]
+        if escalate:
+            escalate_draws.append(metrics.prevalence(escalate))
+        if retry:
+            retry_draws.append(metrics.prevalence(retry))
+        if escalate and retry:
+            diff_draws.append(metrics.prevalence(escalate) - metrics.prevalence(retry))
+    return (
+        metrics.bootstrap_ci(escalate_draws),
+        metrics.bootstrap_ci(retry_draws),
+        diff_draws,
     )
 
 

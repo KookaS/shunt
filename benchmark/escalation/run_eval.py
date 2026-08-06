@@ -14,10 +14,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -39,7 +40,7 @@ from benchmark.escalation.authenticity import errors, verify_trajectory
 
 # The class is imported directly because `EvalReport.deployability` is the field name a reader
 # looks for in the JSON, and a field cannot be annotated with the module it shadows.
-from benchmark.escalation.deployability import Cadence, Deployability
+from benchmark.escalation.deployability import Cadence, CountingMode, Deployability
 from benchmark.escalation.ope import (
     PolicyValueEstimate,
     estimate_policy_value,
@@ -47,23 +48,19 @@ from benchmark.escalation.ope import (
 )
 from benchmark.escalation.schema import Trajectory, load_jsonl
 from benchmark.escalation.session_eval import SessionCadenceReport, session_cadence
-from benchmark.plot_frame import Annotations, FigureSpec
+from benchmark.plot_frame import Annotations
 from shunt.router.escalation import EscalationConfig
 from shunt.router.policy import load_router_policy, packaged_policy_path
 
 matplotlib.use("Agg")
 
 if TYPE_CHECKING:
-    from matplotlib.axes import Axes
-
     from benchmark.escalation.features import ModelCoverage
     from benchmark.escalation.policy_eval import PolicyCell
     from benchmark.escalation.prefix_eval import DepthReport
 
 logger = logging.getLogger(__name__)
 
-_FIGSIZE: Final[tuple[float, float]] = (9.0, 5.5)
-_DPI: Final[int] = 150
 _STATUS_OK = "OK"
 # A cell that clears its null on a corpus that is NOT a deployable estimate is a real signal
 # measured at a cadence production never runs. The badge must say that, not "OK": `status` is
@@ -92,6 +89,61 @@ def _shipped_escalation() -> tuple[int, int, str]:
 # better, so a quiet default change can never hide inside an "argmax" line.
 SHIPPED_ESCALATE_AFTER_N, SHIPPED_STALE_WINDOW, SHIPPED_LADDER = _shipped_escalation()
 
+# THE CANONICAL OPERATING POINT, and the only per-cell point any figure reads.
+#
+# Every knob the product sets is held at its shipped value; exactly one eval-only thing varies —
+# how the recurrence counter treats the reproduction phase. That is what makes it comparable: the
+# as-shipped and edit-gated rows of the same (n, stale_window) differ in ONE way, so the gap
+# between them is attributable. The figures used to read three different points — the shipped
+# default on the outcome bars, an argmax over 60 swept cells on the confusion and null figures,
+# and a continuous score at a third window on the ROC — so no two of them described one policy,
+# and the argmax was presented as an operating point without ever saying it was selected.
+CANONICAL_COUNTING: Final[str] = "edit_gated"
+
+
+@dataclass(frozen=True)
+class RecurrenceScores:
+    """The continuous recurrence score per stamped run, plus every axis a figure strata on."""
+
+    plain: tuple[float, ...]
+    edit: tuple[float, ...]
+    labels: tuple[bool, ...]
+    groups: tuple[str, ...]
+    models: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PrefixAdmission:
+    """Who the prefix risk model is fitted on, and how that differs from the corpus."""
+
+    # Published at the TOP LEVEL because the prefix half's NO_SKILL verdict is quoted about "the
+    # corpus" and is not measured on it: the anti-leak margin admits under half the stamped runs,
+    # and the admitted half fails materially more often than the whole.
+
+    depth: int
+    n_stamped: int
+    n_excluded_too_short: int
+    n_excluded_by_margin: int
+    n_admitted: int
+    admitted_base_rate: float
+    corpus_base_rate: float
+
+    @property
+    def admitted_share(self) -> float:
+        return self.n_admitted / self.n_stamped if self.n_stamped else 0.0
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "depth": self.depth,
+            "n_stamped": self.n_stamped,
+            "n_excluded_too_short": self.n_excluded_too_short,
+            "n_excluded_by_margin": self.n_excluded_by_margin,
+            "n_admitted": self.n_admitted,
+            "admitted_share": round(self.admitted_share, 4),
+            "admitted_base_rate": round(self.admitted_base_rate, 4),
+            "corpus_base_rate": round(self.corpus_base_rate, 4),
+        }
+
 
 @dataclass(frozen=True)
 class EvalReport:
@@ -117,6 +169,11 @@ class EvalReport:
     # EVAL-ONLY policy: the live router has no per-step action stream to gate on, so it describes
     # what the recurrence mechanism could do if a per-step detector ran in production.
     policy_cells_edit_gated: list[PolicyCell] = field(default_factory=list)
+    # The SAME gate re-run for the edit-gated family. `deployability` above describes the shipped
+    # counter; this one adds the counting mismatch, so the canonical cell — the point every
+    # per-cell figure reads — carries its own scope statement rather than borrowing the shipped
+    # counter's. Optional so a hand-built report stays constructible; `evaluate` always sets it.
+    canonical_deployability: Deployability | None = None
     depth_reports: list[DepthReport] = field(default_factory=list)
     coverage: list[ModelCoverage] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -126,17 +183,22 @@ class EvalReport:
     # Observational (parallel arms, adaptive coverage), and small-n; reported as context for the
     # per-step sweep, never as a gate. None when the corpus cannot support it.
     session_cadence: SessionCadenceReport | None = None
-    # The per-run continuous recurrence scores behind the `recurrence_roc.png` figure:
-    # (as-shipped stuck-depth scores, edit-gated stuck-depth scores, terminal-failed labels,
-    # challenge groups), aligned index-for-index over the STAMPED trajectories. Not serialized —
-    # it is figure input, not a reported statistic (the figure's AUROCs are the reportable
-    # numbers). The groups ride along so the figure's detection floor can use the SAME
-    # challenge-block permutation the policy cells use (`policy_eval.null_roc_band`).
-    recurrence_scores: (
-        tuple[tuple[float, ...], tuple[float, ...], tuple[bool, ...], tuple[str, ...]] | None
-    ) = None
+    # The per-run continuous recurrence scores behind `escalation_decision.png`, aligned
+    # index-for-index over the STAMPED trajectories. Not serialized — it is figure input, not a
+    # reported statistic (the AUROCs computed off it are the reportable numbers, and those DO
+    # reach `reports/metrics.json`). The groups ride along so the figure's detection floor can use
+    # the SAME challenge-block permutation the policy cells use (`policy_eval.null_roc_band`), and
+    # the models so the stratified AUROC can rank inside a model.
+    recurrence_scores: RecurrenceScores | None = None
+    # AUROC of both recurrence scores at the shipped stale_window and at an effectively unbounded
+    # one. Published because the headline gap is quoted at a FIXED window: as-shipped reaches
+    # 0.728 at stale_window=1000 against 0.601 at the shipped 10, so a figure that let the window
+    # move between its two curves would credit the counting change with a window change.
+    window_sensitivity: dict[str, float] = field(default_factory=dict)
+    # Per-model split of the canonical cell's two arms — `corpus_and_coverage.png`'s panel B.
+    canonical_model_arms: list[plots.ModelArm] = field(default_factory=list)
     # The recurrence score's detection floor: the scalar family-wise AUROC null and the shaded
-    # 2.5-97.5% band drawn on `recurrence_roc.png`. Figure input, not serialized.
+    # 2.5-97.5% band drawn on `escalation_decision.png`. Figure input, not serialized.
     recurrence_null: metrics.NullResult | None = None
     recurrence_null_band: tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]] | None = (
         None
@@ -144,6 +206,10 @@ class EvalReport:
     # The off-policy escalation-value estimate, present only when a real exploration log was
     # supplied. None means "not asked", NOT "no effect" — the two must stay distinguishable.
     policy_value: PolicyValueEstimate | None = None
+    # The prefix half's scope, published beside its verdict rather than buried in a depth row.
+    prefix_admission: PrefixAdmission | None = None
+    # How many label shuffles every null on this report was estimated from.
+    n_permutations: int = metrics.MIN_PERMUTATIONS
 
     @property
     def headline_cell(self) -> PolicyCell | None:
@@ -184,9 +250,11 @@ class EvalReport:
 
     def to_dict(self) -> dict[str, object]:
         cell = self.headline_cell
+        canonical = canonical_cell(self)
         return {
             "status": self.status,
             "reason": self.reason,
+            "n_permutations": self.n_permutations,
             # Beside `status`, not buried: `status` says whether a signal was found, this says
             # whether the thing that found it is a policy production could run.
             "deployability": self.deployability.to_dict(),
@@ -195,6 +263,22 @@ class EvalReport:
             "n_multistep": self.n_multistep,
             "authenticity_errors": self.authenticity_errors,
             "headline_policy_cell": None if cell is None else cell.to_dict(),
+            # THE point every figure reads: the shipped knobs with edit-gated counting. Published
+            # beside the shipped row so the two can be compared without recomputing either.
+            "canonical_counting": CANONICAL_COUNTING,
+            "canonical_policy_cell": None if canonical is None else canonical.to_dict(),
+            # The canonical cell's OWN scope statement. Without it a reader comparing the two
+            # cells sees one `deployability` block and reasonably assumes it covers both, when the
+            # edit-gated one carries a mismatch the shipped counter does not have.
+            "canonical_deployability": (
+                None
+                if self.canonical_deployability is None
+                else self.canonical_deployability.to_dict()
+            ),
+            "prefix_admission": (
+                None if self.prefix_admission is None else self.prefix_admission.to_dict()
+            ),
+            "window_sensitivity": {k: round(v, 4) for k, v in self.window_sensitivity.items()},
             "policy_cells": [c.to_dict() for c in self.policy_cells],
             # The reproduction-phase-gated family, reported as its own sweep. Its cells carry
             # their own family-wise null; `best_skilled_cell` reads across both.
@@ -240,6 +324,7 @@ def _status(
     authenticity_errors: int = 0,
     deployability: Deployability | None = None,
     edit_gated_cells: Sequence[PolicyCell] = (),
+    canonical_deployability: Deployability | None = None,
 ) -> tuple[str, str]:
     """Gate on Layer-1 authenticity first, then on the permutation nulls (policy AND prefix)."""
     if authenticity_errors:
@@ -280,6 +365,10 @@ def _status(
         # was gated against), NOT across both families — quoting len(all_cells)=60 would overstate
         # the multiplicity correction.
         family_size = len(edit_gated_cells) if in_edit_family else len(report_cells)
+        # The scope sentence must be the WINNING family's. Quoting the shipped counter's verdict
+        # beside an edit-gated cell states two mismatches for a number that has three.
+        if in_edit_family and canonical_deployability is not None:
+            scope_caveat = _offline_only_caveat(canonical_deployability)
         return (
             ok_status,
             f"escalation policy ({family}) at escalate_after_n={best.escalate_after_n}/"
@@ -312,16 +401,51 @@ def _status(
             f"adjusted p={best_depth.gate_null_incremental.p_value:.3f} "
             f"over {len(depths)} reported depth(s))" + scope_caveat,
         )
-    return _STATUS_NO_SKILL, _no_skill_reason(report_cells, depths, edit_gated_cells)
+    return (
+        _STATUS_NO_SKILL,
+        _no_skill_reason(report_cells, depths, edit_gated_cells)
+        + _coverage_gap_caveat(depths, report_cells),
+    )
+
+
+def _coverage_gap_caveat(depths: Sequence[DepthReport], cells: Sequence[PolicyCell] = ()) -> str:
+    """Say WHO the prefix null is about, since it is not measured on the corpus it names."""
+    # A null on an instrument never shown to detect a positive is a coverage gap, not a
+    # falsification; this null is also measured on a different, length-selected population
+    # from the one the sentence above names.
+    if not depths:
+        return ""
+    depth = max(depths, key=lambda d: d.n_rows)
+    reached = depth.n_rows + depth.n_excluded_by_margin
+    if not reached or not depth.n_rows:
+        return ""
+    corpus_rate = next((c.base_failure_rate for c in cells), None)
+    contrast = "" if corpus_rate is None else f" against the corpus's {corpus_rate:.3f}"
+    return (
+        f". COVERAGE-LIMITED NULL, NOT A FALSIFICATION: the anti-leak margin admits only "
+        f"{depth.n_rows} of the {reached} runs that reach depth {depth.depth} "
+        f"({depth.n_rows / reached:.0%}), and that admitted population fails at "
+        f"{depth.base_rate:.3f}{contrast} — it is length-selected and more failure-prone, so this "
+        "is a null on a different population, on an instrument never shown to detect a positive"
+    )
 
 
 def _offline_only_caveat(deployability: Deployability | None) -> str:
     """The scope sentence a non-deployable OK reason must carry, or the empty string."""
     if deployability is None or deployability.deployable:
         return ""
+    # The counting clause is added whenever it applies, and it is the strongest of the three: a
+    # cadence gap describes the shipped rule measured at the wrong granularity, while an
+    # unsupported counter describes a rule the product has no code path for at all.
+    counting = ""
+    if deployability.counting_unsupported:
+        counting = (
+            f" and it is scored with the eval-only '{deployability.counting}' counter, which the "
+            f"product does not implement"
+        )
     return (
         f" — {deployability.label}, so this is a per-step signal, not a shipped "
-        "escalation: production decides once per session"
+        f"escalation: production decides once per session{counting}"
     )
 
 
@@ -469,7 +593,7 @@ def evaluate(
     grid: Sequence[replay.GridPoint] = tuple(datasets.DEFAULT_GRID),
     *,
     depths: Sequence[int] = features.DEFAULT_DEPTHS,
-    n_permutations: int = metrics.MIN_PERMUTATIONS,
+    n_permutations: int = metrics.DEFAULT_PERMUTATIONS,
     exploration_rows: Sequence[Mapping[str, object]] | None = None,
 ) -> EvalReport:
     """Score the shipped policy and the prefix risk model, then gate on the permutation null."""
@@ -489,13 +613,22 @@ def evaluate(
     )
     depth_reports = prefix_eval.evaluate(stamped, depths, n_permutations=n_permutations)
     authenticity_errors = sum(len(errors(verify_trajectory(t))) for t in trajectories)
-    deployability = _deployability(stamped)
+    # Named `deployability_verdict`, not `deployability`: the module of that name is what
+    # `_deployability` calls, and the old local shadowed it for the rest of this function.
+    deployability_verdict = _deployability(stamped)
     status, reason = _status(
-        policy_cells, depth_reports, authenticity_errors, deployability, edit_gated
+        policy_cells,
+        depth_reports,
+        authenticity_errors,
+        deployability_verdict,
+        edit_gated,
+        _deployability(stamped, CountingMode.EDIT_GATED),
     )
     recurrence = _recurrence_scores(stamped)
     recurrence_null, recurrence_null_band = (
-        _recurrence_null(*recurrence, n_permutations=n_permutations) if recurrence else (None, None)
+        _recurrence_null(recurrence, n_permutations=n_permutations)
+        if recurrence.labels
+        else (None, None)
     )
     return EvalReport(
         status=status,
@@ -506,9 +639,10 @@ def evaluate(
         authenticity_errors=authenticity_errors,
         policy_cells=policy_cells,
         policy_cells_edit_gated=edit_gated,
+        canonical_deployability=_deployability(stamped, CountingMode.EDIT_GATED),
         depth_reports=depth_reports,
         coverage=features.model_coverage(trajectories),
-        deployability=_deployability(stamped),
+        deployability=deployability_verdict,
         notes=_corpus_notes(trajectories, stamped, policy_cells),
         # The session-cadence escalation value, computed whenever the corpus carries enough
         # multi-arm instances to estimate it. Observational context, never a gate.
@@ -516,6 +650,10 @@ def evaluate(
         recurrence_scores=recurrence,
         recurrence_null=recurrence_null,
         recurrence_null_band=recurrence_null_band,
+        window_sensitivity=_window_sensitivity(stamped),
+        canonical_model_arms=_canonical_model_arms(stamped),
+        prefix_admission=_prefix_admission(stamped, depth_reports),
+        n_permutations=n_permutations,
         # Only ever computed from a REAL exploration log. Trajectories carry no propensity
         # (the committable whitelist has no `action`/`propensity`), so deriving rows from them
         # would manufacture propensity=1.0 for every decision — a fabricated input, not data.
@@ -527,7 +665,9 @@ def evaluate(
     )
 
 
-def _deployability(stamped: Sequence[Trajectory]) -> Deployability:
+def _deployability(
+    stamped: Sequence[Trajectory], counting: CountingMode = CountingMode.AS_SHIPPED
+) -> Deployability:
     """Gate this run's scored feature set against what a production decision actually holds."""
     # `unfilled` is MEASURED over the corpus that was actually scored, never assumed: a field
     # production has is only a mismatch if no record fills it, and that is a property of the
@@ -538,7 +678,14 @@ def _deployability(stamped: Sequence[Trajectory]) -> Deployability:
     # `Cadence.STEP`: both halves score a decision point at a step boundary — the policy replay
     # walks every step, and the prefix model reads a prefix at step depth d. Production decides
     # once per session, so this is the cadence gap, declared rather than inferred.
-    return deployability.assess(features.FEATURE_NAMES, Cadence.STEP, unfilled=unfilled)
+    #
+    # `counting` is the THIRD mismatch, and it is the one that separates the two reported families:
+    # the as-shipped counter is the product's own, while the edit-gated one reads `StepView.action`,
+    # which no production decision holds and no `EscalationPolicy` knob can ask for. Passing it
+    # here is what makes the canonical cell's scope machine-readable instead of a doc sentence.
+    return deployability.assess(
+        features.FEATURE_NAMES, Cadence.STEP, unfilled=unfilled, counting=counting
+    )
 
 
 def _corpus_notes(
@@ -583,8 +730,8 @@ def _default_gap_note(cells: Sequence[PolicyCell]) -> list[str]:
     ]
 
 
-def _run_annotations(report: EvalReport) -> Annotations:
-    """Status caveats every figure must carry, whatever it plots."""
+def _status_limitations(report: EvalReport) -> list[str]:
+    """The corpus-status limitations that hold whatever population a figure scored."""
     limitations: list[str] = []
     if report.status == _STATUS_NO_SKILL:
         limitations.append(f"NO USABLE SIGNAL — {report.reason}.")
@@ -592,6 +739,29 @@ def _run_annotations(report: EvalReport) -> Annotations:
         limitations.append(f"INSUFFICIENT DATA — {report.reason}.")
     if report.status == _STATUS_UNVERIFIED:
         limitations.append(f"CORPUS FAILED ITS INTEGRITY CHECK — {report.reason}.")
+    return limitations
+
+
+def _run_annotations(report: EvalReport) -> Annotations:
+    """The run-level facts and, at most, the ONE caveat every STAMPED-corpus figure carries."""
+    # This used to append the deployability line to the limitations of EVERY figure, which was a
+    # correctness bug rather than a style one: it told a reader the recurrence ROC "depends on
+    # features a production decision does not hold", and the AS-SHIPPED recurrence score reads
+    # exactly two fields — `failing_check_id` and `success` — both of which production has. The
+    # FEATURE mismatch is real but belongs to the PREFIX model, so it is stated on the one panel
+    # that draws the prefix model (`plots.CORPUS_COVERAGE_SPEC`) and nowhere else.
+    #
+    # That narrowing was correct in direction and over-broad in extent, and this is the fix: the
+    # EDIT-GATED score reads a third field, `StepView.action`, which production does NOT have. So
+    # the canonical (edit-gated) verdict carries its own scope line, added below to the figures
+    # that read the canonical cell — `_canonical_annotations`.
+    #
+    # The limitations/notes output is kept: it never reaches the canvas any more, but it is what
+    # the manifest row and the docs section are written from.
+    #
+    # This block describes the PER-STEP-STAMPED sub-corpus, so it belongs only to figures that
+    # actually score it. `session_value.png` does not — see `_session_run_annotations`.
+    limitations = _status_limitations(report)
     dropped = report.n_trajectories - report.n_stamped
     if dropped:
         limitations.append(
@@ -599,157 +769,502 @@ def _run_annotations(report: EvalReport) -> Annotations:
             "and are excluded from this figure."
         )
     return Annotations(
+        subtitle_facts=(f"{report.n_stamped}/{report.n_trajectories} runs scored",),
+        caveat=_run_caveat(report),
         notes=(
             f"{report.n_stamped} scored trajectories, status={report.status}",
-            # On EVERY figure, whatever it plots: a reader who takes a number off a plot must see
-            # which question it answers without going back to the JSON.
             f"{report.deployability.label} — {report.deployability.reason}",
         ),
         limitations=tuple(limitations),
     )
 
 
+def _canonical_annotations(report: EvalReport) -> Annotations:
+    """The scope line a figure drawn from the CANONICAL (edit-gated) cell must carry."""
+    # Keyed on the verdict, not on prose: if the counter ever became something production holds,
+    # `counting_unsupported` empties and this line disappears on its own. That is the whole point
+    # of routing the counting mode through `deployability.assess` rather than restating it here.
+    verdict = report.canonical_deployability
+    if verdict is None or not verdict.counting_unsupported:
+        return Annotations()
+    return Annotations(
+        notes=(f"canonical cell: {verdict.label} — {verdict.reason}",),
+        limitations=(
+            f"EVAL-ONLY COUNTER: this figure is drawn from the '{verdict.counting}' cell, which "
+            f"ignores failures before the agent's first edit-like action — a rule that reads "
+            f"{', '.join(verdict.counting_unsupported)}, a per-step field the live router never "
+            f"sees, and that no EscalationPolicy knob can ask for. The counter the product does "
+            f"run fires on almost every run and reads the base rate.",
+        ),
+    )
+
+
+def _session_run_annotations(report: EvalReport) -> Annotations:
+    """Run-level facts for the ONE figure scored on the whole corpus, not the stamped subset."""
+    # `session_cadence()` is handed every trajectory and reads only `header.terminal_resolved`
+    # and `header.n_steps` — both present on an unstamped run — so the per-step stamping split
+    # is irrelevant to it. Inheriting `_run_annotations` told a reader this figure scored
+    # 727/799 and excluded 72, and neither is true of it.
+    return Annotations(
+        subtitle_facts=(f"{report.n_trajectories}/{report.n_trajectories} runs read",),
+        # Deliberately NOT `_run_caveat`: its lowest-severity branch is the per-step drop line,
+        # which does not apply here. The status caveats still do.
+        caveat=_status_caveat(report),
+        notes=(
+            f"{report.n_trajectories} trajectories read at session cadence "
+            f"(per-step stamping not required), status={report.status}",
+        ),
+        limitations=(
+            *_status_limitations(report),
+            f"Scored on ALL {report.n_trajectories} trajectories, not the "
+            f"{report.n_stamped}-run per-step-stamped subset the other escalation figures use: "
+            "a session outcome is read from the run header, so an unstamped run is still "
+            "scorable here.",
+        ),
+    )
+
+
+def _status_caveat(report: EvalReport) -> str | None:
+    """The corpus-status red lines, severity-ordered — true whatever population was scored."""
+    # Severity order, most-severe first: a corpus that fails its own integrity recompute outranks
+    # a no-skill verdict, which outranks insufficient data. The frame keeps the FIRST non-None
+    # caveat, and a per-figure caveat is merged ahead of this one, so a figure with its own
+    # specific warning keeps it.
+    if report.status == _STATUS_UNVERIFIED:
+        return (
+            f"CORPUS FAILED ITS INTEGRITY CHECK: {report.authenticity_errors} Layer-1 error(s). "
+            "No number on this figure is trustworthy."
+        )
+    if report.status == _STATUS_NO_SKILL:
+        return "NO USABLE SIGNAL on this corpus — see the report's `reason` field."
+    if report.status == _STATUS_INSUFFICIENT:
+        return "INSUFFICIENT DATA — no trajectory reached a scorable depth."
+    return None
+
+
+def _run_caveat(report: EvalReport) -> str | None:
+    """At most ONE red line, severity-ordered, or None. A canvas gets one or it gets none."""
+    status = _status_caveat(report)
+    if status is not None:
+        return status
+    dropped = report.n_trajectories - report.n_stamped
+    if dropped:
+        return (
+            f"{dropped} of {report.n_trajectories} runs carry no per-step outcomes and are "
+            "excluded; the drop rate is model-correlated."
+        )
+    return None
+
+
 def _merge(*parts: Annotations) -> Annotations:
     """Concatenate annotation blocks; FigureSpec.merged dedups and drops blanks."""
+    # EVERY field, including the rendered ones. Dropping `subtitle_facts`/`caveat`/`counts` here
+    # is not a partial merge, it is a silent one: the figure's own subtitle numbers never reached
+    # the canvas and its manifest row carried no counts, while the code that computed them looked
+    # correct at both ends. Callers merge most-severe-first, and `FigureSpec.merged` keeps the
+    # FIRST non-None caveat, so a figure-specific caveat still outranks the run-level one.
     return Annotations(
+        subtitle_facts=tuple(f for part in parts for f in part.subtitle_facts),
+        caveat=next((part.caveat for part in parts if part.caveat is not None), None),
         definitions=tuple(d for part in parts for d in part.definitions),
         notes=tuple(n for part in parts for n in part.notes),
         limitations=tuple(lim for part in parts for lim in part.limitations),
+        counts=tuple(c for part in parts for c in part.counts),
     )
 
 
-def _save_plots(report: EvalReport, out_dir: Path) -> None:
-    """Render every figure to `out_dir`. Figures whose data is absent are skipped, not faked."""
+# The PNGs live in `docs/assets/figures/escalation/` — one subdirectory per benchmark half —
+# but the manifest that describes them stays beside the code that writes it: it is source, not
+# a published asset. Same for metrics.json: it is the numbers behind the images, not an image.
+_PKG_DIR: Path = Path(__file__).resolve().parent
+MANIFEST: Path = _PKG_DIR / "figures.json"
+CANONICAL_PLOTS_DIR: Path = _PKG_DIR.parents[1] / "docs/assets/figures/escalation"
+CANONICAL_METRICS_DIR: Path = _PKG_DIR / "reports"
+
+
+def _committed_home(plots_dir: Path) -> bool:
+    """Is this run writing the real committed figure set, or a throwaway copy?"""
+    # A test or a scratch render must never touch the committed manifest or metrics.json.
+    # A directory NAME proves nothing — a tmp dir can be called `escalation` too — so the
+    # test is "is this THE committed directory", not "is it named like one".
+    return plots_dir.resolve() == CANONICAL_PLOTS_DIR.resolve()
+
+
+def _manifest_for(plots_dir: Path) -> Path:
+    return MANIFEST if _committed_home(plots_dir) else plots_dir.parent / "figures.json"
+
+
+def _metrics_dir_for(plots_dir: Path) -> Path:
+    return CANONICAL_METRICS_DIR if _committed_home(plots_dir) else plots_dir
+
+
+def _provenance(report: EvalReport, out_dir: Path) -> plot_frame.Provenance:
+    """Which module drew the figure and over what corpus — the manifest's identity columns."""
+    return plot_frame.Provenance(
+        generator="benchmark.escalation.run_eval",
+        # The real content fingerprint, not a human label: `data_digest` exists so a stale
+        # figure can be DETECTED, and a counts-only string collides across two corpora with
+        # the same census. `_corpus_digest` is the same value metrics.json records.
+        data_digest=_corpus_digest(report),
+        manifest=_manifest_for(out_dir),
+    )
+
+
+def _save_plots(report: EvalReport, out_dir: Path, metrics_dir: Path | None = None) -> None:
+    """Render the six figures to `out_dir`. A figure whose data is absent is skipped, not faked."""
     out_dir.mkdir(parents=True, exist_ok=True)
     run = _run_annotations(report)
-    _render(
-        out_dir / "failure_capture_coverage.png",
-        plots.CAPTURE_COVERAGE_SPEC,
-        lambda ax: _merge(plots.capture_coverage(report.coverage, ax), run),
-    )
+    # The three figures below that READ THE CANONICAL CELL get the run block plus the counting
+    # mismatch. `escalation_decision.png` is excluded on purpose: it draws both curves side by
+    # side and its own spec already carries the eval-only sentence, so a second copy would be
+    # duplication, not disclosure. `session_value.png` is session-cadence and reads no cell.
+    canonical_scope = _merge(run, _canonical_annotations(report))
+    provenance = _provenance(report, out_dir)
+    cell = canonical_cell(report)
+    _draw_decision(report, out_dir, run, provenance)
+    _draw_corpus(report, out_dir, canonical_scope, provenance)
+    if cell is not None:
+        _draw_operating_point(report, cell, out_dir, canonical_scope, provenance)
+        _draw_budget(cell, out_dir, canonical_scope, provenance)
+    else:
+        # Only reachable on a hand-built report: `evaluate` guarantees the shipped point is in
+        # both grids. The per-cell figures are skipped rather than drawn off some other cell — a
+        # figure titled with the canonical operating point that plots a different one IS the
+        # defect this whole redesign removes.
+        logger.error("no edit-gated cell matches the shipped knobs; per-cell figures skipped")
     if report.policy_cells:
-        _save_policy_plots(report, out_dir, run)
-        # The prefix risk model's own figures are NOT drawn: its score is constant at the
-        # evaluated depths (early steps are all bug-reproduction, so the model ranks nothing), and
-        # a degenerate curve invites the reader to see "escalation does not work" when the
-        # escalation METHOD (the policy) carries the measurable edge. The prefix model's full
-        # numbers stay in the JSON report, honestly NO_SKILL.
+        _draw_sweep(report, out_dir, run, provenance)
     if report.session_cadence is not None:
-        _render(
-            out_dir / "session_cadence.png",
-            plots.SESSION_CADENCE_SPEC,
-            lambda ax: _merge(plots.session_cadence_bars(report.session_cadence, ax), run),
-        )
+        # NOT `run`: this figure scores every trajectory, not the stamped subset.
+        _draw_session(report.session_cadence, out_dir, _session_run_annotations(report), provenance)
+    _write_metrics(report, metrics_dir if metrics_dir is not None else _metrics_dir_for(out_dir))
 
 
-def _save_policy_plots(report: EvalReport, out_dir: Path, run: Annotations) -> None:
-    """The escalation method's figures: sweep table, outcome bars, and the operating
-    characteristic (PR/ROC), the separating cell's confusion, and its family-wise null."""
+def _draw_decision(
+    report: EvalReport, out_dir: Path, run: Annotations, provenance: plot_frame.Provenance
+) -> None:
+    """Figure 1 — does the trigger detect, and does the counting mode decide the answer."""
+    scores = report.recurrence_scores
+    if scores is None or not scores.labels:
+        logger.error("no recurrence scores on this report; escalation_decision.png skipped")
+        return
+    size = plot_frame.WIDE_TALL
+    fig = plot_frame.new_figure(size)
+    grid = fig.add_gridspec(2, 3, height_ratios=[16, 1])
+    axes = [fig.add_subplot(grid[0, i]) for i in range(3)]
+    axes.append(fig.add_subplot(grid[1, :]))
+    extra = plots.escalation_decision(
+        scores.plain,
+        scores.edit,
+        scores.labels,
+        axes,
+        null=report.recurrence_null,
+        band=report.recurrence_null_band,
+        shipped_n=SHIPPED_ESCALATE_AFTER_N,
+    )
+    plot_frame.save(
+        fig,
+        out_dir / "escalation_decision.png",
+        plots.ESCALATION_DECISION_SPEC,
+        extra=_merge(extra, run),
+        provenance=provenance,
+        size=size,
+    )
+
+
+def _draw_operating_point(
+    report: EvalReport,
+    cell: PolicyCell,
+    out_dir: Path,
+    run: Annotations,
+    provenance: plot_frame.Provenance,
+) -> None:
+    """Figure 2 — BOTH counting modes at the shipped knobs, plus the canonical cell's nulls."""
+    size = plot_frame.WIDE_TALL
+    fig = plot_frame.new_figure(size)
+    grid = fig.add_gridspec(2, 2, height_ratios=[16, 1])
+    axes = [fig.add_subplot(grid[0, 0]), fig.add_subplot(grid[0, 1]), fig.add_subplot(grid[1, :])]
+    extra = plots.operating_point(report.headline_cell, cell, axes)
+    plot_frame.save(
+        fig,
+        out_dir / "operating_point.png",
+        plots.OPERATING_POINT_SPEC,
+        extra=_merge(extra, run),
+        provenance=provenance,
+        size=size,
+    )
+
+
+def _draw_sweep(
+    report: EvalReport, out_dir: Path, run: Annotations, provenance: plot_frame.Provenance
+) -> None:
+    """Figure 3 — every configuration in both counting modes, as one table."""
     cells = report.policy_cells
-    edit_gated = report.policy_cells_edit_gated
-    cell = report.headline_cell
-    # The separating cell comes from BOTH families: on this corpus the edit-gated n=2 cell
-    # (post-first-edit recurrence) separates best, and the confusion/null figures should show the
-    # mechanism at its strongest honest operating point, not the weakest one that happens to ship.
-    best = _best_separating_cell([*cells, *edit_gated])
-    _render(
-        out_dir / "sweep_table.png",
-        plots.SWEEP_TABLE_SPEC,
-        lambda ax: _merge(
-            plots.sweep_table(
-                cells,
-                ax,
-                shipped_index=next((i for i, c in enumerate(cells) if _is_shipped(c)), None),
+    # Wider than the default table canvas: twelve columns (two families x fired / P(fail) / 95% CI
+    # / AUROC / len-only, plus the two knobs) do not stay legible at 11 inches, and the answer to
+    # a column that will not fit is a wider canvas — never a dropped confound control.
+    size = plot_frame.table_size(len(cells) + 1, width_in=16.0)
+    fig = plot_frame.new_figure(size)
+    ax = fig.subplots()
+    extra = plots.policy_sweep(
+        cells,
+        report.policy_cells_edit_gated,
+        ax,
+        shipped_index=next((i for i, c in enumerate(cells) if _is_shipped(c)), None),
+    )
+    plot_frame.save(
+        fig,
+        out_dir / "policy_sweep.png",
+        plots.POLICY_SWEEP_SPEC,
+        extra=_merge(extra, run),
+        provenance=provenance,
+        size=size,
+    )
+
+
+def _draw_session(
+    sc: SessionCadenceReport,
+    out_dir: Path,
+    run: Annotations,
+    provenance: plot_frame.Provenance,
+) -> None:
+    """Figure 4 — escalate vs retry at the cadence production actually runs."""
+    size = plot_frame.WIDE
+    fig, axes = plot_frame.subplots(size, 1, 2)
+    extra = plots.session_value(sc, axes)
+    plot_frame.save(
+        fig,
+        out_dir / "session_value.png",
+        plots.SESSION_VALUE_SPEC,
+        extra=_merge(extra, run),
+        provenance=provenance,
+        size=size,
+    )
+
+
+def _draw_corpus(
+    report: EvalReport, out_dir: Path, run: Annotations, provenance: plot_frame.Provenance
+) -> None:
+    """Figure 5 — who is in the sample, and whether the edge survives the confounds."""
+    size = plot_frame.WIDE_TALL
+    fig, axes = plot_frame.subplots(size, 2, 2)
+    extra = plots.corpus_and_coverage(
+        report.coverage,
+        report.canonical_model_arms,
+        _stratified(report),
+        _admission_panel(report),
+        list(axes.flat),
+    )
+    plot_frame.save(
+        fig,
+        out_dir / "corpus_and_coverage.png",
+        plots.CORPUS_COVERAGE_SPEC,
+        extra=_merge(extra, run),
+        provenance=provenance,
+        size=size,
+    )
+
+
+def _draw_budget(
+    cell: PolicyCell, out_dir: Path, run: Annotations, provenance: plot_frame.Provenance
+) -> None:
+    """Figure 6 — what firing costs, and what it pre-empts."""
+    size = plot_frame.WIDE_TALL
+    fig = plot_frame.new_figure(size)
+    grid = fig.add_gridspec(2, 2, height_ratios=[16, 1])
+    axes = [fig.add_subplot(grid[0, 0]), fig.add_subplot(grid[0, 1]), fig.add_subplot(grid[1, :])]
+    extra = plots.escalation_budget(cell, axes)
+    plot_frame.save(
+        fig,
+        out_dir / "escalation_budget.png",
+        plots.ESCALATION_BUDGET_SPEC,
+        extra=_merge(extra, run),
+        provenance=provenance,
+        size=size,
+    )
+
+
+def _write_metrics(report: EvalReport, out_dir: Path) -> None:
+    """Commit the exact scalars each figure renders, keyed by figure slug.
+
+    Until this existed the only committed artifact was the PNG, so no number on a canvas had a
+    machine-readable source and no reader could check one after the fact.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "metrics.json").write_text(
+        json.dumps(_metrics_payload(report), indent=2, sort_keys=True) + "\n"
+    )
+
+
+def _metrics_payload(report: EvalReport) -> dict[str, object]:
+    """Every figure's rendered scalars, plus the run identity they were all computed under."""
+    cell = canonical_cell(report)
+    scores = report.recurrence_scores
+    strat = _stratified(report)
+    sc = report.session_cadence
+    payload: dict[str, object] = {
+        "run": {
+            "status": report.status,
+            "n_trajectories": report.n_trajectories,
+            "n_stamped": report.n_stamped,
+            "n_permutations": report.n_permutations,
+            "canonical_counting": CANONICAL_COUNTING,
+            # Both scope verdicts, beside the numbers they scope. The shipped counter's names two
+            # mismatches; the canonical one names three, and the third is that the product has no
+            # such counter — the fact this whole record exists to keep machine-readable.
+            "deployability": report.deployability.to_dict(),
+            "canonical_deployability": (
+                None
+                if report.canonical_deployability is None
+                else report.canonical_deployability.to_dict()
             ),
-            run,
-        ),
-    )
-    if edit_gated:
-        _render(
-            out_dir / "edit_gated_sweep_table.png",
-            plots.EDIT_GATED_SWEEP_TABLE_SPEC,
-            # No shipped-highlight on this family: it is EVAL-ONLY (`count_from_first_edit` is not
-            # what ships), so the "shipped default is the highlighted row" title and the amber
-            # locator would point a reader at a default production does not run.
-            lambda ax: _merge(plots.sweep_table(edit_gated, ax), run),
-        )
-    if best is None:
-        # Only reachable on a hand-built report with no fired cell. The curve/confusion/null
-        # figures are SKIPPED rather than drawn off nothing — see `policy_pr_curve`'s own refusal.
-        logger.error("no swept cell fired; operating-characteristic figures skipped")
-        return
-    _render(
-        out_dir / "pr_curve.png",
-        plots.PR_CURVE_SPEC,
-        lambda ax: _merge(plots.policy_pr_curve(cells, ax, edit_gated=edit_gated), run),
-    )
-    _render(
-        out_dir / "roc_curve.png",
-        plots.ROC_CURVE_SPEC,
-        lambda ax: _merge(plots.policy_roc_curve(cells, ax, edit_gated=edit_gated), run),
-    )
-    _render(
-        out_dir / "recurrence_roc.png",
-        plots.RECURRENCE_ROC_SPEC,
-        lambda ax: _merge(_recurrence_roc_plot(report, ax), run),
-    )
-    _render(
-        out_dir / "confusion_matrix.png",
-        plots.CONFUSION_MATRIX_SPEC,
-        lambda ax: _merge(
-            plots.policy_confusion(best, ax, flag_budget=best.n_escalated),
-            Annotations(notes=(_policy_cell_note(best),)),
-            run,
-        ),
-    )
-    _render(
-        out_dir / "permutation_null.png",
-        plots.PERMUTATION_NULL_SPEC,
-        lambda ax: _merge(
-            plots.permutation_null_plot(
-                best.gate_null,
-                ax,
-                label=(
-                    f"policy AUROC at escalate_after_n={best.escalate_after_n} "
-                    "(family-wise null across the sweep)"
+            "shipped_escalation": {
+                "escalate_after_n": SHIPPED_ESCALATE_AFTER_N,
+                "stale_window": SHIPPED_STALE_WINDOW,
+                "ladder": SHIPPED_LADDER,
+            },
+            "corpus_digest": _corpus_digest(report),
+        },
+        "escalation_decision.png": {
+            "auroc_as_shipped": (
+                None if scores is None else round(metrics.auroc(scores.plain, scores.labels), 4)
+            ),
+            "auroc_edit_gated": (
+                None if scores is None else round(metrics.auroc(scores.edit, scores.labels), 4)
+            ),
+            "base_rate": (None if scores is None else round(metrics.prevalence(scores.labels), 4)),
+            "null": (None if report.recurrence_null is None else report.recurrence_null.to_dict()),
+            "window_sensitivity": {k: round(v, 4) for k, v in report.window_sensitivity.items()},
+            "shipped_escalate_after_n": SHIPPED_ESCALATE_AFTER_N,
+        },
+        # BOTH bar pairs the canvas draws, at the same shipped knobs. The as-shipped row is the
+        # negative finding — it fires on essentially everything and reads the base rate — so it
+        # is committed beside the canonical one rather than only inside the sweep list.
+        "operating_point.png": {
+            "as_shipped": (
+                None if report.headline_cell is None else report.headline_cell.to_dict()
+            ),
+            "edit_gated": (None if cell is None else cell.to_dict()),
+        },
+        "policy_sweep.png": {
+            "n_configurations": len(report.policy_cells),
+            "as_shipped": [_sweep_scalars(c) for c in report.policy_cells],
+            "edit_gated": [_sweep_scalars(c) for c in report.policy_cells_edit_gated],
+        },
+        "session_value.png": (None if sc is None else sc.to_dict()),
+        "corpus_and_coverage.png": {
+            # Panels B and C only: the coverage census and the prefix waterfall are counter-free.
+            "counting_panels_b_c": CANONICAL_COUNTING,
+            "coverage": [c.to_dict() for c in report.coverage],
+            "canonical_model_arms": [
+                {
+                    "model": a.model,
+                    "n": a.n,
+                    "p_fail_fired": None if a.p_fail_fired is None else round(a.p_fail_fired, 4),
+                    "p_fail_quiet": None if a.p_fail_quiet is None else round(a.p_fail_quiet, 4),
+                }
+                for a in report.canonical_model_arms
+            ],
+            "stratified_auroc": {
+                "pooled": round(strat.pooled, 4),
+                "within_model": (
+                    None if strat.within_model is None else round(strat.within_model, 4)
                 ),
+                "within_challenge": (
+                    None if strat.within_challenge is None else round(strat.within_challenge, 4)
+                ),
+            },
+            "prefix_admission": (
+                None if report.prefix_admission is None else report.prefix_admission.to_dict()
             ),
-            Annotations(notes=(_policy_cell_note(best),)),
-            run,
+        },
+        # Wholly canonical: every number here comes from the edit-gated cell, so the counting mode
+        # travels with it rather than being inferable only from the prose on the canvas.
+        "escalation_budget.png": (
+            None if cell is None else {**cell.budget.to_dict(), "counting": CANONICAL_COUNTING}
         ),
-    )
-    if cell is None:
-        # Only reachable on a hand-built report: `evaluate` guarantees the shipped cell exists.
-        # The per-cell figure is SKIPPED rather than drawn off an arbitrary cell — a figure
-        # titled with the shipped default that plots a different configuration is the defect.
-        logger.error("no swept cell matches the shipped configuration; per-cell figure skipped")
-        return
-    _render(
-        out_dir / "trajectory_outcomes.png",
-        plots.OUTCOME_BARS_SPEC,
-        lambda ax: _merge(plots.outcome_bars(cell, ax), run),
+    }
+    return payload
+
+
+def _sweep_scalars(cell: PolicyCell) -> dict[str, object]:
+    """The four numbers a sweep-table row actually renders."""
+    return {
+        "escalate_after_n": cell.escalate_after_n,
+        "stale_window": cell.stale_window,
+        "n_escalated": cell.n_escalated,
+        "precision": None if cell.precision is None else round(cell.precision, 4),
+        "precision_ci95": [round(v, 4) for v in cell.precision_ci],
+        "auroc": round(cell.null_auroc.observed, 4),
+        "length_baseline_auroc": (
+            None if cell.length_baseline_auroc is None else round(cell.length_baseline_auroc, 4)
+        ),
+    }
+
+
+def _corpus_digest(report: EvalReport) -> str:
+    """A short, deterministic fingerprint of the scored corpus — no timestamp, no git sha."""
+    # Either of those would dirty this file on every regeneration and turn a meaningful diff into
+    # noise, which is the same reasoning `plot_frame.record` states for the manifest.
+    scores = report.recurrence_scores
+    material = "|".join(sorted(scores.groups)) if scores is not None else ""
+    return hashlib.sha256(
+        f"{report.n_trajectories}:{report.n_stamped}:{material}".encode()
+    ).hexdigest()[:16]
+
+
+def _stratified(report: EvalReport) -> plots.StratifiedAuroc:
+    """The canonical (edit-gated) recurrence score pooled, then within model, then within task."""
+    scores = report.recurrence_scores
+    if scores is None or not scores.labels:
+        return plots.StratifiedAuroc(pooled=0.5, within_model=None, within_challenge=None)
+    return plots.StratifiedAuroc(
+        pooled=metrics.auroc(scores.edit, scores.labels),
+        within_model=metrics.stratified_auroc(scores.edit, scores.labels, scores.models),
+        within_challenge=metrics.stratified_auroc(scores.edit, scores.labels, scores.groups),
     )
 
 
-def _recurrence_scores(
-    stamped: Sequence[Trajectory],
-) -> tuple[tuple[float, ...], tuple[float, ...], tuple[bool, ...], tuple[str, ...]]:
-    """Per-run continuous recurrence scores (as-shipped + edit-gated) and the terminal labels."""
-    # The shipped config's stale_window; the continuous score's whole purpose is to be
-    # threshold-free in `escalate_after_n`, and the window only gates retirement, so the shipped
-    # value is the honest default. Uses the shipped config directly (never the user override) so
-    # the figure means the same thing wherever it is rendered.
+def _admission_panel(report: EvalReport) -> plots.Admission | None:
+    """The prefix admission waterfall's data, or None when no depth was estimable."""
+    admission = report.prefix_admission
+    if admission is None:
+        return None
+    return plots.Admission(
+        depth=admission.depth,
+        n_stamped=admission.n_stamped,
+        n_too_short=admission.n_excluded_too_short,
+        n_by_margin=admission.n_excluded_by_margin,
+        n_admitted=admission.n_admitted,
+        admitted_base_rate=admission.admitted_base_rate,
+        corpus_base_rate=admission.corpus_base_rate,
+    )
+
+
+def _shipped_config(stale_window: int | None = None) -> EscalationConfig:
+    """The shipped escalation knobs, with the window optionally overridden."""
     shipped = _shipped_escalation()
-    cfg = EscalationConfig(
+    return EscalationConfig(
         enabled=True,
         escalate_after_n=shipped[0],
-        stale_window=shipped[1],
+        stale_window=shipped[1] if stale_window is None else stale_window,
         ladder=shipped[2],
     )
+
+
+def _recurrence_scores(stamped: Sequence[Trajectory]) -> RecurrenceScores:
+    """Per-run continuous recurrence scores (as-shipped + edit-gated) and the terminal labels."""
+    # The shipped config's stale_window, held fixed for BOTH scores. The continuous score's whole
+    # purpose is to be threshold-free in `escalate_after_n`, and the window only gates retirement,
+    # so the shipped value is the honest default — and pinning it is what makes the two curves
+    # differ in exactly one thing. Uses the shipped config directly (never the user override) so
+    # the figure means the same thing wherever it is rendered.
+    cfg = _shipped_config()
     plain: list[float] = []
     edit: list[float] = []
     labels: list[bool] = []
     groups: list[str] = []
+    models: list[str] = []
     for traj in stamped:
         plain.append(float(replay.max_recurrence(traj, cfg)))
         edit.append(float(replay.max_recurrence(traj, cfg, count_from_first_edit=True)))
@@ -757,14 +1272,80 @@ def _recurrence_scores(
         # The SAME grouping key the policy half uses — the figure's detection floor must permute
         # at the same exchangeable unit the rest of the eval does.
         groups.append(features.group_of(traj))
-    return tuple(plain), tuple(edit), tuple(labels), tuple(groups)
+        models.append(features.model_of(traj))
+    return RecurrenceScores(tuple(plain), tuple(edit), tuple(labels), tuple(groups), tuple(models))
+
+
+# An effectively unbounded window: no run in the corpus is anywhere near this long, so the
+# recurrence counter never retires an event. The contrast against the shipped window is what the
+# `window_sensitivity` field publishes.
+_UNBOUNDED_WINDOW: Final[int] = 1000
+
+
+def _window_sensitivity(stamped: Sequence[Trajectory]) -> dict[str, float]:
+    """Both scores' AUROC at the shipped window and at an unbounded one — the knob's own size."""
+    labels = [not t.header.terminal_resolved for t in stamped]
+    if not labels or all(labels) or not any(labels):
+        return {}
+    shipped_window = _shipped_escalation()[1]
+    out: dict[str, float] = {}
+    for window in (shipped_window, _UNBOUNDED_WINDOW):
+        cfg = _shipped_config(window)
+        for gated, name in ((False, "as_shipped"), (True, "edit_gated")):
+            scores = [
+                float(replay.max_recurrence(t, cfg, count_from_first_edit=gated)) for t in stamped
+            ]
+            out[f"{name}_auroc_at_stale_window_{window}"] = metrics.auroc(scores, labels)
+    return out
+
+
+def _canonical_model_arms(stamped: Sequence[Trajectory]) -> list[plots.ModelArm]:
+    """The canonical cell's two outcome arms, split per model — one replay pass, aggregated."""
+    # Per-model, not per-run: the figure asks whether the separation survives inside a model, and
+    # a pooled edge that only exists because hard models both fire more and fail more would be a
+    # confound the pooled bars cannot show.
+    cfg = _shipped_config()
+    counts: dict[str, list[int]] = {}
+    for traj in stamped:
+        fired = replay.replay_config(traj, cfg, count_from_first_edit=True).escalated
+        failed = not traj.header.terminal_resolved
+        row = counts.setdefault(features.model_of(traj), [0, 0, 0, 0])
+        row[0 if fired else 2] += int(failed)
+        row[1 if fired else 3] += int(not failed)
+    arms: list[plots.ModelArm] = []
+    for model in sorted(counts):
+        tp, fp, fn, tn = counts[model]
+        arms.append(
+            plots.ModelArm(
+                model=model,
+                n=tp + fp + fn + tn,
+                p_fail_fired=tp / (tp + fp) if tp + fp else None,
+                p_fail_quiet=fn / (fn + tn) if fn + tn else None,
+            )
+        )
+    return arms
+
+
+def _prefix_admission(
+    stamped: Sequence[Trajectory], depths: Sequence[DepthReport]
+) -> PrefixAdmission | None:
+    """The scope the prefix half's verdict is actually about — its own admitted population."""
+    if not depths:
+        return None
+    depth = max(depths, key=lambda d: d.n_rows)
+    return PrefixAdmission(
+        depth=depth.depth,
+        n_stamped=len(stamped),
+        n_excluded_too_short=depth.n_excluded_too_short,
+        n_excluded_by_margin=depth.n_excluded_by_margin,
+        n_admitted=depth.n_rows,
+        admitted_base_rate=depth.base_rate,
+        corpus_base_rate=metrics.prevalence([not t.header.terminal_resolved for t in stamped]),
+    )
 
 
 def _recurrence_null(
-    plain: Sequence[float],
-    edit: Sequence[float],
-    labels: Sequence[bool],
-    groups: Sequence[str],
+    scores: RecurrenceScores,
     *,
     n_permutations: int,
 ) -> tuple[metrics.NullResult, tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]]:
@@ -773,30 +1354,16 @@ def _recurrence_null(
     # (`policy_eval.null_roc_band`), so the footnote's "null 95% [x, y]" is the band's own
     # construction, not a second estimator. The family-wise max over the two score vectors keeps
     # the floor honest to the figure showing both curves: either curve clearing it is the claim.
-    score_vectors = (plain, edit)
+    score_vectors = (scores.plain, scores.edit)
+    labels = scores.labels
     band = policy_eval.null_roc_band(
-        score_vectors, labels, groups, n_permutations=n_permutations, seed=0
+        score_vectors, labels, scores.groups, n_permutations=n_permutations, seed=0
     )
-    observed = max(metrics.auroc(scores, labels) for scores in score_vectors)
+    observed = max(metrics.auroc(vector, labels) for vector in score_vectors)
     draws = policy_eval.family_null_draws(
-        score_vectors, labels, groups, n_permutations=n_permutations, seed=0
+        score_vectors, labels, scores.groups, n_permutations=n_permutations, seed=0
     )
     return metrics.permutation_null(observed, draws), band
-
-
-def _recurrence_roc_plot(report: EvalReport, ax: Axes) -> Annotations:
-    """The complete recurrence-ROC figure, or an honest refusal when the scores are absent."""
-    if report.recurrence_scores is None:
-        return Annotations(limitations=("no recurrence scores on this report",))
-    plain, edit, labels, _groups = report.recurrence_scores
-    return plots.recurrence_roc(
-        plain,
-        edit,
-        labels,
-        ax,
-        null=report.recurrence_null,
-        band=report.recurrence_null_band,
-    )
 
 
 def _best_skilled_cell(cells: Sequence[PolicyCell]) -> PolicyCell | None:
@@ -808,27 +1375,12 @@ def _best_skilled_cell(cells: Sequence[PolicyCell]) -> PolicyCell | None:
     return max(skilled, key=lambda c: (c.null_auroc.observed, c.precision or 0.0), default=None)
 
 
-def _best_separating_cell(cells: Sequence[PolicyCell]) -> PolicyCell | None:
-    """The most readable operating point: skilled by AUROC, else highest-precision fired cell."""
-    skilled = [c for c in cells if c.has_skill]
-    pool = skilled or [c for c in cells if c.precision is not None]
-    return max(pool, key=lambda c: (c.null_auroc.observed, c.precision or 0.0), default=None)
+def canonical_cell(report: EvalReport) -> PolicyCell | None:
+    """The one operating point every per-cell figure reads: edit-gated at the SHIPPED knobs.
 
-
-def _policy_cell_note(cell: PolicyCell) -> str:
-    """The one line that anchors a policy figure to its operating point."""
-    length = "n/a" if cell.length_baseline_auroc is None else f"{cell.length_baseline_auroc:.3f}"
-    return (
-        f"cell: escalate_after_n={cell.escalate_after_n}, stale_window={cell.stale_window}; "
-        f"fired on {cell.n_escalated}/{cell.n_trajectories}; P(fail|fired)={cell.precision:.3f} "
-        f"[{cell.precision_ci[0]:.3f}, {cell.precision_ci[1]:.3f}] vs base "
-        f"{cell.base_failure_rate:.3f}; run-length-only AUROC at this flag count: {length}"
-    )
-
-
-def _render(path: Path, spec: FigureSpec, draw: Callable[[Axes], Annotations]) -> None:
-    """Every figure goes through the annotated frame — the one legal savefig site (SH007)."""
-    plot_frame.render(path, spec, draw, figsize=_FIGSIZE, dpi=_DPI)
+    None only on a hand-built report — `evaluate` guarantees the shipped point is in both grids.
+    """
+    return next((c for c in report.policy_cells_edit_gated if _is_shipped(c)), None)
 
 
 def _print_summary(report: EvalReport) -> None:
@@ -947,16 +1499,27 @@ def _build_parser() -> argparse.ArgumentParser:
         default=here.parent / "data/live",
         help="Real captured live trajectories (schema JSONL).",
     )
-    # Defaults to the committed reports dir: `make escalation-eval` must actually refresh the
-    # figures, or they silently rot while the JSON report says everything is current.
-    parser.add_argument("--plots-dir", type=Path, default=here.parent / "reports")
+    # Both default to their committed homes: `make escalation-eval` must actually refresh the
+    # figures, or they silently rot while the JSON report says everything is current. The PNGs
+    # live inside the published docs tree so the docs can link them relatively; metrics.json
+    # stays beside the code, because it is the numbers behind the images, not an image.
+    # CANONICAL_PLOTS_DIR itself, so the default and `_committed_home` cannot drift apart.
+    parser.add_argument("--plots-dir", type=Path, default=CANONICAL_PLOTS_DIR)
+    parser.add_argument(
+        "--metrics-dir",
+        type=Path,
+        default=None,
+        help="Where metrics.json lands. Defaults to benchmark/escalation/reports/ for the "
+        "committed figure set, and beside the plots for any other --plots-dir.",
+    )
     parser.add_argument(
         "--permutations",
         type=_permutations,
-        default=metrics.MIN_PERMUTATIONS,
+        default=metrics.DEFAULT_PERMUTATIONS,
         help=(
             f"Label shuffles behind every null band (the admissibility gate reads this). "
-            f"Minimum {metrics.MIN_PERMUTATIONS}."
+            f"Default {metrics.DEFAULT_PERMUTATIONS}, minimum {metrics.MIN_PERMUTATIONS}. At the "
+            f"minimum every reported p-value is the floor artifact 1/(n+1)."
         ),
     )
     parser.add_argument(
@@ -1004,7 +1567,7 @@ def main(argv: list[str] | None = None) -> int:
         exploration_rows=exploration_rows,
     )
     if args.plots_dir is not None:
-        _save_plots(report, args.plots_dir)
+        _save_plots(report, args.plots_dir, args.metrics_dir)
     print(json.dumps(report.to_dict(), indent=2))  # noqa: T201 (CLI report to stdout)
     _print_summary(report)
     return 0

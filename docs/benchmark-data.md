@@ -136,8 +136,8 @@ make benchmark ARGS="--live --max-cost 2"   # collect live data + process everyt
 make benchmark ARGS="--from report"         # recompute artifacts from existing data (no spend)
 ```
 
-The report stage regenerates the routing plots and CSVs under
-`benchmark/routing/reports/`. Each stage is also runnable on its own as a debug
+The report stage regenerates the routing plots into `docs/assets/figures/routing/` and the derived
+CSVs into `benchmark/routing/reports/`. Each stage is also runnable on its own as a debug
 entrypoint (`make benchmark-live`, `make offline-replay`, `make routing-report`).
 
 ### Escalation evaluation

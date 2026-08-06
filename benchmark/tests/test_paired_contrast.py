@@ -64,11 +64,22 @@ def test_paired_bootstrap_ci_brackets_point_estimate() -> None:
     assert lo <= 62.5 <= hi  # mean of the diffs (5/8) in pp
 
 
-def test_pick_router_excludes_oracles_and_frontier() -> None:
+def test_pick_router_picks_the_best_live_router_not_the_best_row() -> None:
+    # kNN-cascade outranks every live candidate on Reward and is still not the answer:
+    # the router named in the headline has to be one `router.strategy` can be set to.
     rows = [
         {"strategy": "Oracle", "Reward": 9.0, "n_tasks": 5},
         {"strategy": "Always-Frontier", "Reward": 8.0, "n_tasks": 5},
         {"strategy": "kNN-cascade", "Reward": 7.0, "n_tasks": 5},
+        {"strategy": "kNN", "Reward": 6.5, "n_tasks": 5},
         {"strategy": "Always-Cheap", "Reward": 6.0, "n_tasks": 5},
     ]
-    assert run_eval._pick_router(rows) == "kNN-cascade"
+    assert run_eval._pick_router(rows) == "kNN"
+
+
+def test_pick_router_excludes_the_frontier_baseline_even_though_it_is_live() -> None:
+    rows = [
+        {"strategy": "Always-Frontier", "Reward": 8.0, "n_tasks": 5},
+        {"strategy": "Always-Cheap", "Reward": 6.0, "n_tasks": 5},
+    ]
+    assert run_eval._pick_router(rows) == "Always-Cheap"

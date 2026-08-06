@@ -37,10 +37,12 @@ ASSEMBLED pipeline to recover it; then destroys the signal and asks it to collap
 # routable signal is the question the instrument exists to ask, not something this control answers),
 # the imputation/completion layer, cost accounting, the bootstrap intervals, or the served router.
 #
-# THE PLANTED SIGNAL IS ORTHOGONAL TO REPOSITORY IDENTITY, DELIBERATELY. On the committed corpus
-# `routing_text` resolves to `description` for every task — a ~106-character label of the form
-# `<repo>@<commit12> - resolve <test-node-id>` — so the repository name is a large fraction of
-# every string the embedder is ever handed, and the real front end demonstrably propagates it:
+# THE PLANTED SIGNAL IS ORTHOGONAL TO REPOSITORY IDENTITY, DELIBERATELY. `routing_text` now
+# resolves to the real SWE-bench `problem_statement` on every committed task (median 1185 chars);
+# it resolved to the ~106-character `<repo>@<commit12> - resolve <test-node-id>` label until the
+# corpus was rebuilt, and the diagnostic numbers quoted below were measured on that older text.
+# Either way the repository name is present in the string the embedder is handed, and the real
+# front end demonstrably propagates it:
 # this module's own `repo_identity_positive_score` reads 0.7375 on the ANALYSIS leg against a
 # chance level of 0.5. The STRATEGY leg reads 0.4125 on the same diagnostic over the same corpus,
 # and both numbers are stated here on purpose: repository identity is propagated by the EMBEDDER,

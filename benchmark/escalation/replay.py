@@ -85,11 +85,12 @@ def is_edit_action(action: str) -> bool:
 # off-wire verifier once for a closed session and reaches `record_outcome` at most once per
 # capture. Every trajectory in `data/live/` is a single session (799 files, 799 distinct
 # trajectory ids, median 31 steps, longest 247), so at the live cadence a whole trajectory
-# contributes exactly ONE event — and the shipped `escalate_after_n=2` could never fire on this
-# corpus at all. What the sweep measures is recurrence across the steps within one session, which
-# is not the quantity the shipped rule counts. It is not repairable on this data: a
-# session-cadence replay needs trajectories spanning several sessions and none of these do. Any
-# `escalate_after_n` result read off this sweep describes a per-step policy production does not run.
+# contributes exactly ONE event — so the shipped rule (escalate_after_n >= 2) could never fire
+# on this corpus at all. What the sweep measures is recurrence across the steps within one
+# session, which is not the quantity the shipped rule counts. It is not repairable on this
+# corpus — a session-cadence replay needs trajectories spanning several sessions, and none of
+# these do. Any `escalate_after_n` result read off this sweep describes a per-step policy
+# production does not run.
 #
 # (iv) The FLAKE GUARD is not exercised at all. `counts_as_failure` drops any event with
 # `confirmed=False` — a failure that did not reproduce on re-run. Offline,
@@ -258,7 +259,7 @@ def replay_config(
     #
     # `count_from_first_edit`: skip the reproduction phase. On this corpus the first one or two
     # replayed steps of nearly EVERY run — successful or not — are red on the target F2P test,
-    # because the agent starts by reproducing the bug, so the shipped `escalate_after_n=2` fires on
+    # because the agent starts by reproducing the bug, so the `escalate_after_n=2` cell fires on
     # 727/727 runs and reads the base rate. Those early failures are the target bug at t=0, not
     # "an edit did not work", and a counter that counts them cannot separate a run the agent is
     # stuck on from a run it is about to fix. When set, failures before the first edit-like action

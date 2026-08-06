@@ -38,7 +38,7 @@ graph TD
   A[Tool: Claude Code / opencode / aider] -->|ANTHROPIC_BASE_URL / OPENAI_BASE_URL| P
   subgraph Shunt[Shunt process · localhost:8080]
     P[proxy/ — FastAPI + OpenAI SDK] -->|calls on 1st turn| R[router/ — kNN decision]
-    R -->|cold-start (no outcomes yet)| M[cheap default model]
+    R -->|"cold-start (no outcomes yet)"| M[cheap default model]
     C[capture/ — off-wire verifier] -->|at session close| V[verifiers/ — auto-detect tests]
     V -->|append verified outcome| D[db/ — SQLite + HNSW]
     R -->|cold-start search| D

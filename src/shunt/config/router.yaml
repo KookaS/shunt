@@ -36,7 +36,12 @@ router:
   # the context, so the boundary is the ONLY point a model change is free.
   escalation:
     enabled: false
-    escalate_after_n: 2           # same-key verified failures before a step (1 = failure-biased)
+    # 2, not 1: a single red is normal fail-then-fix, so 1 is failure-biased. 2 is a
+    # PRIOR: in the as-shipped policy sweep (the counter this product runs) every low
+    # threshold is at chance — n=2 fires 727/727 at AUROC 0.500, n=3 726/727 at 0.501 —
+    # so no shipped-counter measurement prefers one over the other. See the comment on
+    # EscalationConfig.escalate_after_n in src/shunt/router/escalation.py.
+    escalate_after_n: 2           # same-key verified failures before a step
     stale_window: 10              # a failure not recurring within N decisions is retired
     blocking_exit_code: 2         # FUTURE hook-stream path only; the off-wire test gate counts a
                                   # real failure by verifier outcome (a pytest/jest/go red is exit

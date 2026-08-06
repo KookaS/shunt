@@ -1,24 +1,32 @@
-"""Detector figures. Each function draws into a caller's Axes and returns the Annotations its"""
+"""Six escalation figures. Each draws into a caller's Axes and returns the Annotations its data"""
 
-# own data earned — no file I/O here. The figure's static READ/GOAL/TERMS/NOTE/LIMITS text lives
-# next to each function as a frozen FigureSpec; anything data-dependent comes back through
-# Annotations so it can never go stale as the corpus grows.
+# earned — no file I/O here. Every per-cell figure is pinned to the SHIPPED knobs, and the only
+# thing that varies across the set is how the recurrence counter treats the reproduction phase.
+# Ten figures used to show three different cells — the shipped default, an argmax over 60 swept
+# cells, and a continuous score at a third window — so no two of them described the same policy.
+# The canonical cell (`run_eval.canonical_cell`, edit-gated at those knobs) drives the null panel
+# and figures 5 and 6; figure 2 draws BOTH counting modes at those same knobs, because "the
+# configuration we actually ship reads the base rate" is the escalation half's negative finding
+# and it has to be on a canvas, not one row of a 30-row table.
+#
+# The static FigureSpec beside each function carries the reading/goal/terms text that used to be
+# rendered as a footer; the canvas gets a title, a subtitle and at most one red caveat, and the
+# rest reaches the reader through figures.json and docs/escalation.md.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
-from matplotlib.cm import ScalarMappable
-from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 from matplotlib.patches import Rectangle
+from matplotlib.transforms import Bbox
 
-from benchmark.calibration.labeler_metrics import ConfusionMatrix
-from benchmark.escalation import metrics
-from benchmark.plot_frame import Annotations, FigureSpec
+from benchmark.escalation import metrics, policy_eval
+from benchmark.plot_frame import MUTED, Annotations, FigureSpec, panel_label
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
     from matplotlib.axes import Axes
     from matplotlib.table import Table
@@ -26,989 +34,508 @@ if TYPE_CHECKING:
     from benchmark.escalation.features import ModelCoverage
     from benchmark.escalation.metrics import NullResult
     from benchmark.escalation.policy_eval import PolicyCell
+    from benchmark.escalation.session_eval import SessionCadenceReport
 
 _NULL_BAND = "#BDBDBD"
 _OBSERVED = "#B71C1C"
-# The theoretical 0.5 ROC diagonal, drawn faint. It is orientation, not the reference: the
-# reference is the MEASURED null centre, which on a refit-per-shuffle pipeline is not 0.5.
+_SHIPPED = "#455A64"
 _FAINT = "#CCCCCC"
 _NULL_CENTRE = "#616161"
-# The shipped row's locator shade — bold text plus a light amber fill. It is a POINTER, not a
-# colour channel: the sweep table's reading already refuses a colour scale (two distinct results
-# cannot carry one honestly), and shading the single known default locates it without encoding
-# any result.
+_LENGTH_NULL = "#1565C0"
+# The shipped row's locator shade — a POINTER, not a colour channel: the sweep table's reading
+# refuses a colour scale (two distinct results cannot carry one honestly), and shading the single
+# known default locates it without encoding any result.
 _SHIPPED_ROW = "#FFF3CD"
+_GATED_COL = "#EEF4FA"
+_UNDEFINED = "#9E9E9E"
 
-# Diverging fill for the confusion matrix: red where a cell exceeds its random-flagger baseline,
-# blue where it falls short, white AT the baseline. Light enough that the black count/expected/
-# excess text stays legible on top; intensity is proportional to |excess| (TwoSlopeNorm).
-_EXCESS_POS = "#FFCDD2"
-_EXCESS_NEG = "#BBDEFB"
-_EXCESS_ZERO = "#FFFFFF"
-# Floor for the colour scale when every cell sits exactly on its baseline (peak = |excess| max).
-_DELTA_FLOOR = 1.0
+_TICK_PT = 8.5
+_LEGEND_PT = 8.0
 
-PR_CURVE_SPEC = FigureSpec(
-    reading=(
-        "x is recall and y is precision, both 0-1, over the SWEPT escalation policy: one point per "
-        "escalate_after_n value that fired. As the recurrence threshold rises, the policy flags "
-        "fewer runs with higher precision. The dashed line is the corpus base failure rate — the "
-        "no-skill precision a random flagger reaches. When present, a SECOND curve (filled "
-        "triangles) is the edit-gated family: the same recurrence rule with failures before the "
-        "agent's first edit excluded from the counter — the reproduction phase is the target bug "
-        "at t=0, not evidence the agent is stuck. The prefix risk model's own PR curve is not "
-        "drawn: its score is constant at the evaluated depths, so it ranks nothing."
-    ),
-    goal=(
-        "Look for points sitting clearly ABOVE the dashed base-rate line. A point above it with "
-        "its interval excluding the base rate is a measured operating point for escalation. The "
-        "edit-gated curve should sit above and to the right of the as-shipped one — that gap is "
-        "the reproduction phase masking the recurrence signal."
-    ),
-    definitions=(
-        ("precision", "share of flagged runs that really failed"),
-        ("recall", "share of failed runs the policy flagged"),
-        ("base failure rate", "the corpus's overall failure rate — a random flagger's precision"),
-        (
-            "edit-gated",
-            "the same recurrence policy with failures before the agent's first edit excluded "
-            "from the counter (an eval-only knob — production has no per-step action stream)",
-        ),
-    ),
-    notes=(
-        "The point with the highest precision is measured, never adopted as the shipped default — "
-        "the shipped configuration is reported separately on the sweep table.",
-        "One point per swept cell per family, so the curve is a discrete operating characteristic, "
-        "not a continuous score sweep (the continuous recurrence ROC is a separate figure).",
-    ),
-    limitations=(
-        "A cell that never fires has no precision at all and is absent rather than plotted at 0.0.",
-        "This shows the detector's operating points, NOT what escalating would have CHANGED — no "
-        "stored trajectory contains an escalation that actually happened.",
-    ),
-)
 
-ROC_CURVE_SPEC = FigureSpec(
-    reading=(
-        "x is the false-positive rate and y the true-positive rate over the SWEPT escalation "
-        "policy, one point per escalate_after_n value that fired. The dotted diagonal is chance. "
-        "As the recurrence threshold rises the policy moves up the curve: more precision, less "
-        "recall. When present, a SECOND curve (filled triangles) is the edit-gated family: the "
-        "same recurrence rule with failures before the agent's first edit excluded from the "
-        "counter. The prefix risk model's ROC is not drawn: its score is constant at the "
-        "evaluated depths, so it ranks nothing."
-    ),
-    goal=(
-        "Look for points leaving the diagonal toward the top-left. A point clearly above the "
-        "diagonal means firing concentrates on failed runs. The edit-gated curve should leave the "
-        "diagonal earlier and higher than the as-shipped one."
-    ),
-    definitions=(
-        ("true-positive rate", "share of failed runs the policy flagged"),
-        ("false-positive rate", "share of resolved runs the policy wrongly flagged"),
-        ("escalate_after_n", "the number of same-key verified failures that trigger escalation"),
-    ),
-    notes=("Auxiliary to the PR figure: precision vs recall is the primary view.",),
-    limitations=(
-        "This shows the detector's operating points, NOT what escalating would have CHANGED.",
-        "A cell that never fires is absent rather than plotted at (0,0).",
-    ),
-)
+# --------------------------------------------------------------------- the scope strip
 
-CONFUSION_MATRIX_SPEC = FigureSpec(
-    reading=(
-        "A 2x2 count grid at the swept policy configuration that separates best (highest AUROC "
-        "among cells that clear their null; on the current corpus that is the edit-gated n=2 "
-        "cell). Rows are the truth (run failed / resolved), columns are what the "
-        "escalation policy said (flagged / not flagged). Each cell prints the observed count, in "
-        "brackets the count a RANDOM flagger at the same flag rate would produce, and the "
-        "difference between them. The cell fill is a diverging heatmap on that excess — red where "
-        "a cell exceeds its random baseline, blue where it falls short, white AT it. With the "
-        "number of flags fixed, all four differences are the SAME number up to sign, so the two "
-        "hues restate the one excess rather than carry four independent facts."
-    ),
-    goal=(
-        "Want the top-left count well ABOVE its bracketed random counterpart. That one excess IS "
-        "the figure — the other three cells restate it with a sign and add no evidence. At or "
-        "below random means the flag carries no information."
-    ),
-    definitions=(
-        ("flagged", "the policy fired on this run (same-key recurrence reached escalate_after_n)"),
-        (
-            "random baseline",
-            "expected count if the same number of flags were scattered at random",
-        ),
-        ("excess", "observed minus that random baseline, in the cell's own units"),
-    ),
-    notes=(
-        "Counts are per trajectory, not per prefix.",
-        "The cell shown is the SWEPT cell with the highest AUROC that clears its null (edit-gated "
-        "n=2 on the current corpus), not the shipped default: the shipped default "
-        "(escalate_after_n=2) fires on every trajectory on this "
-        "corpus, so its 'not flagged' column is empty by construction. Read this figure together "
-        "with the sweep tables, which show every cell of both families.",
-    ),
-    limitations=(
-        "One operating point, not a sweep — the PR/ROC figures show the rest.",
-        "Spending a flag budget equal to the cell's fired count is a choice, not an optimum.",
-        "The random baseline is an expectation, not a sampled interval; a cell one or two counts "
-        "above it is not evidence.",
-    ),
-)
 
-SWEEP_TABLE_SPEC = FigureSpec(
-    reading=(
-        "One row per swept configuration. Columns: escalations fired, P(fail | fired) with its "
-        "95% challenge-bootstrap interval, the base failure rate, lift, the permutation-null "
-        "verdict, and the run-length-only AUROC — what a pure 'run length >= t' predictor scores "
-        "at the same flag count. The table is drawn rather than plotted because the sweep has too "
-        "few distinct results to carry a colour channel honestly. The row that IS the shipped "
-        "default is highlighted — bold text on a shaded background — so the configuration the "
-        "product actually ships can be spotted at a glance."
-    ),
-    goal=(
-        "Read the P(fail | fired) interval against the base rate column. An interval containing "
-        "the base rate is a configuration with no measured value; an interval BELOW it means "
-        "firing predicts success. Read the AUROC against the len-only column too: an AUROC no "
-        "higher than the length-only figure means the 'recurrence' signal is run-length selection."
-    ),
-    definitions=(
-        ("P(fail | fired)", "share of escalated runs that ultimately failed"),
-        ("lift", "P(fail | fired) divided by the base failure rate; 1.0 is worthless"),
-        (
-            "len-only AUROC",
-            "the AUROC of a pure run-length threshold at this cell's flag count — the ceiling "
-            "run length alone can explain",
-        ),
-    ),
-    notes=(
-        "escalate_after_n AND stale_window are both swept (the two are coupled: reaching n "
-        "recurrences needs a window at least that wide, so the stale=10 rows stop firing at "
-        "n>=12 on the current corpus). The shipped default (escalate_after_n=2, stale_window=10) "
-        "is guaranteed a row and is the highlighted one.",
-        "The interval is a CHALLENGE-level bootstrap, not a Wilson interval over rows: the corpus "
-        "is 799 runs drawn from ~160 challenges, so rows are not independent draws and a row-level "
-        "interval is roughly 2x too narrow.",
-    ),
-    limitations=(
-        "The intervals are per row of this table and unadjusted for the multiple configurations "
-        "compared side by side.",
-        "A configuration that never fires has no P(fail | fired) at all; it prints n/a rather "
-        "than 0.000, and it is excluded from the highest-precision line below.",
-    ),
-)
-
-PERMUTATION_NULL_SPEC = FigureSpec(
-    reading=(
-        "The grey histogram is the maximum AUROC the swept policy reaches under BLOCK "
-        "permutation — whole challenge blocks are shuffled, so outcomes move between challenges "
-        "while the global multiset is preserved — with one shared shuffle scored at every swept "
-        "cell and only the largest kept — the FAMILY-WISE (maxT) null across the whole sweep. The "
-        "dashed lines bound that max distribution's central 95%. The red line is the real, "
-        "unshuffled AUROC at the cell that separates best. x is the statistic named on the axis."
-    ),
-    goal=(
-        "The red line must sit clearly to the RIGHT of the upper dashed line. Inside the dashed "
-        "bounds means the sweep's best cell is indistinguishable from noise."
-    ),
-    definitions=(
-        ("null", "what this policy scores when the labels carry no information"),
-        (
-            "family-wise",
-            "the max-statistic (maxT) null over the swept cells, so the p-value beside it is "
-            "already the multiplicity-adjusted one — exact under any dependence between cells",
-        ),
-        (
-            "AUROC",
-            "rank statistic of the fired/not-fired flag against the run outcome, tie-averaged",
-        ),
-    ),
-    notes=(
-        "The null is the gate: a point estimate above chance is not skill on its own.",
-        "Permuting whole challenge blocks preserves the between-challenge variance the "
-        "observation carries; a global shuffle would destroy the clustering and make the band too "
-        "narrow. One shared randomization serves every swept cell, and only the max enters the "
-        "histogram — exactly the distribution the verdict is read off.",
-    ),
-    limitations=(
-        "Clearing this null is necessary, not sufficient: the precision interval must also clear "
-        "the base rate (see the confusion figure), or the AUROC reflects a rank ordering with no "
-        "operating value.",
-        "A cell that never fires has AUROC 0.5 by definition and contributes nothing to the max.",
-    ),
-)
-
-OUTCOME_BARS_SPEC = FigureSpec(
-    reading=(
-        "Two bars with 95% intervals: the share of runs that failed among those the policy "
-        "escalated, and among those it left alone. BOTH intervals are bootstrapped over whole "
-        "CHALLENGES from the same resamples, since runs inside a challenge are correlated and the "
-        "footer compares the two. The dashed line is the corpus base failure rate. n is printed "
-        "on each bar."
-    ),
-    goal=(
-        "Want the left bar (escalated) clearly ABOVE the dashed base rate and above the right "
-        "bar. Left below right means the policy is INVERTED: it fires on the runs that succeed."
-    ),
-    definitions=(("base rate", "share of all runs in this corpus that ended unresolved"),),
-    notes=("This is the question the product asks, at the unit the policy acts on.",),
-    limitations=(
-        "Association only: no stored trajectory contains an escalation that actually happened, so "
-        "this cannot say what escalating would have CHANGED.",
-        "The direction in the footer is called from two marginal intervals failing to overlap. "
-        "That is a conservative test of a difference — it can miss a real gap, but it cannot "
-        "invent one; it is not a paired test of the difference itself.",
-    ),
-)
-
-EDIT_GATED_SWEEP_TABLE_SPEC = FigureSpec(
-    reading=(
-        "The SAME recurrence sweep as the main sweep table, replayed with the reproduction phase "
-        "excluded: failures before the agent's first edit-like action are NOT counted as "
-        "escalation evidence. One row per configuration; columns match the main table, including "
-        "the run-length-only AUROC. This is the variant that separates on this corpus — the "
-        "as-shipped counter fires on every run because reproduction failures recur at step 1-2, "
-        "so it reads the base rate, while the edit-gated counter only accumulates once the agent "
-        "has actually started changing code."
-    ),
-    goal=(
-        "Read the P(fail | fired) interval against the base rate column AND the AUROC against "
-        "the len-only column. A cell that clears both its permutation null and the run-length "
-        "baseline is a recurrence edge that run length alone cannot explain."
-    ),
-    definitions=(
-        ("P(fail | fired)", "share of escalated runs that ultimately failed"),
-        ("lift", "P(fail | fired) divided by the base failure rate; 1.0 is worthless"),
-        (
-            "len-only AUROC",
-            "the AUROC a pure run-length threshold reaches at this cell's flag count — the "
-            "ceiling run length alone can explain",
-        ),
-    ),
-    notes=(
-        "This is an EVAL-ONLY knob: the live router has no per-step action stream to gate on. It "
-        "measures what the recurrence mechanism could do if a per-step detector ran in production "
-        "and only counted failures after the agent first tried to change the code.",
-    ),
-    limitations=(
-        "Still scored at per-step cadence, not the per-session cadence production runs.",
-        "No stored trajectory contains an escalation that actually happened, so this is "
-        "association, not a causal estimate of what escalating would have CHANGED.",
-    ),
+_SCOPE_BOXES: tuple[tuple[str, str], ...] = (
+    ("DETECTS (per-step, eval-only)", "OK"),
+    ("VALUE (session cadence, observational)", "OK"),
+    ("CAUSAL VALUE AT THE TRIGGER", "not identified: P(escalate)=0"),
 )
 
 
-SESSION_CADENCE_SPEC = FigureSpec(
-    reading=(
-        "Two bars with 95% Wilson intervals, measured on the SAME instances (the overlap subset "
-        "where each task has >=2 cheap sessions AND a frontier session). The left bar: after a "
-        "cheap session FAILED on a task, the share of FRONTIER sessions on that task that "
-        "resolved it — the escalation arm. The right bar: after a cheap session failed, the share "
-        "of a SECOND cheap session on that task that resolved it — the no-escalation retry arm. "
-        "The dashed line is the cheap model's overall base rate."
-    ),
-    goal=(
-        "Want the left bar clearly above the right bar: escalating to a frontier model after a "
-        "cheap failure should resolve the task far more often than a same-cost retry. This is "
-        "the value of the ladder at the cadence production actually runs (one decision per "
-        "session), where the per-step sweep does not apply."
-    ),
-    definitions=(
-        ("frontier", "the most expensive models present in the corpus — the escalation target"),
-        ("cheap", "the cheapest model present — the base pick, and the retry counterfactual"),
-        (
-            "overlap subset",
-            "tasks with >=2 cheap sessions AND a frontier session, so both arms "
-            "are read on the same tasks (adaptive-coverage selection removed as far as possible)",
-        ),
-    ),
-    notes=(
-        "Observational, not causal: the arms ran in parallel, and which tasks got frontier "
-        "coverage was adaptive. Small-n — read the intervals, not the point estimates.",
-        "At session cadence the detector is trivially satisfied (the failed cheap session carries "
-        "the task's target failing-check id), so this measures the ladder's VALUE, not the "
-        "trigger's detection quality.",
-    ),
-    limitations=(
-        "The escalation ladder in production steps one rank at a time (effort, then the next "
-        "price rank), not straight to the frontier; this figure collapses the ladder to its "
-        "endpoint.",
-        "No causal ordering: a frontier session that resolved might have done so regardless of "
-        "the cheap failure that preceded it in this ordering.",
-    ),
-)
+def scope_strip(ax: Axes) -> None:
+    """Three boxes saying which of the three escalation claims this figure can support."""
+    # The third box is the one that matters. No logged trajectory ever escalated, so the
+    # propensity of the escalate action is 0 everywhere and `ope.estimate_policy_value` returns
+    # `not_identified` — correctly. Drawing an estimated policy value anyway would be fabrication,
+    # so the absence is rendered as a labelled box instead of quietly left off the figure.
+    ax.axis("off")
+    ax.set_xlim(0, 3)
+    ax.set_ylim(0, 1)
+    for index, (claim, verdict) in enumerate(_SCOPE_BOXES):
+        supported = verdict == "OK"
+        ax.add_patch(
+            Rectangle(
+                (index + 0.01, 0.08),
+                0.98,
+                0.84,
+                facecolor="#F1F8E9" if supported else "#FFEBEE",
+                edgecolor=_NULL_CENTRE if supported else _OBSERVED,
+                linewidth=0.8 if supported else 1.6,
+            )
+        )
+        ax.text(
+            index + 0.5,
+            0.5,
+            f"{claim} — {verdict}",
+            ha="center",
+            va="center",
+            fontsize=7.5,
+            color="#1a1a1a" if supported else _OBSERVED,
+            fontweight="bold" if not supported else "normal",
+        )
 
 
-RECURRENCE_ROC_SPEC = FigureSpec(
+# ------------------------------------------------------------- 1. escalation_decision
+
+
+ESCALATION_DECISION_SPEC = FigureSpec(
+    title="Counting the reproduction phase is what decides the answer: AUROC 0.601 vs 0.781",
     reading=(
-        "The COMPLETE ROC of the recurrence signal as a continuous score. Each run gets a score "
-        "= the largest number of times the same failing-check id recurred in a window (the "
-        "'stuck depth'); the curve sweeps that score over ALL thresholds, so unlike the discrete "
-        "operating-characteristic figures it has a point at every possible escalate_after_n, not "
-        "just the swept grid. Two curves: as-shipped (every same-key failure counted) and "
-        "edit-gated (failures before the agent's first edit excluded). The dashed diagonal is "
-        "chance; the shaded band is the recurrence score's OWN permutation null — the central "
-        "95% of AUROCs the score reaches when terminal outcomes are shuffled across challenges "
-        "— so an AUROC above it is signal, not noise; the area under each curve is its AUROC."
+        "Left: the COMPLETE ROC of the recurrence score as a continuous statistic — each run is "
+        "scored by the largest number of times one failing-check id recurred inside the shipped "
+        "stale_window, and the curve sweeps every threshold, so it has a point at every possible "
+        "escalate_after_n rather than only the swept grid. Two curves: as-shipped (every same-key "
+        "failure counted) and edit-gated (failures before the agent's first edit-like action are "
+        "not counted). The grey band is the score's own challenge-block permutation null. Middle: "
+        "P(run failed | score >= t) against t for both families, with the corpus base rate as the "
+        "no-skill line. Right: what share of the corpus each threshold fires on. The shipped "
+        "escalate_after_n is marked on both right-hand panels."
     ),
     goal=(
-        "The edit-gated curve should sit clearly above and left of the as-shipped one — the "
-        "reproduction phase (counted by the as-shipped score) is pure noise at the low end, so "
-        "the as-shipped curve hugs the diagonal until the score gets large. The gap between the "
-        "two curves is exactly what the reproduction phase masks. Read both AUROCs against the "
-        "shaded null band: a curve whose AUROC clears the band's upper edge is a detector, one "
-        "inside it is indistinguishable from shuffled labels."
+        "The two curves must differ. If they do, the reproduction phase — not the recurrence "
+        "mechanism — is what the as-shipped counter is measuring, and the gap between them is its "
+        "size. Read the middle panel at the shipped threshold: the edit-gated precision there is "
+        "the operating point every other figure in this set uses."
     ),
     definitions=(
-        ("stuck depth", "max same-key verified failure count the run ever accumulates"),
+        ("recurrence score", "max same-key verified-failure count a run reaches in the window"),
         ("edit-gated", "failures before the agent's first edit-like action are not counted"),
-        ("AUROC", "area under this curve — the discrimination of the score over terminal outcome"),
+        ("null band", "central 95% of ROC curves under challenge-block label shuffles"),
     ),
     notes=(
-        "This is the recurrence rule relaxed to a score; the discrete PR/ROC figures are its "
-        "operating points at the swept thresholds. The AUROC of the score bounds what ANY "
-        "single threshold (any escalate_after_n) can achieve.",
+        "stale_window is held FIXED at the shipped value for BOTH curves. It is a knob in its own "
+        "right — the as-shipped score reaches 0.728 at stale_window=1000 — so letting it vary "
+        "between the two curves would have credited the counting change with a window change.",
+        "The AUROC of the score bounds what ANY single escalate_after_n can reach.",
     ),
     limitations=(
-        "Still per-step cadence and eval-only (production has no per-step action stream).",
-        "The score is computed with the shipped stale_window; a shorter window would change it.",
+        "Per-step cadence and eval-only: the live router has no per-step action stream to gate on, "
+        "so the edit-gated family measures what a per-step detector could do, not what ships.",
+        "Association only — no stored trajectory contains an escalation that actually happened.",
     ),
 )
 
 
-def recurrence_roc(
+def escalation_decision(
     scores_plain: Sequence[float],
     scores_edit: Sequence[float],
     labels: Sequence[bool],
-    ax: Axes,
+    axes: Sequence[Axes],
     *,
     null: NullResult | None = None,
     band: tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]] | None = None,
+    shipped_n: int,
 ) -> Annotations:
-    """The complete ROC of the recurrence 'stuck depth' score, as-shipped and edit-gated."""
-    # One point per DISTINCT score threshold (the score is integer-valued, so the curve has a
-    # vertex at every possible escalate_after_n) — a proper continuous curve, not the discrete
-    # operating characteristic of the swept policy.
-    ax.plot([0, 1], [0, 1], linestyle=":", color=_FAINT, linewidth=0.8, label="chance")
-    if band is not None:
-        grid, low, high = band
-        ax.fill_between(
-            grid,
-            low,
-            high,
-            color=_NULL_BAND,
-            alpha=0.45,
-            label="null 95% band",
-        )
-    for scores, label, colour, style in (
-        (scores_plain, "as-shipped", "#455A64", "--"),
-        (scores_edit, "edit-gated", _OBSERVED, "-"),
-    ):
-        fpr_tpr = metrics.roc_operating_points(scores, list(labels))
-        xs, ys = zip(*fpr_tpr, strict=True)
-        ax.plot(
-            xs,
-            ys,
-            label=f"{label} (AUROC {metrics.auroc(scores, labels):.3f})",
-            color=colour,
-            linestyle=style,
-            linewidth=1.8,
-        )
-    ax.set_xlabel("false-positive rate (share of resolved runs flagged)")
-    ax.set_ylabel("true-positive rate (share of failed runs flagged)")
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.set_title("complete ROC of the recurrence score — every threshold, both gating modes")
-    ax.legend()
+    """ROC + null band, precision-vs-threshold and fire rate — the detection claim, in one."""
+    ax_roc, ax_precision, ax_rate, ax_scope = axes
+    _draw_roc(ax_roc, scores_plain, scores_edit, labels, band=band)
+    base = metrics.prevalence(labels)
+    _draw_threshold_panels(ax_precision, ax_rate, scores_plain, scores_edit, labels, shipped_n)
+    ax_precision.axhline(
+        base, linestyle="--", color=_NULL_CENTRE, linewidth=1.0, label=f"base rate {base:.3f}"
+    )
+    ax_precision.legend(fontsize=_LEGEND_PT, loc="lower right")
+    scope_strip(ax_scope)
+    auroc_plain = metrics.auroc(scores_plain, labels)
+    auroc_edit = metrics.auroc(scores_edit, labels)
     return Annotations(
+        subtitle_facts=(
+            f"base rate {base:.3f}",
+            f"AUROC as-shipped {auroc_plain:.3f} · edit-gated {auroc_edit:.3f}",
+        ),
         notes=(
-            f"AUROC as-shipped {metrics.auroc(scores_plain, labels):.3f} vs edit-gated "
-            f"{metrics.auroc(scores_edit, labels):.3f}",
-            "one point per distinct recurrence count, so the curve is continuous in the "
-            "escalate_after_n threshold",
             *(
                 (
-                    f"null 95% [{null.ci_low:.3f}, {null.ci_high:.3f}]; AUROC above it "
-                    "clears the instrument's detection floor",
+                    f"score null 95% [{null.ci_low:.3f}, {null.ci_high:.3f}], "
+                    f"p={null.p_value:.4f} over {null.n_permutations} challenge-block shuffles",
                 )
                 if null is not None
                 else ()
             ),
         ),
-        limitations=(
-            "The score is integer (a same-key failure count), so the curve has a vertex per "
-            "possible threshold — smooth-looking but discrete under the hood.",
-        ),
+        counts=(("stamped_runs", len(labels)),),
     )
 
 
-CAPTURE_COVERAGE_SPEC = FigureSpec(
+def _draw_roc(
+    ax: Axes,
+    scores_plain: Sequence[float],
+    scores_edit: Sequence[float],
+    labels: Sequence[bool],
+    *,
+    band: tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]] | None,
+) -> None:
+    ax.plot([0, 1], [0, 1], linestyle=":", color=_FAINT, linewidth=0.8, label="chance")
+    if band is not None:
+        grid, low, high = band
+        ax.fill_between(grid, low, high, color=_NULL_BAND, alpha=0.45, label="null 95% band")
+    for scores, name, colour, style in (
+        (scores_plain, "as-shipped", _SHIPPED, "--"),
+        (scores_edit, "edit-gated", _OBSERVED, "-"),
+    ):
+        points = metrics.roc_operating_points(scores, list(labels))
+        xs, ys = zip(*points, strict=True)
+        ax.plot(
+            xs,
+            ys,
+            label=f"{name} ({metrics.auroc(scores, labels):.3f})",
+            color=colour,
+            linestyle=style,
+            linewidth=1.8,
+        )
+    ax.set_xlabel("false-positive rate")
+    ax.set_ylabel("true-positive rate")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.tick_params(labelsize=_TICK_PT)
+    ax.legend(fontsize=_LEGEND_PT, loc="lower right")
+    panel_label(ax, "A · complete ROC of the recurrence score")
+
+
+def _threshold_curve(
+    scores: Sequence[float], labels: Sequence[bool]
+) -> tuple[list[float], list[float], list[float]]:
+    """(threshold, P(fail | score >= t), share firing) at every distinct positive threshold."""
+    thresholds = sorted({s for s in scores if s > 0})
+    xs: list[float] = []
+    precision: list[float] = []
+    rate: list[float] = []
+    for t in thresholds:
+        flagged = [labels[i] for i, s in enumerate(scores) if s >= t]
+        if not flagged:
+            continue
+        xs.append(t)
+        precision.append(sum(flagged) / len(flagged))
+        rate.append(len(flagged) / len(scores))
+    return xs, precision, rate
+
+
+def _draw_threshold_panels(
+    ax_precision: Axes,
+    ax_rate: Axes,
+    scores_plain: Sequence[float],
+    scores_edit: Sequence[float],
+    labels: Sequence[bool],
+    shipped_n: int,
+) -> None:
+    for scores, name, colour, style in (
+        (scores_plain, "as-shipped", _SHIPPED, "--"),
+        (scores_edit, "edit-gated", _OBSERVED, "-"),
+    ):
+        xs, precision, rate = _threshold_curve(scores, labels)
+        if not xs:
+            continue
+        ax_precision.plot(xs, precision, color=colour, linestyle=style, linewidth=1.8, label=name)
+        ax_rate.plot(xs, rate, color=colour, linestyle=style, linewidth=1.8, label=name)
+    for ax in (ax_precision, ax_rate):
+        ax.axvline(shipped_n, color="#F9A825", linewidth=1.4, label=f"shipped n={shipped_n}")
+        # Linear, not log: the score is an integer recurrence count with a single-digit useful
+        # range, and a log axis on 1-10 labels two decades and nothing between them.
+        ax.set_xlabel("escalate_after_n threshold")
+        ax.set_ylim(0, 1)
+        ax.tick_params(labelsize=_TICK_PT)
+    ax_precision.set_ylabel("P(run failed | fired)")
+    ax_rate.set_ylabel("share of corpus fired on")
+    ax_rate.legend(fontsize=_LEGEND_PT, loc="lower left")
+    panel_label(ax_precision, "B · precision at every threshold")
+    panel_label(ax_rate, "C · fire rate at every threshold")
+
+
+# ----------------------------------------------------------------- 2. operating_point
+
+
+OPERATING_POINT_SPEC = FigureSpec(
+    title="The shipped counter sits at the base rate; edit-gated counting separates outcomes",
     reading=(
-        "One bar per model: the share of that model's trajectories that went through the per-step "
-        "verified-outcome stamping stage. A bar at zero means not one of that model's runs carries "
-        "per-step outcomes, so the recurrence trigger is structurally dead on it. The number of "
-        "trajectories is printed on each bar."
+        "Left: at the SAME shipped knobs, the share of runs that ultimately failed among those "
+        "the policy escalated and among those it left alone — for BOTH counting modes. The left "
+        "pair is the configuration the product actually ships, which fires on essentially every "
+        "run: its escalated bar sits on the dashed base rate and its not-escalated arm holds so "
+        "few runs that no rate can be read off it, so it is drawn as a hatched 'undefined' box "
+        "rather than as a measured 0.000. The right pair is the same rule with the reproduction "
+        "phase excluded. Intervals are the central 95% of the same challenge-bootstrap resamples, "
+        "so the two arms of a pair are paired draw-for-draw. Right: the CANONICAL (edit-gated) "
+        "cell's AUROC against TWO nulls — the family-wise max-over-cells challenge-block null "
+        "(grey), which asks whether any cell in the sweep could reach this by chance, and the "
+        "length-stratified null (blue), which shuffles failures inside equal-count run-length "
+        "bins and so asks whether firing predicts failure BEYOND what the lengths of the fired "
+        "runs already predict."
     ),
     goal=(
-        "Want every bar at 1.0. Any bar at zero invalidates every per-model comparison on this "
-        "corpus — that model contributes outcome labels but no detectable evidence."
+        "The left pair IS the negative result and it belongs on a canvas, not in a table row: a "
+        "shipped configuration whose escalated bar sits on the base rate is a null detector. Then "
+        "want the right pair's escalated bar clearly above both the dashed line and its own quiet "
+        "bar, and the red observed line to the right of BOTH null distributions. Clearing the "
+        "grey null alone is not enough: the challenge-block shuffle destroys the run-length "
+        "association along with everything else, so a cell whose firing is really length "
+        "selection can clear it and still sit inside the blue one."
     ),
     definitions=(
-        ("stamped", "the offline container replay ran and wrote per-step verified outcomes"),
-        ("terminal failure rate", "share of that model's runs that ended unresolved"),
+        ("as-shipped", "every same-key verified failure counts, which is what production runs"),
+        ("canonical cell", "edit-gated counting at the shipped escalate_after_n/stale_window"),
+        ("family-wise null", "max AUROC over the swept cells under one shared block shuffle"),
+        ("length-stratified null", "failures shuffled within equal-count run-length bins"),
     ),
     notes=(
-        "Unstamped runs are a pipeline coverage gap, not agent behaviour: their per-step fields "
-        "are the parser defaults, so they look uniformly successful until the terminal grade.",
+        "Both pairs are at the SAME knobs, so the only thing that differs between them is how the "
+        "counter treats the reproduction phase.",
+        "The intervals are a CHALLENGE-level bootstrap: the corpus is drawn from ~166 challenges, "
+        "each attempted by several model/effort arms, so a row-level interval is roughly 2x too "
+        "narrow.",
     ),
     limitations=(
-        "Stamping coverage tracks capture DATE, and capture date correlates with model, so model "
-        "and coverage are confounded on this corpus and cannot be separated from it.",
-        "This figure deliberately does NOT plot the `capture_rate` field that the JSON report "
-        "carries. That field is the share of failed steps holding a failing_check_id, and the "
-        "normalizer writes `success`, `failing_check_id` and `blocking` in one assignment — so it "
-        "is 1.000 for every model BY CONSTRUCTION on every corpus that was stamped by the grader-"
-        "parity replay. A bar chart of it would be six identical full bars presenting an identity "
-        "as a measurement.",
+        "Association, not causation — see the scope strip: no logged trajectory escalated.",
+        "Two operating points; the sweep figure shows every other configuration.",
     ),
 )
 
 
-def _draw_confusion_cells(
-    counts: tuple[tuple[int, int], tuple[int, int]],
-    expected: tuple[tuple[float, float], tuple[float, float]],
-    ax: Axes,
-) -> None:
-    """A 2x2 heatmap whose fill is the cell's excess over its random-flagger baseline."""
-    # The four cells carry ONE number: with the flag count fixed every excess is the same magnitude
-    # up to sign (tn - E[tn] == tp - E[tp], and both off-diagonals are its negation), so the fill
-    # is a diverging scale on that single excess — red above the baseline, blue below, white at it —
-    # NOT a shade per cell. The previous version shaded by RAW count, which put the heaviest ink on
-    # the cell furthest BELOW its baseline: the eye read "biggest = best" off a deficit, and a
-    # four-valued scale was encoding one degree of freedom as four. Same reasoning as `sweep_table`,
-    # which refuses a colour scale because two distinct results cannot carry one honestly; here the
-    # single degree of freedom is what the colour encodes, and the footer says so.
-    deltas = np.array([[counts[r][c] - expected[r][c] for c in range(2)] for r in range(2)])
-    peak = max(float(np.abs(deltas).max()), _DELTA_FLOOR)
-    cmap = LinearSegmentedColormap.from_list("excess", (_EXCESS_NEG, _EXCESS_ZERO, _EXCESS_POS))
-    norm = TwoSlopeNorm(vcenter=0.0, vmin=-peak, vmax=peak)
-    for r in range(2):
-        for c in range(2):
-            ax.add_patch(
-                Rectangle(
-                    (c - 0.5, r - 0.5),
-                    1.0,
-                    1.0,
-                    facecolor=cmap(norm(deltas[r, c])),
-                    edgecolor=_NULL_CENTRE,
-                    linewidth=0.8,
-                )
-            )
-    ax.set_xlim(-0.5, 1.5)
-    ax.set_ylim(1.5, -0.5)
-    ax.set_xticks([0, 1], ["flagged", "not flagged"])
-    ax.set_yticks([0, 1], ["failed", "resolved"])
-    ax.axhline(0.5, color=_NULL_CENTRE, linewidth=0.8)
-    ax.axvline(0.5, color=_NULL_CENTRE, linewidth=0.8)
-    for r in range(2):
-        for c in range(2):
-            ax.text(
-                c,
-                r,
-                f"{counts[r][c]}\n[{expected[r][c]:.0f}]\n{counts[r][c] - expected[r][c]:+.1f}",
-                ha="center",
-                va="center",
-                color="black",
-            )
-    _attach_excess_colorbar(ax, cmap, norm, peak)
-
-
-def _attach_excess_colorbar(ax: Axes, cmap, norm, peak: float) -> None:
-    """The scale the fills live on; the footer's notes explain what it encodes."""
-    # The grid uses only the two extremes of the scale, so the colorbar ticks at them rather than
-    # at intermediate values the data never reaches.
-    mappable = ScalarMappable(norm=norm, cmap=cmap)
-    mappable.set_array(np.array([-peak, peak]))
-    ax.figure.colorbar(
-        mappable, ax=ax, label="excess over random flagging", ticks=[-peak, peak], format="%+.1f"
-    )
-
-
-def _confusion_notes(
-    cm: ConfusionMatrix, expected_tp: float, *, total: int, threshold: float, rate: float
-) -> tuple[str, ...]:
-    """The corpus's own numbers, so no caption ever restates a base rate as a literal."""
-    positives = cm.tp + cm.fn
-    base_rate = positives / total if total else 0.0
-    excess = cm.tp - expected_tp
-    return (
-        f"{total} trajectories at the derived operating threshold {threshold:.4f}; this corpus's "
-        f"measured base failure rate is {base_rate:.4f} ({positives} of {total} runs failed)",
-        f"flag rate {rate:.3f} ({cm.tp + cm.fp} of {total}); a random flagger at that rate catches "
-        f"{expected_tp:.0f} of {positives} failures against the detector's {cm.tp}",
-        f"ONE degree of freedom: with the flag count fixed, the whole grid is the caught-failure "
-        f"excess {excess:+.1f}. The resolved/not-flagged cell repeats it and the two off-diagonal "
-        f"cells are {-excess:+.1f}; none of them is independent evidence.",
-    )
-
-
-def _budget_limits(flagged: int, budget: int, total: int) -> tuple[str, ...]:
-    """Say when the cut spent more flags than the base-rate budget it was derived from."""
-    # `operating_threshold` returns the base-rate quantile SCORE and every consumer flags
-    # `score >= cut`, so a block of runs tied with the cut is admitted whole. When that block
-    # straddles the budget the grid is drawn at a flag rate the caption's derivation never chose,
-    # and every count in it moves. Stated here rather than silently absorbed.
-    if budget <= 0 or flagged <= budget or total <= 0:
-        return ()
-    return (
-        f"BUDGET OVERSPENT BY THE TIE BLOCK: the base-rate budget is {budget} flags "
-        f"({budget / total:.3f} of the corpus) but the cut admits {flagged} "
-        f"({flagged / total:.3f}), "
-        f"because {flagged - budget} run(s) tie with the threshold score and `score >= cut` takes "
-        "the whole tie block. Every count in this grid, and the random baseline beside it, is at "
-        "the realised rate, not the intended one.",
-    )
-
-
-def sweep_table(
-    cells: Sequence[PolicyCell], ax: Axes, *, shipped_index: int | None = None
+def operating_point(
+    as_shipped: PolicyCell | None, canonical: PolicyCell, axes: Sequence[Axes]
 ) -> Annotations:
-    """The sweep as a table with intervals — the honest replacement for a 2-result heatmap."""
-    ax.axis("off")
-    # `stale_window` is a COLUMN, not a pinned constant: the shipped cell is appended to the swept
-    # grid and differs from it on exactly that knob. Rendering `n` alone drew the shipped row and
-    # the swept n=2 row as two identical lines — a duplicate to any reader, under a title that
-    # claimed the knob was pinned.
-    header = [
-        "n",
-        "stale",
-        "escalated",
-        "P(fail|fired)",
-        "95% CI",
-        "base",
-        "lift",
-        "vs null",
-        "len-only",
-    ]
-    rows = [
-        [
-            str(c.escalate_after_n),
-            str(c.stale_window),
-            str(c.n_escalated),
-            _rate(c.precision),
-            f"[{_rate(c.precision_ci[0])}, {_rate(c.precision_ci[1])}]",
-            f"{c.base_failure_rate:.3f}",
-            "n/a" if c.lift is None else f"{c.lift:.2f}x",
-            "beats" if c.null_auroc.beats_null else "inside",
-            "n/a" if c.length_baseline_auroc is None else f"{c.length_baseline_auroc:.3f}",
-        ]
-        for c in cells
-    ]
-    table = ax.table(cellText=rows, colLabels=header, loc="center", cellLoc="center")
-    table.auto_set_font_size(False)
-    # 9 columns: at fontsize 8 the widest cells stay inside their borders without shrinking.
-    table.set_fontsize(8)
-    table.scale(1.16, 1.55)
-    title = "policy sweep — escalate_after_n × stale_window (ladder pinned)"
-    if shipped_index is not None and 0 <= shipped_index < len(rows):
-        _mark_shipped_row(table, shipped_index)
-        title += " — shipped default is the highlighted row"
-    ax.set_title(title)
-    return Annotations(notes=(_sweep_note(cells),), limitations=_sweep_limits(cells))
-
-
-def _mark_shipped_row(table: Table, index: int) -> None:
-    """Bold the shipped row's text and shade its cells, so the default is spot-table."""
-    # `get_celld()` keys are (row, col); the header occupies row 0, so data row `index` is cell
-    # row `index + 1`. The shipped index is passed in (run_eval owns what "shipped" means) rather
-    # than matched by value here, so plots.py never imports the eval's constants.
-    for (row, _col), cell in table.get_celld().items():
-        if row == index + 1:
-            cell.set_text_props(fontweight="bold")
-            cell.set_facecolor(_SHIPPED_ROW)
-
-
-def _sweep_note(cells: Sequence[PolicyCell]) -> str:
-    # A cell that never fired has NO precision (None), not a precision of zero. Ranking it as 0.0
-    # let a never-firing configuration enter the argmax and lose only by luck; it is excluded here.
-    scored = [c for c in cells if c.precision is not None]
-    if not cells:
-        return "no configurations swept"
-    if not scored:
-        return f"{len(cells)} configurations, none of which fired: P(fail|fired) is undefined"
-    best = max(scored, key=lambda c: c.precision or 0.0)
-    return (
-        f"{len(cells)} configurations ({len(scored)} fired); highest P(fail|fired) is "
-        f"{best.precision:.3f} at escalate_after_n={best.escalate_after_n} "
-        f"(stale_window={best.stale_window}) against a base rate of {best.base_failure_rate:.3f}"
-    )
-
-
-def _sweep_limits(cells: Sequence[PolicyCell]) -> tuple[str, ...]:
-    """Say plainly, per cell rather than globally, when an interval fails to clear the base rate."""
-    # `any(...)` used to suppress this warning for EVERY cell as soon as ONE separated — including
-    # for the shipped configuration, which is the one a reader is actually deciding on. The count
-    # is reported instead, so a lone separating cell can never vouch for the rest of the sweep.
-    if not cells:
-        return ()
-    separating = [c for c in cells if c.precision_ci[0] > c.base_failure_rate]
-    if len(separating) == len(cells):
-        return ()
-    if not separating:
-        return (
-            "No configuration's precision interval clears the base failure rate: on this corpus "
-            "the sweep contains no setting with measured value.",
-        )
-    cleared = ", ".join(f"n={c.escalate_after_n}/stale={c.stale_window}" for c in separating)
-    return (
-        f"Only {len(separating)} of {len(cells)} configurations clear the base failure rate "
-        f"({cleared}); every other cell in this figure, including any not listed, does not.",
-    )
-
-
-def permutation_null_plot(null: NullResult, ax: Axes, *, label: str) -> Annotations:
-    """The null distribution with its 95% bounds and the observed value drawn over it."""
-    ax.hist(list(null.draws), bins=40, color=_NULL_BAND, label=f"null ({null.n_permutations} perm)")
-    ax.axvline(null.ci_low, linestyle="--", color="grey")
-    ax.axvline(null.ci_high, linestyle="--", color="grey", label="null 95%")
-    ax.axvline(null.observed, color=_OBSERVED, linewidth=2, label=f"observed={null.observed:.3f}")
-    ax.set_xlabel(label)
-    ax.set_ylabel("permutations")
-    ax.set_title(f"{label} against its permutation null")
-    ax.legend()
-    verdict = (
-        "clears the null band"
-        if null.beats_null
-        else "sits INSIDE the null band — indistinguishable from chance"
-    )
+    """Both counting modes' outcome arms at the shipped knobs, and the canonical cell's nulls."""
+    # The as-shipped pair is drawn even though — BECAUSE — it is the null result. Collapsing the
+    # whole figure set onto the canonical cell would demote "the configuration we actually ship
+    # fires on 726 of 727 runs and reads the base rate" to one row of a 30-row table, which is
+    # the exact failure this redesign exists to remove.
+    ax_bars, ax_null, ax_scope = axes
+    _draw_arms(ax_bars, as_shipped, canonical)
+    _draw_nulls(ax_null, canonical)
+    scope_strip(ax_scope)
     return Annotations(
-        notes=(f"observed {null.observed:.4f} {verdict}; p={null.p_value:.4f}",),
-        limitations=()
-        if null.beats_null
-        else (f"NO USABLE SIGNAL on {label}: p={null.p_value:.3f} against shuffled labels.",),
+        subtitle_facts=(
+            f"both at escalate_after_n={canonical.escalate_after_n}, "
+            f"stale_window={canonical.stale_window} · base rate "
+            f"{canonical.base_failure_rate:.3f}",
+            *_family_facts(as_shipped, canonical),
+        ),
+        caveat=_arm_floor_caveat(as_shipped, canonical),
+        notes=tuple(
+            _cell_note(name, cell)
+            for name, cell in (("as-shipped", as_shipped), ("edit-gated", canonical))
+            if cell is not None
+        ),
+        counts=(
+            ("fired", canonical.tp + canonical.fp),
+            ("quiet", canonical.fn + canonical.tn),
+        ),
+        limitations=_direction_limits(canonical),
     )
 
 
-def _annotate_sweep_points(
-    ax: Axes,
-    cells: Sequence[PolicyCell],
-    xy_of: Callable[[PolicyCell], tuple[float, float | None]],
-    placed: list[tuple[float, float]] | None = None,
-) -> None:
-    """Label each fired operating point, deduplicating co-located cells and staggering overlaps."""
-    # The two stale_window rows of one escalate_after_n can land on the SAME plotted point (the
-    # window only gates how many events the trigger admits, not whether it fired), and the old
-    # code annotated EVERY cell — two identical `n=2` labels printed on top of each other, then
-    # the next threshold's label on top of both. Coincident points are annotated ONCE (their n
-    # values joined); points that merely land close together on the curve are pushed apart
-    # vertically so no two labels sit on the same spot.
-    #
-    # `placed` is SHARED across family calls (both curves of the PR/ROC figure pass the SAME
-    # list), so the edit-gated labels dodge the as-shipped ones: the old per-call local list let
-    # an edit-gated n=20 label land on the as-shipped n=4 label, and so on for four pairs on the
-    # committed figures. None (a standalone call) starts a fresh list.
-    if placed is None:
-        placed = []
-    grouped: dict[tuple[float, float], list[PolicyCell]] = {}
-    for c in cells:
-        if c.precision is None:
-            continue
-        x, y = xy_of(c)
-        if y is None:
-            continue
-        grouped.setdefault((round(x, 6), round(y, 6)), []).append(c)
-    for (x, y), members in grouped.items():
-        label = "n=" + ",".join(f"{c.escalate_after_n}" for c in members)
-        # Drop the label until its anchor clears every earlier one: consecutive thresholds sit
-        # within ~0.03-0.05 of each other on the curve, so a flat (6, 4) offset stacks every
-        # label on its neighbour. `step` is roughly one text line in data units (fontsize 8).
-        nudge = 0
-        step, radius = 0.035, 0.022
-        while any(
-            abs(px - x) < 0.10 and abs(py - (y - step * nudge)) < radius for px, py in placed
-        ):
-            nudge += 1
-        placed.append((x, y - step * nudge))
-        ax.annotate(
-            label,
-            (x, y),
-            textcoords="offset points",
-            xytext=(6, 4 - 14 * nudge),
-            fontsize=8,
+def _family_facts(as_shipped: PolicyCell | None, canonical: PolicyCell) -> tuple[str, ...]:
+    facts = []
+    if as_shipped is not None:
+        facts.append(
+            f"as-shipped fires {as_shipped.n_escalated}/{as_shipped.n_trajectories} at "
+            f"P(fail|fired)={_rate(as_shipped.precision)}"
         )
+    facts.append(
+        f"edit-gated fires {canonical.n_escalated}/{canonical.n_trajectories} at "
+        f"{_rate(canonical.precision)} vs {_rate(canonical.p_fail_given_quiet)} quiet"
+    )
+    return tuple(facts)
 
 
-def policy_pr_curve(
-    cells: Sequence[PolicyCell], ax: Axes, *, edit_gated: Sequence[PolicyCell] = ()
-) -> Annotations:
-    """Precision vs recall across SWEPT thresholds — the escalation method's curve."""
-    # The old PR figure was drawn from the prefix risk model, whose score is constant at the
-    # evaluated depths (early steps are all bug-reproduction, so the model ranks nothing) — a
-    # degenerate 1-2-point curve. The escalation METHOD is the policy, and its operating
-    # characteristic is real: as escalate_after_n rises, precision climbs from the base rate
-    # toward 1.0 (as-shipped 0.878 at n=50; edit-gated 0.950) while recall falls. One point per
-    # swept cell per family; the base rate is the no-skill line.
-    # When the edit-gated family is present it is drawn as a SECOND curve (filled markers): the
-    # same recurrence rule with failures before the agent's first edit excluded from the counter.
-    # On this corpus that variant separates much earlier and harder (n=2 already lifts 1.41), so
-    # the two curves together ARE the finding — the mechanism works when the reproduction phase
-    # is not counted as escalation evidence.
-    points = [(c.recall, c.precision) for c in cells if c.precision is not None]
-    scored = [c for c in cells if c.precision is not None]
-    if not points and not edit_gated:
-        return Annotations(
-            limitations=(
-                "NO CONFIGURATION FIRED: the sweep contains no measurable operating point.",
-            )
+def _arm_counts(cell: PolicyCell) -> tuple[int, int]:
+    return cell.tp + cell.fp, cell.fn + cell.tn
+
+
+def _arm_floor_caveat(as_shipped: PolicyCell | None, canonical: PolicyCell) -> str | None:
+    """Name an arm too small to read a rate off, in the one line the canvas allows."""
+    thin: list[str] = []
+    for family, cell in (("as-shipped", as_shipped), ("edit-gated", canonical)):
+        if cell is None:
+            continue
+        fired, quiet = _arm_counts(cell)
+        thin += [
+            f"{family} {name} arm n={n}"
+            for name, n in (("escalated", fired), ("not-escalated", quiet))
+            if n < policy_eval.MIN_ARM
+        ]
+    if not thin:
+        return None
+    return f"{' and '.join(thin)}: below the n={policy_eval.MIN_ARM} floor, drawn as undefined"
+
+
+# Two pairs with a gap between them, so the eye groups each family's arms before comparing
+# families. The gap is not decoration: adjacent bars read as comparable, and the comparison that
+# matters is fired-vs-quiet WITHIN a family, then family against family.
+_ARM_POSITIONS: tuple[float, ...] = (0.0, 1.0, 2.4, 3.4)
+_ARM_LABELS: tuple[str, ...] = (
+    "escalated\nas-shipped",
+    "not escalated\nas-shipped",
+    "escalated\nedit-gated",
+    "not escalated\nedit-gated",
+)
+_ARM_COLOURS: tuple[str, ...] = ("#78909C", "#B0BEC5", _OBSERVED, "#EF9A9A")
+
+
+def _draw_arms(ax: Axes, as_shipped: PolicyCell | None, canonical: PolicyCell) -> None:
+    arms: list[tuple[float | None, tuple[float, float], int] | None] = []
+    for cell in (as_shipped, canonical):
+        if cell is None:
+            arms += [None, None]
+            continue
+        fired_n, quiet_n = _arm_counts(cell)
+        arms.append((cell.precision, cell.precision_ci, fired_n))
+        arms.append((cell.p_fail_given_quiet, cell.quiet_ci, quiet_n))
+    for position, arm in zip(_ARM_POSITIONS, arms, strict=True):
+        if arm is None:
+            continue
+        value, interval, n = arm
+        if n < policy_eval.MIN_ARM or value is None or np.isnan(interval[0]):
+            _draw_undefined_arm(ax, position, n)
+            continue
+        ax.bar(
+            [position],
+            [value],
+            width=0.7,
+            color=_ARM_COLOURS[_ARM_POSITIONS.index(position)],
+            yerr=[[max(0.0, value - interval[0])], [max(0.0, interval[1] - value)]],
+            capsize=6,
         )
-    base = next((c.base_failure_rate for c in cells if c.precision is not None), 0.0)
+        ax.text(position, 0.03, f"n={n}", ha="center", color="white", fontsize=9)
+        # Above the interval's UPPER arm, not above the bar: a label placed at value + a constant
+        # lands inside the error bar whenever the interval is wider than that constant.
+        ax.text(
+            position,
+            min(0.95, max(value, interval[1]) + 0.025),
+            f"{value:.3f}",
+            ha="center",
+            fontsize=9.5,
+        )
+    ax.set_xticks(list(_ARM_POSITIONS), list(_ARM_LABELS))
     ax.axhline(
-        base,
+        canonical.base_failure_rate,
         linestyle="--",
         color=_NULL_CENTRE,
-        label=f"base failure rate={base:.3f}",
-    )
-    placed: list[tuple[float, float]] = []
-    if points:
-        xs, ys = zip(*points, strict=True)
-        ax.plot(xs, ys, marker="o", linestyle="--", label="as-shipped (escalate_after_n rising)")
-        _annotate_sweep_points(ax, cells, lambda c: (c.recall, c.precision), placed)
-    gated = [(c.recall, c.precision) for c in edit_gated if c.precision is not None]
-    if gated:
-        xs, ys = zip(*gated, strict=True)
-        ax.plot(
-            xs,
-            ys,
-            marker="^",
-            linestyle="-",
-            color=_OBSERVED,
-            label="edit-gated (failures before first edit excluded)",
-        )
-        _annotate_sweep_points(ax, edit_gated, lambda c: (c.recall, c.precision), placed)
-    ax.set_xlabel("recall (share of failed runs flagged)")
-    ax.set_ylabel("precision (P(fail | flagged))")
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.set_title("escalation policy operating characteristic — precision vs recall")
-    ax.legend()
-    pool = [*scored, *[c for c in edit_gated if c.precision is not None]]
-    best = max(pool, key=lambda c: c.precision or 0.0)
-    # The family label on the note must come from the EDIT-GATED arm's own best, never the
-    # combined best: when an as-shipped tail cell out-precisions every edit-gated cell (as-shipped
-    # n=50 reaches 0.878), quoting `best` here would credit the wrong family with a precision it
-    # does not have. Computed only when the edit-gated arm actually fired (its iterable is empty
-    # otherwise).
-    notes = []
-    if scored:
-        notes.append(
-            f"{len(scored)} of {len(cells)} swept cells fired; one point per escalate_after_n"
-        )
-    if gated:
-        best_gated = max(
-            (c for c in edit_gated if c.precision is not None), key=lambda c: c.precision or 0.0
-        )
-        notes.append(
-            f"edit-gated family: {len(gated)} fired cells; highest precision "
-            f"{best_gated.precision:.3f} "
-            f"at n={best_gated.escalate_after_n} (recall {best_gated.recall:.3f}) against the "
-            f"same base {base:.3f}"
-        )
-    return Annotations(
-        notes=tuple(notes),
-        limitations=(
-            ()
-            if best.precision_ci[0] > best.base_failure_rate
-            else (
-                "NO OPERATING POINT CLEARS THE BASE RATE: no swept configuration's precision "
-                "interval excludes the base failure rate.",
-            )
-        ),
-    )
-
-
-def policy_roc_curve(
-    cells: Sequence[PolicyCell], ax: Axes, *, edit_gated: Sequence[PolicyCell] = ()
-) -> Annotations:
-    """TPR vs FPR across the SWEPT recurrence thresholds — the escalation method's ROC."""
-
-    # Same re-pointing as `policy_pr_curve`: the method's curve, not the degenerate prefix score's.
-    # The edit-gated family is drawn as the second curve when present (see `policy_pr_curve`).
-    def _roc_point(cell: PolicyCell) -> tuple[float, float]:
-        return (
-            cell.fp / (cell.fp + cell.tn) if (cell.fp + cell.tn) else 0.0,
-            cell.tp / (cell.tp + cell.fn) if (cell.tp + cell.fn) else 0.0,
-        )
-
-    points = [p for c in cells if c.precision is not None and (p := _roc_point(c))]
-    gated = [p for c in edit_gated if c.precision is not None and (p := _roc_point(c))]
-    if not points and not gated:
-        return Annotations(
-            limitations=(
-                "NO CONFIGURATION FIRED: the sweep contains no measurable operating point.",
-            )
-        )
-    ax.plot([0, 1], [0, 1], linestyle=":", color=_FAINT, linewidth=0.8, label="chance")
-    placed: list[tuple[float, float]] = []
-    if points:
-        xs, ys = zip(*points, strict=True)
-        ax.plot(xs, ys, marker="o", linestyle="--", label="as-shipped (escalate_after_n rising)")
-        rates = {c: _roc_point(c) for c in cells if c.precision is not None}
-        _annotate_sweep_points(ax, cells, lambda c: rates.get(c, (0.0, None)), placed)
-    if gated:
-        xs, ys = zip(*gated, strict=True)
-        ax.plot(
-            xs,
-            ys,
-            marker="^",
-            linestyle="-",
-            color=_OBSERVED,
-            label="edit-gated (failures before first edit excluded)",
-        )
-        rates = {c: _roc_point(c) for c in edit_gated if c.precision is not None}
-        _annotate_sweep_points(ax, edit_gated, lambda c: rates.get(c, (0.0, None)), placed)
-    ax.set_xlabel("false-positive rate (share of resolved runs flagged)")
-    ax.set_ylabel("true-positive rate (share of failed runs flagged)")
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.set_title("escalation policy ROC across recurrence thresholds")
-    ax.legend()
-    return Annotations(
-        notes=(
-            f"{len(points)} as-shipped and {len(gated)} edit-gated cells fired; "
-            "one point per escalate_after_n per family",
-        )
-    )
-
-
-def policy_confusion(cell: PolicyCell, ax: Axes, *, flag_budget: int | None = None) -> Annotations:
-    """The 2x2 of the SWEPT CELL that separates best — the escalation method's operating point."""
-    # The old confusion figure came from the prefix score, which flags every row when the score is
-    # constant, so the "not flagged" column was empty (0/0) — exactly the "no datapoints being
-    # kept" the audit flagged. The policy cell at high n has all four cells populated.
-    cm = ConfusionMatrix(tp=cell.tp, fp=cell.fp, fn=cell.fn, tn=cell.tn)
-    flagged = cell.tp + cell.fp
-    budget = flag_budget if flag_budget is not None else flagged
-    counts = ((cm.tp, cm.fn), (cm.fp, cm.tn))
-    positives = cm.tp + cm.fn
-    negatives = cm.fp + cm.tn
-    total = positives + negatives
-    rate = flagged / total if total else 0.0
-    expected = (
-        (positives * rate, positives * (1 - rate)),
-        (negatives * rate, negatives * (1 - rate)),
-    )
-    _draw_confusion_cells(counts, expected, ax)
-    ax.set_title(
-        f"escalation policy confusion @ escalate_after_n={cell.escalate_after_n}, "
-        f"stale_window={cell.stale_window} "
-        "(count, [random at the same flag rate], excess)"
-    )
-    return Annotations(
-        notes=_confusion_notes(cm, expected[0][0], total=total, threshold=0.0, rate=rate),
-        limitations=(
-            *_budget_limits(flagged, budget, total),
-            *(
-                ()
-                if cm.tp > expected[0][0]
-                else (
-                    "The detector catches no more failures than random flagging at the same rate.",
-                )
-            ),
-        ),
-    )
-
-
-def outcome_bars(cell: PolicyCell, ax: Axes) -> Annotations:
-    """P(fail | fired) vs P(fail | not fired) on one challenge bootstrap, plus the base rate."""
-    # A cell that never fired has an UNDEFINED precision, not one of zero. Drawing it as a
-    # zero-height bar would read as "escalating never predicts failure" — a measured claim — when
-    # the truth is that the configuration made no prediction at all. It is drawn as absent instead.
-    #
-    # Both arms read their interval off the SAME challenge resamples (`policy_eval._arm_intervals`).
-    # The quiet bar used to carry `metrics.wilson_interval` over rows while the fired bar carried
-    # the bootstrap, and the footer below compared the two — a directional verdict read off two
-    # estimators that do not answer the same question.
-    fired = _bar_geometry(cell.precision, cell.precision_ci)
-    quiet = _bar_geometry(cell.p_fail_given_quiet, cell.quiet_ci)
-    heights = [fired[0], quiet[0]]
-    errors = np.array([[fired[1], quiet[1]], [fired[2], quiet[2]]])
-    bars = ax.bar(["escalated", "not escalated"], heights, yerr=errors, capsize=6)
-    for bar, n in zip(bars, [cell.tp + cell.fp, cell.fn + cell.tn], strict=True):
-        ax.text(bar.get_x() + bar.get_width() / 2, 0.02, f"n={n}", ha="center", color="white")
-    ax.axhline(
-        cell.base_failure_rate,
-        linestyle="--",
-        color="grey",
-        label=f"base rate={cell.base_failure_rate:.3f}",
+        label=f"base rate {canonical.base_failure_rate:.3f}",
     )
     ax.set_ylabel("P(run ultimately failed)")
     ax.set_ylim(0, 1)
-    ax.set_title(f"outcome by escalation — escalate_after_n={cell.escalate_after_n}")
-    ax.legend()
-    return Annotations(notes=(_outcome_note(cell),), limitations=_outcome_limits(cell))
+    ax.set_xlim(-0.6, 4.0)
+    ax.tick_params(labelsize=_TICK_PT)
+    ax.legend(fontsize=_LEGEND_PT, loc="upper right")
+    panel_label(ax, "A · outcome by escalation, both counting modes, 95% challenge bootstrap")
 
 
-def _bar_geometry(value: float | None, interval: tuple[float, float]) -> tuple[float, float, float]:
-    """Bar height plus its two error-bar arms; an undefined proportion is drawn as absent."""
-    # Absent is a NaN HEIGHT, not a height of zero. A zero-height bar is pixel-identical to a
-    # genuine precision of 0.000 — "this policy fired and every flagged run resolved" — so the two
-    # readings were separated only by the footer. Matplotlib omits a NaN-height bar from the axes
-    # entirely, which is what "the configuration made no prediction" should look like.
-    #
-    # The arms stay finite at 0.0: `Axes.bar` draws a whisker of unbounded length from a NaN arm,
-    # rendering maximum uncertainty as a full-height line — the opposite of absent — and a NaN
-    # centre with 0.0 arms already yields nothing to draw.
-    if value is None or np.isnan(interval[0]) or np.isnan(interval[1]):
-        return (float("nan"), 0.0, 0.0)
-    return (value, max(0.0, value - interval[0]), max(0.0, interval[1] - value))
-
-
-def _rate(value: float | None, digits: int = 3) -> str:
-    """Format a proportion for a caption, keeping an undefined one visibly undefined."""
-    # A never-firing cell's interval is (nan, nan) — not None — so the bare-value guard was not
-    # enough: the CI column rendered the literal "[nan, nan]" against the footer's promise that
-    # an undefined interval "prints n/a rather than 0.000". NaN is the same undefined quantity.
-    if value is None or np.isnan(value):
-        return "n/a"
-    return f"{value:.{digits}f}"
-
-
-def _outcome_note(cell: PolicyCell) -> str:
-    lift = "n/a" if cell.lift is None else f"{cell.lift:.2f}x"
-    return (
-        f"P(fail|fired)={_rate(cell.precision)} vs P(fail|not fired)="
-        f"{_rate(cell.p_fail_given_quiet)}, base rate {cell.base_failure_rate:.3f} "
-        f"(lift {lift})"
+def _draw_undefined_arm(ax: Axes, position: float, n: int) -> None:
+    """An arm below the reporting floor: a hatched box over the whole range, never a bar."""
+    # A one-row arm rendered 0/1 = 0.000 as a full-looking measurement on the committed figure.
+    # Height 1.0 spans every value the rate could take, which is exactly what "undefined" means
+    # here, and the hatch plus the label make it unreadable as a point estimate.
+    ax.add_patch(
+        Rectangle(
+            (position - 0.275, 0.0),
+            0.55,
+            1.0,
+            facecolor="none",
+            edgecolor=_UNDEFINED,
+            hatch="///",
+            linewidth=1.0,
+        )
+    )
+    ax.text(
+        position,
+        0.5,
+        f"undefined\n(n={n})",
+        ha="center",
+        va="center",
+        fontsize=9,
+        color=_UNDEFINED,
+        fontweight="bold",
+        # The label sits ON the hatch, which is the point — but hatch strokes through 9pt text
+        # make it unreadable, so it gets its own opaque backing.
+        bbox={"facecolor": "white", "edgecolor": "none", "pad": 2.0},
     )
 
 
-def _outcome_limits(cell: PolicyCell) -> tuple[str, ...]:
-    """Call the direction ONLY when the two like-for-like intervals actually separate."""
-    # A point estimate below the base rate is not evidence of an inverted policy while the intervals
-    # overlap — reading a sign off overlapping bars is the same error as reading skill off a point
-    # estimate inside its null, which is what this whole harness exists to stop.
-    #
-    # Both bounds come from `policy_eval`'s challenge bootstrap. Reading `quiet_*` off a Wilson
-    # interval over rows, as this did, compared an interval to one built under an assumption the
-    # corpus rejects: runs cluster by challenge, so a row-level interval is too narrow. Too narrow
-    # raises `quiet_lo` and lowers `quiet_hi`, so it makes BOTH branches below easier to trip — a
-    # mismatched pair can manufacture an "INVERTED" caption or a silent endorsement, and neither
-    # would be a measurement. Whether any given cell's verdict actually moves is a property of the
-    # corpus loaded, not of this fix; what the fix buys is that the two bars are now the same
-    # estimator on the same resamples, so the comparison is defined at all.
+def _draw_nulls(ax: Axes, cell: PolicyCell) -> None:
+    ax.hist(
+        list(cell.gate_null.draws),
+        bins=40,
+        color=_NULL_BAND,
+        label=f"family-wise null ({cell.gate_null.n_permutations} perm)",
+    )
+    if cell.null_auroc_length is not None:
+        ax.hist(
+            list(cell.null_auroc_length.draws),
+            bins=40,
+            histtype="step",
+            color=_LENGTH_NULL,
+            linewidth=1.4,
+            label="length-stratified null",
+        )
+    ax.axvline(
+        cell.null_auroc.observed,
+        color=_OBSERVED,
+        linewidth=2,
+        label=f"observed AUROC {cell.null_auroc.observed:.3f}",
+    )
+    if cell.length_baseline_auroc is not None:
+        ax.axvline(
+            cell.length_baseline_auroc,
+            color=_LENGTH_NULL,
+            linestyle=":",
+            linewidth=1.4,
+            label=f"run-length-only {cell.length_baseline_auroc:.3f}",
+        )
+    ax.set_xlabel("AUROC of the fired flag against the terminal outcome")
+    ax.set_ylabel("permutations")
+    # Room to the right of the observed line, so it reads as a line rather than as the frame.
+    left, right = ax.get_xlim()
+    ax.set_xlim(left, max(right, cell.null_auroc.observed) + 0.02)
+    ax.tick_params(labelsize=_TICK_PT)
+    ax.legend(fontsize=_LEGEND_PT, loc="center right")
+    panel_label(ax, "B · observed against both nulls")
+
+
+def _cell_note(family: str, cell: PolicyCell) -> str:
+    length = "n/a" if cell.length_baseline_auroc is None else f"{cell.length_baseline_auroc:.3f}"
+    return (
+        f"{family} at escalate_after_n={cell.escalate_after_n}, "
+        f"stale_window={cell.stale_window}; fired on "
+        f"{cell.n_escalated}/{cell.n_trajectories}; P(fail|fired)={_rate(cell.precision)} "
+        f"[{_rate(cell.precision_ci[0])}, {_rate(cell.precision_ci[1])}] vs quiet "
+        f"{_rate(cell.p_fail_given_quiet)}; AUROC {cell.null_auroc.observed:.3f} against a "
+        f"run-length-only {length}"
+    )
+
+
+def _direction_limits(cell: PolicyCell) -> tuple[str, ...]:
+    """Call the direction ONLY when both readable intervals actually separate."""
+    fired_n, quiet_n = _arm_counts(cell)
+    if fired_n < policy_eval.MIN_ARM or quiet_n < policy_eval.MIN_ARM:
+        return (
+            f"One arm holds fewer than {policy_eval.MIN_ARM} runs, so no direction can be read "
+            "off this cell at all.",
+        )
     fired_lo, fired_hi = cell.precision_ci
     quiet_lo, quiet_hi = cell.quiet_ci
-    if cell.precision is None or np.isnan(fired_lo) or np.isnan(fired_hi):
-        return (
-            "This configuration never fired on this corpus, so P(fail | fired) is UNDEFINED and "
-            "the left bar is absent rather than zero. No direction can be read here at all.",
-        )
-    if cell.p_fail_given_quiet is None or np.isnan(quiet_lo) or np.isnan(quiet_hi):
-        return (
-            "This configuration fired on EVERY run, so P(fail | not fired) is UNDEFINED and the "
-            "right bar is absent rather than zero. There is nothing to compare the left bar "
-            "against, so no direction can be read here at all.",
-        )
+    if np.isnan(fired_lo) or np.isnan(quiet_lo):
+        return ("An arm has no estimable interval on this corpus.",)
     if fired_hi < quiet_lo:
         return (
             "INVERTED: escalated runs failed significantly LESS often than the runs the policy "
@@ -1022,99 +549,573 @@ def _outcome_limits(cell: PolicyCell) -> tuple[str, ...]:
     )
 
 
-def session_cadence_bars(
-    sc: object,
-    ax: Axes,  # noqa: ANN401 (SessionCadenceReport, TYPE_CHECKING-imported)
-) -> Annotations:
-    """The escalate-vs-cheap-retry resolution contrast at the session cadence."""
-    from benchmark.escalation.session_eval import SessionCadenceReport
+# -------------------------------------------------------------------- 3. policy_sweep
 
-    if not isinstance(sc, SessionCadenceReport):
-        return Annotations(limitations=("no session-cadence estimate on this corpus",))
+
+POLICY_SWEEP_SPEC = FigureSpec(
+    title="Every swept configuration, in both counting modes, against one base rate",
+    reading=(
+        "One row per configuration of the two coupled knobs — escalate_after_n and stale_window, "
+        "with the escalation ladder pinned to the shipped one. The A columns are as-shipped "
+        "counting (every same-key verified failure counts); the shaded B columns are the same "
+        "configuration with the reproduction phase excluded, i.e. failures before the agent's "
+        "first edit-like action are not escalation evidence. Per family: how many trajectories the "
+        "cell fired on, P(run failed | fired), and the AUROC of the fired flag against the "
+        "terminal outcome. The row that IS the shipped default is highlighted."
+    ),
+    goal=(
+        "Compare the A and B columns row by row. A configuration whose P(fail|fired) sits at the "
+        "base rate has no measured value at all; the gap between the A and B columns of the SAME "
+        "row is the reproduction phase's contribution, isolated from every other knob. The two "
+        "knobs are coupled — reaching n recurrences needs a window at least that wide — which is "
+        "why the stale_window=10 rows stop firing above n=10."
+    ),
+    definitions=(
+        ("A", "as-shipped counting"),
+        ("B", "edit-gated counting (failures before the first edit excluded)"),
+        ("P(fail)", "share of the runs this cell fired on that ultimately failed"),
+        (
+            "len-only",
+            "the AUROC a pure 'run length >= t' predictor reaches at THIS cell's flag count — the "
+            "ceiling run length alone can explain, so an AUROC no higher than it is length "
+            "selection rather than recurrence",
+        ),
+    ),
+    notes=(
+        "The table is drawn rather than plotted because the sweep has too few distinct results to "
+        "carry a colour channel honestly.",
+        "The interval is the CHALLENGE-level bootstrap, not a Wilson interval over rows: the "
+        "corpus is drawn from ~166 challenges, so rows are not independent draws and a row-level "
+        "interval is roughly 2x too narrow.",
+    ),
+    limitations=(
+        "Every number here is unadjusted for the 60 configurations compared side by side; the "
+        "family-wise correction lives in each cell's null, not in this table.",
+        "A configuration that never fires has no P(fail|fired) at all and prints n/a.",
+    ),
+)
+
+
+def policy_sweep(
+    as_shipped: Sequence[PolicyCell],
+    edit_gated: Sequence[PolicyCell],
+    ax: Axes,
+    *,
+    shipped_index: int | None = None,
+) -> Annotations:
+    """Both families as one table — no Table.scale(), the bbox pins it to the axes rect."""
+    ax.axis("off")
+    # NEITHER `95% CI` NOR `len-only` is droppable to make the two families fit. The interval is
+    # what the whole challenge-level bootstrap exists to produce, and a precision quoted bare
+    # invites exactly the over-reading this set is built to prevent.
+    #
+    # `len-only` is this table's built-in
+    # run-length confound control: an AUROC no higher than the length-only figure at the same flag
+    # count means the "recurrence" signal is run-length selection, and nothing else on the canvas
+    # stands between those two readings. It is per family because the baseline is evaluated at
+    # THAT family's flag count, which differs — one shared column would be wrong for one of them.
+    header = [
+        "n",
+        "stale",
+        "A fired",
+        "A P(fail)",
+        "A 95% CI",
+        "A AUROC",
+        "A len-only",
+        "B fired",
+        "B P(fail)",
+        "B 95% CI",
+        "B AUROC",
+        "B len-only",
+    ]
+    gated = {(c.escalate_after_n, c.stale_window): c for c in edit_gated}
+    rows = [_sweep_row(c, gated.get((c.escalate_after_n, c.stale_window))) for c in as_shipped]
+    table = ax.table(
+        cellText=rows, colLabels=header, cellLoc="center", bbox=Bbox.from_bounds(0, 0, 1, 1)
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(8)
+    # NO `table.scale()`. Scaling is what pushed the table past its own axes rect, which
+    # matplotlib does not clip — the title was then drawn straight through the top rows. The bbox
+    # above pins the table to the rect the frame reserved, and `plot_frame.table_size` gives the
+    # rect enough height for the row count.
+    _shade_columns(table, first=7, last=11, n_rows=len(rows))
+    if shipped_index is not None and 0 <= shipped_index < len(rows):
+        _mark_shipped_row(table, shipped_index)
+    return Annotations(
+        subtitle_facts=(
+            f"{len(rows)} configurations x 2 counting modes",
+            "A = as-shipped · B = edit-gated · shipped default highlighted",
+            "len-only = the AUROC run length alone reaches at that cell's flag count",
+        ),
+        notes=(_sweep_note(as_shipped, edit_gated),),
+        limitations=_sweep_limits(as_shipped, edit_gated),
+        counts=(("configurations", len(rows)),),
+    )
+
+
+def _sweep_row(shipped: PolicyCell, gated: PolicyCell | None) -> list[str]:
+    row = [
+        str(shipped.escalate_after_n),
+        str(shipped.stale_window),
+        str(shipped.n_escalated),
+        _rate(shipped.precision),
+        _ci(shipped),
+        f"{shipped.null_auroc.observed:.3f}",
+        _rate(shipped.length_baseline_auroc),
+    ]
+    if gated is None:
+        return [*row, "n/a", "n/a", "n/a", "n/a", "n/a"]
+    return [
+        *row,
+        str(gated.n_escalated),
+        _rate(gated.precision),
+        _ci(gated),
+        f"{gated.null_auroc.observed:.3f}",
+        _rate(gated.length_baseline_auroc),
+    ]
+
+
+def _ci(cell: PolicyCell) -> str:
+    """The precision's challenge-bootstrap interval. A point estimate without one over-reads."""
+    return f"[{_rate(cell.precision_ci[0])}, {_rate(cell.precision_ci[1])}]"
+
+
+def _shade_columns(table: Table, *, first: int, last: int, n_rows: int) -> None:
+    """Tint the edit-gated column group so the two families read apart without a second header."""
+    for (row, col), cell in table.get_celld().items():
+        if first <= col <= last and 0 <= row <= n_rows:
+            cell.set_facecolor(_GATED_COL)
+
+
+def _mark_shipped_row(table: Table, index: int) -> None:
+    """Bold the shipped row's text and shade its cells, so the default is spottable."""
+    # `get_celld()` keys are (row, col); the header occupies row 0, so data row `index` is cell
+    # row `index + 1`. The shipped index is passed in (run_eval owns what "shipped" means).
+    for (row, _col), cell in table.get_celld().items():
+        if row == index + 1:
+            cell.set_text_props(fontweight="bold")
+            cell.set_facecolor(_SHIPPED_ROW)
+
+
+def _sweep_note(as_shipped: Sequence[PolicyCell], edit_gated: Sequence[PolicyCell]) -> str:
+    # A cell that never fired has NO precision (None), not a precision of zero — it is excluded
+    # from the ranking rather than given the worst finite value.
+    scored = [c for c in (*as_shipped, *edit_gated) if c.precision is not None]
+    if not scored:
+        return f"{len(as_shipped)} configurations, none of which fired"
+    best = max(scored, key=lambda c: c.precision or 0.0)
+    family = "edit-gated" if any(best is c for c in edit_gated) else "as-shipped"
+    return (
+        f"{len(as_shipped)} configurations per family; highest P(fail|fired) is "
+        f"{best.precision:.3f} at {family} escalate_after_n={best.escalate_after_n} "
+        f"(stale_window={best.stale_window}) against a base rate of {best.base_failure_rate:.3f}"
+    )
+
+
+def _sweep_limits(
+    as_shipped: Sequence[PolicyCell], edit_gated: Sequence[PolicyCell]
+) -> tuple[str, ...]:
+    """Say plainly, with a count, how many cells fail to clear the base rate."""
+    cells = [*as_shipped, *edit_gated]
+    if not cells:
+        return ()
+    separating = [c for c in cells if c.precision_ci[0] > c.base_failure_rate]
+    if len(separating) == len(cells):
+        return ()
+    if not separating:
+        return (
+            "No configuration's precision interval clears the base failure rate: on this corpus "
+            "the sweep contains no setting with measured value.",
+        )
+    return (
+        f"{len(separating)} of {len(cells)} configurations across both families clear the base "
+        "failure rate; every other cell in this table does not.",
+    )
+
+
+# ------------------------------------------------------------------- 4. session_value
+
+
+SESSION_VALUE_SPEC = FigureSpec(
+    title="At production cadence, escalating after a cheap failure beats retrying cheap",
+    reading=(
+        "Read on EVERY trajectory in the corpus, not the per-step-stamped subset the other "
+        "escalation figures score: a session outcome comes off the run header, so a run without "
+        "per-step stamps still counts here. "
+        "Measured on the overlap subset — tasks carrying BOTH a second cheap session and a "
+        "frontier session, so the two arms are read on the same tasks. Left: after a cheap "
+        "session failed a task, the share of FRONTIER sessions on that task that resolved it "
+        "(escalate) against the share of a SECOND cheap session that resolved it (retry). Both "
+        "intervals resample whole INSTANCES, because several frontier sessions on one task are "
+        "not independent draws. Right: the PAIRED difference, escalate minus retry, on those same "
+        "instance resamples, with its 95% interval and zero marked."
+    ),
+    goal=(
+        "The right panel is the answer. Two marginal intervals that fail to overlap is a "
+        "conservative test of a difference; the paired distribution IS the difference, and the "
+        "claim holds only if its interval excludes zero."
+    ),
+    definitions=(
+        ("frontier", "the two most expensive models present in the corpus"),
+        ("cheap", "the cheapest model present — the base pick and the retry counterfactual"),
+        ("overlap subset", "tasks with >=2 cheap sessions AND a frontier session"),
+    ),
+    notes=(
+        "At session cadence the detector is trivially satisfied — the failed cheap session carries "
+        "the task's target failing-check id — so this measures the LADDER's value, not the "
+        "trigger's detection quality.",
+        "The dashed line is the cheap model's UNCONDITIONAL base rate. The bars condition on a "
+        "cheap failure on the same task, so the line is not a ceiling for them.",
+    ),
+    limitations=(
+        "Observational: the arms ran in parallel and which tasks got frontier coverage was "
+        "adaptive. Small n — read the interval, not the point estimate.",
+        "Production's ladder steps one price rank at a time; this collapses it to its endpoint.",
+    ),
+)
+
+
+def session_value(sc: SessionCadenceReport, axes: Sequence[Axes]) -> Annotations:
+    """The escalate-vs-retry contrast and, beside it, the paired difference that decides it."""
+    ax_bars, ax_diff = axes
+    _draw_session_bars(ax_bars, sc)
+    _draw_paired_difference(ax_diff, sc)
+    lift = "n/a" if sc.lift is None else f"{sc.lift:.2f}x"
+    return Annotations(
+        subtitle_facts=(
+            f"{sc.n_overlap_instances} overlap tasks · escalate {sc.n_escalated_resolved}/"
+            f"{sc.n_escalated} vs retry {sc.n_retried_resolved}/{sc.n_retried}",
+            f"lift {lift} · paired difference {sc.diff_estimate:+.3f} "
+            f"[{sc.diff_ci[0]:+.3f}, {sc.diff_ci[1]:+.3f}]",
+        ),
+        # ALWAYS non-None, and that is load-bearing: `_merge` keeps the first caveat, so a
+        # figure that leaves it None inherits the run-level one — and the run-level line is about
+        # per-step stamping, which this figure does not use (it reads every trajectory, stamped
+        # or not). An inherited caveat that is false for the figure carrying it is the exact
+        # defect this redesign removes. The same reasoning applies to the subtitle and the
+        # limitations, which is why the caller hands this figure `_session_run_annotations`
+        # rather than the stamped-corpus `_run_annotations`.
+        caveat=(
+            "Observational: the arms ran in parallel and frontier coverage was adaptive."
+            if sc.diff_excludes_zero
+            else "The paired difference's 95% interval spans zero — no measured advantage here."
+        ),
+        notes=(
+            f"instance-level bootstrap over {sc.n_instances_resampled} overlap tasks, not Wilson "
+            "over sessions: several frontier sessions on one task are one draw, not several",
+        ),
+        counts=(
+            ("overlap_instances", sc.n_overlap_instances),
+            ("escalate_sessions", sc.n_escalated),
+            ("retry_sessions", sc.n_retried),
+        ),
+    )
+
+
+def _draw_session_bars(ax: Axes, sc: SessionCadenceReport) -> None:
+    heights = [sc.escalate_rate, sc.retry_rate]
+    errors = [
+        [sc.escalate_rate - sc.escalate_ci[0], sc.retry_rate - sc.retry_ci[0]],
+        [sc.escalate_ci[1] - sc.escalate_rate, sc.retry_ci[1] - sc.retry_rate],
+    ]
     ax.bar(
         ["escalate\nto frontier", "cheap\nretry"],
-        [sc.escalate_rate, sc.retry_rate],
-        yerr=_session_error(sc),
+        heights,
+        yerr=np.clip(np.array(errors), 0.0, None),
         capsize=6,
-        color=[_OBSERVED, "#455A64"],
+        width=0.55,
+        color=[_OBSERVED, _SHIPPED],
     )
+    for position, (rate, n, top) in enumerate(
+        (
+            (sc.escalate_rate, sc.n_escalated, sc.escalate_ci[1]),
+            (sc.retry_rate, sc.n_retried, sc.retry_ci[1]),
+        )
+    ):
+        ax.text(position, 0.03, f"n={n}", ha="center", color="white", fontsize=9)
+        # Above the interval, not above the bar — see `_draw_arms`.
+        ax.text(
+            position,
+            min(0.95, max(rate, top) + 0.025),
+            f"{rate:.3f}",
+            ha="center",
+            fontsize=9.5,
+        )
     ax.axhline(
         sc.cheap_base_rate,
         linestyle="--",
         color=_NULL_CENTRE,
-        label=f"cheap base rate={sc.cheap_base_rate:.3f}",
+        label=f"cheap unconditional base {sc.cheap_base_rate:.3f}",
     )
-    ax.set_ylabel("P(task resolved by the retry session)")
+    ax.set_ylabel("P(task resolved by the next session)")
     ax.set_ylim(0, 1)
-    ax.set_title("session-cadence escalation value — escalate vs same-cost retry")
-    ax.legend()
-    lift = "n/a" if sc.lift is None else f"{sc.lift:.2f}x"
-    return Annotations(
-        notes=(
-            f"overlap subset: {sc.n_overlap_instances} tasks with >=2 cheap sessions AND a "
-            f"frontier session",
-            f"escalate {sc.n_escalated_resolved}/{sc.n_escalated} vs cheap retry "
-            f"{sc.n_retried_resolved}/{sc.n_retried}; lift {lift}",
-            # The dashed line is the CHEAP model's UNCONDITIONAL base rate, which can sit above
-            # the escalate bar: the bars are conditioned on a cheap session having FAILED that
-            # task, so they measure a harder subset than the unconditional rate. Without this
-            # line a reader compares bars to a line they do not share a denominator with.
-            f"dashed line = cheap model's unconditional base rate {sc.cheap_base_rate:.3f} — the "
-            "bars condition on a cheap failure on the same task, so the line is not a bar ceiling",
-        ),
-        limitations=(
-            "Observational (parallel arms, adaptive coverage); small-n — read the intervals.",
-        ),
+    ax.tick_params(labelsize=_TICK_PT)
+    ax.legend(fontsize=_LEGEND_PT, loc="upper right")
+    panel_label(ax, "A · resolution by next-session choice")
+
+
+def _draw_paired_difference(ax: Axes, sc: SessionCadenceReport) -> None:
+    if not sc.diff_draws:
+        ax.axis("off")
+        ax.text(0.5, 0.5, "no paired draws on this corpus", ha="center", va="center", color=MUTED)
+        return
+    ax.hist(list(sc.diff_draws), bins=40, color=_NULL_BAND)
+    ax.axvline(0.0, color=_NULL_CENTRE, linestyle="--", linewidth=1.2, label="no difference")
+    ax.axvline(
+        sc.diff_estimate,
+        color=_OBSERVED,
+        linewidth=2,
+        label=f"observed {sc.diff_estimate:+.3f}",
     )
+    for bound in sc.diff_ci:
+        ax.axvline(bound, color=_OBSERVED, linestyle=":", linewidth=1.2)
+    ax.set_xlabel("paired difference: P(resolve | escalate) - P(resolve | retry)", labelpad=30)
+    ax.set_ylabel("instance resamples")
+    ax.tick_params(labelsize=_TICK_PT)
+    # Below the axes: every vertical rule this legend names spans the FULL height, so an
+    # in-axes legend necessarily covers the marks it is explaining.
+    ax.legend(
+        fontsize=_LEGEND_PT,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.075),
+        ncol=2,
+        frameon=False,
+    )
+    panel_label(ax, "B · paired difference, 95% interval dotted")
 
 
-def _session_error(sc: object) -> list[list[float]]:  # noqa: ANN401
-    from benchmark.escalation.session_eval import SessionCadenceReport
-
-    if not isinstance(sc, SessionCadenceReport):
-        return [[0.0, 0.0], [0.0, 0.0]]
-    return [
-        [sc.escalate_rate - sc.escalate_ci[0], sc.escalate_ci[1] - sc.escalate_rate],
-        [sc.retry_rate - sc.retry_ci[0], sc.retry_ci[1] - sc.retry_rate],
-    ]
+# ------------------------------------------------------------- 5. corpus_and_coverage
 
 
-def capture_coverage(coverages: Sequence[ModelCoverage], ax: Axes) -> Annotations:
-    """Per-model share of trajectories that carry per-step verified outcomes."""
-    # STAMPING coverage is plotted, never `ModelCoverage.capture_rate`. The latter is 1.000 for
-    # every model on this corpus by construction (see the spec's limitation), so a bar of it would
-    # be a tautology drawn six times. Stamping coverage is the real collection diagnostic and it
-    # does vary — 0.769 to 0.937 across the six models, 727 of 799 runs stamped overall. The
-    # per-model counts are printed on the bars themselves, so no literal is pinned here.
-    names = [c.model for c in coverages]
-    shares = [c.n_stamped / c.n_trajectories if c.n_trajectories else 0.0 for c in coverages]
-    bars = ax.barh(names, shares)
-    for bar, cov in zip(bars, coverages, strict=True):
-        ax.text(
-            0.01,
-            bar.get_y() + bar.get_height() / 2,
-            f"{cov.n_stamped}/{cov.n_trajectories} stamped · "
-            f"terminal-fail {cov.terminal_failure_rate:.2f}",
-            va="center",
-        )
-    ax.set_xlabel("share of trajectories with per-step verified outcomes")
-    ax.set_xlim(0, 1)
-    ax.set_title("failure-capture coverage by model")
-    return Annotations(notes=_coverage_notes(coverages), limitations=_coverage_limits(coverages))
+@dataclass(frozen=True)
+class ModelArm:
+    """One model's two outcome arms at the canonical cell — the per-model dumbbell's data."""
+
+    model: str
+    n: int
+    p_fail_fired: float | None
+    p_fail_quiet: float | None
 
 
-def _coverage_notes(coverages: Sequence[ModelCoverage]) -> tuple[str, ...]:
-    """The counts behind the bars, plus the terminal-outcome spread the bars cannot show."""
+@dataclass(frozen=True)
+class Admission:
+    """Who the prefix risk model is actually fitted on, and who it silently is not."""
+
+    depth: int
+    n_stamped: int
+    n_too_short: int
+    n_by_margin: int
+    n_admitted: int
+    admitted_base_rate: float
+    corpus_base_rate: float
+
+
+@dataclass(frozen=True)
+class StratifiedAuroc:
+    """The recurrence score pooled, then ranked only within a model, then within a challenge."""
+
+    pooled: float
+    within_model: float | None
+    within_challenge: float | None
+
+
+CORPUS_COVERAGE_SPEC = FigureSpec(
+    title="Who is in the sample, and whether the edge survives the confounds",
+    reading=(
+        "A: the share of each model's trajectories that carry per-step verified outcomes, with "
+        "95% Wilson intervals and the counts printed — a run without them cannot fire the trigger "
+        "at all and is excluded from every per-step metric. B: per model, P(run failed | fired) "
+        "against P(run failed | quiet) at the canonical cell, drawn as a dumbbell; a model whose "
+        "two ends coincide contributes no separation. C: the recurrence score's AUROC pooled, "
+        "then computed WITHIN each model and WITHIN each challenge and pooled by comparable pairs "
+        "— the drop between them is how much of the pooled number is the confound rather than the "
+        "score. D: the prefix risk model's admission waterfall at its reported depth, with the "
+        "admitted population's base failure rate against the corpus's."
+    ),
+    goal=(
+        "In C the within-strata bars must stay well above chance: if the pooled edge disappears "
+        "once ranking happens inside a model or inside a challenge, the score is reading which "
+        "model or which task the run belongs to. In D read the two base rates against each other "
+        "— an admitted population failing far more often than the corpus is a different "
+        "population, and a null measured on it is a coverage gap, not a falsification."
+    ),
+    definitions=(
+        ("stamped", "the offline container replay wrote per-step verified outcomes for this run"),
+        # "canonical cell" appears in this figure's Reading block but was defined only on
+        # operating_point.png, so a reader arriving here had no way to learn it is the eval-only
+        # counter. A term a canvas uses is defined on that canvas.
+        ("canonical cell", "the eval-only edit-gated counter at the shipped knobs (panels B, C)"),
+        ("within-model AUROC", "ranked only against runs of the same model, pooled by pair count"),
+        ("admission margin", "runs that reached the depth but leave too few steps unread after it"),
+    ),
+    notes=(
+        "Stamping coverage tracks capture DATE, and capture date correlates with model, so model "
+        "and coverage are confounded on this corpus and cannot be separated from it.",
+        "A single-class stratum contributes no comparable pairs and is DROPPED from the "
+        "within-strata AUROCs rather than scored at chance.",
+    ),
+    limitations=(
+        "Panel D's population is length-selected by construction: the anti-leak margin excludes "
+        "every short run, and short runs resolve more often, so the admitted base rate is higher "
+        "than the corpus's by design rather than by accident.",
+    ),
+)
+
+
+def corpus_and_coverage(
+    coverages: Sequence[ModelCoverage],
+    arms: Sequence[ModelArm],
+    strat: StratifiedAuroc,
+    admission: Admission | None,
+    axes: Sequence[Axes],
+) -> Annotations:
+    """Sample composition, per-model separation, stratified AUROC, and the prefix scope."""
+    ax_cov, ax_arms, ax_strat, ax_admit = axes
+    _draw_stamping(ax_cov, coverages)
+    _draw_model_arms(ax_arms, arms)
+    _draw_stratified(ax_strat, strat)
+    _draw_admission(ax_admit, admission)
     total = sum(c.n_trajectories for c in coverages)
     stamped = sum(c.n_stamped for c in coverages)
-    if not coverages:
-        return ("no models in this corpus",)
-    rates = [c.terminal_failure_rate for c in coverages]
-    return (
-        f"{len(coverages)} models, {total} trajectories, {stamped} stamped ({total - stamped} not)",
-        f"terminal failure rate spans {min(rates):.3f} to {max(rates):.3f} across these models — "
-        "the outcome labels differ per model even where stamping coverage does not",
+    facts = [f"{len(coverages)} models · {stamped}/{total} trajectories stamped"]
+    if admission is not None:
+        facts.append(
+            f"prefix depth {admission.depth} admits {admission.n_admitted}/"
+            f"{admission.n_stamped} at base rate {admission.admitted_base_rate:.3f} vs corpus "
+            f"{admission.corpus_base_rate:.3f}"
+        )
+    return Annotations(
+        subtitle_facts=tuple(facts),
+        # Panel D ONLY. The feature-mismatch line used to be appended to every figure in the
+        # set, including the recurrence ROC, whose score reads two fields production has.
+        # The old wording said "Panel D only: … The recurrence trigger does not", which was false
+        # for this canvas: panels B and C are both scored on the EDIT-GATED counter, and that
+        # counter reads `StepView.action` — a per-step field production lacks. The claim was
+        # narrowed correctly for the as-shipped score and over-broadly for the canonical one.
+        caveat=(
+            "Panels B/C use the eval-only edit-gated counter; panel D's prefix score "
+            "reads per-step fields production lacks."
+        ),
+        notes=(
+            f"AUROC pooled {strat.pooled:.3f} · within-model {_rate(strat.within_model)} · "
+            f"within-challenge {_rate(strat.within_challenge)}",
+        ),
+        limitations=_coverage_limits(coverages),
+        counts=(("models", len(coverages)), ("trajectories", total), ("stamped", stamped)),
     )
+
+
+def _draw_stamping(ax: Axes, coverages: Sequence[ModelCoverage]) -> None:
+    names = [c.model for c in coverages]
+    shares = [c.n_stamped / c.n_trajectories if c.n_trajectories else 0.0 for c in coverages]
+    intervals = [metrics.wilson_interval(c.n_stamped, c.n_trajectories) for c in coverages]
+    errors = np.array(
+        [
+            [max(0.0, s - lo) for s, (lo, _hi) in zip(shares, intervals, strict=True)],
+            [max(0.0, hi - s) for s, (_lo, hi) in zip(shares, intervals, strict=True)],
+        ]
+    )
+    ax.barh(names, shares, xerr=errors, color=_SHIPPED, height=0.6, capsize=3)
+    for index, cov in enumerate(coverages):
+        ax.text(0.02, index, f"{cov.n_stamped}/{cov.n_trajectories}", va="center", fontsize=8)
+    ax.set_xlabel("share of runs with per-step verified outcomes")
+    ax.set_xlim(0, 1.05)
+    ax.tick_params(labelsize=_TICK_PT)
+    panel_label(ax, "A · stamping coverage, 95% Wilson")
+
+
+def _draw_model_arms(ax: Axes, arms: Sequence[ModelArm]) -> None:
+    readable = [a for a in arms if a.p_fail_fired is not None and a.p_fail_quiet is not None]
+    if not readable:
+        ax.axis("off")
+        ax.text(0.5, 0.5, "no model has both arms populated", ha="center", va="center", color=MUTED)
+        return
+    for index, arm in enumerate(readable):
+        quiet = arm.p_fail_quiet or 0.0
+        fired = arm.p_fail_fired or 0.0
+        ax.plot([quiet, fired], [index, index], color=_FAINT, linewidth=2, zorder=1)
+        ax.scatter([quiet], [index], color=_SHIPPED, zorder=2, s=34)
+        ax.scatter([fired], [index], color=_OBSERVED, zorder=2, s=34)
+    ax.set_yticks(range(len(readable)), [f"{a.model} (n={a.n})" for a in readable])
+    ax.scatter([], [], color=_SHIPPED, label="quiet", s=34)
+    ax.scatter([], [], color=_OBSERVED, label="fired", s=34)
+    ax.set_xlabel("P(run ultimately failed)")
+    ax.set_xlim(0, 1)
+    ax.tick_params(labelsize=_TICK_PT)
+    ax.legend(fontsize=_LEGEND_PT, loc="lower right")
+    panel_label(ax, "B · per-model separation at the canonical cell")
+
+
+def _draw_stratified(ax: Axes, strat: StratifiedAuroc) -> None:
+    bars = [
+        ("pooled", strat.pooled),
+        ("within model", strat.within_model),
+        ("within challenge", strat.within_challenge),
+    ]
+    drawn = [(name, value) for name, value in bars if value is not None]
+    ax.bar(
+        [name for name, _ in drawn],
+        [value for _, value in drawn],
+        color=[_OBSERVED, "#EF6C00", _SHIPPED][: len(drawn)],
+        width=0.55,
+    )
+    for index, (_name, value) in enumerate(drawn):
+        ax.text(index, value + 0.012, f"{value:.3f}", ha="center", fontsize=9.5)
+    ax.axhline(0.5, linestyle="--", color=_NULL_CENTRE, label="chance")
+    ax.set_ylabel("AUROC of the recurrence score")
+    ax.set_ylim(0.4, 1.0)
+    ax.tick_params(labelsize=_TICK_PT)
+    ax.legend(fontsize=_LEGEND_PT, loc="upper right")
+    panel_label(ax, "C · does the edge survive the strata")
+
+
+# Axes-fraction centre of the waterfall's second column ("too short"), which is the one region
+# of that panel no bar reaches: four categories over a [-0.5, 3.5] view puts column 1 at 0.375.
+_ADMISSION_NOTE_X = 0.375
+
+
+def _draw_admission(ax: Axes, admission: Admission | None) -> None:
+    if admission is None:
+        ax.axis("off")
+        ax.text(0.5, 0.5, "no prefix depth was estimable", ha="center", va="center", color=MUTED)
+        return
+    labels = ["stamped", "too short", "anti-leak\nmargin", "admitted"]
+    values = [
+        admission.n_stamped,
+        -admission.n_too_short,
+        -admission.n_by_margin,
+        admission.n_admitted,
+    ]
+    bottoms = [0, admission.n_stamped - admission.n_too_short, admission.n_admitted, 0]
+    colours = [_SHIPPED, _UNDEFINED, _UNDEFINED, _OBSERVED]
+    ax.bar(labels, [abs(v) for v in values], bottom=bottoms, color=colours, width=0.6)
+    for index, value in enumerate(values):
+        ax.text(
+            index,
+            bottoms[index] + abs(value) + admission.n_stamped * 0.015,
+            f"{abs(value)}",
+            ha="center",
+            fontsize=9,
+        )
+    ax.set_ylabel("trajectories")
+    ax.set_ylim(0, admission.n_stamped * 1.16)
+    ax.tick_params(labelsize=_TICK_PT)
+    # In the "too short" column's own empty space. That column's bar is ten trajectories tall, so
+    # everything below it is blank by construction — no opaque backing needed, and an opaque
+    # backing here would punch a hole through whichever bar it drifted onto.
+    ax.text(
+        _ADMISSION_NOTE_X,
+        0.40,
+        f"admitted base rate {admission.admitted_base_rate:.3f}\nvs corpus "
+        f"{admission.corpus_base_rate:.3f}",
+        transform=ax.transAxes,
+        ha="center",
+        va="center",
+        fontsize=8.5,
+        color=_OBSERVED,
+    )
+    panel_label(ax, f"D · prefix admission at depth {admission.depth}")
 
 
 def _coverage_limits(coverages: Sequence[ModelCoverage]) -> tuple[str, ...]:
@@ -1131,24 +1132,154 @@ def _coverage_limits(coverages: Sequence[ModelCoverage]) -> tuple[str, ...]:
     )
 
 
+# ---------------------------------------------------------------- 6. escalation_budget
+
+
+ESCALATION_BUDGET_SPEC = FigureSpec(
+    # "the trigger", unqualified, read as the SHIPPED trigger — which fires on 726/727 runs and
+    # would produce an entirely different ledger. Every number on this canvas comes from the
+    # canonical (edit-gated) cell, so the title has to say which trigger it is about.
+    title="What firing costs: the eval-only edit-gated trigger pre-empts more than it interrupts",
+    reading=(
+        "Left: where in a run the trigger fires, as a fraction of the run's total steps, drawn as "
+        "an ECDF for the runs that ultimately FAILED and for the runs that were RESOLVED. A curve "
+        "that rises early means the trigger fires early in those runs. Right: the steps that sit "
+        "AFTER the trigger point, totalled over every fired run and split by how the run ended. "
+        "On a failed run that work was spent and lost, so escalating there PRE-EMPTS it; on a "
+        "resolved run the agent went on to fix the task, so escalating INTERRUPTS work that was "
+        "about to pay off. The ratio between the two bars is the trigger's budget case."
+    ),
+    goal=(
+        "Want the pre-empted bar clearly taller than the interrupted one — that ratio is what the "
+        "trigger buys per unit of disruption. In the left panel, want the failed-run curve to the "
+        "LEFT of the resolved one: firing earlier on the runs that were going to fail is the "
+        "whole point."
+    ),
+    definitions=(
+        ("edit-gated", "failures before the agent's first edit-like action are not counted"),
+        ("fire position", "the step index the policy first escalated at, over the run's length"),
+        ("pre-empted", "steps after the trigger on runs that ultimately failed"),
+        ("interrupted", "steps after the trigger on runs that were ultimately resolved"),
+    ),
+    notes=(
+        "Aggregates only. The per-run timing arrays these summarise are deliberately not kept: "
+        "the same reasoning that deleted the lead-time figure — on this corpus a lead time is "
+        "largely the run length minus a constant.",
+        "Steps are agent decisions, not wall-clock and not dollars. This is a work ledger, not a "
+        "cost estimate.",
+    ),
+    limitations=(
+        "COUNTERFACTUAL BY ARITHMETIC, not by measurement: no logged trajectory escalated, so "
+        "'pre-empted' is what firing would have cut short assuming the run would otherwise have "
+        "continued unchanged. See the scope strip.",
+        "The ledger's ratio is driven mostly by ARM SIZE, not by timing: most of it is simply "
+        "that more of the fired runs failed. Read it beside the fire-position panel, which is "
+        "where a timing claim would have to come from — and where the two curves nearly coincide.",
+    ),
+)
+
+
+def escalation_budget(cell: PolicyCell, axes: Sequence[Axes]) -> Annotations:
+    """Where the trigger lands and what the steps after it are worth, split by outcome."""
+    ax_ecdf, ax_ledger, ax_scope = axes
+    budget = cell.budget
+    _draw_fire_ecdf(ax_ecdf, budget)
+    _draw_step_ledger(ax_ledger, budget)
+    scope_strip(ax_scope)
+    if not budget.n_fired_positioned:
+        return Annotations(
+            subtitle_facts=("no fired run carries a trigger position on this report",),
+            limitations=("The budget aggregates were not computed for this cell.",),
+        )
+    ratio = _ratio(budget.steps_after_fire_failed, budget.steps_after_fire_resolved)
+    return Annotations(
+        subtitle_facts=(
+            f"{budget.n_fired_positioned} fired runs · median fire at step "
+            f"{_number(budget.fire_step_median)} of {_number(budget.run_length_median)}",
+            f"{budget.steps_after_fire_failed} steps pre-empted vs "
+            f"{budget.steps_after_fire_resolved} interrupted ({ratio})",
+        ),
+        notes=(
+            f"median fire position {_rate(budget.fire_fraction_median_failed)} of the run on "
+            f"failed runs, {_rate(budget.fire_fraction_median_resolved)} on resolved ones",
+        ),
+        counts=(("fired_positioned", budget.n_fired_positioned),),
+    )
+
+
+def _draw_fire_ecdf(ax: Axes, budget: policy_eval.BudgetAggregates) -> None:
+    quantiles = np.linspace(0.0, 1.0, 11)
+    drawn = False
+    for deciles, name, colour in (
+        (budget.fire_fraction_deciles_failed, "ultimately failed", _OBSERVED),
+        (budget.fire_fraction_deciles_resolved, "ultimately resolved", _SHIPPED),
+    ):
+        if not deciles:
+            continue
+        drawn = True
+        ax.step(deciles, quantiles, where="post", color=colour, linewidth=1.8, label=name)
+    if not drawn:
+        ax.axis("off")
+        ax.text(0.5, 0.5, "no positioned fire on this cell", ha="center", va="center", color=MUTED)
+        return
+    ax.set_xlabel("fire position as a fraction of the run's steps")
+    ax.set_ylabel("share of fired runs at or before")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.tick_params(labelsize=_TICK_PT)
+    ax.legend(fontsize=_LEGEND_PT, loc="lower right")
+    panel_label(ax, "A · where the trigger lands")
+
+
+def _draw_step_ledger(ax: Axes, budget: policy_eval.BudgetAggregates) -> None:
+    heights = [budget.steps_after_fire_failed, budget.steps_after_fire_resolved]
+    ax.bar(
+        ["pre-empted\n(run failed)", "interrupted\n(run resolved)"],
+        heights,
+        color=[_OBSERVED, _SHIPPED],
+        width=0.55,
+    )
+    top = max(heights) if any(heights) else 1
+    for index, value in enumerate(heights):
+        ax.text(index, value + top * 0.02, f"{value}", ha="center", fontsize=9.5)
+    ax.set_ylabel("agent steps after the trigger point")
+    ax.set_ylim(0, top * 1.16)
+    ax.tick_params(labelsize=_TICK_PT)
+    panel_label(ax, "B · work after the trigger, by outcome")
+
+
+def _ratio(numerator: int, denominator: int) -> str:
+    return f"{numerator / denominator:.2f}:1" if denominator else "no interrupted steps"
+
+
+def _number(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.0f}"
+
+
+def _rate(value: float | None, digits: int = 3) -> str:
+    """Format a proportion for a caption, keeping an undefined one visibly undefined."""
+    # A never-firing cell's interval is (nan, nan) — not None — so a bare-value guard is not
+    # enough: NaN is the same undefined quantity and must print the same way.
+    if value is None or np.isnan(value):
+        return "n/a"
+    return f"{value:.{digits}f}"
+
+
 __all__ = [
-    "CAPTURE_COVERAGE_SPEC",
-    "CONFUSION_MATRIX_SPEC",
-    "EDIT_GATED_SWEEP_TABLE_SPEC",
-    "OUTCOME_BARS_SPEC",
-    "PERMUTATION_NULL_SPEC",
-    "PR_CURVE_SPEC",
-    "RECURRENCE_ROC_SPEC",
-    "ROC_CURVE_SPEC",
-    "SESSION_CADENCE_SPEC",
-    "SWEEP_TABLE_SPEC",
-    "capture_coverage",
-    "outcome_bars",
-    "permutation_null_plot",
-    "policy_confusion",
-    "policy_pr_curve",
-    "policy_roc_curve",
-    "recurrence_roc",
-    "session_cadence_bars",
-    "sweep_table",
+    "CORPUS_COVERAGE_SPEC",
+    "ESCALATION_BUDGET_SPEC",
+    "ESCALATION_DECISION_SPEC",
+    "OPERATING_POINT_SPEC",
+    "POLICY_SWEEP_SPEC",
+    "SESSION_VALUE_SPEC",
+    "Admission",
+    "ModelArm",
+    "StratifiedAuroc",
+    "corpus_and_coverage",
+    "escalation_budget",
+    "escalation_decision",
+    "operating_point",
+    "policy_sweep",
+    "scope_strip",
+    "session_value",
 ]

@@ -126,7 +126,7 @@ def test_disclosure_banner_equal_coverage_wording(monkeypatch: pytest.MonkeyPatc
     assert "equal-coverage via monotone imputation" in banner
     # The banner must NOT assert a direction imputation was never shown to have.
     assert "widens the router" not in banner
-    assert "EVERY imputed cell is filled pass=True" in banner
+    assert "NEARLY every imputed cell is filled pass=True" in banner
 
 
 def test_disclosure_banner_downgrades_when_unequal(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -204,61 +204,6 @@ def test_band_metadata_pct_tasks_from_im() -> None:
     total = sum(b["pct_tasks_min_solved"] for b in meta.values())
     assert 0.0 < total <= 1.0
     assert meta[1]["pct_tasks_min_solved"] > 0.0  # band 1 (c0) is τ for the easy tasks
-
-
-# ------------------------------------------------------------------- plots render
-
-
-def test_plot_capability_distribution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _use_rank(monkeypatch)
-    path = report.plot_capability_distribution(_im(), tmp_path)
-    assert path.exists() and path.stat().st_size > 0
-
-
-def test_plot_per_stratum_winrate_shows_a_tie_as_a_tie(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The replaced figure named ONE winner per stratum via max(), so an exact
-    # three-way tie broken by list order carried the whole headline conclusion.
-    _use_rank(monkeypatch)
-    stats: report.StratumStats = {
-        1: {
-            "Always-Cheap": {"n": 2.0, "mean": 0.75, "lo": 0.5, "hi": 1.0},
-            "kNN-cascade": {"n": 2.0, "mean": 0.75, "lo": 0.5, "hi": 1.0},
-        },
-        2: {
-            "Always-Cheap": {"n": 1.0, "mean": 0.2, "lo": 0.2, "hi": 0.2},
-            "kNN-cascade": {"n": 1.0, "mean": 0.8, "lo": 0.8, "hi": 0.8},
-        },
-    }
-    assert report._stratum_ties(stats[1]) == ["Always-Cheap", "kNN-cascade"]
-    assert report._stratum_ties(stats[2]) == ["kNN-cascade"]
-    ann = report._per_stratum_annotations(stats, [1, 2])
-    assert any("EXACT TIE" in n for n in ann.notes)
-    path = report.plot_per_stratum_winrate(stats, tmp_path)
-    assert path.exists() and path.stat().st_size > 0
-
-
-def test_stratum_reward_stats_scores_every_strategy_on_the_same_tasks(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _use_rank(monkeypatch)
-    im = _im()
-    matrix = {"tasks": dict.fromkeys(im.matrix, {}), "results": im.matrix}
-
-    class _Pick:
-        def __init__(self, name: str, model: str) -> None:
-            self.name, self._model = name, model
-
-        def select(self, tid: str, meta: dict, matrix: dict) -> str:  # noqa: ARG002
-            return self._model
-
-    tasks = sorted(im.complete)
-    stats = report.stratum_reward_stats(
-        matrix, im, [_Pick("cheap", "c0"), _Pick("strong", "f0")], tasks, 0.1
-    )
-    for per_strategy in stats.values():
-        assert len({s["n"] for s in per_strategy.values()}) == 1  # one shared denominator
 
 
 # ------------------------------------------------------- phantom machinery removed

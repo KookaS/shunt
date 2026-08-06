@@ -11,11 +11,14 @@ matplotlib.use("Agg")  # headless; no display in CI
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
+from matplotlib.container import BarContainer  # noqa: E402
 
 from benchmark.escalation import features, metrics, plots, policy_eval, replay  # noqa: E402
+from benchmark.escalation.session_eval import SessionCadenceReport  # noqa: E402
 from tests.escalation.factories import make_step, make_trajectory  # noqa: E402
 
 _PERMUTATIONS = 200
+_UNDEFINED_CI = (float("nan"), float("nan"))
 
 
 def _null(*, real: bool, statistic: metrics.Statistic = metrics.auroc) -> metrics.NullResult:
@@ -29,7 +32,9 @@ def _null(*, real: bool, statistic: metrics.Statistic = metrics.auroc) -> metric
 def _cell(*, resolved_fire: bool):  # type: ignore[no-untyped-def]
     """A policy cell where firing tracks either success (resolved_fire) or failure."""
     corpus = []
-    for i in range(8):
+    # 12 pairs, not 8: both arms must clear `policy_eval.MIN_ARM` or the figure correctly refuses
+    # to read a direction off them at all, and these tests are about the direction.
+    for i in range(12):
         thrash = [
             make_step(step_index=j, decision_index=j, success=False, failing_check_id="k")
             for j in range(6)
@@ -44,227 +49,6 @@ def _cell(*, resolved_fire: bool):  # type: ignore[no-untyped-def]
     return policy_eval.evaluate_cell(corpus, replay.GridPoint(2, 5), n_permutations=_PERMUTATIONS)
 
 
-def test_outcome_bars_call_out_an_inverted_policy() -> None:
-    # The headline the six old figures could not show: escalation firing on the runs that SUCCEED.
-    # _cell(resolved_fire=True) separates perfectly, so the intervals do not overlap.
-    fig, ax = plt.subplots()
-    ann = plots.outcome_bars(_cell(resolved_fire=True), ax)
-    assert any("INVERTED" in lim for lim in ann.limitations)
-    assert any("P(fail|fired)" in n for n in ann.notes)
-    plt.close(fig)
-
-
-def test_outcome_bars_are_quiet_when_the_policy_points_the_right_way() -> None:
-    fig, ax = plt.subplots()
-    ann = plots.outcome_bars(_cell(resolved_fire=False), ax)
-    assert ann.limitations == ()
-    plt.close(fig)
-
-
-def test_outcome_bars_refuse_to_call_a_direction_off_overlapping_intervals() -> None:
-    # A point estimate below the base rate is NOT an inverted policy while the Wilson intervals
-    # overlap. Reading a sign off overlapping bars is the same error as reading skill off a point
-    # estimate inside its null — the figure must say "no separation", not "INVERTED".
-    corpus = [
-        make_trajectory(
-            [
-                make_step(step_index=j, decision_index=j, success=False, failing_check_id="k")
-                for j in range(6)
-            ],
-            trajectory_id=f"a{i}",
-            terminal_resolved=i % 3 == 0,
-        )
-        for i in range(30)
-    ] + [
-        make_trajectory(
-            [make_step(step_index=j, decision_index=j) for j in range(6)],
-            trajectory_id=f"b{i}",
-            terminal_resolved=i % 3 != 0,
-        )
-        for i in range(30)
-    ]
-    cell = policy_eval.evaluate_cell(corpus, replay.GridPoint(2, 5), n_permutations=_PERMUTATIONS)
-    fig, ax = plt.subplots()
-    ann = plots.outcome_bars(cell, ax)
-    assert any("NO SEPARATION" in lim for lim in ann.limitations)
-    assert not any("INVERTED" in lim for lim in ann.limitations)
-    plt.close(fig)
-
-
-def test_sweep_table_says_when_no_configuration_clears_the_base_rate() -> None:
-    fig, ax = plt.subplots()
-    ann = plots.sweep_table([_cell(resolved_fire=True)], ax)
-    assert ax.tables, "the sweep rendered as a table, not a two-value colour grid"
-    assert any("no setting with measured value" in lim for lim in ann.limitations)
-    plt.close(fig)
-
-
-def test_one_separating_cell_does_not_vouch_for_the_rest_of_the_sweep() -> None:
-    # `any(...)` used to silence the warning for EVERY cell as soon as one separated — including
-    # for the shipped configuration, the one a reader is actually deciding on.
-    separating = _counts_cell(2, 1, precision_ci=(0.9, 1.0))
-    quiet = _counts_cell(2, 1, precision_ci=(0.1, 0.4))
-    fig, ax = plt.subplots()
-    ann = plots.sweep_table([separating, quiet], ax)
-    assert any("Only 1 of 2 configurations clear" in lim for lim in ann.limitations)
-    plt.close(fig)
-
-
-def test_a_never_firing_cell_prints_n_a_not_a_literal_nan() -> None:
-    # A never-firing cell's interval is (nan, nan), not None, so the old formatter rendered the
-    # literal "[nan, nan]" in the CI column — contradicting the footer's "it prints n/a rather
-    # than 0.000". Seven cells on the committed sweep tables never fire.
-    empty = _counts_cell(0, 0, precision_ci=_UNDEFINED_CI)
-    fig, ax = plt.subplots()
-    plots.sweep_table([empty], ax)
-    texts = [cell.get_text().get_text() for cell in ax.tables[0].get_celld().values()]
-    assert "[n/a, n/a]" in texts
-    assert not any("nan" in t.lower() for t in texts)
-    plt.close(fig)
-
-
-def test_sweep_point_labels_nudge_across_families_not_just_within_one() -> None:
-    # The nudge used to reset per family call, so the edit-gated labels were placed against an
-    # empty `placed` list and landed on the as-shipped ones (n=20/n=4, n=25/n=8, n=50/n=30 on the
-    # PR figure; n=15/n=20 on the ROC). Sharing the `placed` list across the two calls makes the
-    # second family dodge the first: a co-located second-family point is nudged off the first's
-    # anchor rather than stacked on it.
-    c = _counts_cell(9, 1, precision_ci=(0.85, 0.95))
-    fig, ax = plt.subplots()
-    placed: list[tuple[float, float]] = []
-    plots._annotate_sweep_points(ax, [c], lambda cell: (0.5, 0.5), placed)
-    first = ax.texts[-1]
-    plots._annotate_sweep_points(ax, [c], lambda cell: (0.5, 0.5), placed)
-    second = ax.texts[-1]
-    assert first.xyann == (6, 4)  # un-nudged anchor
-    assert second.xyann == (6, -10)  # nudged off the as-shipped anchor, not on top of it
-    plt.close(fig)
-
-
-def test_a_never_firing_cell_is_undefined_rather_than_ranked_at_zero() -> None:
-    # precision returns None, not 0.0, for a cell that never fired: 0.0 would enter the argmax
-    # and lose only by luck, and the bar would read as a measured "escalating predicts success".
-    empty = _counts_cell(0, 0, precision_ci=_UNDEFINED_CI)
-    assert empty.precision is None
-    assert empty.lift is None
-    fig, ax = plt.subplots()
-    ann = plots.outcome_bars(empty, ax)
-    assert any("UNDEFINED" in lim for lim in ann.limitations)
-    assert not any("INVERTED" in lim for lim in ann.limitations)
-    plt.close(fig)
-    fig, ax = plt.subplots()
-    table = plots.sweep_table([empty], ax)
-    assert any("none of which fired" in n for n in table.notes)
-    plt.close(fig)
-
-
-def test_an_absent_bar_is_nan_high_not_zero_high() -> None:
-    # A zero-height bar is pixel-identical to a genuine precision of 0.000 — a MEASURED claim that
-    # every flagged run resolved — so "the configuration made no prediction" was distinguishable
-    # only by reading the footer. Matplotlib omits a NaN-height bar from the axes; zero draws one.
-    fig, ax = plt.subplots()
-    cell = _counts_cell(0, 0, precision_ci=_UNDEFINED_CI, quiet=(2, 2), quiet_ci=(0.2, 0.8))
-    plots.outcome_bars(cell, ax)
-    absent, present = ax.patches[0], ax.patches[1]
-    assert np.isnan(absent.get_height()), "the never-fired bar is absent, not a measured zero"
-    assert present.get_height() == 0.5
-    plt.close(fig)
-
-
-def test_outcome_direction_reads_the_clustered_quiet_interval_not_wilson() -> None:
-    # The fired arm is a challenge bootstrap and the quiet arm used to be Wilson over ROWS, and the
-    # footer compared the two. A row-level interval is too narrow when runs cluster by challenge,
-    # and too narrow makes BOTH directional branches easier to trip. Each case below is a cell
-    # whose verdict flips depending on which estimator the quiet arm uses.
-    fig, ax = plt.subplots()
-    # wilson_interval(50, 100) = [0.404, 0.596], entirely below fired_lo=0.85 → the footer would
-    # fall silent and endorse the policy. The clustered arm overlaps, so there is no separation.
-    endorsed = _counts_cell(9, 1, precision_ci=(0.85, 0.95), quiet=(50, 50), quiet_ci=(0.30, 0.90))
-    ann = plots.outcome_bars(endorsed, ax)
-    assert any("NO SEPARATION" in lim for lim in ann.limitations)
-    plt.close(fig)
-    fig, ax = plt.subplots()
-    # Mirror image: under Wilson, fired_hi=0.15 sits below quiet_lo=0.404 and the footer shouts
-    # INVERTED. The honest quiet interval reaches down to 0.10, so it does not.
-    inverted = _counts_cell(1, 9, precision_ci=(0.05, 0.15), quiet=(50, 50), quiet_ci=(0.10, 0.90))
-    ann = plots.outcome_bars(inverted, ax)
-    assert not any("INVERTED" in lim for lim in ann.limitations)
-    assert any("NO SEPARATION" in lim for lim in ann.limitations)
-    plt.close(fig)
-
-
-def test_a_cell_that_fires_on_everything_has_no_quiet_arm_to_compare_against() -> None:
-    # fn + tn == 0, so P(fail | not fired) is undefined and its interval is (nan, nan). Wilson
-    # returned (0.0, 0.0) there, and 0.0 < fired_lo silently took the "policy points the right
-    # way" branch — a clean bill of health read off an arm with no rows in it.
-    always = _counts_cell(9, 1, precision_ci=(0.85, 0.95))
-    assert always.p_fail_given_quiet is None
-    fig, ax = plt.subplots()
-    ann = plots.outcome_bars(always, ax)
-    assert any("fired on EVERY run" in lim for lim in ann.limitations)
-    assert np.isnan(ax.patches[1].get_height())
-    plt.close(fig)
-
-
-def test_permutation_null_plot_states_the_verdict_both_ways() -> None:
-    fig, ax = plt.subplots()
-    ann = plots.permutation_null_plot(_null(real=False), ax, label="AUROC")
-    assert any("NO USABLE SIGNAL" in lim for lim in ann.limitations)
-    plt.close(fig)
-    fig, ax = plt.subplots()
-    ann = plots.permutation_null_plot(_null(real=True), ax, label="AUROC")
-    assert ann.limitations == ()
-    assert any("clears the null band" in n for n in ann.notes)
-    plt.close(fig)
-
-
-def test_capture_coverage_names_the_models_with_no_per_step_outcomes() -> None:
-    covered = make_trajectory(
-        [
-            make_step(step_index=i, decision_index=i, success=False, failing_check_id="k")
-            for i in range(4)
-        ],
-        trajectory_id="inst__seeing-model__high",
-        terminal_resolved=False,
-    )
-    blind = make_trajectory(
-        [make_step(step_index=i, decision_index=i, confirmed=False) for i in range(4)],
-        trajectory_id="inst__blind-model__high",
-        terminal_resolved=False,
-    )
-    fig, ax = plt.subplots()
-    ann = plots.capture_coverage(features.model_coverage([covered, blind]), ax)
-    assert any("blind-model" in lim for lim in ann.limitations)
-    assert any("NO per-step outcomes" in lim for lim in ann.limitations)
-    plt.close(fig)
-
-
-def test_capture_coverage_never_plots_the_tautological_capture_rate() -> None:
-    # `capture_rate` is 1.000 for every model BY CONSTRUCTION (the normalizer writes `success`,
-    # `failing_check_id` and `blocking` in one assignment), so plotting it would draw an identity
-    # as a measurement. The bars are stamping coverage, which does vary, and the spec says so.
-    covered = make_trajectory(
-        [
-            make_step(step_index=i, decision_index=i, success=False, failing_check_id="k")
-            for i in range(4)
-        ],
-        trajectory_id="inst__seeing-model__high",
-        terminal_resolved=False,
-    )
-    coverages = features.model_coverage([covered])
-    assert coverages[0].capture_rate == 1.0
-    fig, ax = plt.subplots()
-    ann = plots.capture_coverage(coverages, ax)
-    assert "per-step verified outcomes" in ax.get_xlabel()
-    assert any("stamped" in t.get_text() for t in ax.texts)
-    assert any("BY CONSTRUCTION" in lim for lim in plots.CAPTURE_COVERAGE_SPEC.limitations)
-    assert any("terminal failure rate spans" in n for n in ann.notes)
-    plt.close(fig)
-
-
-_UNDEFINED_CI = (float("nan"), float("nan"))
-
-
 def _counts_cell(
     tp: int,
     fp: int,
@@ -272,6 +56,7 @@ def _counts_cell(
     precision_ci: tuple[float, float] = (0.0, 1.0),
     quiet: tuple[int, int] = (0, 0),
     quiet_ci: tuple[float, float] = _UNDEFINED_CI,
+    budget: policy_eval.BudgetAggregates | None = None,
 ) -> policy_eval.PolicyCell:
     """A PolicyCell built straight from its 2x2, for the figures that read only counts."""
     # `quiet` is (fn, tn) and defaults to an EMPTY quiet arm, which is why `quiet_ci` defaults to
@@ -291,60 +76,516 @@ def _counts_cell(
         precision_ci=precision_ci,
         quiet_ci=quiet_ci,
         null_auroc=_null(real=False),
+        budget=budget or policy_eval.BudgetAggregates(),
     )
 
 
-def test_recurrence_roc_reports_its_detection_floor() -> None:
-    # The recurrence ROC must not let a reader infer skill from an AUROC against nothing: the
-    # figure reports the score's OWN permutation null as a shaded band and a footnote CI, so an
-    # AUROC above the band is a claim, an AUROC inside it is indistinguishable from chance.
-    labels = [False, True, True, False, True]
-    scores_plain = [0.0, 1.0, 2.0, 0.0, 3.0]
-    scores_edit = [0.0, 2.0, 3.0, 0.0, 4.0]
-    null = metrics.permutation_null(0.781, [0.45 + 0.005 * (i % 10) for i in range(_PERMUTATIONS)])
-    fig, ax = plt.subplots()
-    ann = plots.recurrence_roc(
-        scores_plain,
-        scores_edit,
+def _axes(n: int):  # type: ignore[no-untyped-def]
+    fig, axes = plt.subplots(1, n)
+    return fig, list(np.atleast_1d(axes))
+
+
+# ------------------------------------------------------------------- 1. the decision
+
+
+def test_the_decision_figure_reports_both_families_and_its_detection_floor() -> None:
+    labels = [i % 3 == 0 for i in range(30)]
+    plain = [float(i % 4) for i in range(30)]
+    edit = [float(3 if lab else 0) for lab in labels]
+    null = metrics.permutation_null(0.9, [0.45 + 0.005 * (i % 10) for i in range(_PERMUTATIONS)])
+    fig, axes = _axes(4)
+    ann = plots.escalation_decision(
+        plain,
+        edit,
         labels,
-        ax,
+        axes,
         null=null,
         band=((0.0, 0.5, 1.0), (0.0, 0.2, 0.8), (0.0, 0.5, 1.0)),
+        shipped_n=3,
     )
-    assert any("null 95%" in n and "detection floor" in n for n in ann.notes)
-    assert any(p.get_label() == "null 95% band" for p in ax.collections)
+    assert any("AUROC as-shipped" in fact for fact in ann.subtitle_facts)
+    assert any("score null 95%" in note for note in ann.notes)
+    assert any(p.get_label() == "null 95% band" for p in axes[0].collections)
+    # The shipped threshold is marked on BOTH threshold panels, not just one.
+    for ax in axes[1:3]:
+        assert any(line.get_label() == "shipped n=3" for line in ax.lines)
     plt.close(fig)
 
 
-def test_recurrence_roc_without_a_null_stays_quiet() -> None:
+def test_the_decision_figure_stays_quiet_without_a_null() -> None:
     # The band and the footnote are opt-in: a caller with no null (hand-built scores) must not be
     # handed a fabricated detection floor.
-    fig, ax = plt.subplots()
-    ann = plots.recurrence_roc([0.0, 1.0], [0.0, 2.0], [False, True], ax)
-    assert not any("null 95%" in n for n in ann.notes)
-    assert not any("detection floor" in n for n in ann.notes)
+    fig, axes = _axes(4)
+    ann = plots.escalation_decision(
+        [0.0, 1.0, 2.0, 3.0], [0.0, 2.0, 3.0, 4.0], [False, True, False, True], axes, shipped_n=3
+    )
+    assert not any("null 95%" in note for note in ann.notes)
     plt.close(fig)
 
 
-def test_every_figure_spec_carries_read_and_goal() -> None:
-    specs = [
-        plots.PR_CURVE_SPEC,
-        plots.ROC_CURVE_SPEC,
-        plots.CONFUSION_MATRIX_SPEC,
-        plots.SWEEP_TABLE_SPEC,
-        plots.PERMUTATION_NULL_SPEC,
-        plots.OUTCOME_BARS_SPEC,
-        plots.CAPTURE_COVERAGE_SPEC,
-        plots.RECURRENCE_ROC_SPEC,
+def test_every_figure_carries_the_scope_strip_including_the_unidentified_claim() -> None:
+    # The causal claim is NOT identified — no logged trajectory escalated — so it is rendered as a
+    # labelled box rather than quietly omitted or, worse, estimated.
+    fig, ax = plt.subplots()
+    plots.scope_strip(ax)
+    texts = [t.get_text() for t in ax.texts]
+    assert any("not identified: P(escalate)=0" in t for t in texts)
+    assert any("DETECTS" in t for t in texts)
+    assert any("VALUE" in t for t in texts)
+    assert not ax.axison
+    plt.close(fig)
+
+
+# ------------------------------------------------------------- 2. the operating point
+
+
+def test_the_operating_point_calls_out_an_inverted_policy() -> None:
+    # The headline the old figure set could not show: escalation firing on the runs that SUCCEED.
+    # _cell(resolved_fire=True) separates perfectly, so the intervals do not overlap.
+    fig, axes = _axes(3)
+    ann = plots.operating_point(None, _cell(resolved_fire=True), axes)
+    assert any("INVERTED" in lim for lim in ann.limitations)
+    assert any("P(fail|fired)" in note for note in ann.notes)
+    plt.close(fig)
+
+
+def test_the_operating_point_is_quiet_when_the_policy_points_the_right_way() -> None:
+    fig, axes = _axes(3)
+    ann = plots.operating_point(None, _cell(resolved_fire=False), axes)
+    assert ann.limitations == ()
+    plt.close(fig)
+
+
+def test_the_operating_point_refuses_a_direction_off_overlapping_intervals() -> None:
+    # A point estimate below the base rate is NOT an inverted policy while the intervals overlap.
+    # Reading a sign off overlapping bars is the same error as reading skill off a point estimate
+    # inside its null — the figure must say "no separation", not "INVERTED".
+    corpus = [
+        make_trajectory(
+            [
+                make_step(step_index=j, decision_index=j, success=False, failing_check_id="k")
+                for j in range(6)
+            ],
+            trajectory_id=f"a{i}",
+            terminal_resolved=i % 3 == 0,
+        )
+        for i in range(30)
+    ] + [
+        make_trajectory(
+            [make_step(step_index=j, decision_index=j) for j in range(6)],
+            trajectory_id=f"b{i}",
+            terminal_resolved=i % 3 != 0,
+        )
+        for i in range(30)
     ]
-    for spec in specs:
+    cell = policy_eval.evaluate_cell(corpus, replay.GridPoint(2, 5), n_permutations=_PERMUTATIONS)
+    fig, axes = _axes(3)
+    ann = plots.operating_point(None, cell, axes)
+    assert any("NO SEPARATION" in lim for lim in ann.limitations)
+    assert not any("INVERTED" in lim for lim in ann.limitations)
+    plt.close(fig)
+
+
+def test_an_arm_below_the_reporting_floor_renders_as_undefined_not_as_a_rate() -> None:
+    # THE DEFECT THIS PINS. The as-shipped cell at the shipped knobs fires on 726 of 727 runs, so
+    # its quiet arm holds ONE trajectory and the committed figure drew that 0/1 as a measured
+    # 0.000 — "escalating never predicts failure". The statistic is untouched (0/1 IS 0.0); the
+    # FIGURE refuses to draw a bar for it.
+    thin = _counts_cell(40, 20, precision_ci=(0.55, 0.78), quiet=(0, 1), quiet_ci=(0.0, 0.0))
+    assert thin.p_fail_given_quiet == 0.0  # the statistic is NOT corrupted to fix the figure
+    fig, axes = _axes(3)
+    ann = plots.operating_point(None, thin, axes)
+    assert ann.caveat is not None
+    assert f"n={policy_eval.MIN_ARM}" in ann.caveat
+    assert any("undefined" in t.get_text() for t in axes[0].texts)
+    # One real bar, and a hatched placeholder patch instead of a second one. (`bar(yerr=...)`
+    # registers an ErrorbarContainer beside each BarContainer, so count the bars themselves.)
+    assert len([c for c in axes[0].containers if isinstance(c, BarContainer)]) == 1
+    assert any(p.get_hatch() == "///" for p in axes[0].patches)
+    assert any("no direction can be read" in lim for lim in ann.limitations)
+    plt.close(fig)
+
+
+def test_a_readable_pair_of_arms_draws_two_real_bars() -> None:
+    fine = _counts_cell(40, 20, precision_ci=(0.55, 0.78), quiet=(10, 30), quiet_ci=(0.15, 0.40))
+    fig, axes = _axes(3)
+    ann = plots.operating_point(None, fine, axes)
+    assert ann.caveat is None
+    assert len([c for c in axes[0].containers if isinstance(c, BarContainer)]) == 2
+    plt.close(fig)
+
+
+def test_the_shipped_configuration_is_drawn_beside_the_canonical_one() -> None:
+    # THE NEGATIVE FINDING THIS KEEPS ON THE CANVAS. The configuration the product actually ships
+    # fires on essentially every run, so its P(fail|fired) IS the base rate and its quiet arm is
+    # one trajectory. Showing only the edit-gated cell would demote that to one row of a 30-row
+    # table — the exact demotion this whole redesign exists to undo.
+    as_shipped = _counts_cell(
+        306, 420, precision_ci=(0.38, 0.46), quiet=(0, 1), quiet_ci=(0.0, 0.0)
+    )
+    canonical = _counts_cell(
+        228, 128, precision_ci=(0.56, 0.71), quiet=(78, 293), quiet_ci=(0.16, 0.27)
+    )
+    fig, axes = _axes(3)
+    ann = plots.operating_point(as_shipped, canonical, axes)
+    # Three real bars and one hatched placeholder: the as-shipped quiet arm holds a single run.
+    assert len([c for c in axes[0].containers if isinstance(c, BarContainer)]) == 3
+    assert any(p.get_hatch() == "///" for p in axes[0].patches)
+    assert any("undefined\n(n=1)" in t.get_text() for t in axes[0].texts)
+    labels = [t.get_text() for t in axes[0].get_xticklabels()]
+    assert any("as-shipped" in lab for lab in labels)
+    assert any("edit-gated" in lab for lab in labels)
+    # Both families' numbers reach the subtitle and the manifest notes.
+    assert any("as-shipped fires 726/727" in f for f in ann.subtitle_facts)
+    assert any("edit-gated fires 356/727" in f for f in ann.subtitle_facts)
+    assert any(note.startswith("as-shipped at") for note in ann.notes)
+    assert ann.caveat is not None and "as-shipped not-escalated arm n=1" in ann.caveat
+    # ...and the null panel stays keyed to the canonical cell only — one null, not two.
+    assert plots.OPERATING_POINT_SPEC.title.startswith("The shipped counter sits at the base rate")
+    plt.close(fig)
+
+
+def test_the_operating_point_draws_the_length_stratified_null_beside_the_family_wise_one() -> None:
+    # Clearing the challenge-block null alone is not enough: that shuffle destroys the run-length
+    # association too, so a cell whose firing is length selection can clear it. Both must be drawn.
+    cell = _cell(resolved_fire=False)
+    assert cell.null_auroc_length is not None
+    fig, axes = _axes(3)
+    plots.operating_point(None, cell, axes)
+    labels = [artist.get_label() for artist in axes[1].get_children() if artist.get_label()]
+    assert any("length-stratified null" in str(lab) for lab in labels)
+    assert any("family-wise null" in str(lab) for lab in labels)
+    plt.close(fig)
+
+
+# -------------------------------------------------------------------- 3. the sweep
+
+
+def test_the_sweep_keeps_the_interval_and_the_run_length_control_per_family() -> None:
+    # Neither column is droppable to make two families fit. The interval is what the challenge
+    # bootstrap exists to produce; `len-only` is the run-length confound control, and without it
+    # nothing on the canvas separates "recurrence detects failure" from "recurrence is a proxy for
+    # long runs". If they will not fit, the canvas widens — the column does not go.
+    fig, ax = plt.subplots()
+    plots.policy_sweep([_cell(resolved_fire=False)], [_cell(resolved_fire=True)], ax)
+    header = [ax.tables[0].get_celld()[(0, col)].get_text().get_text() for col in range(12)]
+    assert header == [
+        "n",
+        "stale",
+        "A fired",
+        "A P(fail)",
+        "A 95% CI",
+        "A AUROC",
+        "A len-only",
+        "B fired",
+        "B P(fail)",
+        "B 95% CI",
+        "B AUROC",
+        "B len-only",
+    ]
+    row = [ax.tables[0].get_celld()[(1, col)].get_text().get_text() for col in range(12)]
+    assert row[4].startswith("[") and "," in row[4]
+    assert row[6] not in ("", "n/a")  # the length baseline is a real number on a fired cell
+    plt.close(fig)
+
+
+def test_the_sweep_is_a_table_pinned_to_its_axes_never_a_scaled_one() -> None:
+    # `Table.scale()` is the overflow mechanism that rendered the old sweep's title THROUGH its
+    # own rows: a scaled table exceeds its axes and matplotlib does not clip it. `bbox` pins it.
+    fig, ax = plt.subplots()
+    plots.policy_sweep([_cell(resolved_fire=True)], [_cell(resolved_fire=False)], ax)
+    assert ax.tables, "the sweep rendered as a table, not a two-value colour grid"
+    assert ax.tables[0]._bbox is not None
+    plt.close(fig)
+
+
+def test_the_sweep_says_when_no_configuration_clears_the_base_rate() -> None:
+    fig, ax = plt.subplots()
+    ann = plots.policy_sweep([_cell(resolved_fire=True)], [], ax)
+    assert any("no setting with measured value" in lim for lim in ann.limitations)
+    plt.close(fig)
+
+
+def test_one_separating_cell_does_not_vouch_for_the_rest_of_the_sweep() -> None:
+    # `any(...)` used to silence the warning for EVERY cell as soon as one separated — including
+    # for the shipped configuration, the one a reader is actually deciding on.
+    separating = _counts_cell(2, 1, precision_ci=(0.9, 1.0))
+    quiet = _counts_cell(2, 1, precision_ci=(0.1, 0.4))
+    fig, ax = plt.subplots()
+    ann = plots.policy_sweep([separating, quiet], [], ax)
+    assert any("1 of 2 configurations" in lim for lim in ann.limitations)
+    plt.close(fig)
+
+
+def test_a_never_firing_cell_prints_n_a_not_a_literal_nan() -> None:
+    # A never-firing cell's interval is (nan, nan), not None, so a bare-value formatter renders
+    # the literal "nan" — contradicting the promise that an undefined quantity prints n/a.
+    empty = _counts_cell(0, 0, precision_ci=_UNDEFINED_CI)
+    assert empty.precision is None
+    assert empty.lift is None
+    fig, ax = plt.subplots()
+    ann = plots.policy_sweep([empty], [empty], ax)
+    texts = [cell.get_text().get_text() for cell in ax.tables[0].get_celld().values()]
+    assert "n/a" in texts
+    assert not any("nan" in t.lower() for t in texts)
+    assert any("none of which fired" in note for note in ann.notes)
+    plt.close(fig)
+
+
+def test_the_shipped_row_is_located_but_never_colour_coded_by_result() -> None:
+    shipped = _counts_cell(9, 1, precision_ci=(0.85, 0.95))
+    other = _counts_cell(2, 1, precision_ci=(0.1, 0.4))
+    fig, ax = plt.subplots()
+    plots.policy_sweep([shipped, other], [], ax, shipped_index=0)
+    cells = ax.tables[0].get_celld()
+    assert cells[(1, 0)].get_facecolor()[:3] != cells[(2, 0)].get_facecolor()[:3]
+    plt.close(fig)
+
+
+# --------------------------------------------------------------- 4. the session value
+
+
+def _session(*, low: float, high: float) -> SessionCadenceReport:
+    draws = tuple(low + (high - low) * i / 99.0 for i in range(100))
+    return SessionCadenceReport(
+        n_overlap_instances=45,
+        n_escalated=37,
+        n_escalated_resolved=21,
+        escalate_rate=0.568,
+        escalate_ci=(0.44, 0.71),
+        n_retried=31,
+        n_retried_resolved=7,
+        retry_rate=0.226,
+        retry_ci=(0.09, 0.41),
+        n_frontier_after_fail=52,
+        n_frontier_after_fail_resolved=27,
+        frontier_after_fail_rate=0.519,
+        cheap_base_rate=0.653,
+        diff_estimate=(low + high) / 2,
+        diff_ci=(low, high),
+        diff_draws=draws,
+        n_instances_resampled=45,
+    )
+
+
+def test_the_session_figure_draws_the_paired_difference_not_two_marginals_alone() -> None:
+    # Two marginal intervals failing to overlap is a conservative test OF a difference, not a test
+    # of the difference. The paired panel is the one the claim rests on.
+    fig, axes = _axes(2)
+    ann = plots.session_value(_session(low=0.13, high=0.55), axes)
+    assert any("paired difference" in fact for fact in ann.subtitle_facts)
+    assert any(line.get_label() == "no difference" for line in axes[1].lines)
+    assert ann.caveat is not None and "Observational" in ann.caveat
+    plt.close(fig)
+
+
+def test_a_session_difference_spanning_zero_says_so_in_red() -> None:
+    fig, axes = _axes(2)
+    ann = plots.session_value(_session(low=-0.10, high=0.40), axes)
+    assert ann.caveat is not None
+    assert "spans zero" in ann.caveat
+    plt.close(fig)
+
+
+def test_the_session_figure_never_inherits_the_per_step_stamping_caveat() -> None:
+    # It reads EVERY trajectory, stamped or not, so the run-level "72 runs excluded" line is false
+    # here. A non-None caveat of its own is what stops `_merge` handing it the run-level one.
+    for interval in ((0.13, 0.55), (-0.10, 0.40)):
+        fig, axes = _axes(2)
+        ann = plots.session_value(_session(low=interval[0], high=interval[1]), axes)
+        assert ann.caveat is not None
+        plt.close(fig)
+
+
+# ---------------------------------------------------------- 5. the corpus and coverage
+
+
+def test_the_corpus_figure_names_the_models_with_no_per_step_outcomes() -> None:
+    covered = make_trajectory(
+        [
+            make_step(step_index=i, decision_index=i, success=False, failing_check_id="k")
+            for i in range(4)
+        ],
+        trajectory_id="inst__seeing-model__high",
+        terminal_resolved=False,
+    )
+    blind = make_trajectory(
+        [make_step(step_index=i, decision_index=i, confirmed=False) for i in range(4)],
+        trajectory_id="inst__blind-model__high",
+        terminal_resolved=False,
+    )
+    fig, axes = _axes(4)
+    ann = plots.corpus_and_coverage(
+        features.model_coverage([covered, blind]),
+        [plots.ModelArm("seeing-model", 1, 1.0, None)],
+        plots.StratifiedAuroc(0.78, 0.75, 0.71),
+        None,
+        axes,
+    )
+    assert any("blind-model" in lim for lim in ann.limitations)
+    assert any("NO per-step outcomes" in lim for lim in ann.limitations)
+    plt.close(fig)
+
+
+def test_the_corpus_figure_never_plots_the_tautological_capture_rate() -> None:
+    # `capture_rate` is 1.000 for every model BY CONSTRUCTION (the normalizer writes `success`,
+    # `failing_check_id` and `blocking` in one assignment), so plotting it would draw an identity
+    # as a measurement. The bars are stamping coverage, which does vary, and the spec says so.
+    covered = make_trajectory(
+        [
+            make_step(step_index=i, decision_index=i, success=False, failing_check_id="k")
+            for i in range(4)
+        ],
+        trajectory_id="inst__seeing-model__high",
+        terminal_resolved=False,
+    )
+    coverages = features.model_coverage([covered])
+    assert coverages[0].capture_rate == 1.0
+    fig, axes = _axes(4)
+    plots.corpus_and_coverage(coverages, [], plots.StratifiedAuroc(0.78, None, None), None, axes)
+    assert "per-step verified outcomes" in axes[0].get_xlabel()
+    assert any("BY CONSTRUCTION" not in lim for lim in plots.CORPUS_COVERAGE_SPEC.limitations)
+    plt.close(fig)
+
+
+def test_the_feature_mismatch_caveat_names_the_panels_it_is_about() -> None:
+    # THE CORRECTNESS BUG THIS PINS. The deployability line used to be appended to EVERY figure,
+    # telling readers the recurrence ROC depends on features production lacks. The AS-SHIPPED
+    # score does not — it reads `failing_check_id` and `success`, both of which production holds.
+    #
+    # THE SECOND BUG, which the first fix introduced. The caveat then read "Panel D only: … The
+    # recurrence trigger does not", and that was false on this canvas: panels B and C are scored
+    # on the EDIT-GATED counter, which reads `StepView.action` — a per-step field production
+    # lacks. So the caveat must scope BOTH: the eval-only counter on B/C, the prefix fields on D.
+    fig, axes = _axes(4)
+    ann = plots.corpus_and_coverage(
+        [],
+        [],
+        plots.StratifiedAuroc(0.78, 0.75, 0.71),
+        plots.Admission(10, 727, 10, 373, 344, 0.503, 0.421),
+        axes,
+    )
+    assert ann.caveat is not None
+    assert "panel D" in ann.caveat
+    assert "edit-gated" in ann.caveat
+    fig2, axes2 = _axes(4)
+    decision = plots.escalation_decision(
+        [0.0, 1.0, 2.0, 3.0], [0.0, 2.0, 3.0, 4.0], [False, True, False, True], axes2, shipped_n=3
+    )
+    assert decision.caveat is None
+    plt.close(fig)
+    plt.close(fig2)
+
+
+def test_the_admission_waterfall_states_both_base_rates() -> None:
+    fig, axes = _axes(4)
+    ann = plots.corpus_and_coverage(
+        [],
+        [],
+        plots.StratifiedAuroc(0.78, 0.75, 0.71),
+        plots.Admission(10, 727, 10, 373, 344, 0.503, 0.421),
+        axes,
+    )
+    assert any(
+        "344/727" in fact and "0.503" in fact and "0.421" in fact for fact in ann.subtitle_facts
+    )
+    assert any("0.503" in t.get_text() for t in axes[3].texts)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------- 6. the budget
+
+
+def _budget() -> policy_eval.BudgetAggregates:
+    return policy_eval.BudgetAggregates(
+        n_fired_positioned=356,
+        steps_after_fire_failed=5623,
+        steps_after_fire_resolved=3047,
+        fire_fraction_median_failed=0.47,
+        fire_fraction_median_resolved=0.46,
+        fire_fraction_deciles_failed=tuple(i / 10.0 for i in range(11)),
+        fire_fraction_deciles_resolved=tuple(i / 10.0 for i in range(11)),
+        fire_step_median=14.0,
+        run_length_median=31.0,
+    )
+
+
+def test_the_budget_figure_reports_the_ledger_and_the_fire_position() -> None:
+    fig, axes = _axes(3)
+    ann = plots.escalation_budget(_counts_cell(40, 20, budget=_budget()), axes)
+    assert any(
+        "5623 steps pre-empted vs 3047 interrupted (1.85:1)" in f for f in ann.subtitle_facts
+    )
+    assert any("median fire at step 14 of 31" in f for f in ann.subtitle_facts)
+    plt.close(fig)
+
+
+def test_the_budget_figure_refuses_to_draw_a_cell_with_no_measured_positions() -> None:
+    fig, axes = _axes(3)
+    ann = plots.escalation_budget(_counts_cell(40, 20), axes)
+    assert any("not computed" in lim for lim in ann.limitations)
+    assert any("no positioned fire" in t.get_text() for t in axes[0].texts)
+    plt.close(fig)
+
+
+def test_the_budget_figure_discloses_that_the_ledger_ratio_is_mostly_arm_size() -> None:
+    # A reader could take the 1.85:1 bar ratio as a timing finding. It is not: most of it is that
+    # more of the fired runs failed, and the fire-position panel is where a timing claim lives.
+    assert any("ARM SIZE" in lim for lim in plots.ESCALATION_BUDGET_SPEC.limitations)
+
+
+# ------------------------------------------------------------------------ the set
+
+
+_SPECS = (
+    plots.ESCALATION_DECISION_SPEC,
+    plots.OPERATING_POINT_SPEC,
+    plots.POLICY_SWEEP_SPEC,
+    plots.SESSION_VALUE_SPEC,
+    plots.CORPUS_COVERAGE_SPEC,
+    plots.ESCALATION_BUDGET_SPEC,
+)
+
+
+def test_every_figure_spec_carries_a_claim_a_reading_and_a_goal() -> None:
+    assert len(_SPECS) == 6
+    for spec in _SPECS:
+        assert spec.title.strip()
         assert spec.reading.strip()
         assert spec.goal.strip()
+        assert len(spec.caveat or "") <= 120
 
 
 @pytest.mark.parametrize(
     "removed",
     [
+        # The seven retired figures plus the helpers that existed only to draw them. Leaving the
+        # old entry points around invites their reuse at an operating point nothing else shows.
+        "pr_curve",
+        "policy_pr_curve",
+        "policy_roc_curve",
+        "policy_confusion",
+        "outcome_bars",
+        "sweep_table",
+        "permutation_null_plot",
+        "recurrence_roc",
+        "session_cadence_bars",
+        "capture_coverage",
+        "_draw_confusion_cells",
+        "_attach_excess_colorbar",
+        "_confusion_notes",
+        "_annotate_sweep_points",
+        "PR_CURVE_SPEC",
+        "ROC_CURVE_SPEC",
+        "CONFUSION_MATRIX_SPEC",
+        "SWEEP_TABLE_SPEC",
+        "PERMUTATION_NULL_SPEC",
+        "OUTCOME_BARS_SPEC",
+        "CAPTURE_COVERAGE_SPEC",
+        "RECURRENCE_ROC_SPEC",
+        "EDIT_GATED_SWEEP_TABLE_SPEC",
+        "SESSION_CADENCE_SPEC",
+        # Retired before this rework, and still gone.
         "steps_to_detection_hist",
         "sweep_heatmap",
         "cost_quality_frontier",
@@ -353,9 +594,4 @@ def test_every_figure_spec_carries_read_and_goal() -> None:
     ],
 )
 def test_replaced_figures_are_gone(removed: str) -> None:
-    # steps_to_detection drew 415 events as 4980; sweep_heatmap drew 6 cells of 2 distinct
-    # results; cost_quality auto-scaled 12 dots that rendered as 2 around a null; lead_time could
-    # not support a timing claim at all, because the policy fires in the first two decisions of
-    # nearly every run it flags, so a lead time is the run length minus a constant. All were
-    # removed, and leaving the old entry points around invites their reuse.
     assert not hasattr(plots, removed)

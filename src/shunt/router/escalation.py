@@ -40,6 +40,20 @@ class EscalationConfig:
     enabled: bool = False
     # 2, not 1: intermediate fail-then-fix is normal, so a single verified failure is not
     # escalation-worthy (escalating on the first verified failure is failure-biased).
+    #
+    # THIS VALUE IS A PRIOR, NOT A TUNED ONE, and the only measurement that may be cited for it
+    # is the one THIS counter produces. In the `as_shipped` family of the policy sweep — the
+    # family that replays `counts_as_failure` exactly as written below, at the shipped
+    # stale_window=10 — every low threshold is at chance: n=2 fires on 727/727 offline runs at
+    # AUROC 0.500 and does not clear its permutation null (p=1.0), n=3 fires on 726/727 at
+    # AUROC 0.501, n=4 on 720/727 at 0.506. There is therefore no shipped-counter evidence
+    # preferring 3 to 2, nor either to any other low threshold. (The 0.724 AUROC quoted around
+    # the report belongs to the `edit_gated` family, which skips failures before the agent's
+    # first edit — a rule this module does not implement, `EscalationPolicy` is `extra="forbid"`
+    # with no counting knob, and `benchmark/escalation/deployability.py` classifies as
+    # offline-only. It is not evidence about this default.) `enabled` defaults False for the
+    # same reason: nothing has yet measured this counter to be worth switching on.
+    # See docs/escalation.md and benchmark/escalation/reports/metrics.json (`policy_sweep.png`).
     escalate_after_n: int = 2
     # A failure that does not RECUR within this many decisions is retired from the counter —
     # this is the user's "+10 calls elapsed" idea kept as a staleness bound, not a trigger.

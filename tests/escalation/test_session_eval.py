@@ -67,9 +67,12 @@ def test_models_absent_from_the_registry_do_not_crash_the_ranking() -> None:
     assert session_eval.session_cadence(trajs) is None  # no overlap subset -> no estimate
 
 
-def test_the_arms_report_wilson_intervals_and_serialize_to_dict() -> None:
-    # The bars' error arms are Wilson intervals, and to_dict must carry the SAME numbers (rounded)
-    # plus the full-corpus context — the figure and the JSON cannot disagree about a rate.
+def test_the_arms_resample_instances_not_sessions_and_serialize_to_dict() -> None:
+    # THE FIX THIS PINS. The arms carried Wilson intervals over SESSIONS, which treats several
+    # frontier sessions on one task as several independent draws. They are one task, one repo, one
+    # target test — the instance is the exchangeable unit, so both arms resample whole instances
+    # and the paired difference comes off the same resamples. `to_dict` must carry the SAME
+    # numbers (rounded) plus the full-corpus context — the figure and the JSON cannot disagree.
     trajs = []
     for inst in ("i1", "i2"):
         trajs.append(_session(inst, "deepseek-v4-flash", resolved=False))
@@ -77,10 +80,16 @@ def test_the_arms_report_wilson_intervals_and_serialize_to_dict() -> None:
         trajs.append(_session(inst, "kimi-k3", resolved=True))
     report = session_eval.session_cadence(trajs)
     assert report is not None
-    assert report.escalate_ci == metrics.wilson_interval(
+    # Every escalate draw resolves here, so the instance bootstrap is degenerate at 1.0 — and
+    # that is the point: Wilson over 2 sessions would have manufactured a spread of [0.34, 1.0]
+    # from a corpus holding exactly two instances, both of which resolved.
+    assert report.escalate_ci == (1.0, 1.0)
+    assert report.escalate_ci != metrics.wilson_interval(
         report.n_escalated_resolved, report.n_escalated
     )
-    assert report.retry_ci == metrics.wilson_interval(report.n_retried_resolved, report.n_retried)
+    assert report.n_instances_resampled == 2
+    # The paired difference is estimable on the same instances and is published beside the arms.
+    assert report.to_dict()["paired_difference"]["n_instances"] == 2  # type: ignore[index]
     # Full-corpus context: every cheap failure was followed by a frontier session, so the
     # context's frontier-after-fail arm is the escalate arm's superset — not a separate figure.
     assert report.n_frontier_after_fail == report.n_escalated

@@ -414,15 +414,26 @@ class TestParallelStamping:
 
 
 class TestStandaloneFigureFreshness:
-    """The 12 standalone figures sat on NO refresh path; timing_comparison.png shipped
-    stale because of it. The gate below is what makes that state visible."""
+    """Figures once sat on NO refresh path and shipped stale because of it. The gate below
+    is what makes that state visible — now over EVERY figure job, not just the standalone
+    four: the report and escalation figures previously had no digest at all."""
 
-    def test_every_committed_standalone_figure_is_declared(self) -> None:
-        declared = {out for job in pipeline.STANDALONE_FIGURES for out in job.outputs}
-        # report.py owns the rest of the directory; these are the ones no stage touched.
-        assert "timing_comparison.png" in declared
-        assert "strategy_comparison.png" in declared
-        assert len(declared) == 12
+    def test_every_committed_figure_is_declared(self) -> None:
+        declared = {
+            out for job in pipeline.FIGURE_JOBS for out in job.outputs if out.endswith(".png")
+        }
+        on_disk = {
+            path.name for job in pipeline.FIGURE_JOBS for path in job.figures_dir.glob("*.png")
+        }
+        assert declared == on_disk
+
+    def test_every_stage_that_draws_figures_is_covered(self) -> None:
+        """A figure drawn by a stage with no FigureJob is a figure with no freshness gate."""
+        assert {job.stage for job in pipeline.FIGURE_JOBS} == {
+            pipeline.FIGURES,
+            pipeline.REPORT,
+            pipeline.EVALUATE,
+        }
 
     def test_declared_outputs_all_exist(self) -> None:
         assert pipeline.missing_figures() == []
@@ -440,21 +451,27 @@ class TestStandaloneFigureFreshness:
         _REAL_WRITE_MANIFEST(manifest)
         assert pipeline.stale_figures(manifest) == []
         digests = pipeline.figure_digests()
-        digests["plot_timing"] = "0" * 64
+        digests["viz_knn"] = "0" * 64
         manifest.write_text(json.dumps(digests))
-        assert pipeline.stale_figures(manifest) == ["plot_timing"]
+        assert pipeline.stale_figures(manifest) == ["viz_knn"]
 
     def test_an_absent_manifest_is_stale_not_silently_ok(self, tmp_path: Path) -> None:
         assert pipeline.stale_figures(tmp_path / "absent.json") == [
-            job.name for job in pipeline.STANDALONE_FIGURES
+            job.name for job in pipeline.FIGURE_JOBS
         ]
 
     def test_the_strategy_set_is_part_of_the_digest(self) -> None:
-        """Adding a strategy must mark the strategy/timing figures stale — the exact
-        drift that let Price-Cascade never reach timing_comparison.png."""
-        jobs = {job.name: job for job in pipeline.STANDALONE_FIGURES}
-        for name in ("plot_timing", "plot_strategies"):
-            assert any(p.name == "strategies" for p in jobs[name].inputs)
+        """Adding a strategy must mark the strategy-comparing figures stale — the exact
+        drift that once let a new strategy never reach the committed figures."""
+        jobs = {job.name: job for job in pipeline.FIGURE_JOBS}
+        assert any(p.name == "strategies" for p in jobs["report"].inputs)
+
+    def test_the_escalation_corpus_is_part_of_its_digest(self) -> None:
+        """The escalation figures are scored on the live trajectories; a corpus rebuild
+        must mark them stale. manifest.json carries a content_sha256 per trajectory."""
+        inputs = pipeline._data_inputs("escalation")
+        assert any(p.name == "manifest.json" for p in inputs)
+        assert any(p.name == "router.yaml" for p in inputs)
 
     def test_the_model_registry_is_part_of_the_data_digest(self) -> None:
         """A `default_arm` change in models.yaml re-picks each model's canonical routing
