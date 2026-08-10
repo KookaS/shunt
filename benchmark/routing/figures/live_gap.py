@@ -25,7 +25,7 @@ from benchmark import plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
 from benchmark.routing.figures import context as ctxmod
 from benchmark.routing.plot_style import usd
-from benchmark.routing.strategy_class import StrategyClass, classify
+from benchmark.routing.strategy_class import StrategyClass, classify, shipped_mechanism
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -97,7 +97,10 @@ SPEC = FigureSpec(
     title="Most of the headroom above the shipped router is blocked, not impossible",
     reading=(
         "Left: every strategy that reaches the bound's pass rate within one percentage "
-        "point, as total spend on a log axis, cheapest at the bottom, coloured by class. "
+        "point, as total spend on a log axis, cheapest at the bottom, coloured by class. A "
+        "HOLLOW bar is a blocked row whose mechanism already ships and is on by default under "
+        "another config surface — what is blocked there is the strategy NAME, not the "
+        "capability, so do not read its share of the bracket as unbuilt work. "
         "The blue bracket is the span between the cheapest LIVE way to buy that quality and "
         "the cheapest BLOCKED one — engineering work, not physics. The red bracket is the "
         "span from there down to the bound, which no strategy of any class can cross. "
@@ -119,8 +122,9 @@ SPEC = FigureSpec(
         ),
         (
             "blocked",
-            "realizable in principle, with a named blocker and a path to live recorded in "
-            "benchmark/routing/strategy_class.py. A costed to-do, not a result.",
+            "no router.strategy value names it, with the reason and a path to live recorded "
+            "in benchmark/routing/strategy_class.py. A costed to-do, not a result — but the "
+            "to-do is sometimes only the NAME, not the mechanism.",
         ),
         (
             "control",
@@ -139,8 +143,11 @@ SPEC = FigureSpec(
     ),
     limitations=(
         "The blue bracket is what the BLOCKED strategies measured here would buy IF their "
-        "blockers were removed. Their blockers are structural (cache-safety, an offline-fit "
-        "input), so the live mechanism that replaces them may land nowhere near this span.",
+        "blockers were removed, and the blockers are not one kind of thing: some are "
+        "structural (cache-safety, an offline-fit input) and the live mechanism replacing "
+        "them may land nowhere near this span, while another is only that no router.strategy "
+        "value names a mechanism that already ships in a different layer. Read each blocker "
+        "in benchmark/routing/strategy_class.py before treating this span as unbuilt work.",
         "Only strategies inside the quality band appear on the left panel. A cheap strategy "
         "that gives up quality is not a smaller version of this gap — read the frontier "
         "figure for that trade.",
@@ -152,8 +159,21 @@ SPEC = FigureSpec(
 
 def _draw_band(ax: Axes, band: list[tuple[str, StrategyClass, float, float]]) -> None:
     ys = list(range(len(band)))
-    for y, (_name, cls, cost, perf) in zip(ys, band, strict=True):
-        ax.barh(y, cost, height=0.6, color=_CLASS_COLOUR[cls], zorder=2)
+    for y, (name, cls, cost, perf) in zip(ys, band, strict=True):
+        # Hollow means the MECHANISM already runs; the class colour still says "blocked".
+        # Same fill convention as cost_quality_frontier.png, so the one reader who sees both
+        # figures learns it once. Without it this panel counts a shipped, default-on
+        # mechanism into a bracket labelled "unlocked by wiring the blocked ones".
+        ships = shipped_mechanism(name) is not None
+        ax.barh(
+            y,
+            cost,
+            height=0.6,
+            facecolor="none" if ships else _CLASS_COLOUR[cls],
+            edgecolor=_CLASS_COLOUR[cls],
+            linewidth=1.6 if ships else 0.0,
+            zorder=2,
+        )
         ax.text(
             cost * 1.06,
             y,

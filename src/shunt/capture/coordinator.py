@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Any, Protocol
 
 from shunt.capture.refit import RefitScheduler
@@ -19,6 +20,7 @@ from shunt.proxy.wire_signals import derive_wire_tier1_outcome
 from shunt.router.escalation import derive_blocking
 from shunt.session import Session
 from shunt.verifiers.base import VerifierResult
+from shunt.verifiers.tier2 import detect_framework
 
 logger = logging.getLogger(__name__)
 
@@ -55,32 +57,104 @@ class RecordOutcomeCallback(Protocol):
     ) -> None: ...
 
 
-class WorkDirResolver:
-    """Resolve a session to a repo root from **operator config only**.
+def _git_root(start: str) -> str | None:
+    """Walk up from *start* for a directory holding ``.git``, in pure Python.
 
-    Precedence: per-``tool_identity`` override map, then single ``work_dir`` (env
-    ``SHUNT_WORK_DIR`` beats file); none ⇒ ``None`` (manual-only). Never a wire path (RCE).
+    No ``git`` binary is invoked: the shipped container image has none, and shelling out
+    to a binary found on ``PATH`` inside a directory Shunt is about to trust is its own risk.
+    """
+    current = Path(start)
+    for candidate in (current, *current.parents):
+        if (candidate / ".git").exists():
+            return str(candidate)
+    return None
+
+
+def _validated_launch_root(launch_dir: str | None) -> str | None:
+    """Promote Shunt's launch directory to a repo root Shunt can verify, or refuse it.
+
+    Refuses anything that is not a real directory whose git root declares a detectable
+    test framework — the tree whose test command will be executed.
+    """
+    # There is deliberately NO containment check against a set of permitted roots here.
+    # The input is Shunt's own `os.getcwd()`: the operator changed to this directory and
+    # started the binary in it, so no untrusted party is on this path and containment
+    # would buy no security while refusing every repo outside $HOME (/workspace, /srv,
+    # /opt, /var/www, any container bind-mount). The checks that remain answer a real
+    # question — "is this a repo with a suite?" — rather than "do I trust the operator?".
+    if not launch_dir:
+        return None
+    real = os.path.realpath(launch_dir)
+    if not os.path.isdir(real):
+        return None
+    root = _git_root(real)
+    if root is None:
+        return None
+    if detect_framework(root) is None:
+        return None
+    return root
+
+
+class WorkDirResolver:
+    """Resolve a session to a repo root from **operator config or Shunt's own launch dir**.
+
+    Precedence: per-``tool_identity`` map, then single ``work_dir`` (env ``SHUNT_WORK_DIR``
+    beats file), then the validated launch directory; none ⇒ ``None``. Never a wire path.
     """
 
+    # All three layers are operator-chosen: layers 1–2 are paths written into config, and
+    # layer 3 is the directory the operator started the binary in. Layer 3 is still checked
+    # (realpath → is_dir → git root → a test framework), because "is this a repo whose suite
+    # can be run?" is a real question — but it is a capability check, not a trust gate.
+    # A WIRE-supplied path is deliberately absent from every layer: a client-announced cwd
+    # becoming a `subprocess.run(cwd=…)` is remote code execution, and the handful of
+    # integrations that could announce one do not pay for that trust widening.
     def __init__(
-        self, work_dir: str | None = None, work_dirs: dict[str, str] | None = None
+        self,
+        work_dir: str | None = None,
+        work_dirs: dict[str, str] | None = None,
+        launch_dir: str | None = None,
     ) -> None:
         self._work_dir = work_dir
         self._work_dirs = work_dirs or {}
+        # Sampled ONCE, here, rather than per `resolve()`. The engine's decide-side task key
+        # (first turn) and the capture side (session close, minutes later) both call `resolve`
+        # on this one shared instance; re-deriving the launch root each time would let a chdir,
+        # a `git init`, or a new dependency file change the digest between the two, and a
+        # decide/capture key that disagrees turns escalation into a silent null detector.
+        self._launch_root = _validated_launch_root(launch_dir)
 
     @classmethod
     def from_config(
-        cls, work_dir: str | None = None, work_dirs: dict[str, str] | None = None
+        cls,
+        work_dir: str | None = None,
+        work_dirs: dict[str, str] | None = None,
+        launch_dir: str | None = None,
+        trust_launch_dir: bool = True,
     ) -> WorkDirResolver:
         """Build a resolver, letting env ``SHUNT_WORK_DIR`` override the file's single path."""
         env = os.environ.get("SHUNT_WORK_DIR")
-        return cls(work_dir=env or work_dir, work_dirs=work_dirs)
+        return cls(
+            work_dir=env or work_dir,
+            work_dirs=work_dirs,
+            launch_dir=launch_dir if trust_launch_dir else None,
+        )
+
+    def armed_layer(self) -> str | None:
+        """Which precedence layer can auto-capture, as a log-safe label, or None (manual-only)."""
+        if self._work_dirs:
+            return "capture.work_dirs"
+        if self._work_dir:
+            return "SHUNT_WORK_DIR / capture.work_dir / --work-dir"
+        if self._launch_root:
+            return f"launch directory ({self._launch_root})"
+        return None
 
     def resolve(self, session: Session) -> str | None:
         mapped = self._work_dirs.get(session.tool_identity)
         if mapped:
             return mapped
-        return self._work_dir or None
+        return self._work_dir or self._launch_root or None
 
 
 def _run_signature(work_dir: str) -> str:

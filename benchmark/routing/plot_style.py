@@ -164,13 +164,18 @@ _LABEL_PAD_PT: Final[float] = 2.0
 
 @dataclass(frozen=True)
 class LabelPoint:
-    """One point to direct-label, with the half-height of its error bar (0 when none)."""
+    """One point to direct-label, with the half-extent of its error bars (0 when none)."""
 
     x: float
     y: float
     text: str
     yerr_lo: float = 0.0
     yerr_hi: float = 0.0
+    # Horizontal extent, for a figure that puts an interval on x as well. The obstacle model
+    # knew only vertical bars, so a label was free to land on top of a horizontal one.
+    # Defaults keep every caller that has no x interval placing labels exactly as before.
+    xerr_lo: float = 0.0
+    xerr_hi: float = 0.0
 
 
 def _rects_overlap(
@@ -290,11 +295,13 @@ def place_labels(
         px, py = trans.transform((p.x, p.y))
         _, lo_py = trans.transform((p.x, p.y - p.yerr_lo))
         _, hi_py = trans.transform((p.x, p.y + p.yerr_hi))
+        left_px, _ = trans.transform((p.x - p.xerr_lo, p.y))
+        right_px, _ = trans.transform((p.x + p.xerr_hi, p.y))
         taken.append(
             (
-                px - pad_px,
+                min(left_px, px) - pad_px,
                 min(lo_py, py) - pad_px,
-                px + pad_px,
+                max(right_px, px) + pad_px,
                 max(hi_py, py) + pad_px,
             )
         )

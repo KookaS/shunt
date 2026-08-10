@@ -25,6 +25,7 @@ from shunt.router.escalation import (
     ExplorationStream,
     FailureEvent,
     failure_event_from_outcome,
+    next_rung_rank,
 )
 from shunt.router.exploration import CandidateStats, ExplorationDecision, ThompsonSampler
 from shunt.router.policy import ExplorationPolicy
@@ -276,6 +277,14 @@ class RouterEngine:
         # its base model. Persisted with the failure log so a restart keeps the higher rung; a
         # verified pass retires it alongside the failures.
         self._task_effort_arm: dict[str, str] = {}
+        # Capability-rank FLOOR, keyed like every other escalation map by the REPO
+        # (`_task_key` digests the resolved work_dir): the highest rank ANY task in that repo has
+        # escalated to, so an unrelated task in the same repo inherits it. Base routing has no
+        # memory of an escalation — it re-picks the cheap model every session — so without a
+        # floor the ladder oscillates cheap->mid, cheap->mid forever and never reaches the
+        # frontier. The floor is what turns one rung into a CASCADE across sessions.
+        # Persisted and retired exactly like the effort arm.
+        self._task_rank_floor: dict[str, int] = {}
         # The epsilon-greedy decision stream, built ONLY when the extra opt-in knob is set.
         # Seeded from config when given, else drawn once and recorded on every decision so a
         # logged propensity stays auditable after the run.
@@ -347,7 +356,7 @@ class RouterEngine:
             # Foreign embedding space: the stored corpus was built by a different embedder,
             # so its neighbours are meaningless. Route as if cold (no embed, no query) until
             # `shunt reindex` re-embeds the corpus and the fingerprint matches again.
-            return self._decide_stale_space()
+            return self._decide_stale_space(session_id)
 
         # Effective-sample-size gate (nₑ), not raw count: a low-confidence or decayed outcome
         # counts for less, so cold-start ends on *trustworthy* evidence, not row volume.
@@ -403,11 +412,15 @@ class RouterEngine:
         logger.debug("decide[%s]: chose model=%s reason=%s", session_id, model_name, reason)
         return self._finalize_decision(session_id, model_name, reason, provenance)
 
-    def _decide_stale_space(self) -> tuple[str, str, dict[str, Any]]:
+    def _decide_stale_space(self, session_id: str) -> tuple[str, str, dict[str, Any]]:
         """Route via the cold-start default when the corpus is in a stale embedding space.
 
         No embed, no index query — the reason token surfaces in ``shunt explain``.
         """
+        # Finalized like every other neighbour-consulting decision: a stale embedding space is
+        # `knn` DEGRADED, not a fixed strategy the operator pinned. The verified-failure signal
+        # is unaffected by the corpus being unreadable, so suppressing escalation here left the
+        # router stuck on the cheap model for exactly as long as a reindex was outstanding.
         model_name = self._cold_start_strategy.select(self._model_pool)
         provenance = build_provenance(
             model_chosen=model_name,
@@ -416,7 +429,7 @@ class RouterEngine:
             router_propensity=1.0,
             candidate_model_scores={},
         )
-        return (model_name, "stale_embedding_space", provenance)
+        return self._finalize_decision(session_id, model_name, "stale_embedding_space", provenance)
 
     def _decide_fixed(self) -> tuple[str, str, dict[str, Any]]:
         """Route a neighbor-independent (fixed) strategy: no cold-start, embedding, or query.
@@ -618,6 +631,7 @@ class RouterEngine:
                 },
                 "decision_index": dict(self._task_decision_index),
                 "effort_arm": dict(self._task_effort_arm),
+                "rank_floor": dict(self._task_rank_floor),
             }
 
     def restore_escalation_state(self, state: dict[str, Any] | None) -> None:
@@ -627,6 +641,7 @@ class RouterEngine:
         raw_log = state.get("failure_log")
         raw_index = state.get("decision_index")
         raw_effort = state.get("effort_arm")
+        raw_floor = state.get("rank_floor")
         with self._lock:
             if isinstance(raw_log, dict):
                 self._failure_log = _restore_failure_log(_state_keyed(raw_log, "failure_log"))
@@ -638,6 +653,31 @@ class RouterEngine:
                 self._task_effort_arm = {
                     str(k): str(v) for k, v in _state_keyed(raw_effort, "effort_arm").items()
                 }
+            if isinstance(raw_floor, dict):
+                self._task_rank_floor = self._clamped_floors(
+                    _restore_int_map(_state_keyed(raw_floor, "rank_floor"))
+                )
+
+    def _clamped_floors(self, floors: dict[str, int]) -> dict[str, int]:
+        """Clamp restored rank floors to the CURRENT pool's top rank."""
+        # A floor persisted against a bigger registry makes `models_from_rank(floor)` return
+        # [] in the smaller one, so `_lift_to_rank_floor` falls through and the cascade's
+        # memory is silently dead — the router re-picks the cheap model every session, which
+        # is the oscillation the floor exists to stop. Logged: silence is what hid it.
+        top = self._max_rank_index()
+        if top < 0:
+            return dict(floors)
+        clamped = {}
+        for key, floor in floors.items():
+            if floor > top:
+                logger.warning(
+                    "restore: rank floor %d for %s exceeds the pool top rank %d — clamped",
+                    floor,
+                    key[:8],
+                    top,
+                )
+            clamped[key] = min(floor, top)
+        return clamped
 
     def _task_key(self, session_id: str) -> str | None:
         """The escalation task identity — the resolved REPO (work_dir), or None to skip."""
@@ -686,11 +726,31 @@ class RouterEngine:
         config = self._escalation
         if config is None:
             return (model_name, reason, provenance)
+        # Re-serve the rung this task already climbed to BEFORE deciding. Base routing is
+        # memoryless (cold-start and kNN both re-pick from the corpus, not from the ladder), so
+        # without this the next session drops back to the cheap model and the ladder re-climbs
+        # the same rung forever, oscillating between the cheap model and the rung above it and
+        # never reaching the frontier. Lifting first also means the effort ladder below is read
+        # on the model actually served.
+        model_name, reason, provenance = self._lift_to_rank_floor(
+            task_key, model_name, reason, provenance
+        )
         cur_arm_index, max_arm_index, cur_arm, reasoning = self._effort_ladder(task_key, model_name)
         # Phase 1: rank is read LIVE from the pool (cache-safe only because price order is
         # process-constant). Phase 2 (learned overlay) MUST read a per-session pinned snapshot
         # from CapabilityRankResolver here instead — see router/capability_rank.py NOT-YET-WIRED.
         rank_index = self._rank_of(model_name)
+        # The routing-collapse alarm is a POLICY-OSSIFICATION detector: it reads the choice
+        # distribution to catch the router settling onto costly models BY ITS OWN LEARNED
+        # CHOICES. During COLD START the router is not choosing at all — it defaults every
+        # session to the cheap cold-start model — so its choice distribution is degenerate by
+        # design (entropy collapses to 0 on one model) and the alarm would fire on the very
+        # state where verified failures first accumulate, globally suppressing auto-escalation.
+        # The alarm is therefore suppressed while cold-start is active, and applied normally
+        # once the router has enough verified outcomes to be making informed choices.
+        ne_total = self._outcome_index.effective_labeled()
+        ne_tier2 = self._outcome_index.effective_tier2()
+        cold_start_active = self._cold_start_strategy.is_active_effective(ne_total, ne_tier2)
         # Build this decision's directive through the SHARED lifecycle helper the offline replay
         # also drives, seeded with the engine's concrete ladder position (effort arm + model rank).
         # The concrete application (arm/model + the model-health rank edge) stays engine-only below.
@@ -704,7 +764,9 @@ class RouterEngine:
         directive = runner.decide(
             self._task_decision_index.get(task_key, 0),
             config,
-            loop_health_alarm=bool(self._loop_health_alarm and self._loop_health_alarm()),
+            loop_health_alarm=bool(
+                self._loop_health_alarm and not cold_start_active and self._loop_health_alarm()
+            ),
             stream=self._escalation_stream,
         )
         # A flagged checkpoint carries the propensity that generated its arm — persisted with the
@@ -730,6 +792,43 @@ class RouterEngine:
         # this row into exactly the arm it is trying to measure.
         return (model_name, reason, _void_exploration(provenance))
 
+    def _lift_to_rank_floor(
+        self, task_key: str, model_name: str, reason: str, provenance: dict[str, Any]
+    ) -> tuple[str, str, dict[str, Any]]:
+        """Re-serve the highest rank this REPO already escalated to (the cascade's memory)."""
+        # Held, not new: no rung is climbed here, so the reason is `escalation_floor`, not
+        # `auto_escalation`. It is still IMPOSED by the failure signal rather than sampled by the
+        # policy, so it is marked non-policy for the same reason an escalated turn is — otherwise
+        # the learner trains a forced model as a free choice and the propensity is a lie.
+        floor = self._task_rank_floor.get(task_key)
+        if floor is None:
+            return (model_name, reason, provenance)
+        # Defence in depth behind the restore-time clamp: a floor past the top rank makes
+        # `models_from_rank` empty, and this method would fall through with no log line.
+        floor = min(floor, self._max_rank_index())
+        current = self._rank_of(model_name)
+        if current is not None and current >= floor:
+            return (model_name, reason, provenance)
+        for m in self._model_pool.models_from_rank(floor):
+            if self._model_pool.is_healthy(m.name):
+                logger.info(
+                    "decide: escalation floor holds %s at %s -> %s (rank>=%d)",
+                    task_key[:8],
+                    model_name,
+                    m.name,
+                    floor,
+                )
+                held = EscalationDirective(
+                    EscalationAction.HOLD, "escalation_floor", new_label_window=False
+                )
+                return (
+                    m.name,
+                    "escalation_floor",
+                    self._non_policy_provenance(provenance, held, m.name),
+                )
+        # Every model at or above the floor is unhealthy — serve the base pick rather than fail.
+        return (model_name, reason, provenance)
+
     def _max_rank_index(self) -> int:
         """The top capability-rank index (number of ranked models - 1; -1 when empty)."""
         return len(self._model_pool.ranked_models()) - 1
@@ -751,7 +850,17 @@ class RouterEngine:
             return (0, 0, None, None)  # no arms → indices 0/0 → the ladder steps tier
         ids = [arm.id for arm in sorted(reasoning.arms, key=lambda a: a.rank)]
         cur_arm = self._task_effort_arm.get(task_key, reasoning.default_arm)
-        cur_index = ids.index(cur_arm) if cur_arm in ids else 0
+        if cur_arm not in ids:
+            # A persisted arm FOREIGN to this model. The effort ladder is per-task, the routed
+            # model per-decision, so base routing can re-pick a different model than the one the
+            # arm was escalated on. A foreign id has no `next_arm_above`: reporting it as headroom
+            # made `_apply_effort` return None, the directive was voided, the failure window was
+            # never retired, and escalation deadlocked before ever reaching the rank rung. Reset
+            # to THIS model's default — the fresh model climbs its own effort ladder from the
+            # bottom, exactly as a rank step starts a new model at its own default arm.
+            self._task_effort_arm[task_key] = reasoning.default_arm
+            cur_arm = reasoning.default_arm
+        cur_index = ids.index(cur_arm)
         return (cur_index, len(ids) - 1, cur_arm, reasoning)
 
     def _apply_effort(  # noqa: PLR0913 (escalation branch threads the resolved ladder state)
@@ -785,7 +894,7 @@ class RouterEngine:
             model_name,
             "auto_escalation",
             {
-                **self._non_policy_provenance(provenance, directive),
+                **self._non_policy_provenance(provenance, directive, model_name),
                 "escalated_reasoning_arm": next_arm,
             },
         )
@@ -798,9 +907,9 @@ class RouterEngine:
         provenance: dict[str, Any],
         directive: EscalationDirective,
     ) -> tuple[str, str, dict[str, Any]] | None:
-        """Step to the first healthy model at a strictly-higher capability rank."""
+        """Step to the healthy model the shortlist ladder jumps to from the current rank."""
         del reason
-        higher = self._escalate_one_rank(model_name)
+        higher = self._escalate_one_rank(model_name, self._task_rank_floor.get(task_key, 0))
         if higher is None:  # every higher-rank model unhealthy — the caller voids the record
             return None
         self._retire_after_escalation(task_key)
@@ -808,23 +917,43 @@ class RouterEngine:
         # arm, never mid-ladder on a stale/foreign arm id (which would silently block its own
         # effort steps — a foreign id has no next_arm_above).
         self._task_effort_arm.pop(task_key, None)
+        # Remember the rung so the NEXT session starts here instead of back at the cheap model.
+        # Monotone by max(): a transient health gap that forces a lower pick must never lower a
+        # floor the task already earned, or the ladder silently walks backwards.
+        climbed = self._rank_of(higher)
+        if climbed is not None:
+            self._task_rank_floor[task_key] = max(climbed, self._task_rank_floor.get(task_key, 0))
         logger.info("decide: auto-escalation %s -> %s (%s)", model_name, higher, directive.reason)
-        return (higher, "auto_escalation", self._non_policy_provenance(provenance, directive))
+        return (
+            higher,
+            "auto_escalation",
+            self._non_policy_provenance(provenance, directive, higher),
+        )
 
     @staticmethod
     def _non_policy_provenance(
-        provenance: dict[str, Any], directive: EscalationDirective
+        provenance: dict[str, Any], directive: EscalationDirective, model_chosen: str
     ) -> dict[str, Any]:
         """Mark an escalated turn non-policy: it is imposed by the failure signal, not sampled."""
+        # `model_chosen` is REQUIRED, not inherited: the base dict was built before escalation ran,
+        # so every field describing WHAT WAS SERVED must be restated here or the row asserts the
+        # model the router merely would have picked. Making it a parameter is what stops a fourth
+        # non-policy path from silently forgetting — the two that did are why this is a parameter.
         # Neutralize the base model's propensity + candidate scores and carry the new-label-window
         # flag so the learner never trains the escalated arm/model as a free policy choice.
         return {
             **provenance,
+            "model_chosen": model_chosen,
             "rank_escalation_reason": directive.reason,
             "auto_escalated": True,
             "new_label_window": directive.new_label_window,
             "router_propensity": None,
             "candidate_model_scores": {},
+            # An escalated turn is never the exploratory downshift the base pick may have been:
+            # the served model/arm is at or above the greedy one. Left stale, a verified pass on
+            # the ESCALATED model banked slack into the ConservativeGate as evidence the CHEAPER
+            # model works, unlocking downshifts the evidence never supported.
+            "downshift": False,
         }
 
     def _retire_after_escalation(self, task_key: str) -> None:
@@ -838,12 +967,33 @@ class RouterEngine:
         """Capability-rank index of *model_name* (0 = cheapest), or None if absent."""
         return self._model_pool.rank_of(model_name)
 
-    def _escalate_one_rank(self, current_model: str) -> str | None:
-        """The first healthy model at a strictly-higher rank than *current_model*, else None."""
+    def _next_rung_rank(self, from_rank: int) -> int:
+        """The rank the ladder aims at from *from_rank*, per the shared shortlist rule."""
+        # The arithmetic itself is `escalation.next_rung_rank`, shared verbatim with the offline
+        # session-cascade replay that measures this ladder. Note the live ladder is already
+        # strictly more graduated than the offline cascade: `effort_then_rank` spends the model's
+        # own reasoning arms before every rank rung, which the offline cascade has no analogue for.
+        shortlist = self._escalation.rank_shortlist if self._escalation is not None else 0
+        return next_rung_rank(from_rank, self._max_rank_index(), shortlist)
+
+    def _escalate_one_rank(self, current_model: str, floor: int = 0) -> str | None:
+        """The healthy model the ladder jumps to from *current_model*, else None."""
         idx = self._model_pool.rank_of(current_model)
         if idx is None:
             return None
-        for m in self._model_pool.models_from_rank(idx + 1):
+        # Aim from the rung the task OWNS, not the one a health gap forced it onto:
+        # `_lift_to_rank_floor` degrades to the base pick when everything at or above the floor is
+        # unhealthy, and measuring the next rung from that lower model would re-walk ranks the
+        # task already passed. The floor itself stays monotone in `_apply_rank`'s `max()`.
+        target = self._next_rung_rank(max(idx, floor))
+        for m in self._model_pool.models_from_rank(target):
+            if self._model_pool.is_healthy(m.name):
+                return m.name
+        # The target and everything above it is unhealthy. Degrade to the MOST capable healthy
+        # model still above the current one — one choice, not a silent rung-by-rung walk back
+        # into the mid-tier the shortlist exists to skip. Empty unless the jump skipped ranks.
+        skipped = list(self._model_pool.models_from_rank(idx + 1))[: max(target - idx - 1, 0)]
+        for m in reversed(skipped):
             if self._model_pool.is_healthy(m.name):
                 return m.name
         return None
@@ -899,10 +1049,13 @@ class RouterEngine:
         task_key = task_state_key(task_key)
         with self._lock:
             if success:
-                # A verified suite pass retires the task's failures AND its effort escalation —
-                # it is no longer stuck, so the reasoning ladder resets to the model's default.
+                # A verified suite pass retires the task's failures AND its whole ladder position
+                # — it is no longer stuck, so effort resets to the model's default arm and the
+                # rank floor drops back to base routing. Keeping the floor after a pass would
+                # pin the task to the expensive model forever on the strength of an old failure.
                 self._failure_log.pop(task_key, None)
                 self._task_effort_arm.pop(task_key, None)
+                self._task_rank_floor.pop(task_key, None)
                 return
             if dedup_key is None:
                 return

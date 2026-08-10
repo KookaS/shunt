@@ -187,8 +187,9 @@ def test_the_operating_point_refuses_a_direction_off_overlapping_intervals() -> 
 
 
 def test_an_arm_below_the_reporting_floor_renders_as_undefined_not_as_a_rate() -> None:
-    # THE DEFECT THIS PINS. The as-shipped cell at the shipped knobs fires on 726 of 727 runs, so
-    # its quiet arm holds ONE trajectory and the committed figure drew that 0/1 as a measured
+    # THE DEFECT THIS PINS. The as-shipped cell at the shipped knobs fires on 727 of 727 runs, so
+    # its quiet arm is EMPTY (n=0); the committed figure draws it as "undefined (n=0)" rather
+    # than a measured rate. A one-row arm would be worse — its 0/1 would read as a measured
     # 0.000 — "escalating never predicts failure". The statistic is untouched (0/1 IS 0.0); the
     # FIGURE refuses to draw a bar for it.
     thin = _counts_cell(40, 20, precision_ci=(0.55, 0.78), quiet=(0, 1), quiet_ci=(0.0, 0.0))
@@ -217,29 +218,29 @@ def test_a_readable_pair_of_arms_draws_two_real_bars() -> None:
 
 def test_the_shipped_configuration_is_drawn_beside_the_canonical_one() -> None:
     # THE NEGATIVE FINDING THIS KEEPS ON THE CANVAS. The configuration the product actually ships
-    # fires on essentially every run, so its P(fail|fired) IS the base rate and its quiet arm is
-    # one trajectory. Showing only the edit-gated cell would demote that to one row of a 30-row
+    # fires on every run (727/727), so its P(fail|fired) IS the base rate and its quiet arm is
+    # EMPTY. Showing only the edit-gated cell would demote that to one row of a 30-row
     # table — the exact demotion this whole redesign exists to undo.
     as_shipped = _counts_cell(
-        306, 420, precision_ci=(0.38, 0.46), quiet=(0, 1), quiet_ci=(0.0, 0.0)
+        306, 421, precision_ci=(0.38, 0.46), quiet=(0, 0), quiet_ci=(0.0, 0.0)
     )
     canonical = _counts_cell(
-        228, 128, precision_ci=(0.56, 0.71), quiet=(78, 293), quiet_ci=(0.16, 0.27)
+        258, 177, precision_ci=(0.56, 0.71), quiet=(48, 244), quiet_ci=(0.16, 0.27)
     )
     fig, axes = _axes(3)
     ann = plots.operating_point(as_shipped, canonical, axes)
-    # Three real bars and one hatched placeholder: the as-shipped quiet arm holds a single run.
+    # Three real bars and one hatched placeholder: the as-shipped quiet arm holds no runs.
     assert len([c for c in axes[0].containers if isinstance(c, BarContainer)]) == 3
     assert any(p.get_hatch() == "///" for p in axes[0].patches)
-    assert any("undefined\n(n=1)" in t.get_text() for t in axes[0].texts)
+    assert any("undefined\n(n=0)" in t.get_text() for t in axes[0].texts)
     labels = [t.get_text() for t in axes[0].get_xticklabels()]
     assert any("as-shipped" in lab for lab in labels)
     assert any("edit-gated" in lab for lab in labels)
     # Both families' numbers reach the subtitle and the manifest notes.
-    assert any("as-shipped fires 726/727" in f for f in ann.subtitle_facts)
-    assert any("edit-gated fires 356/727" in f for f in ann.subtitle_facts)
+    assert any("as-shipped fires 727/727" in f for f in ann.subtitle_facts)
+    assert any("edit-gated fires 435/727" in f for f in ann.subtitle_facts)
     assert any(note.startswith("as-shipped at") for note in ann.notes)
-    assert ann.caveat is not None and "as-shipped not-escalated arm n=1" in ann.caveat
+    assert ann.caveat is not None and "as-shipped not-escalated arm n=0" in ann.caveat
     # ...and the null panel stays keyed to the canonical cell only — one null, not two.
     assert plots.OPERATING_POINT_SPEC.title.startswith("The shipped counter sits at the base rate")
     plt.close(fig)

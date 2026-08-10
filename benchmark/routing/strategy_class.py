@@ -31,6 +31,16 @@ class Classification:
     cls: StrategyClass
     reason: str
     path_to_live: str | None = None
+    # The config surface the measured MECHANISM already runs under in production, or None
+    # when nothing equivalent ships. BLOCKED covers two situations that a reader must not
+    # be shown as one: a strategy that cannot be run at all, and one whose mechanism runs
+    # in every default install while only its NAME is unselectable. Reporting the second as
+    # "not deployable" is the mirror image of reporting a blocked strategy as deployable —
+    # the defect this module exists to prevent, pointed the other way. Kept as a FIELD
+    # rather than a fifth StrategyClass on purpose: every consumer switches on `cls`, and a
+    # new member would fall through cost_quality_frontier's `_encode` to the live-circle
+    # default, silently drawing an undeployable strategy as deployable. A field cannot.
+    shipped_as: str | None = None
 
 
 # Benchmark code reports by display name (`Strategy.name`); the product configures by
@@ -46,6 +56,7 @@ DISPLAY_TO_ID: Final[Mapping[str, str]] = MappingProxyType(
         "Random": "random",
         "kNN-cascade": "knn_cascade",
         "Price-Cascade": "price_cascade",
+        "Session-Cascade": "session_cascade",
         "Tier-Classifier": "tier_classifier",
     }
 )
@@ -60,10 +71,13 @@ _CASCADE_BLOCKER: Final[str] = (
 # preview of what escalation would buy is wrong by roughly a factor of five.
 _CASCADE_PATH: Final[str] = (
     "the live escalation ladder (src/shunt/router/escalation.py, effort_then_rank) is the "
-    "cache-safe analogue — one decision per session, over closed prior sessions only — but "
-    "it escalates base_pick + 1 rung and then resets its ladder (escalation.py:378-383), so "
-    "it CANNOT walk up to the frontier and cannot reach the cascade's operating point; it "
-    "also ships disabled and no benchmark strategy models it, so this path is unmeasured"
+    "cache-safe analogue — one decision per session, over closed prior sessions only — and it "
+    "now DOES walk to the frontier, because the engine's per-task rank floor persists the "
+    "climbed rung across sessions (engine.py `_lift_to_rank_floor`). It is modelled offline by "
+    "Session-Cascade (strategies/session_cascade.py), which is the measurement of how far short "
+    "of this operating point session cadence lands: the same ladder paced one attempt per "
+    "session re-bills every rung `escalate_after_n` times, so equalling a within-task cascade "
+    "requires escalate_after_n=1 plus arm-level coverage the corpus does not have"
 )
 
 # Everything that is not live, and why. A name absent from both this table and
@@ -96,6 +110,18 @@ _NON_LIVE: Final[Mapping[str, Classification]] = MappingProxyType(
         ),
         "kNN-cascade": Classification(StrategyClass.BLOCKED, _CASCADE_BLOCKER, _CASCADE_PATH),
         "Price-Cascade": Classification(StrategyClass.BLOCKED, _CASCADE_BLOCKER, _CASCADE_PATH),
+        "Session-Cascade": Classification(
+            StrategyClass.BLOCKED,
+            "it is not a router.strategy at all: it models the escalation LAYER that sits over "
+            "base routing (shipped as escalation.enabled, not as a selectable strategy id), so "
+            "no router.strategy value can name it. Its replay also assumes one failing-check "
+            "identity per task, which the live recurrence counter does not guarantee",
+            "the mechanism already runs in production; what is blocked is the NAME. Either "
+            "report this row as the escalation layer's offline estimate rather than as a router, "
+            "or expose the ladder as a router.strategy id in src/shunt/router/policy.py. Its "
+            "effort rung additionally needs per-arm coverage the corpus does not yet have",
+            shipped_as="escalation.enabled",
+        ),
         "Tier-Classifier": Classification(
             StrategyClass.BLOCKED,
             "its model order comes from an offline-fit capability rank derived from the "
@@ -136,6 +162,15 @@ def blocker(name: str) -> str | None:
     """Why this strategy cannot run live, or None when it can."""
     found = classify(name)
     return None if found.cls is StrategyClass.LIVE else found.reason
+
+
+def shipped_mechanism(name: str) -> str | None:
+    """The config surface a non-live row's mechanism already runs under, or None."""
+    # `is_live` answers "may router.strategy name it"; this answers the different question
+    # "does the thing it measures run today". Session-Cascade is False on the first and
+    # not-None on the second, and a figure that conflates them tells a reader a shipped,
+    # default-on mechanism cannot be run.
+    return classify(name).shipped_as
 
 
 def live_names(names: Iterable[str]) -> list[str]:

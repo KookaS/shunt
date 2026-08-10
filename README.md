@@ -53,6 +53,17 @@ better, for less money.** Three jobs make that up: allocate the right model up
 front, track what each model actually delivers, and escalate to a
 higher-reasoning model when an attempt is failing.
 
+<p align="center">
+  <img src="docs/assets/route/map.svg" width="860"
+       alt="A task's route drawn as satnav navigation: it starts on DeepSeek v4 (blue), meets congestion where the tests keep failing and the retry budget runs out, and at a junction reroutes onto Fable 5 (light blue), staying on it to the verified result.">
+</p>
+
+Think of it as satnav for a task. The cheap model is the default road. When the
+evidence says that road is blocked — tests still failing, retry budget spent —
+Shunt recalculates and takes the stronger model, and it does so **at a junction**:
+a task or session boundary, never mid-request, because switching inside a cached
+turn throws the cache away. Once it escalates, it stays escalated.
+
 ## Vision
 
 **Routing is a mathematical and statistical problem, not a systems problem.**
@@ -168,7 +179,11 @@ the reproduction phase) it fires on every run and reads exactly the base rate.
 Both readings are **per-step** signals on the offline corpus — production decides
 once per session, so neither is shippable as measured, and the edit-gated variant
 is eval-only (production has no per-step action stream). The prefix risk model
-reads no skill, and escalation ships **disabled**.
+reads no skill. Escalation **ships enabled** (owner choice, 2026-08-08) with those
+caveats carried in the docs. It is armed once a repo is resolved — the explicit
+`capture.work_dir` / `capture.work_dirs` / `SHUNT_WORK_DIR`, or else the launch
+directory, so `cd myrepo && shunt start` arms it with no configuration — and the
+router warns at boot if it is enabled but not armed.
 We reproduced that paper and withdrew our citation of it; the write-up is in the
 [research log](docs/research-log.md).
 
@@ -198,8 +213,9 @@ cold-starts to a fixed cheap model. The pick is then **locked to the session** �
 lock is the cache-safety guarantee. Depth: [docs/routing.md](docs/routing.md).
 
 **The escalation model** is two stages, and only the first involves pattern matching.
-At session close Shunt re-runs *your* repo's suite off the wire — pytest, jest,
-`go test`, `cargo test`, auto-detected — and classifies the result by exit code
+At session close Shunt re-runs *your* repo's suite off the wire — **pytest** (Python),
+**jest / vitest** (JavaScript/TypeScript), **`go test`** (Go), **`cargo test`** (Rust),
+auto-detected from the repo's files — and classifies the result by exit code
 first, then by regex over the output: did tests really run and fail, or was this an
 environment error? A genuine failure is re-run to confirm it is not a flake, then
 given a **dedup key**: the failing test's node id, or a hash of the detail with
@@ -208,11 +224,14 @@ the *same* key reaches `escalate_after_n` confirmed, non-infrastructural failure
 inside a window of recent decisions, the router raises the current model's reasoning
 effort — same model, so the prompt cache survives — and only steps to a pricier model
 once that ladder is exhausted. Different failures never add up; a passing suite wipes
-the slate. Depth: [docs/escalation.md](docs/escalation.md).
+the slate. Those four runner families are what the classifier is *built and tested*
+on today; it is designed to be extended to any runner whose output reports pass/fail
+(see [which runners are supported](docs/escalation.md#which-runners-are-supported)).
+Depth: [docs/escalation.md](docs/escalation.md).
 
 **One verified outcome per session, not per step.** The verifier runs at session
 close, so escalation sees at most one failure event per session — never one per tool
-call. With the shipped threshold that means three *sessions* failing the same check.
+call. With the shipped threshold that means two *sessions* failing the same check.
 It does not watch an attempt unfold and step in mid-flight.
 
 ### Where they stop
@@ -222,7 +241,10 @@ It does not watch an attempt unfold and step in mid-flight.
   not depend on it; the kNN decision does.
 - An empty neighbourhood and a confident one produce the same-looking response. Only
   `shunt explain` tells them apart.
-- Escalation is inert without a repo it can test, and inert on a repo with no tests.
+- Escalation is inert without a repo it can test. It resolves one from `capture.work_dirs`,
+  then `SHUNT_WORK_DIR` / `capture.work_dir`, then the launch directory — so launching
+  outside a git repo, or with `trust_launch_dir: false`, leaves it enabled but not armed
+  (not a load error — the router warns at boot). It is equally inert on a repo with no tests.
 - Escalation grades nothing — it counts. Every confirmed failure weighs the same, so
   a trivial assertion and a total collapse are one event each.
 - A test runner whose output varies run to run in a way our normalisers do not strip
@@ -234,10 +256,19 @@ It does not watch an attempt unfold and step in mid-flight.
 ### Scope: SWE tasks today
 
 Both models handle **software-engineering work only**. The routing corpus is coding
-tasks, and escalation's only verified signal is a repository's own test suite. Point
+tasks, and escalation's only verified signal is a repository's own test suite — today
+pytest, jest/vitest, `go test` and `cargo test` (the classifier is built to extend to
+any runner that reports pass/fail). Point
 Shunt at a notebook, a market analysis, or a piece of prose and it still proxies and
 forwards — but the routing decision has no evidence behind it and nothing grades the
 result afterwards.
+
+**Other domains are planned, not scheduled.** Data science and ML work (a notebook
+that runs, a metric that moves) and non-engineering work (business analysis,
+literature — where the check is a spreadsheet rule or a rubric a person signs off)
+need their own dataset, their own verifier, and their own honest evaluation, which is
+what the divide-and-conquer design is for. None of it starts before the SWE case
+holds up.
 
 ### Rank and cost are different orderings
 
@@ -289,14 +320,17 @@ line, so a plot lifted out of context still says what it cannot support. The res
 of what each one means is in [`docs/routing.md`](docs/routing.md#figures) and
 [`docs/escalation.md`](docs/escalation.md#figures).
 
-Three figures below carry the headline. The other sixteen, each with how to read
-it and what it cannot support, are in [routing](docs/routing.md#figures) and
+Three figures below carry the headline. The other seventeen, each with how to
+read it and what it cannot support, are in [routing](docs/routing.md#figures) and
 [escalation](docs/escalation.md#figures).
 
-**Does the router beat always-frontier at equal quality?** This is the kill gate:
-the pre-registered non-inferiority test at δ=5pp, on three evidence bases. It
-clears — but on a single discordant pair in 175, which is very little evidence,
-and the figure says so.
+**Does the shipped router beat always-frontier at equal quality?** No. This is the
+pre-registered non-inferiority test at δ=5pp, on three evidence bases, and on all
+three the kNN router is **worse** by more than the margin — Δ=−16.1pp on the
+completed basis, with the interval excluding the bar. It does spend far less, but
+that is a saving bought at a quality loss that was pre-registered as
+unacceptable, not a saving at equal quality. The cache-safe result above sits in
+the escalation layer *over* base routing; it does not repair this.
 
 ![The kill gate](docs/assets/figures/routing/kill_gate.png)
 
@@ -309,10 +343,10 @@ same n. A working positive control beside a negative result.
 ![Embedding signal](docs/assets/figures/routing/embedding_signal.png)
 
 **Does the escalation trigger fire on the runs that fail?** At the shipped
-configuration, no: it fires on 726 of 727 runs and lands exactly on the base rate.
-Counting only failures *after* the agent's first edit separates outcomes 0.640 vs
-0.210 — but that variant is eval-only, because production has no per-step action
-stream to gate on.
+configuration, no: it fires on 727 of 727 runs and lands exactly on the base rate.
+Counting only failures *after* the agent's first edit separates outcomes 0.593 vs
+0.164 at the shipped threshold — but that variant is eval-only, because production
+has no per-step action stream to gate on.
 
 ![Escalation operating point](docs/assets/figures/escalation/operating_point.png)
 
@@ -321,41 +355,81 @@ stream to gate on.
 Full numbers, method, and caveats: **[docs/results.md](docs/results.md)**. The
 headline, stated plainly:
 
-> **Cheap-first routing with verified escalation reaches always-frontier quality
-> for roughly a quarter of the cost ($21.12 against $88.61) — but the machine
-> learning contributes nothing to that, and the escalation signal is real: the
-> recurrence rule separates at the shipped threshold once the reproduction phase
-> is excluded (eval-only), not in the prefix risk model.**
-> The saving is real and comes from *mechanism*, not prediction.
+> **The escalation ladder at session cadence — one decision per session,
+> cache-safe by construction, and enabled in a default install — now reaches the
+> blocked mid-session cascades at equal quality. On the 180-task scoring path it
+> costs $23.46 cache-aware at 96.67%, against Price-Cascade's $22.07 at the same
+> pass rate and Always-Frontier's $91.15 at 95.00%. On the harder fully-measured
+> 61-task set it costs $25.50 at 90.16% against Always-Frontier's $33.53 at
+> 88.52%.**
+> The saving is real and comes from *mechanism*, not prediction — the machine
+> learning still contributes nothing. And it is much smaller on measured cells
+> than on imputed ones: see the correction below.
 
-| strategy | pass rate | total cost |
-|---|---:|---:|
-| Oracle (hindsight — not deployable) | 96.6% | $14.37 |
-| Price-Cascade | 96.6% | $21.12 |
-| kNN-cascade | 96.6% | $23.72 |
-| Always-Frontier | 96.0% | $88.61 |
-| kNN | 78.3% | $10.29 |
-| Always-Cheap | 77.1% | $1.41 |
-| Tier-Classifier | 65.7% | $3.52 |
+**Set A — the 180-task scoring path** (35% of cells monotone-imputed). Naive
+totals are cache-blind sums; the cache-aware column is what a provider would
+bill. Only `Session-Cascade` re-serves the same model on consecutive attempts, so
+it is the only row the cache term moves.
 
-The learned `kNN` row is measured on the real SWE-bench problem statement. It sits
-1.2pp above `Always-Cheap`, which is inside noise — on this corpus the embedding
-does not buy routing quality. See [Results](docs/results.md#routing-results).
+| strategy | pass rate | 95% CI | naive cost | cache-aware cost |
+|---|---:|---|---:|---:|
+| Oracle (hindsight — a bound, never deployable) | 96.7% | 93.9–98.9 | $15.18 | $15.18 |
+| Price-Cascade (blocked — not deployable) | 96.7% | 93.9–98.9 | $22.07 | $22.07 |
+| **Session-Cascade, `rank_shortlist=3` (ships enabled)** | **96.7%** | 93.9–98.9 | $27.68 | **$23.46** |
+| kNN-cascade (blocked — not deployable) | 96.7% | 93.9–98.9 | $24.95 | $24.95 |
+| Always-Frontier | 95.0% | 91.7–97.8 | $91.15 | $91.15 |
+| kNN | 78.9% | 72.8–84.4 | $11.61 | $11.61 |
+| Always-Cheap | 77.2% | 71.1–83.3 | $1.39 | $1.39 |
+| Tier-Classifier (blocked — not deployable) | 65.6% | — | $9.46 | $9.46 |
+
+`Session-Cascade` is the one row here whose *mechanism* you are already running.
+It is classified blocked, and the blocker is only the **name**: it is not a
+`router.strategy` value because it is not a router — it models the escalation
+**layer** over base routing, shipped as `escalation.enabled: true` with
+`escalation.rank_shortlist: 3`. Every other blocked row above needs a verified
+outcome mid-session, which breaks cache-safety and is rejected at boot; this one
+does not. On a paired per-task bootstrap it costs **$1.37 more than
+`Price-Cascade`** (95% CI [+0.82, +2.00]) and is **not distinguishable from
+`kNN-cascade`** (−$1.23, [−3.42, +0.73]) — and it is cache-safe and enableable,
+which neither of them is. Against Always-Frontier: **−$66.12** ([−74.19,
+−57.90]).
 
 `Price-Cascade` uses no embeddings, no nearest neighbours, and no training. It
 tries models in ascending price order and stops at the first one whose patch
-passes. Of the deployable strategies whose quality interval overlaps
-Always-Frontier's, it is the cheapest. The learned `kNN-cascade` costs *more* for
-the same 96.6%.
+passes — which needs a verified outcome mid-session, so the router rejects
+`price_cascade` at boot. **You cannot buy that row.** The learned `kNN-cascade`
+costs *more* for the same 96.7% and is blocked for the same reason. The learned
+`kNN` row sits 1.7pp above `Always-Cheap`, inside noise: on this corpus the
+embedding does not buy routing quality. See
+[Results](docs/results.md#routing-results).
+
+**The correction: the saving is much smaller on measured cells.** Set B is the
+raw, un-imputed basis — 61 scorable tasks of 69, every cell actually run, and
+biased *hard* where set A is biased easy. **Set A has 180 tasks and set B has 61,
+so totals do not compare across them; compare only within a set.**
+
+| basis | Price-Cascade vs Always-Frontier | Session-Cascade `sl=3` (cache-aware) vs Always-Frontier |
+|---|---|---|
+| Set A — 180 tasks, 35% imputed | $22.07 vs $91.15 — **76% cheaper** | $23.46 vs $91.15 — **74% cheaper** |
+| Set B — 61 tasks, 100% measured | $23.91 vs $33.53 — **29% cheaper** | $25.50 vs $33.53 — **24% cheaper** |
+
+A four-fold saving becomes roughly a quarter. The direction holds on measured
+data; the magnitude is mostly imputation, and the ordering survives two selections
+biased in opposite directions — that last part is the load-bearing claim, not
+either total. On set B the ladder's 90.16% [81.97, 96.72] point estimate is above
+Always-Frontier's 88.52% [80.33, 95.08], but the intervals overlap: the two are
+**not distinguishable on quality**. Full tables, both subset guards verbatim, and
+the paired bootstrap:
+[Routing at session cadence](docs/results.md#routing-at-session-cadence).
 
 Three things we will not let you take away from that table:
 
-1. **It is part projection.** 22% of Price-Cascade's dollars and 45% of
-   Always-Frontier's are imputed, and every imputed cell is filled as a **pass**.
-   On the 87 challenges where both chose genuinely measured cells, it is
-   Always-Frontier **$46.65 @ 92.0%** vs Price-Cascade **$15.61 @ 93.1%**
-   (McNemar p = 1.000) — about a third of the cost. The saving survives, but that
-   subset is opportunistic, not pre-registered.
+1. **Set A is part projection.** 22% of Price-Cascade's dollars and 45% of
+   Always-Frontier's are imputed, and every imputed cell is filled as a **pass** —
+   which charges the frontier baseline full price on tasks a cheaper model
+   demonstrably solved. That is where the four-fold saving comes from, and set B
+   above is what is left when it is removed. Neither subset is pre-registered;
+   both are coverage-selected and say so.
 2. **The two quality figures are not the same kind of number.** A cascade stops
    at the first attempt whose tests pass and is scored on that same label, so its
    figure is best-of-N coverage while Always-Frontier's is single-shot. We flagged
@@ -403,7 +477,7 @@ claim. Task identity accounts for ~57% of outcome variance, so there is structur
 there; this encoder does not reach it.
 
 Routing quality *fell* when the input was corrected: kNN went from 81.71% to
-**78.29%**, which is inside noise of always-cheap's 77.14%. The 106-character label
+**78.89%**, which is inside noise of always-cheap's 77.22%. The 106-character label
 was not merely uninformative, it was mildly leaky — the repo name it carried is a
 weak difficulty proxy. Given the right input, the learned router is not
 distinguishable from the trivial policy. Figures:
@@ -479,12 +553,17 @@ needs roughly four times the distinct challenges (152 → ~640); more runs per
 existing challenge buy almost nothing, because the clustering already inflates
 variance ~3×.
 
-**What survives all of it:** the cascade result. Price-Cascade at $21.12 against
-Always-Frontier's $88.61 is untouched by every defect above — it uses no model,
-so there was no model to get wrong. If anything the audit sharpened it: ~90% of
-the headroom is mechanical, which bounds the entire remaining prize for a perfect
-difficulty predictor at **about $6.9 on a $21.12 base**. That number is the honest
-answer to "how much is routing intelligence worth here", and it is small.
+**What survives all of it:** the cascade result. It is untouched by every defect
+above, because it uses no model, so there was no model to get wrong — and it is
+no longer only a measurement. `Price-Cascade` at $22.07 against Always-Frontier's
+$91.15 is still blocked at boot and still unrunnable, but the session-cadence
+ladder reaches the same 96.67% for $23.46 cache-aware, is cache-safe by
+construction, and ships enabled. What the audit and the un-imputed basis together
+sharpened is the *size*: on fully-measured tasks the saving is ~25%, not ~75%.
+And ~90% of the headroom is mechanical, which bounds the entire remaining prize
+for a perfect difficulty predictor at **about $6.9 on a $22.07 base**. That number
+is the honest answer to "how much is routing intelligence worth here", and it is
+small.
 
 ## Future
 

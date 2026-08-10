@@ -7,6 +7,8 @@ from pydantic import ValidationError
 
 from shunt.router.policy import (
     LIVE_STRATEGIES,
+    CapturePolicy,
+    EscalationPolicy,
     ExplorationPolicy,
     KnnPolicy,
     RouterPolicy,
@@ -67,6 +69,38 @@ def test_knn_cascade_is_not_live_eligible() -> None:
     assert "knn_cascade" not in LIVE_STRATEGIES
     with pytest.raises(ValidationError, match="unknown router.strategy"):
         RouterPolicy(strategy="knn_cascade")
+
+
+def test_escalation_enabled_default_without_a_repo_is_not_a_load_error() -> None:
+    # Escalation ships ON; "enabled without a work_dir" is the common default state (a plain
+    # install has no repo to test), so it must NOT be a load error — the router would fail to
+    # boot for every install. The never-silently-inert guarantee moved to a boot WARNING
+    # (server._log_capture_disclosure). A hard load error returns only if escalation gains a
+    # second verified-failure signal that needs no repo.
+    assert RouterPolicy().escalation.enabled is True  # ships ON
+    RouterPolicy()  # no ValidationError — a plain default config loads
+
+
+def test_escalation_enabled_with_a_work_dir_or_map_is_accepted() -> None:
+    assert (
+        RouterPolicy(
+            escalation=EscalationPolicy(enabled=True),
+            capture=CapturePolicy(work_dir="/srv/repo"),
+        ).escalation.enabled
+        is True
+    )
+    assert (
+        RouterPolicy(
+            escalation=EscalationPolicy(enabled=True),
+            capture=CapturePolicy(work_dirs={"toolA": "/srv/repo"}),
+        ).escalation.enabled
+        is True
+    )
+
+
+def test_escalation_can_still_be_explicitly_disabled() -> None:
+    # Turning it off remains a supported, documented config.
+    assert RouterPolicy(escalation=EscalationPolicy(enabled=False)).escalation.enabled is False
 
 
 @pytest.mark.parametrize("name", LIVE_STRATEGIES)

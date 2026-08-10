@@ -342,6 +342,7 @@ docker compose -f benchmark/compose.yaml run --rm benchmark  # simulated loop + 
 | kNN | Embed task → retrieve similar → cheapest capable |
 | kNN-cascade | kNN-informed try-verify-escalate |
 | Price-Cascade | Try-verify-escalate in ascending price order — no embeddings, no kNN |
+| Session-Cascade | The shipped escalation ladder at session cadence: one decision per session, effort rung then rank rung, climbed rank persisting, cache-safe analogue |
 | Tier-Classifier | Single-shot: predict the crossover tier, route there directly |
 
 ## Challenge store
@@ -362,9 +363,11 @@ spec → image → ephemeral-container run flow and the gold-smoke / `--live` co
 The canonical index is `benchmark/routing/data/challenges.json`:
 - `challenges` — lightweight index (id, source, language, difficulty)
 - `tasks` — metadata dict (id → description, repo, base_commit, difficulty, spec
-  path). `routing_text()` prefers `problem_statement`, but no committed entry carries
-  it (0 of 500), so every strategy currently embeds the `description` label
-  (`<repo>@<commit12> - resolve <test-id>`, median 106 characters)
+  path). `routing_text()` prefers `problem_statement` and every committed entry
+  carries it (all 500, backfilled 2026-08-05), so strategies embed the issue text
+  rather than the `description` label
+  (`<repo>@<commit12> - resolve <test-id>`, median 106 characters — kept as a
+  contrast row so the input change is visible, not asserted)
 - top-level `source`, `source_dataset`, `dataset_revision` — the HF provenance
 
 Model pricing and per-model outcomes are kept **out** of challenges.json to

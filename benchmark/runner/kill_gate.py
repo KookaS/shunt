@@ -10,13 +10,12 @@ import argparse
 import math
 import random
 import sys
-from collections.abc import Iterable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 from benchmark import config, validate_results
 from benchmark.routing import censoring, summary
+from benchmark.routing.cache_cost import CachePrice, cache_aware_total, cache_prices
 from benchmark.routing.metrics import compute_cost_decomposition as _compute_cost_decomposition
 from benchmark.routing.strategies.knn import kNNStrategy
 
@@ -28,15 +27,6 @@ from benchmark.routing.strategies.knn import kNNStrategy
 # ---------------------------------------------------------------------------
 # Pricing helpers
 # ---------------------------------------------------------------------------
-
-
-def _input_share_from_config(model: str) -> float:
-    pricing = config.enabled_pricing()
-    p = pricing.get(model, {})
-    inp: float = p.get("input", 0)
-    out: float = p.get("output", 0)
-    total = inp + out
-    return inp / total if total > 0 else 0.3
 
 
 def _model_order(pricing: dict[str, dict]) -> list[str]:
@@ -154,92 +144,21 @@ def evaluate_router(
 # ---------------------------------------------------------------------------
 
 
-MEASURED: Final[str] = "measured"
-ASSUMED: Final[str] = "assumed"
-
-# No run in this corpus records a per-turn cache-hit ratio, so the hit rate is the one
-# genuinely invented number left in the cache-aware criterion. It stays a named constant
-# with an ``assumed`` flag rather than a literal buried in a default argument, and
-# `cache_economics.png` draws the gate's sensitivity to it.
-ASSUMED_CACHE_HIT_RATE: Final[float] = 0.9
-# Fallback discount for a model whose registry entry carries no cache-read price. Kept
-# deliberately conservative-for-the-router: it neither invents a discount the provider
-# does not offer nor assumes the worst.
-ASSUMED_CACHE_DISCOUNT: Final[float] = 0.5
-
-
-@dataclass(frozen=True)
-class CachePrice:
-    """One model's cache economics, and whether the registry measured them or we assumed."""
-
-    model: str
-    input_share: float
-    discount: float
-    hit_rate: float
-    provenance: str
-
-    @property
-    def saving_fraction(self) -> float:
-        """Share of a turn's cost a cache hit removes, at this model's input share."""
-        return self.input_share * self.hit_rate * self.discount
-
-
-def cache_prices(models: Iterable[str]) -> dict[str, CachePrice]:
-    """Per-model cache discount read off the shipped registry, flagged measured|assumed."""
-    # The gate's headline cache-aware ratio used to be computed from two literals
-    # (hit=0.9, discount=0.5) applied uniformly to every model, which is a claim about
-    # six providers' billing made from nothing. The discount is recoverable exactly:
-    # a registry row carrying `cache_read_cost_per_1m` states what a cached input token
-    # is billed at, so the discount is 1 - cache_read/input for that model and nobody
-    # else's.
-    pricing = config.load_pricing()
-    out: dict[str, CachePrice] = {}
-    for model in models:
-        info = pricing.get(model)
-        share = _input_share_from_config(model)
-        discount, provenance = ASSUMED_CACHE_DISCOUNT, ASSUMED
-        if isinstance(info, dict):
-            read = info.get("cache_read_cost_per_1m")
-            inp = info.get("input_cost_per_1m")
-            if (
-                isinstance(read, int | float)
-                and isinstance(inp, int | float)
-                and inp > 0
-                and 0 <= read < inp
-            ):
-                discount, provenance = 1.0 - read / inp, MEASURED
-        out[model] = CachePrice(
-            model=model,
-            input_share=share,
-            discount=discount,
-            hit_rate=ASSUMED_CACHE_HIT_RATE,
-            provenance=provenance,
-        )
-    return out
-
-
 def compute_cache_costs(
     decisions: list[Decision],
     pricing: dict[str, Any],
     prices: dict[str, CachePrice] | None = None,
 ) -> tuple[float, float]:
     """(naive, cache-aware) total cost — a repeat of the same model banks its discount."""
-    naive = sum(d[3] for d in decisions)
+    # The model itself lives in `benchmark.routing.cache_cost`, shared with the routing summary:
+    # a cost that is cache-aware in this gate and cache-blind in the published strategy table is
+    # two different verdicts wearing one name.
     if not decisions:
         return (0.0, 0.0)
     if prices is None:
         prices = cache_prices(sorted({d[1] for d in decisions} | set(pricing)))
-
-    savings = 0.0
-    prev_model: str | None = None
-    for model, cost in ((d[1], d[3]) for d in decisions):
-        if prev_model is not None and model == prev_model:
-            price = prices.get(model)
-            if price is not None:
-                savings += cost * price.saving_fraction
-        prev_model = model
-
-    return (naive, naive - savings)
+    attempts = [(d[1], d[3]) for d in decisions]
+    return (sum(d[3] for d in decisions), cache_aware_total(attempts, prices))
 
 
 # ---------------------------------------------------------------------------
@@ -306,32 +225,38 @@ def bootstrap_pass_rate_delta(
     n_iterations: int = 10000,
     seed: int = 42,
 ) -> dict[str, float]:
+    """PAIRED bootstrap: one task resample per draw, both arms read at those tasks."""
     scorable = [(cd, td) for cd, td in zip(control, test, strict=True) if _scorable_pair(cd, td)]
     n = len(scorable)
     if n == 0:
         return {"mean": 0.0, "std": 0.0, "ci_lower": 0.0, "ci_upper": 0.0}
 
-    control_pass = [1 if cd[2] else 0 for cd, _ in scorable]
-    test_pass = [1 if td[2] else 0 for _, td in scorable]
-    observed_mean = (sum(test_pass) - sum(control_pass)) / n
+    # Both arms are scored on the SAME task set, so the comparison is paired and the
+    # resampling unit is the TASK, not the arm. Resampling each arm independently drops
+    # the strong positive across-arm correlation (same tasks, same difficulty) and
+    # inflates the CI several-fold — on this gate that is a false-negative risk, not a
+    # cosmetic one. Because the statistic is a difference of means,
+    # mean(test[idx]) - mean(control[idx]) == mean(delta[idx]) exactly, so resampling the
+    # per-task deltas IS the task-index resample — the same shape the sibling
+    # `bootstrap_cost_delta` already uses.
+    deltas = [(1 if td[2] else 0) - (1 if cd[2] else 0) for cd, td in scorable]
+    observed_mean = sum(deltas) / n
 
     rng = random.Random(seed)
     boot_deltas: list[float] = []
     for _ in range(n_iterations):
-        c_s = [rng.choice(control_pass) for _ in range(n)]
-        t_s = [rng.choice(test_pass) for _ in range(n)]
-        boot_deltas.append((sum(t_s) - sum(c_s)) / n)
+        s = [rng.choice(deltas) for _ in range(n)]
+        boot_deltas.append(sum(s) / n)
 
     boot_deltas.sort()
 
+    # Standard ERROR of the paired mean delta (the previous formula summed the two arms'
+    # independent binomial variances — the same unpaired assumption as the loop above).
+    var = sum((d - observed_mean) ** 2 for d in deltas) / n if n > 1 else 0.0
+
     return {
         "mean": observed_mean,
-        "std": math.sqrt(
-            (sum(test_pass) / n * (1 - sum(test_pass) / n) / n)
-            + (sum(control_pass) / n * (1 - sum(control_pass) / n) / n)
-        )
-        if n > 1
-        else 0.0,
+        "std": math.sqrt(var / n),
         "ci_lower": boot_deltas[int(0.05 * n_iterations)],
         "ci_upper": boot_deltas[int(0.95 * n_iterations)],
     }

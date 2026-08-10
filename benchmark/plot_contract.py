@@ -180,7 +180,7 @@ def _audit_tick_labels(fig: Figure, renderer: RendererBase, canvas: BboxBase) ->
 def audit(fig: Figure, *, band_top_px: float | None = None) -> list[Violation]:
     """Draw once, then check every artist's real device-space extent."""
     fig.canvas.draw()
-    renderer: RendererBase = fig.canvas.get_renderer()  # type: ignore[attr-defined]
+    renderer: RendererBase = fig.canvas.get_renderer()
     canvas = fig.bbox
 
     violations = _audit_canvas(fig, renderer, canvas)

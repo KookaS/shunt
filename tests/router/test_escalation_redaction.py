@@ -168,6 +168,30 @@ def test_sink2_survives_the_sqlite_round_trip(tmp_path: Path) -> None:
     assert _SECRET not in json.dumps(loaded)
 
 
+def test_a_secret_bearing_key_still_groups_across_a_restart() -> None:
+    # F2: the dedup key is redacted at the SINGLE construction seam, so the in-memory log and the
+    # plaintext snapshot hold the SAME string. Before that seam, the restored log carried the
+    # redacted key while a fresh capture appended the raw one — the two halves never grouped, so
+    # recurrence silently stopped for exactly the secret-bearing ids the redaction exists to
+    # protect ("state survives restart" held only for keys that did not redact).
+    original = _engine_with_secret_failure()  # 1 verified failure; key redacted in-memory
+    state = original.snapshot_escalation_state()
+    fresh = _engine()
+    fresh.restore_escalation_state(state)
+    # Same task, same secret-bearing check id, a SECOND verified failure AFTER the restart.
+    fresh.record_outcome(
+        downshift=False,
+        success=False,
+        task_key="repoA",
+        dedup_key=_CHECK_ID,
+        exit_code=1,
+        is_infra_failure=False,
+        confirmed=True,
+    )
+    _model, reason, _prov = fresh.decide("s2", "task")
+    assert reason == "auto_escalation"  # two same-key failures, one on each side of the restart
+
+
 def test_failure_event_persistable_redacts_the_dedup_key() -> None:
     event = FailureEvent(
         decision_index=0, dedup_key=_CHECK_ID, exit_code=1, success=False, confirmed=True

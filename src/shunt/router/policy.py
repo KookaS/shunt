@@ -62,15 +62,19 @@ class ExplorationPolicy(BaseModel):
 
 
 class EscalationPolicy(BaseModel):
-    """Auto-escalation knobs. Shipped OFF — enabling is a config change."""
+    """Auto-escalation knobs. Ships ON (owner choice, 2026-08-08) but only fires once a
+    `capture.work_dir` gives it a repo to verify (a boot warning covers enabled-without-one);
+    the trigger is a null detector at the live cadence — see EscalationConfig.enabled."""
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = False
+    enabled: bool = True
     escalate_after_n: int = Field(default=2, gt=0)
     stale_window: int = Field(default=10, gt=0)
-    blocking_exit_code: int = Field(default=2, ge=0)
     ladder: str = Field(default="effort_then_rank")
+    # The cheapest N ranks are walked one rung at a time; the rung that leaves them jumps to the
+    # top rank instead of paying every model in between. 0 restores the every-rank walk.
+    rank_shortlist: int = Field(default=3, ge=0)
     # Additionally opt-in on top of `enabled` — enabling escalation must never silently
     # randomize. 0.0 = deterministic; above 0, flagged checkpoints are randomized so the
     # policy's value becomes identifiable. Bounded below 1.0: at 1.0 the policy arm is never
@@ -91,8 +95,8 @@ class EscalationPolicy(BaseModel):
             enabled=self.enabled,
             escalate_after_n=self.escalate_after_n,
             stale_window=self.stale_window,
-            blocking_exit_code=self.blocking_exit_code,
             ladder=self.ladder,
+            rank_shortlist=self.rank_shortlist,
             exploration_epsilon=self.exploration_epsilon,
             exploration_seed=self.exploration_seed,
         )
@@ -117,6 +121,24 @@ class CapturePolicy(BaseModel):
     # Where the encrypted local plane is written. Unset ⇒ the recorder resolves a default
     # OUTSIDE the repo ($SHUNT_HOME/trajectories); never inside the tree, never committed.
     trajectory_dir: str | None = None
+    # Wall-clock budget for ONE off-wire verification run. null ⇒ the verifier's built-in
+    # 120s. A suite slower than the budget times out, returns `unknown` + infra-failure and
+    # writes nothing — so on a big repo the whole loop is a silent no-op until this is raised.
+    verify_timeout_seconds: float | None = Field(default=None, gt=0.0)
+    # How many times a FAILING suite is re-run before the red is trusted (flake guard).
+    # Total worst-case runs = 1 + rerun_confirmations, each up to verify_timeout_seconds.
+    # Floored at 1, not 0: an unconfirmed failure is dropped by the escalation gate, so 0
+    # ("stop re-running my slow suite") would silently turn auto-escalation into a null
+    # detector with nothing in the logs. Turn escalation off explicitly instead.
+    rerun_confirmations: int = Field(default=2, ge=1)
+    # Trust Shunt's OWN launch directory (promoted to its git root) as the last work_dir
+    # layer, so `cd myrepo && shunt start` captures out of the box. It is checked for
+    # capability (git root · test framework present), NOT for trust — the directory is one
+    # the operator chose by starting the binary in it. Arming ANY work_dir arms arbitrary
+    # code execution: the verifier runs the tree's own test command, which executes its
+    # `conftest.py` / `build.rs` / npm scripts. This switch is how you refuse that on a
+    # shared or multi-tenant host, and it is the only gate on the layer.
+    trust_launch_dir: bool = True
 
 
 class RefitPolicy(BaseModel):
@@ -153,6 +175,17 @@ class RouterPolicy(BaseModel):
             allowed = ", ".join(LIVE_STRATEGIES)
             raise ValueError(f"unknown router.strategy {self.strategy!r}; live-eligible: {allowed}")
         return self
+
+    # NOTE — the escalation/work_dir precondition is deliberately NOT a load error. Escalation's
+    # only signal is a verified failure keyed by the resolved work_dir (the repo): without one the
+    # engine's `_task_key` resolves to None and no FailureEvent is ever logged, so escalation is
+    # INERT. While escalation shipped OFF, an enabled-without-work_dir config was an operator
+    # footgun worth rejecting at load. Escalation now ships ON by default, which makes
+    # "enabled without a work_dir" the COMMON default state (a plain install has no repo to test)
+    # — a load error there would brick every install until a work_dir is set. The never-silently-
+    # inert guarantee now lives as a prominent boot WARNING in `server.py`'s disclosure
+    # (`_log_capture_disclosure` warns when escalation is enabled but no work_dir is resolvable)
+    # and in the docs. Revisit as a hard error only if escalation gains a signal needing no repo.
 
 
 def parse_router_policy(data: dict[str, object] | None) -> RouterPolicy:

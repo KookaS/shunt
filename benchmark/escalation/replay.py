@@ -66,19 +66,24 @@ def is_edit_action(action: str) -> bool:
 # A permissive ladder position: neither ceiling reached, no collapse alarm — so a same-key
 # recurrence is free to fire. The sweep varies the policy knobs, not the ladder geometry.
 #
-# SCOPE OF PARITY (read before trusting the rank rung). This replay measures the escalation policy
-# IN ISOLATION, holding routing constant at this fixed context. Parity with the live engine is
-# guaranteed for (i) the failure-log lifecycle — append, clear on a VERIFIED PASS only (an
-# unstamped or infra/unknown step is a no-op, as it is live), retire-on-escalation —
-# and (ii) the EFFORT rung, which the engine persists per task AND resets to the default on a
-# verified success (mirrored here), so effort parity holds even across a success boundary. The RANK
-# rung is NOT engine-faithful: here the runner climbs a persistent monotone rank counter that
-# saturates at a ceiling,
-# whereas the engine re-seeds rank from the base routing pick each decision (no persistent rank
-# ladder) and re-escalates indefinitely. Treat the rank stream as an abstract isolation upper
-# bound. The detector metric (run_eval) reads only the FIRST-flag prefix, so it stays faithful.
+# SCOPE OF PARITY (read before trusting the directive stream). This replay measures the escalation
+# policy IN ISOLATION, holding routing constant at this fixed context. Parity with the live engine
+# is guaranteed for (i) the failure-log lifecycle — append, clear on a VERIFIED PASS only (an
+# unstamped or infra/unknown step is a no-op, as it is live), retire-on-escalation — (ii) the
+# EFFORT rung, which the engine persists per task AND resets to the default on a verified success
+# (mirrored here), and (iii) the RANK rung, which the engine likewise persists per task as a
+# capability-rank floor it re-serves on the next decision and drops on a verified pass. The runner's
+# monotone rank counter reproduces that floor rather than bounding it, so the whole directive stream
+# is engine-faithful — PROVIDED the pool is ladder-homogeneous (every model exposing the same number
+# of reasoning arms, each defaulting to its own bottom arm). The abstract counter carries one effort
+# ceiling for all ranks, so a higher-rank model with fewer arms reaches its ceiling before the
+# counter does and the streams part there; `EscalationRunner`'s own note states both conditions and
+# `tests/escalation/test_parity.py` pins them against the real engine. The context above is
+# permissive rather than pool-derived, so on THIS corpus the ceilings are a modelling choice, not a
+# measured geometry — but the detector metric (run_eval) reads only the FIRST-flag prefix, which is
+# reached before any rung is climbed and is therefore invariant to every ceiling here.
 #
-# (iii) CADENCE is NOT engine-faithful either, and it is the widest of the gaps. This replay feeds
+# (iv) CADENCE is NOT engine-faithful either, and it is the widest of the gaps. This replay feeds
 # the runner one event PER STEP: `replay_config` loops over `traj.steps` and calls
 # `EscalationRunner.step` once per StepView — instrumented, an 8-step trajectory produces 8 calls.
 # Live, an event is produced once PER CLOSED SESSION: `CaptureCoordinator.capture` runs the
@@ -92,7 +97,7 @@ def is_edit_action(action: str) -> bool:
 # these do. Any `escalate_after_n` result read off this sweep describes a per-step policy
 # production does not run.
 #
-# (iv) The FLAKE GUARD is not exercised at all. `counts_as_failure` drops any event with
+# (v) The FLAKE GUARD is not exercised at all. `counts_as_failure` drops any event with
 # `confirmed=False` — a failure that did not reproduce on re-run. Offline,
 # `normalize.mini_swe_agent.stamp_step` hardcodes `confirmed=True`, ignoring
 # `VerifierResult.confirmed`; and `benchmark/runner/offline_replay.replay_step` runs each step's
@@ -251,11 +256,11 @@ def replay_config(
 ) -> ReplayDecision:
     """Replay the escalation lifecycle boundary-by-boundary over a trajectory (isolation model)."""
     # Drives the SHARED `EscalationRunner` the live engine also uses, so the log lifecycle (append /
-    # clear-on-success / retire-on-escalation) and the EFFORT rung match the engine by construction
-    # — not a hand-rolled copy. `context` sets the starting ladder position and the ceilings the
-    # abstract ladder climbs against. The RANK advance here is a persistent monotone counter with no
-    # engine counterpart (the engine re-seeds rank from routing each decision) — an isolation upper
-    # bound, not an engine reproduction. See the SCOPE OF PARITY note above.
+    # clear-on-success / retire-on-escalation) and BOTH rungs match the engine by construction — not
+    # a hand-rolled copy. `context` sets the starting ladder position and the ceilings the abstract
+    # ladder climbs against; those ceilings are permissive here rather than read off a live model
+    # pool, which is the one place this replay's geometry is a modelling choice. See the SCOPE OF
+    # PARITY note above for the two conditions engine-faithfulness rests on.
     #
     # `count_from_first_edit`: skip the reproduction phase. On this corpus the first one or two
     # replayed steps of nearly EVERY run — successful or not — are red on the target F2P test,

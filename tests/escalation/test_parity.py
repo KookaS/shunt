@@ -1,16 +1,27 @@
-"""Parity kill-gate BOUNDED to what the offline replay actually reproduces, over both structurally
-distinct paths (the RouterEngine and `replay.replay_config`).
+"""Parity kill-gate over both structurally distinct paths (the RouterEngine and
+`replay.replay_config`), and the one geometry that still parts them.
 """
 
 # Parity is real and asserted for the failure-log lifecycle (append / clear on a VERIFIED PASS
-# only, an unstamped or infra step being a no-op / retire-on-escalation) AND the EFFORT rung (the
-# engine persists effort via its per-task effort arm and resets it to the default on a verified
-# success, mirrored by the runner — so effort parity holds even across a success boundary). It is
-# NOT real for the RANK rung: the replay climbs a persistent monotone abstract rank
-# counter that saturates at a ceiling, while the engine re-seeds rank from the base routing pick
-# each decision (no persistent rank ladder) and re-escalates indefinitely. The rank stream is an
-# isolation-model upper bound, not an engine reproduction; the tests below assert both the real
-# parity AND that documented divergence boundary.
+# only, an unstamped or infra step being a no-op / retire-on-escalation), the EFFORT rung, AND the
+# RANK rung. The engine persists both rungs per task — the effort arm and the capability-rank floor
+# it re-serves on the next decision — and drops both on a verified pass, which is exactly what the
+# runner's abstract monotone counters do. So the whole directive stream matches, ceilings included.
+#
+# The first condition is a LADDER-HOMOGENEOUS pool. The abstract counter carries a single effort
+# ceiling for every rank, so a higher-rank model exposing fewer reasoning arms hits its own ceiling
+# before the counter does and the streams part there. `_Pool` below is homogeneous and its ceilings
+# equal the offline context's (4 ranked models -> rank ceiling 3; a 3-arm ladder -> effort ceiling
+# 2), so full parity is the assertion; `_ArmlessTopPool` pins the heterogeneous boundary instead.
+#
+# The second is a pool NARROWER THAN THE RANK SHORTLIST + 1. The counter advances rank by exactly
+# +1, whereas the engine walks only the `rank_shortlist` cheapest ranks one at a time and then
+# jumps to the top rank. At `_Pool`'s 4 models and the shipped shortlist of 3 the two shapes
+# coincide exactly (ranks 0,1,2 walked, then the top rank is 3 either way), which is why the parity
+# assertions below are unchanged. `_WidePool` pins the boundary where they part: the engine reaches
+# its ceiling in fewer rungs and holds while the counter is still climbing. That divergence is the
+# shortlist working, not a live bug — the offline replay is the side that models a ladder nothing
+# runs, and closing it means teaching the replay's context about the shortlist.
 
 from __future__ import annotations
 
@@ -56,9 +67,13 @@ def _ladder() -> ReasoningConfig:
 
 
 class _Pool:
+    """4 ranked models sharing one 3-arm ladder — ceilings equal to the offline context's."""
+
+    _NAMES = ("qwen", "glm", "kimi", "opus")
+
     def __init__(self) -> None:
-        self._models = {"qwen": _cfg("qwen", _ladder()), "glm": _cfg("glm")}
-        self._ranked = [self._models["qwen"], self._models["glm"]]  # weakest -> strongest
+        self._ranked = [_cfg(n, _ladder()) for n in self._NAMES]  # weakest -> strongest
+        self._models = {m.name: m for m in self._ranked}
 
     def get_model(self, name: str) -> ModelConfig | None:
         return self._models.get(name)
@@ -114,9 +129,26 @@ class _Embedder:
         return np.zeros(8, dtype=np.float32)
 
 
-def _engine() -> RouterEngine:
+class _WidePool(_Pool):
+    """Wider than the shortlist + 1, so the engine's rank rung JUMPS and the counter's does not."""
+
+    _NAMES = ("qwen", "glm", "kimi", "sonnet", "gemini", "opus")
+
+
+class _ArmlessTopPool(_Pool):
+    """The heterogeneous case: the rank-1 model exposes no reasoning arms at all."""
+
+    _NAMES = ("qwen", "glm")
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._ranked[1] = _cfg("glm")  # strip the top model's reasoning arms
+        self._models = {m.name: m for m in self._ranked}
+
+
+def _engine(pool: _Pool | None = None) -> RouterEngine:
     return RouterEngine(
-        model_pool=_Pool(),
+        model_pool=pool if pool is not None else _Pool(),
         session_manager=_SessionManager(),
         outcome_index=_Index(),
         embedder=_Embedder(),
@@ -145,14 +177,16 @@ class _Outcome(StrEnum):
     INFRA = "infra"  # verifier said `unknown` + is_infra_failure — not a labellable outcome
 
 
-def _live_stream_outcomes(outcomes: list[_Outcome]) -> list[EscalationAction]:
+def _live_stream_outcomes(
+    outcomes: list[_Outcome], *, pool: _Pool | None = None
+) -> list[EscalationAction]:
     """Drive the real engine over an arbitrary outcome pattern."""
     # The engine decides, then records outcome i; its decision at turn i sees outcomes 0..i-1, so
     # the directive AFTER the first outcome is what the offline replay (observe-then-decide)
     # reproduces. Failures share one dedup key; a pass records a non-failure (clears the window).
     # UNVERIFIED/INFRA record NOTHING: `CaptureCoordinator` gates on `_LABELLABLE`, so a step with
     # no verified outcome never reaches `record_outcome` and the failure log is untouched.
-    eng = _engine()
+    eng = _engine(pool)
     actions: list[EscalationAction] = []
     n = len(outcomes)
     for i in range(n + 1):
@@ -194,9 +228,9 @@ def _offline_stream_outcomes(
     traj = make_trajectory([_step_for(i, o) for i, o in enumerate(outcomes)])
     ctx = EscalationContext(
         current_rank_index=0,
-        max_rank_index=3,  # abstract isolation ceiling (was len(TIER_ORDER) - 1)
+        max_rank_index=3,  # `_Pool`'s 4 ranked models → rank ceiling index 3
         current_effort_index=0,
-        max_effort_index=2,  # qwen's 3-arm ladder → effort ceiling index 2
+        max_effort_index=2,  # the shared 3-arm ladder → effort ceiling index 2
     )
     return replay.replay_config(
         traj, GridPoint(2, stale_window).to_config(), context=ctx
@@ -241,28 +275,54 @@ def test_offline_stream_reflects_retire_not_the_naive_over_fire() -> None:
     assert offline != naive_over_fire
 
 
-# --- effort->rank boundary: parity holds through effort, then the abstract rank ladder parts ---
+# --- the effort<->rank ladder: parity across every crossing, and where a pool's shape breaks it ---
 
 
-def test_effort_rung_and_lifecycle_parity_holds_before_the_tier_ceiling() -> None:
-    # Parity is REAL through the first rank crossing and several effort<->effort<->rank cycles: the
-    # log lifecycle and the effort rung match by construction. 24 same-key failures line up 0..22.
+def test_full_directive_stream_parity_across_every_rank_crossing() -> None:
+    # 24 same-key failures walk the whole ladder: three effort climbs, three rank crossings, and
+    # saturation. The engine persists the climbed rank as a per-task floor and re-serves it, which
+    # is precisely the runner's monotone counter, so the streams match rung for rung.
     live = _live_stream(24)
     offline = _offline_stream(24)
-    assert live[:23] == offline[:23]
+    assert live == offline
+    assert live.count(EscalationAction.RAISE_RANK) == 3
 
 
-def test_tier_stream_diverges_at_the_abstract_ceiling_not_engine_faithful() -> None:
-    # The documented boundary: the replay's persistent monotone rank counter saturates
-    # (rank at ceiling AND effort at ceiling -> HOLD), so it emits HOLD at index 23; the engine has
-    # no persistent rank ladder and re-escalates (RAISE_RANK). The replay's rank is an abstract
-    # isolation upper bound, NOT an engine reproduction — assert the divergence rather than a false
-    # full-stream match.
+def test_both_paths_saturate_at_the_same_ceiling() -> None:
+    # The end of the ladder is where a memoryless engine used to part from the replay: it re-picked
+    # the cheap model each decision and re-climbed forever (RAISE_RANK at index 23) while the replay
+    # had already saturated. With the rank floor both sides run out of rungs together — rank AND
+    # effort at their ceilings -> HOLD, on the same index.
     live = _live_stream(24)
     offline = _offline_stream(24)
-    assert live != offline
-    assert live[23] is EscalationAction.RAISE_RANK
+    assert live[23] is EscalationAction.HOLD
     assert offline[23] is EscalationAction.HOLD
+
+
+def test_rank_parity_breaks_when_a_higher_model_has_a_shorter_effort_ladder() -> None:
+    # The one condition the abstract counter cannot express: it carries a SINGLE effort ceiling for
+    # every rank. Give the rank-1 model no reasoning arms and the engine hits its effort ceiling the
+    # moment it arrives there, while the counter still believes two arms remain — so the engine
+    # holds where the replay raises effort. A pool-derived replay context must therefore be built
+    # from a ladder-homogeneous pool, or its post-first-rank rungs describe a policy nothing runs.
+    live = _live_stream_outcomes([_Outcome.FAIL] * 12, pool=_ArmlessTopPool())
+    offline = _offline_stream(12)
+    assert live[:7] == offline[:7]  # identical up to and including the rank crossing at index 5
+    assert live[7] is EscalationAction.HOLD  # glm has no arm above its default
+    assert offline[7] is EscalationAction.RAISE_EFFORT
+
+
+def test_a_verified_pass_returns_both_paths_to_the_base_rung() -> None:
+    # The engine pops BOTH the effort arm and the rank floor on a verified suite pass — the task is
+    # unstuck, so it falls back to base routing. A runner that reset only effort stayed a full
+    # rank-cycle ahead and saturated early, holding while the engine still had rungs. Climb to rank
+    # 1, pass, then climb again: the second ascent must reproduce the first.
+    f, p = _Outcome.FAIL, _Outcome.PASS
+    outcomes = [f] * 8 + [p] + [f] * 22
+    live = _live_stream_outcomes(outcomes)
+    offline = _offline_stream_outcomes(outcomes)
+    assert live == offline
+    assert offline[14] is EscalationAction.RAISE_RANK  # the post-pass ascent re-crosses rank 0->1
 
 
 def test_effort_parity_holds_across_a_verified_success() -> None:
@@ -319,17 +379,40 @@ def test_stale_window_is_observable_in_the_replay() -> None:
     assert _offline_stream_outcomes(outcomes, stale_window=1000)[5] is EscalationAction.RAISE_EFFORT
 
 
+def test_rank_parity_breaks_when_the_pool_is_wider_than_the_shortlist() -> None:
+    # The second condition, pinned. Six ranked models against the shipped shortlist of 3: the
+    # engine walks ranks 0,1,2 and then JUMPS to rank 5, so it saturates after three rank rungs
+    # while the abstract +1 counter needs five. Up to the third crossing the streams are identical;
+    # past it the engine holds at its ceiling where the counter still raises. A replay context
+    # built off a pool this wide therefore describes a ladder production does not walk.
+    live = _live_stream_outcomes([_Outcome.FAIL] * 36, pool=_WidePool())
+    traj = make_trajectory([_step_for(i, _Outcome.FAIL) for i in range(36)])
+    ctx = EscalationContext(
+        current_rank_index=0,
+        max_rank_index=5,  # the context a replay would DERIVE from `_WidePool`'s 6 models
+        current_effort_index=0,
+        max_effort_index=2,
+    )
+    offline = replay.replay_config(traj, GridPoint(2, 10).to_config(), context=ctx).directives
+    assert live[:18] == offline[:18]  # identical through the two rungs inside the shortlist
+    assert live.count(EscalationAction.RAISE_RANK) == 3  # 0->1, 1->2, 2->5 (the jump)
+    assert offline.count(EscalationAction.RAISE_RANK) == 5  # the +1 counter buys every rung
+    assert live[23] is EscalationAction.HOLD  # the engine has saturated...
+    assert offline[23] is EscalationAction.RAISE_RANK  # ...where the counter is still climbing
+
+
 def _first_flag(stream: list[EscalationAction]) -> int | None:
     """The index the policy first fired at — the ONLY thing the trajectory-level metric reads."""
     return next((i for i, a in enumerate(stream) if a is not EscalationAction.HOLD), None)
 
 
-def test_detection_point_is_parity_faithful_past_the_tier_ceiling() -> None:
-    # Even where the raw directive streams diverge (index 23), what the eval consumes — the
-    # first-escalation index, via replay.ReplayDecision — is identical for both paths. This is why
-    # the metric is robust to the rank-ladder abstraction: it never reads the post-flag rungs.
-    live = _live_stream(24)
+def test_detection_point_is_parity_faithful_under_a_mismatched_ladder() -> None:
+    # What the eval actually consumes is the first-escalation index (via replay.ReplayDecision),
+    # and it is reached BEFORE any rung is climbed — so it survives even the heterogeneous pool
+    # whose later rungs provably diverge above. This is why the metric is robust to the replay's
+    # ladder geometry being a modelling choice rather than a measured one.
+    live = _live_stream_outcomes([_Outcome.FAIL] * 24, pool=_ArmlessTopPool())
     offline = _offline_stream(24)
-    assert live != offline  # raw streams part at the ceiling
+    assert live != offline  # the raw streams part once the shorter ladder runs out
     assert _first_flag(live) == _first_flag(offline)
     assert _first_flag(offline) is not None

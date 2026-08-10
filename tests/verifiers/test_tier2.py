@@ -1,6 +1,8 @@
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from shunt.verifiers.tier2 import AutoDetectVerifier
 
 
@@ -18,13 +20,38 @@ class TestAutoDetectVerifier:
         assert result.outcome == "unknown"
         assert result.confidence == 0.0
 
-    def test_detect_python_pyproject_toml(self) -> None:
+    def test_detect_python_pyproject_tool_table(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "pyproject.toml").write_text(
-                '[build-system]\nrequires = ["setuptools", "pytest"]'
-            )
+            (Path(tmpdir) / "pyproject.toml").write_text("[tool.pytest.ini_options]\naddopts = ''")
             lang = self.v.detect(tmpdir)
             assert lang == "python"
+
+    @pytest.mark.parametrize(
+        ("filename", "body"),
+        [
+            # Every packaging tool declares the dev dependency in a different table, and
+            # Poetry puts the package name in the KEY. A structured parse that misses one
+            # turns capture silently off, which is worse than accepting a stray mention:
+            # whether a directory may be verified at all is gated by trust_launch_dir and
+            # the operator's own work_dir choice, not by this predicate.
+            ("pyproject.toml", '[tool.poetry.group.dev.dependencies]\npytest = "^8.0"\n'),
+            ("pyproject.toml", '[tool.poetry.dev-dependencies]\npytest = "^7"\n'),
+            ("pyproject.toml", '[tool.pdm.dev-dependencies]\ntest = ["pytest>=8"]\n'),
+            ("pyproject.toml", '[tool.uv]\ndev-dependencies = ["pytest"]\n'),
+            ("pyproject.toml", '[tool.hatch.envs.default]\ndependencies = ["pytest"]\n'),
+            ("pyproject.toml", '[project.optional-dependencies]\ndev = ["pytest"]\n'),
+            ("setup.cfg", "[options.extras_require]\ntest = pytest\n"),
+            ("requirements-dev.txt", "pytest  # the runner\n"),
+            # Files that exist only because pytest does.
+            ("pytest.ini", "[pytest]\n"),
+            ("conftest.py", "\n"),
+            ("tox.ini", "[pytest]\naddopts = -q\n"),
+        ],
+    )
+    def test_detect_python_across_packaging_tools(self, filename: str, body: str) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / filename).write_text(body)
+            assert self.v.detect(tmpdir) == "python"
 
     def test_detect_python_setup_cfg(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -67,9 +94,7 @@ class TestAutoDetectVerifier:
 
     def test_detect_prefers_pytest_over_other_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "pyproject.toml").write_text(
-                '[build-system]\nrequires = ["setuptools", "pytest"]'
-            )
+            (Path(tmpdir) / "pyproject.toml").write_text("[tool.pytest.ini_options]\naddopts = ''")
             (Path(tmpdir) / "go.mod").write_text("module example\n")
             lang = self.v.detect(tmpdir)
             assert lang == "python"

@@ -73,20 +73,44 @@ Two layers:
 1. **Always-on, hermetic** ([`tests/integrations/test_handshake.py`](../../tests/integrations/test_handshake.py)) —
    runs in the normal test job on every push, no Docker. Drives Shunt in-process
    against a live fake upstream across both wires.
-2. **Opt-in Docker matrix** (`.github/workflows/integration-handshake.yml`) — one
-   leg per tool directory that ships a `handshake.yaml`. Each leg starts the shared
-   substrate ([`compose.base.yaml`](compose.base.yaml): Shunt + fake upstream) and
-   runs the real tool against it.
+2. **Opt-in Docker matrix** (`.github/workflows/integration-handshake.yml`) — one leg
+   per **(tool, scenario)** pair. Each leg starts the shared substrate
+   ([`compose.base.yaml`](compose.base.yaml): Shunt + fake upstream) and runs the real
+   tool against it.
+
+### Scenarios
+
+Each `handshake.yaml` declares which scenarios its tool runs:
+
+| Scenario | What it proves | Verdict comes from |
+|---|---|---|
+| `wiring` | the tool reaches Shunt and a decision rides back | the client's exit code |
+| `escalation` | after repeated **verified** failures, Shunt escalates at the next session boundary | Shunt's own outcome store, via the `assert-escalation` sidecar |
+| `live` | the same run against a real provider — **authored, gated, never run in CI on a PR** | as above |
+
+**Why `escalation` does not grep stdout.** Most agentic CLIs never surface response
+headers, so "no `X-Shunt-Decision` in the output" is indistinguishable from "the router
+never escalated". The sidecar reads `sessions.decision_provenance` from the outcome
+store instead, matching a marker the driver planted in the prompt — so the escalated
+decision is proven to belong to *this tool's* request.
+
+**Why each prompt uses a different `User-Agent`.** A session is keyed on
+`sha256(source_ip + User-Agent)`, and the request path refreshes an open session's idle
+deadline before sweeping expired ones. Repeat prompts from one identity therefore reuse
+one session and produce **one** decision, however many you send — which silently reports
+"no escalation" when the truth is "no second session". A distinct User-Agent per prompt
+makes every prompt a real session boundary.
 
 ### Run a handshake locally
 
 ```bash
-# Build the Shunt image once (the compose base layers the fake registry onto it):
-docker build -t shunt-router:handshake -f ../../Dockerfile ../..
+# Everything, or one tool, or one leg. Builds the image on first use.
+make e2e
+make e2e TOOL=curl
+make e2e TOOL=curl SCENARIO=escalation
 
-# Then run any tool's leg — exit 0 means the roundtrip worked:
-docker compose -f openai-python/compose.yaml up --build \
-  --abort-on-container-exit --exit-code-from openai-python
+# The same runner CI uses, directly:
+tests/integrations/run_scenario.sh curl escalation
 ```
 
 ### Add a tool
@@ -96,8 +120,12 @@ Create `examples/integrations/<tool>/` with:
 - **`README.md`** — the copy-paste config (always).
 - **`compose.yaml`** — `include: [../compose.base.yaml]` plus one service that drives
   Shunt at `http://shunt:8080`, exiting 0 on a routed completion.
-- **`handshake.yaml`** — `tool`, `wire`, `service` (the verdict service), and
-  `expected_model` (a model in [`fake_registry.yaml`](../../tests/integrations/fake_registry.yaml)).
+- **`handshake.yaml`** — `tool`, `wire`, `service` (the verdict service),
+  `expected_model` (a model in [`fake_registry.yaml`](../../tests/integrations/fake_registry.yaml)),
+  `best_effort`, and `scenarios` (at minimum `[wiring]`).
+- **`compose.escalation.yaml`** — only if the tool declares the `escalation` scenario:
+  one driver service that sends N prompts, each with its own `User-Agent`, polling
+  `/admin/loop-health` between them rather than sleeping on a guess.
 
 Shipping a `handshake.yaml` is the **marker** that makes the tool CI-eligible — the
 matrix globs `examples/integrations/*/handshake.yaml`, no central list to edit.

@@ -18,8 +18,13 @@ def _apply_router_flag_overrides(args: argparse.Namespace) -> None:
     strategy = getattr(args, "strategy", None)
     explore = getattr(args, "explore", None)
     budget = getattr(args, "explore_budget_frac", None)
+    work_dir = getattr(args, "work_dir", None)
     if strategy is not None:
         os.environ["SHUNT_ROUTER_STRATEGY"] = strategy
+    if work_dir is not None:
+        # Same env var the file's single `work_dir` is overridden by, so the flag inherits
+        # its precedence (map > flag/env > file > validated launch dir) with no second path.
+        os.environ["SHUNT_WORK_DIR"] = work_dir
     if explore is not None:
         os.environ["SHUNT_EXPLORATION_ENABLED"] = "1" if explore else "0"
     if budget is not None:
@@ -44,6 +49,15 @@ def _add_start_flags(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=None,
         help="Exploration budget fraction (~1.4x cost at 0.4).",
+    )
+    parser.add_argument(
+        "--work-dir",
+        default=None,
+        help=(
+            "Repo whose tests are re-run off the wire to verify outcomes. Overrides "
+            "capture.work_dir. Unset: the launch directory is used if it is a git repo with "
+            "a test framework. WARNING: this runs that repo's own test code."
+        ),
     )
     parser.add_argument(
         "--log-level",

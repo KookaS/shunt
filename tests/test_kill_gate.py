@@ -132,6 +132,61 @@ class TestCensoringGuardFiresWhenImputeIsOff:
 
 
 # ---------------------------------------------------------------------------
+# The pass-rate bootstrap is PAIRED — both arms resampled on the same tasks
+# ---------------------------------------------------------------------------
+
+
+def _unpaired_pass_rate_ci(
+    control: list[kill_gate.Decision], test: list[kill_gate.Decision], n_iterations: int
+) -> tuple[float, float]:
+    """Reference implementation of the WRONG (arms-resampled-independently) estimator."""
+    import random as _random
+
+    control_pass = [1 if cd[2] else 0 for cd in control]
+    test_pass = [1 if td[2] else 0 for td in test]
+    n = len(control_pass)
+    rng = _random.Random(42)
+    boot = []
+    for _ in range(n_iterations):
+        c_s = [rng.choice(control_pass) for _ in range(n)]
+        t_s = [rng.choice(test_pass) for _ in range(n)]
+        boot.append((sum(t_s) - sum(c_s)) / n)
+    boot.sort()
+    return boot[int(0.05 * n_iterations)], boot[int(0.95 * n_iterations)]
+
+
+class TestPassRateBootstrapIsPaired:
+    """Both arms score the SAME tasks, so the resampling unit is the task. Independent
+    per-arm resampling discards the across-arm correlation and inflates the CI."""
+
+    @staticmethod
+    def _correlated_arms() -> tuple[list[kill_gate.Decision], list[kill_gate.Decision]]:
+        # 40 tasks. The router reproduces the control's outcome everywhere except two
+        # tasks it loses — strong positive correlation, small true delta (-2/40 = -0.05).
+        control_pass = [i < 30 for i in range(40)]
+        test_pass = [p and i not in (0, 1) for i, p in enumerate(control_pass)]
+        control = [_d(f"t{i}", "f", p, 1.0) for i, p in enumerate(control_pass)]
+        test = [_d(f"t{i}", "c", p, 0.5) for i, p in enumerate(test_pass)]
+        return control, test
+
+    def test_paired_ci_is_materially_narrower_than_unpaired(self):
+        control, test = self._correlated_arms()
+        res = kill_gate.bootstrap_pass_rate_delta(control, test, n_iterations=4000)
+        paired_width = res["ci_upper"] - res["ci_lower"]
+        lo, hi = _unpaired_pass_rate_ci(control, test, n_iterations=4000)
+        unpaired_width = hi - lo
+        assert paired_width < 0.6 * unpaired_width, (
+            f"paired width {paired_width} not materially narrower than {unpaired_width}"
+        )
+
+    def test_point_estimate_is_unchanged_by_pairing(self):
+        # Pairing affects the VARIANCE of the delta, never its mean.
+        control, test = self._correlated_arms()
+        res = kill_gate.bootstrap_pass_rate_delta(control, test, n_iterations=1000)
+        assert res["mean"] == pytest.approx(-2 / 40)
+
+
+# ---------------------------------------------------------------------------
 # BUG 3 — the router arm drives the verdict; router errors surface
 # ---------------------------------------------------------------------------
 

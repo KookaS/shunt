@@ -44,20 +44,31 @@ trusted, because coding agents reward-hack and misreport.
 
 | Source | Tier | Trust | Enable |
 |---|---|---|---|
-| Off-wire test run | Tier-2 | Verified (drives routing) | Set a `work_dir` |
+| Off-wire test run | Tier-2 | Verified (drives routing) | On by default in a test-bearing git repo |
 | Structured wire signal | Tier-1 | Weak prior, quarantined | Automatic when present |
 | Human `shunt flag` | Tier-2 | Verified (drives routing) | Always available |
 
 ### 1. Automatic — off-wire test execution (the signal that matters)
 
-When a `work_dir` is configured, at session close Shunt re-runs **that repo's test
-suite** off the wire — `pytest`, `jest`/`vitest`, `go test`, or `cargo test`,
-auto-detected — and records the pass/fail as a verified Tier-2 outcome. No human step.
+At session close Shunt re-runs **the resolved repo's test suite** off the wire —
+`pytest`, `jest`/`vitest`, `go test`, or `cargo test`, auto-detected — and records the
+pass/fail as a verified Tier-2 outcome. No human step.
 
-Arm it with an environment variable or config:
+Usually there is nothing to arm. Launch Shunt from the repo you are working in and it
+uses that repo:
 
 ```bash
-SHUNT_WORK_DIR=/path/to/your/repo shunt start
+cd ~/my-repo && shunt start
+```
+
+The launch directory is accepted only after a check that Shunt can actually verify it —
+it must resolve to a real directory inside a git repository that declares a test
+framework. It is confined to no set of permitted roots: the directory is the one you
+started Shunt in, so a repo anywhere on the machine arms. Point Shunt somewhere else, or
+run it from a directory that fails those checks, with an explicit path:
+
+```bash
+shunt start --work-dir /path/to/your/repo      # or SHUNT_WORK_DIR=…
 ```
 
 ```yaml
@@ -66,9 +77,20 @@ router:
   capture:
     work_dir: /path/to/your/repo
     # work_dirs: { "<tool_identity>": /path/to/other/repo }   # per-tool override
+    # trust_launch_dir: false                                 # disable the launch-dir layer
 ```
 
-The startup log states whether capture is armed or manual-only.
+The startup log states whether capture is armed, and which layer armed it.
+
+> **This runs the repo's own code.** Re-running a suite executes whatever that tree's
+> test command executes — `conftest.py`, `build.rs`, npm scripts. Only point Shunt at
+> repositories you would run tests in yourself, and set `trust_launch_dir: false` on a
+> shared host. A path supplied by a *client on the wire* is never used, at any setting.
+
+A path a request announces is never honoured. Full precedence and every knob —
+including `verify_timeout_seconds`, which silently no-ops the loop on a suite slower
+than its budget — are in
+[Configuration → Record verified outcomes automatically](configuration.md#record-verified-outcomes-automatically).
 
 **Know its limits before you trust it.** Automatic capture is a strong signal, not
 ground truth:
@@ -77,10 +99,14 @@ ground truth:
   closed. A pre-existing, unrelated failure will label a good session bad.
 - It needs the repo **and its test toolchain** wherever Shunt runs. A slim container
   that has neither cannot run your tests — see [by deployment](#giving-feedback-by-deployment).
-- A flaky test (fail → pass on unchanged state) is re-run once to confirm it is real;
-  a failure that does not reproduce is treated as a flake and abstained from (does not
-  feed the router or escalation). A confirmed failure is passed through.
-- If there is no test framework, or no `work_dir`, Shunt writes **nothing**. It never
+- A flaky test (fail → pass on unchanged state) is re-run to confirm it is real
+  (`rerun_confirmations`, default 2); a failure that does not reproduce is treated as a
+  flake and abstained from (does not feed the router or escalation). A confirmed failure
+  is passed through.
+- A run slower than `verify_timeout_seconds` (default 120s) records **nothing**, so on a
+  large suite the loop is a silent no-op until you raise it. Every run logs its measured
+  duration at debug level, and warns past 70% of the budget.
+- If there is no test framework, or no repo resolves, Shunt writes **nothing**. It never
   fabricates a label from a session it could not verify.
 
 ### 2. Structured wire signals (weak, quarantined)
@@ -122,7 +148,7 @@ How you record feedback depends on how Shunt runs.
 
 | Deployment | Automatic capture | Human feedback |
 |---|---|---|
-| `shunt start` on your host / dev box | Works — set `SHUNT_WORK_DIR` | `shunt flag <id> good` |
+| `shunt start` on your host / dev box | Works — automatic from the launch repo | `shunt flag <id> good` |
 | Docker / `docker compose` | Off unless you mount the repo + its test deps | `docker exec <container> shunt flag <id> good` |
 
 Automatic capture belongs where Shunt runs **beside** your code and its tests — a

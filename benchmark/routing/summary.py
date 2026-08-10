@@ -10,6 +10,8 @@ from typing import Final
 
 from benchmark import config
 from benchmark.admissibility import AdmissibilityResult
+from benchmark.routing import selection_guard
+from benchmark.routing.cache_cost import CachePrice, cache_aware_total, cache_prices
 from benchmark.routing.impute import ImputedMatrix, complete_matrix, is_non_observation
 from benchmark.routing.metrics import (
     bootstrap_ci,
@@ -27,14 +29,31 @@ SUMMARY_FIELDS: Final[tuple[str, ...]] = (
     "AvgPerf%",
     "AvgPerf_ci_lower",
     "AvgPerf_ci_upper",
+    # BOTH cost models ship, never one silently standing in for the other. `TotalCost` is the raw
+    # sum of billed attempts; `TotalCost_cacheaware` prices the repeat-model discount a provider
+    # actually grants. A cascade re-serves one model on consecutive attempts by construction, so
+    # the two differ most exactly where the ranking is decided — a reader must see which they hold.
     "TotalCost",
+    "TotalCost_ci_lower",
+    "TotalCost_ci_upper",
+    "TotalCost_cacheaware",
     "AvgCost",
+    "AvgCost_ci_lower",
+    "AvgCost_ci_upper",
+    "AvgCost_cacheaware",
     "Reward",
     "CumReg",
     "CumReg_ci_lower",
     "CumReg_ci_upper",
     "rAcc",
+    # `Pareto` is decided on CACHE-AWARE cost; `Pareto_naive` repeats the frontier on raw sums so
+    # a reader can see whether the cache assumption moved anyone.
     "Pareto",
+    "Pareto_naive",
+    # Whether this row was scored on the full sample or a coverage-selected slice of it, and the
+    # measured difficulty gap when it was. See benchmark/routing/selection_guard.py.
+    "subset_selected",
+    "subset_note",
     # Every published row carries the verdict on the instrument that produced it. A reader who
     # greps ONE line still sees whether the routing pipeline behind it has been shown to recover
     # a signal it is known to contain — which is the difference between "kNN scored 78.53%" and
@@ -48,13 +67,18 @@ DETERMINISTIC_FIELDS: Final[tuple[str, ...]] = (
     "n_pass",
     "AvgPerf%",
     "TotalCost",
+    "TotalCost_cacheaware",
     "AvgCost",
+    "AvgCost_cacheaware",
     "Reward",
     "CumReg",
     "rAcc",
 )
 
 Decision = tuple[str, str, bool, float]
+# One billed attempt: (model, cost). A single-shot decision is one attempt; a cascade is as many
+# as it made, in billing order.
+Attempt = tuple[str, float]
 
 
 def complete_scored_matrix(matrix: dict) -> tuple[dict, ImputedMatrix | None]:
@@ -105,8 +129,20 @@ def evaluate(strategy: object, matrix: dict, tasks: list[str]) -> tuple[list[Dec
     """Run one strategy, returning ``(decisions, unscorable)``: ``(task, model, passed,
     cost)`` tuples plus the task ids that cannot be scored — the chosen cell was never
     measured, or a cascade's PATH crossed an unmeasured cell (callers must exclude them)."""
+    decisions, unscorable, _attempts = evaluate_billed(strategy, matrix, tasks)
+    return decisions, unscorable
+
+
+def evaluate_billed(
+    strategy: object, matrix: dict, tasks: list[str]
+) -> tuple[list[Decision], set[str], dict[str, list[Attempt]]]:
+    """``evaluate`` plus each task's billed attempt sequence, from the SAME single pass.
+
+    The cache-aware cost model needs the attempt ORDER, which the collapsed decision hides.
+    """
     decisions: list[Decision] = []
     unscorable: set[str] = set()
+    attempts: dict[str, list[Attempt]] = {}
     for tid in tasks:
         task_meta = matrix["tasks"].get(tid, {})
         model = strategy.select(tid, task_meta, matrix)  # type: ignore[attr-defined]
@@ -129,7 +165,11 @@ def evaluate(strategy: object, matrix: dict, tasks: list[str]) -> tuple[list[Dec
         cascade_cost = getattr(strategy, "cascade_total_cost", None)
         cost = cascade_cost if cascade_cost is not None else outcome.get("cost", 0.0)
         decisions.append((tid, model, passed, cost))
-    return decisions, unscorable
+        # A cascade publishes its per-attempt billing; a single-shot decision IS one attempt.
+        # Copied, because the strategy overwrites the attribute on the next `select`.
+        billed = getattr(strategy, "cascade_attempts", None)
+        attempts[tid] = list(billed) if billed else [(model, float(cost))]
+    return decisions, unscorable, attempts
 
 
 def compute_strategy_rows(
@@ -147,30 +187,60 @@ def compute_strategy_rows(
     """
     if not tasks:
         return []
+    # The PRE-completion matrix is kept as the selection guard's difficulty probe: completion
+    # drops incomplete challenges, so asking the completed matrix why they were dropped finds no
+    # cells to compare and the guard would report "nothing to say" about its own selection.
+    probe = matrix
     matrix, _imputed = complete_scored_matrix(matrix)
     oracle_decisions, oracle_unscorable = evaluate(OracleRewardAware(gamma=gamma), matrix, tasks)
     random.seed(seed)
-    rows: list[dict] = []
-    strat_metrics: dict[str, dict] = {}
-    for strategy in strategies:
-        rows.append(
-            _strategy_row(
-                strategy, matrix, tasks, oracle_decisions, oracle_unscorable, gamma, bootstrap
-            )
+    prices = cache_prices(sorted(matrix.get("models", {})))
+    rows = [
+        _strategy_row(
+            s, matrix, tasks, oracle_decisions, oracle_unscorable, gamma, bootstrap, prices, probe
         )
-        # Zero-evidence rows (no scorable task) are kept in the output but NEVER
-        # enter the Pareto comparison: (cost $0, pass 0%) is un-dominated by
-        # construction, so including them certifies "measured nothing" as optimal.
-        if int(rows[-1].get("n_tasks", 0) or 0) > 0:
-            strat_metrics[rows[-1]["strategy"]] = {
-                "AvgPerf%": rows[-1].get("AvgPerf%", 0.0),
-                "TotalCost": rows[-1].get("TotalCost", 0.0),
-            }
-    pareto = compute_pareto(strat_metrics)
-    for r in rows:
-        r["Pareto"] = pareto.get(r["strategy"], False)
+        for s in strategies
+    ]
+    _apply_pareto(rows)
     rows.sort(key=lambda r: r.get("Reward", 0), reverse=True)
     return rows
+
+
+def _apply_pareto(rows: list[dict]) -> None:
+    """Stamp each row's Pareto membership under BOTH cost models."""
+    # `Pareto` is decided on CACHE-AWARE cost, because that is the cost a deployment actually
+    # pays and the question the frontier answers is which strategy to run. Naive cost overstates
+    # exactly the strategies that re-serve one model — the cascades — so a naive frontier ranks
+    # partly on cache blindness. `Pareto_naive` ships beside it so the assumption is auditable
+    # rather than silent: a row where the two disagree is a row the cache model moved.
+    axes = (("TotalCost_cacheaware", "Pareto"), ("TotalCost", "Pareto_naive"))
+    for cost_field, out_field in axes:
+        # Zero-evidence rows (no scorable task) are kept in the output but NEVER enter the
+        # comparison: (cost $0, pass 0%) is un-dominated by construction, so including them
+        # certifies "measured nothing" as optimal.
+        metrics = {
+            r["strategy"]: {"AvgPerf%": r.get("AvgPerf%", 0.0), "TotalCost": r.get(cost_field, 0.0)}
+            for r in rows
+            if int(r.get("n_tasks", 0) or 0) > 0
+        }
+        pareto = compute_pareto(metrics)
+        for r in rows:
+            r[out_field] = pareto.get(r["strategy"], False)
+
+
+def _cache_aware_cost(
+    decisions: list[Decision],
+    attempts: dict[str, list[Attempt]],
+    prices: dict[str, CachePrice],
+) -> float:
+    """Total cost of the scored tasks' billed attempts once repeat-model caching is priced."""
+    # SCOPED PER TASK, and that is the load-bearing choice. A task here is one session, and a
+    # cache discount exists because a PREFIX is still warm — so a cascade retrying inside a task
+    # banks it, and two unrelated tasks that happen to route to the same model do not. Summing
+    # the whole run as one sequence instead would hand a fixed-model baseline a discount on every
+    # task after the first (measured: it cuts Always-Frontier from $88.61 to $23.51 on this
+    # corpus), which is not caching — it is treating 175 independent sessions as one conversation.
+    return sum(cache_aware_total(attempts.get(tid, []), prices) for tid, _m, _p, _c in decisions)
 
 
 def _strategy_row(  # noqa: PLR0913
@@ -181,8 +251,10 @@ def _strategy_row(  # noqa: PLR0913
     oracle_unscorable: set[str],
     gamma: float,
     bootstrap: int,
+    prices: dict[str, CachePrice] | None = None,
+    probe: dict | None = None,
 ) -> dict:
-    decisions, strat_unscorable = evaluate(strategy, matrix, tasks)
+    decisions, strat_unscorable, attempts = evaluate_billed(strategy, matrix, tasks)
     # A task is comparable only if BOTH the strategy and the oracle landed on a
     # measured cell; otherwise it is a coverage gap, not a real fail@$0, and must
     # not corrupt pass rate / cost. Filtering keeps strategy/oracle position-aligned.
@@ -195,7 +267,16 @@ def _strategy_row(  # noqa: PLR0913
         oracle_aligned = oracle_decisions
     metrics = compute_metrics(decisions, gamma=gamma)
     comparison = compare_to_oracle(decisions, oracle_aligned, gamma=gamma)
-    avgperf_ci, cumreg_ci = bootstrap_ci(decisions, oracle_aligned, bootstrap, gamma=gamma)
+    cis = bootstrap_ci(decisions, oracle_aligned, bootstrap, gamma=gamma)
+    cache_total = _cache_aware_cost(decisions, attempts, prices or {})
+    n = len(decisions)
+    probe_matrix = matrix if probe is None else probe
+    selection = selection_guard.assess(
+        [d[0] for d in decisions],
+        tasks,
+        probe_matrix,
+        selection_guard.reference_model(probe_matrix),
+    )
     return {
         "strategy": strategy.name,  # type: ignore[attr-defined]
         # Count every task dropped from THIS row's metrics — a coverage gap in the
@@ -204,10 +285,18 @@ def _strategy_row(  # noqa: PLR0913
         "n_unscorable": len(excluded),
         **metrics,
         **comparison,
-        "AvgPerf_ci_lower": avgperf_ci[0],
-        "AvgPerf_ci_upper": avgperf_ci[1],
-        "CumReg_ci_lower": cumreg_ci[0],
-        "CumReg_ci_upper": cumreg_ci[1],
+        "TotalCost_cacheaware": round(cache_total, 4),
+        "AvgCost_cacheaware": round(cache_total / n, 6) if n else 0.0,
+        "AvgPerf_ci_lower": cis.avgperf[0],
+        "AvgPerf_ci_upper": cis.avgperf[1],
+        "CumReg_ci_lower": cis.cumreg[0],
+        "CumReg_ci_upper": cis.cumreg[1],
+        "TotalCost_ci_lower": cis.total_cost[0],
+        "TotalCost_ci_upper": cis.total_cost[1],
+        "AvgCost_ci_lower": cis.avg_cost[0],
+        "AvgCost_ci_upper": cis.avg_cost[1],
+        "subset_selected": selection.is_subset,
+        "subset_note": selection.note,
     }
 
 

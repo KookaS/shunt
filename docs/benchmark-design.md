@@ -75,7 +75,8 @@ The evaluator iterates tasks, calls `select()` per strategy, looks up the outcom
 | Metric | Formula | Meaning |
 |---|---|---|
 | AvgPerf% | `pass_count / total_tasks × 100` | % of tasks solved |
-| TotalCost | `sum(cost of chosen model per task)` | Raw dollar cost |
+| TotalCost | `sum(cost of every billed attempt)` | Raw dollar cost, cache-blind |
+| TotalCost_cacheaware | `TotalCost − Σ(cost × input_share × hit_rate × discount)` over consecutive same-model attempts | Dollar cost once repeat-model caching is priced. `input_share` is the cost-weighted input share of the model's MEASURED token mix; `discount` is `1 − cache_read_price/input_price` from the registry; only `hit_rate` is assumed |
 | Reward | `1.0 × pass_rate − γ × total_cost` | Cost-aware utility |
 | CumReg | `sum(oracle_reward − strategy_reward)` | Regret vs oracle — reward lost by not routing optimally |
 | rAcc | fraction of tasks routed to the oracle's model | Routing accuracy |
@@ -94,6 +95,17 @@ average regret per task, so a lower, flatter curve means routing closer to optim
 Cost is recorded from actual model API responses: the provider-returned cache-aware `usage.cost` when present (e.g. Requesty-routed models, including cache-aware rates), falling back to litellm's computed cost otherwise (e.g. direct routes litellm can price, such as deepseek). For offline eval, costs come from the cached `results.csv` (recorded during live benchmark matrix runs). Recording per-request API cost on the live proxy path is roadmap, not a current feature.
 
 ## Baselines
+
+The two fixed baselines bracket the problem. Always-Frontier arrives but pays top
+price on every task; Always-Cheap is cheap but grinds through the tail it cannot
+solve. A router earns its place only by being cost-effective against both — which
+is what the strategies below are scored on.
+
+![The same workload under three policies. Always-frontier arrives and is the most costly, paying frontier price on every trip. Always-cheap arrives but not reliably — its hard tail stalls in traffic before reaching the goal. Shunt is cheap by default and pays frontier price only for the tail.](assets/route/versus.svg)
+
+The figure is a conceptual framing of the three policies, not a result: cost is
+shown as a price word rather than a number. The measured comparison is in
+[Results](results.md).
 
 | Strategy | Behavior |
 |---|---|

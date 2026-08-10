@@ -317,7 +317,7 @@ def operating_point(
     """Both counting modes' outcome arms at the shipped knobs, and the canonical cell's nulls."""
     # The as-shipped pair is drawn even though — BECAUSE — it is the null result. Collapsing the
     # whole figure set onto the canonical cell would demote "the configuration we actually ship
-    # fires on 726 of 727 runs and reads the base rate" to one row of a 30-row table, which is
+    # fires on 727 of 727 runs and reads the base rate" to one row of a 30-row table, which is
     # the exact failure this redesign exists to remove.
     ax_bars, ax_null, ax_scope = axes
     _draw_arms(ax_bars, as_shipped, canonical)
@@ -1136,7 +1136,7 @@ def _coverage_limits(coverages: Sequence[ModelCoverage]) -> tuple[str, ...]:
 
 
 ESCALATION_BUDGET_SPEC = FigureSpec(
-    # "the trigger", unqualified, read as the SHIPPED trigger — which fires on 726/727 runs and
+    # "the trigger", unqualified, read as the SHIPPED trigger — which fires on 727/727 runs and
     # would produce an entirely different ledger. Every number on this canvas comes from the
     # canonical (edit-gated) cell, so the title has to say which trigger it is about.
     title="What firing costs: the eval-only edit-gated trigger pre-empts more than it interrupts",

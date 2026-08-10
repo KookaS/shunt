@@ -57,8 +57,9 @@ signal.
   fails and Shunt falls back to another model, that model necessarily prefills the
   conversation from scratch — a provider's cache is per-model, so the cost is
   unavoidable rather than a design flaw. It is reported, not hidden.
-- **A visible `X-Shunt-Decision` header** — names the model and the reason; today
-  the reason is always the cold-start default.
+- **A visible `X-Shunt-Decision` header** — names the model and the reason; while
+  the router is cold the reason is the cold-start default, and escalation and fixed
+  strategies report theirs (full token list in [routing](routing.md#the-reason-tokens)).
 - **Bring-your-own keys, zero telemetry** — nothing phoned home, replayed, or resold.
 
 ## Design center (what the roadmap is being built toward)
@@ -147,7 +148,7 @@ trust rules: [Feedback](feedback.md).
 - [Configuration](configuration.md) — add provider keys and register models
 - [Feedback](feedback.md) — how outcomes are captured (auto + manual) and learned from
 - [The routing model](routing.md) — what the session's model choice reads, how it decides, and where it stops
-- [Error detection & auto-escalation](escalation.md) — how a verified failure is detected and, on repeat, escalates a rung (opt-in)
+- [Error detection & auto-escalation](escalation.md) — how a verified failure is detected and, on repeat, escalates a rung (ships enabled; armed when a repo is resolved)
 - [Results](results.md) — every measured routing and escalation number, with its caveats
 - [Research log](research-log.md) — published ideas we tested, and what held
 - [Benchmark](benchmark.md) — run the offline model-capability and routing evals

@@ -5,6 +5,7 @@ consistent (verdict service exists, expected_model is real, docs-only dirs docum
 """
 
 from pathlib import Path
+from typing import Final
 
 import pytest
 import yaml
@@ -14,7 +15,20 @@ _INTEGRATIONS = _ROOT / "examples" / "integrations"
 _FAKE_REGISTRY = _ROOT / "tests" / "integrations" / "fake_registry.yaml"
 
 _WIRES = frozenset({"openai", "anthropic", "both"})
-_REQUIRED_KEYS = ("tool", "wire", "service", "expected_model", "best_effort")
+_REQUIRED_KEYS = ("tool", "wire", "service", "expected_model", "best_effort", "scenarios")
+
+# Scenario -> the compose file it runs from. `wiring` reads its verdict service from the
+# spec's top level (it is the original leg); the others read theirs from a same-named block.
+_SCENARIO_COMPOSE: Final[dict[str, str]] = {
+    "wiring": "compose.yaml",
+    "escalation": "compose.escalation.yaml",
+    "live": "compose.live.yaml",
+}
+# The stable subset. These clients have no onboarding to be brittle about, so their
+# escalation leg is REQUIRED: a regression in the ladder must turn the build red rather
+# than be absorbed by continue-on-error. Encoded as a test, not as a comment, because the
+# whole value of the leg is that someone cannot quietly flip it to best_effort.
+_REQUIRED_ESCALATION_TOOLS = frozenset({"curl", "openai-python", "anthropic-python"})
 
 
 def _handshake_dirs() -> list[Path]:
@@ -59,6 +73,54 @@ def test_ci_tool_dir_is_well_formed(tool_dir: Path) -> None:
         f"{tool_dir.name}: handshake.yaml names verdict service {spec['service']!r}, "
         f"but compose.yaml defines no such service"
     )
+
+
+@pytest.mark.parametrize("tool_dir", _handshake_dirs(), ids=lambda p: p.name)
+def test_declared_scenarios_are_runnable(tool_dir: Path) -> None:
+    # A scenario the matrix would dispatch but nothing can run is worse than a missing
+    # leg: CI reports a name, not a check. Every declared scenario must therefore own a
+    # compose file AND a service in it.
+    spec = yaml.safe_load((tool_dir / "handshake.yaml").read_text())
+    scenarios = spec["scenarios"]
+
+    assert isinstance(scenarios, list) and scenarios, "'scenarios' must be a non-empty list"
+    assert len(set(scenarios)) == len(scenarios), f"{tool_dir.name}: duplicate scenario"
+    unknown = set(scenarios) - set(_SCENARIO_COMPOSE)
+    assert not unknown, f"{tool_dir.name}: unknown scenario(s) {sorted(unknown)}"
+    assert "wiring" in scenarios, f"{tool_dir.name}: every CI-eligible tool runs 'wiring'"
+
+    for scenario in scenarios:
+        compose_path = tool_dir / _SCENARIO_COMPOSE[scenario]
+        assert compose_path.exists(), (
+            f"{tool_dir.name} declares scenario {scenario!r} but ships no {compose_path.name}"
+        )
+        block = spec if scenario == "wiring" else spec.get(scenario)
+        assert isinstance(block, dict), (
+            f"{tool_dir.name} declares scenario {scenario!r} but has no '{scenario}:' block "
+            f"naming its verdict service and best_effort flag"
+        )
+        assert isinstance(block.get("best_effort"), bool), (
+            f"{tool_dir.name}/{scenario}: 'best_effort' must be a boolean — the CI matrix "
+            f"turns it into continue-on-error, and a missing flag silently means 'required'"
+        )
+        service = block.get("service")
+        compose = yaml.safe_load(compose_path.read_text())
+        assert service in compose.get("services", {}), (
+            f"{tool_dir.name}/{scenario}: names verdict service {service!r}, but "
+            f"{compose_path.name} defines no such service"
+        )
+
+
+def test_escalation_is_required_for_the_stable_subset() -> None:
+    # The point of the escalation scenario is that it CAN fail the build. If every leg
+    # were best_effort, a broken ladder would ship green.
+    for tool in sorted(_REQUIRED_ESCALATION_TOOLS):
+        spec = yaml.safe_load((_INTEGRATIONS / tool / "handshake.yaml").read_text())
+        assert "escalation" in spec["scenarios"], f"{tool} must declare the escalation scenario"
+        assert spec["escalation"]["best_effort"] is False, (
+            f"{tool}: the escalation leg must be REQUIRED (best_effort: false) — a "
+            f"harness that cannot turn the build red is theatre"
+        )
 
 
 @pytest.mark.parametrize("tool_dir", _docs_only_dirs(), ids=lambda p: p.name)

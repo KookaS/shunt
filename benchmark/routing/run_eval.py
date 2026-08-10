@@ -9,13 +9,15 @@ from pathlib import Path
 from typing import Final
 
 from benchmark import config
-from benchmark.routing import frontier_estimate, impute, summary
+from benchmark.routing import frontier_estimate, impute, selection_guard, summary
 from benchmark.routing.metrics import discriminating_stats
+from benchmark.routing.session_cascade_control import assert_ladder_quotable
 from benchmark.routing.strategies.fixed import AlwaysCheap, AlwaysFrontier, Random
 from benchmark.routing.strategies.knn import kNNStrategy
 from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
 from benchmark.routing.strategies.oracle import Oracle, OracleRewardAware
 from benchmark.routing.strategies.price_cascade import PriceCascade
+from benchmark.routing.strategies.session_cascade import SessionCascadeStrategy
 from benchmark.routing.strategies.tier_classifier import TierClassifier
 from benchmark.routing.strategy_class import is_live
 
@@ -52,6 +54,7 @@ def get_strategies(
             "knn",
             "knn_cascade",
             "price_cascade",
+            "session_cascade",
             "tier_classifier",
         ]
 
@@ -76,6 +79,14 @@ def get_strategies(
     # Price-Cascade takes only max_tries — it has no kNN knobs by construction, and
     # sharing the cascade's depth keeps the two cascades comparable at equal depth.
     price_p = {"max_tries": cascade_p.get("max_tries", 3)}
+    # Session-Cascade takes the PRODUCT's escalation knobs, not the cascade's depth: its ladder
+    # length is the model pool's, and what it is parameterised by is the live recurrence policy.
+    session_p = dict(strat_cfg.get("session_cascade", {}))
+    # STRUCTURAL: refuse to build the strategy at a ladder its positive control does not cover,
+    # rather than produce a row nobody may quote. Raised here — before any evaluation — so the
+    # failure costs nothing and cannot be mistaken for a result.
+    if "session_cascade" in enabled:
+        assert_ladder_quotable(str(session_p.get("ladder", "rank_only")))
 
     registry: dict[str, Callable[[], object]] = {
         "oracle": lambda: Oracle(),
@@ -86,6 +97,7 @@ def get_strategies(
         "knn": lambda: kNNStrategy(**knn_p),
         "knn_cascade": lambda: kNNCascadeStrategy(**cascade_p),
         "price_cascade": lambda: PriceCascade(**price_p),
+        "session_cascade": lambda: SessionCascadeStrategy(**session_p),
         "tier_classifier": lambda: TierClassifier(**tier_p),
     }
 
@@ -248,10 +260,19 @@ def _frontier_gate_inputs(matrix: dict, tasks: list[str]) -> dict:
 def _paired_outcomes(
     matrix: dict, disc: list[str], control: str
 ) -> tuple[dict[str, int], dict[str, int]]:
-    """Router (knn_cascade) vs fixed-frontier (control) realized pass on the disputed set."""
-    from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
-
-    router = kNNCascadeStrategy(**config.knn_params())
+    """Shipped kNN router vs fixed-frontier (control) realized pass on the disputed set."""
+    # The arm has to be a strategy `LIVE_STRATEGIES` accepts, or the gate adjudicates
+    # "should we ship this" on something the product refuses to run. It used to be
+    # kNN-cascade, which is blocked (see benchmark/routing/strategy_class.py) — the same
+    # substitution benchmark/runner/kill_gate.py was fixed away from. Single-shot: one
+    # decision per task, so the contrast is single-shot-vs-single-shot rather than
+    # best-of-N coverage against a single attempt.
+    knn = config.knn_params()
+    router = kNNStrategy(
+        k=knn.get("k", 20),
+        success_rate_threshold=knn.get("success_rate_threshold", 0.6),
+        min_samples=knn.get("min_samples", 3),
+    )
     results = matrix.get("results", {})
     router_pass: dict[str, int] = {}
     baseline_pass: dict[str, int] = {}
@@ -395,13 +416,20 @@ def _print_imputation_gate(
 def _print_rows(rows: list[dict]) -> None:
     for r in rows:
         ci_ap = f"[{r['AvgPerf_ci_lower']:>5.2f},{r['AvgPerf_ci_upper']:>5.2f}]"
+        ci_c = f"[{r['TotalCost_ci_lower']:>8.4f},{r['TotalCost_ci_upper']:>8.4f}]"
         ci_cr = f"[{r['CumReg_ci_lower']:>7.4f},{r['CumReg_ci_upper']:>7.4f}]"
+        # The subset marker rides on the row itself, not only in a footer: a line copied out of
+        # this table alone still carries the fact that it was not scored on the full sample.
+        flag = " *SUBSET" if r.get("subset_selected") else ""
         print(
             f"  {r['strategy']:25}  AvgPerf={r['AvgPerf%']:>5.2f}%  {ci_ap}  "
-            f"TotalCost=${r['TotalCost']:<8.4f}  "
+            f"TotalCost=${r['TotalCost']:<8.4f} {ci_c}  "
+            f"cache-aware=${r['TotalCost_cacheaware']:<8.4f}  "
             f"CumReg={r['CumReg']:<8.4f}  {ci_cr}  "
-            f"rAcc={r['rAcc']:<6.4f}"
+            f"rAcc={r['rAcc']:<6.4f}{flag}"
         )
+    for line in selection_guard.rows_footer(rows):
+        print(line)
 
 
 def main(config_path: str = "benchmark/benchmark.yaml") -> None:

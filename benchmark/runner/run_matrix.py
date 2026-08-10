@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Final, NoReturn
 
 from benchmark import config
-from benchmark.routing import censoring, coverage, integrity, validate
+from benchmark.routing import censoring, coverage, impute, integrity, validate
 from benchmark.routing.strategies.fixed import AlwaysCheap, AlwaysFrontier
 from benchmark.routing.strategies.oracle import Oracle
 from benchmark.runner import image_version, infer, swebench_specs
@@ -132,7 +132,18 @@ def _is_stale(
     digests: dict[str, str | None] | None,
     arm_hash_map: dict[str, dict[str, str]] | None = None,
 ) -> bool:
-    """Stale iff stored spec hash, model version, arm-param hash, or image digest drifted."""
+    """Stale iff the row records no executed work, or spec/model/arm/image drifted."""
+    # ZERO-WORK ROWS ARE STALE. A row with zero priced calls and $0 spend never executed —
+    # it is an aborted collection's residue, not a measurement — yet every other check here
+    # passes on it, so it was cached forever as though the cell had been observed. That
+    # silently removed the cell from `to_run` for all time: the collector cannot tell
+    # "measured" from "never happened" by presence alone.
+    # Deliberately NOT `impute.is_non_observation`, which also matches CENSORED cells. A
+    # censored cell DID run, burned tokens and cost real money; only its pass/fail is
+    # unknown. Re-collecting one buys a likely-identical non-observation at full price, so
+    # the narrower `is_zero_work` is the correct predicate here.
+    if impute.is_zero_work(cell):
+        return True
     if cell.get("version_hash") != hashes.get(cid):
         return True
     if cell.get("model_version") != versions.get(model):

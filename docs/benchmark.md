@@ -24,7 +24,7 @@ different meanings, so keep them apart (see the note below the table).
 | `arm_sampling.default_only_models` | collect | Models pinned to their default reasoning arm (no effort sweep). |
 | `collect.*` (`audit_fraction`, `noninferiority_margin`, `phase_a_mode` …) | collect | Knobs for the `cost_optimal` sampler only. |
 | `sample_size`, `seed`, `n_default` | collect | **Which tasks** run and how many (nested order). |
-| `strategies.enabled` | evaluate | **Which routing policies are scored offline** over the cache — `oracle`, `always_cheap`, `always_frontier`, `knn`, `knn_cascade`, `price_cascade`, `tier_classifier`. |
+| `strategies.enabled` | evaluate | **Which routing policies are scored offline** over the cache — `oracle`, `always_cheap`, `always_frontier`, `knn`, `knn_cascade`, `price_cascade`, `session_cascade`, `tier_classifier`. |
 | `strategies.knn.*`, `knn_cascade.*` … | evaluate | Per-policy hyperparameters (`k`, `success_rate_threshold`, `max_tries`). |
 | `routing.control_model` | evaluate | The fixed-frontier baseline the kill-gate is measured against. |
 
@@ -42,11 +42,11 @@ with human-verified test sets. Each task is a minimal spec under
 `repo`, `base_commit`, `version`, `FAIL_TO_PASS` / `PASS_TO_PASS` test sets, a
 `difficulty_stratum`, an `image_ref`, and a pinned `dataset_revision`. Repo and
 patch content are pulled on demand by the official harness — nothing is vendored.
-The `problem_statement` handed to the agent is fetched from the dataset at run time
-rather than stored in the spec. The spec format has a slot to mirror it for routing,
-and `routing_text()` prefers it, but no committed spec carries the key (0 of 500) — so
-the routing strategies embed the `description` label instead
-([Results](results.md#routing-results)).
+The `problem_statement` handed to the agent is fetched from the dataset at run time;
+it is **also stored** in each spec and mirrored in every `tasks` entry of
+`routing/data/challenges.json` (backfilled 2026-08-05 from the pinned dataset
+revision), so `routing_text()` embeds the issue text rather than the `description`
+label ([Results](results.md#routing-results)).
 
 The challenge suite is the full **500-instance** SWE-bench Verified set across 12
 repos, spanning a spread of difficulty strata, each with a verified prebuilt
@@ -341,6 +341,21 @@ escalation corpus, with its default 200-permutation nulls, takes **~90 s** — n
 requests. [Routing evaluation](#routing-evaluation) below is the same idea for routing
 strategies over `results.csv`.
 
+**Both halves re-score for $0.** A code change — a routing strategy, the escalation regex, a
+config default — never invalidates `results.csv` or the escalation corpus. Routing cell
+staleness is decided by four immutable anchors (`version_hash`, `model_version`, `arm_hash`,
+`image_digest`), and none of them move when code changes; the escalation stamps key on the
+replay source, not on the detector scoring them. So changing the router, the escalation
+policy, or `benchmark.yaml` defaults re-runs both evals free: `make routing-report` and `make
+escalation-eval` are **$0 of API money**. Only collecting **new** live model outcomes spends.
+
+What *does* go stale after a code change is the derived artifacts committed beside the
+results — `escalation/reports/metrics.json`, the PNGs under `docs/assets/figures/<half>/`, and
+`<half>/figures.json`. `make escalation-eval` and `make routing-report` regenerate them, and
+`make check-figures` (`benchmark.pipeline --check-figures`) proves the committed figures are
+current without regenerating anything — the gate to run after a code change before trusting an
+old PNG.
+
 Re-replaying is what `--restamp` does, and you only need it when the *instrument* changes —
 the classifier, the grader, the admissibility adjudicator. Old stamps came from a different
 instrument, so they aren't comparable to new ones.
@@ -434,12 +449,17 @@ Metrics per strategy:
 |--------|---------|
 | AvgPerf% | Tasks solved correctly |
 | AvgPerf_ci_lower / AvgPerf_ci_upper | 95% bootstrap CI on AvgPerf% (resample tasks, B=1000) |
-| TotalCost | Total backend model cost (USD) |
+| TotalCost | Total backend model cost (USD), summed raw over every billed attempt |
+| TotalCost_ci_lower / TotalCost_ci_upper | 95% bootstrap CI on TotalCost (same task resample as AvgPerf%). Cost here is heavy-tailed, so the point total does not travel alone |
+| TotalCost_cacheaware | TotalCost once a repeat of the same model on consecutive attempts banks its cache-read discount. Point estimate only — cache savings are adjacency-dependent, so resampling tasks would destroy the ordering the statistic is defined over |
+| AvgCost_ci_lower / AvgCost_ci_upper / AvgCost_cacheaware | The per-task forms of the three above |
 | Reward | `Σ(1.0 × passed − γ × cost)` per task (γ=0.1 default) |
 | CumReg | `total(oracle_reward) − total(strategy_reward)` |
 | CumReg_ci_lower / CumReg_ci_upper | 95% bootstrap CI on CumReg |
 | rAcc | Fraction of tasks where strategy picked the same model as the oracle |
-| Pareto | True if no other strategy has higher AvgPerf% AND lower TotalCost |
+| Pareto | True if no other strategy has higher AvgPerf% AND lower **TotalCost_cacheaware** — the cost a deployment actually pays |
+| Pareto_naive | The same frontier computed on raw TotalCost, published beside it so the cache assumption is auditable rather than silent |
+| subset_selected / subset_note | Whether the row was scored on a coverage-selected slice of the sample rather than the whole of it, and the measured difficulty gap between what it scored on and what it dropped. Collection is adaptive, so full coverage tracks difficulty — a subset row is not comparable to a full-sample row |
 | instrument_admissible / instrument_verdict | The two-sided instrument verdict for the SHIPPED selection path, stamped on every row (see [instrument validity](#is-the-router-measuring-anything-instrument-validity)) |
 
 ### Is the router measuring anything? (instrument validity)
@@ -593,9 +613,11 @@ Scored offline, the embedding-based routing strategies split by workload:
 - On the **agentic-coding** tasks this benchmark targets, the embedding-based
   difficulty signal did not clear the viability bar for cost-at-equal-quality
   relative to fixed-frontier-with-caching. Ranking hard tasks from easy ones off the
-  prompt embedding came out near chance — but that was measured while the strategies
-  embedded the short `description` label rather than the task's `problem_statement`,
-  so it is a coverage gap pending re-measurement, not a settled null
+  prompt embedding came out near chance — and that result was measured while the
+  strategies embedded the short `description` label rather than the task's
+  `problem_statement`, so it was pending re-measurement. The manifest has since been
+  rebuilt with the real statements (2026-08-05), and the re-measured numbers fell:
+  kNN 78.89% is inside noise of Always-Cheap — a settled null, not a coverage gap
   ([Results](results.md#routing-results)). The router is wired into the live proxy
   (it decides the first turn), outcomes are recorded automatically at session close
   (via off-wire test re-execution when configured), and the learning loop is live.
@@ -709,10 +731,14 @@ equal coverage across the whole suite is guaranteed by **ladder collection mode*
 **What the report shows.** The headline is a **paired** cost/quality contrast — the router
 versus fixed-frontier on the *same* completed task set — with its confidence interval, and
 it stays honest when that interval crosses zero (equal quality is reported as equal, not
-spun as a win). On the current coverage-incomplete data, the best deployable router is
-`Price-Cascade`: it matches fixed-frontier quality (**+0.6 pp, CI crosses zero →
-statistically equal**) at roughly **76% lower cost** on the shared measurable set; the
-full-distribution figure waits on ladder-mode collection.
+spun as a win). On the current coverage-incomplete data, the cheapest strategy that
+matches fixed-frontier quality is `Price-Cascade` (**+0.6 pp, CI crosses zero →
+statistically equal**, at roughly **76% lower cost** on the shared measurable set) — but
+it is **blocked, not deployable**: the router rejects `price_cascade` at boot, because
+stopping at the first passing patch needs a verified outcome mid-session and that is not
+one cache-safe decision per session. So this is a bound on what the mechanism is worth,
+not an offer. The headline gate itself is adjudicated on the shipped single-shot kNN
+router; the full-distribution figure waits on ladder-mode collection.
 
 **A population estimate, as a cross-check.** Alongside imputation, Shunt can estimate the
 fixed-frontier baseline's pass-rate and cost directly from a *uniformly random audit* of

@@ -115,9 +115,15 @@ at matched quality — has a tighter coverage limit than the 177 usable tasks su
 can only use tasks where **both** the router's chosen model **and** the frontier baseline
 have real, measured cells at equal quality. Because the frontier model is the most
 expensive and is run sparingly, the number of such paired tasks is currently small
-(**~20**) — far below 177. That makes the comparison **suggestive, not yet settled** at
-this sample size. It is a coverage limitation, not a result; it resolves as more paired
-frontier cells are collected.
+(**~20**) — far below 177. That makes the **cost** side of the comparison suggestive
+rather than settled: it is a coverage limitation, not a result, and it resolves as more
+paired frontier cells are collected.
+
+The **quality** side of that same gate sample is no longer unresolved. On the paired
+bootstrap the router passes 16 of 20 against the frontier baseline's 19 of 20, a
+pass-rate delta of **-15.0pp with a 90% CI of [-30.0, -5.0]**. The interval excludes
+zero, so at 90% confidence the router is measurably **worse** on pass rate here — not
+indistinguishable from the baseline. The saving is a saving at lower quality.
 
 ## How to run it end to end
 
@@ -159,4 +165,4 @@ make benchmark-live ARGS="--live --strategy ladder --max-cost 2"
 ```
 
 Full mode reference, budget caps, and the row-integrity gates are in
-[Benchmark](benchmark.md#running-it).
+[Benchmark](benchmark.md#benchmark-execution).

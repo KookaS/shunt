@@ -21,6 +21,7 @@ strategies:
     - knn                 # shipped algorithm: predict by nearest neighbors
     - knn_cascade         # kNN-informed try-verify-escalate
     - price_cascade       # zero-ML floor: cheapest-first try-verify-escalate, no embeddings
+    - session_cascade     # the SHIPPED escalation ladder at session cadence (cache-safe analogue)
     - tier_classifier     # single-shot: predict crossover tier, route there directly
     # - oracle_reward      # same as oracle with different cost weight
     # - random             # not useful for comparison
@@ -33,6 +34,25 @@ strategies:
     success_rate_threshold: 0.6
   tier_classifier:
     success_rate_threshold: 0.6   # neighbour pass-rate at a tier's rung to route there
+  session_cascade:
+    # The PRODUCT's escalation defaults (src/shunt/router/escalation.py EscalationConfig), so
+    # the offline row scores the policy production actually runs. Changing one here without
+    # changing it there measures a policy nobody ships.
+    escalate_after_n: 2
+    stale_window: 10
+    # PINNED to rank_only, and the product's default is effort_then_rank — a deliberate,
+    # documented divergence, not an oversight. The effort rung serves a NON-DEFAULT reasoning
+    # arm, and results.csv holds a 3-arm measurement for only 54 of 770 (task, model) cells, so
+    # scoring effort_then_rank censors 71 of 200 tasks as coverage gaps AND leaves a survivor set
+    # that is 100% pass at $1.31 — a selection artefact that would be drawn as a Pareto-dominant
+    # point. rank_only is a shipped ladder value (escalation.ESCALATION_LADDERS), scores 0
+    # unscorable on the completed matrix, and is the largest honestly-measurable slice of the live
+    # ladder. Flip this back when per-arm coverage exists; do not flip it to make a nicer number.
+    ladder: rank_only
+    # `rank_shortlist` is deliberately ABSENT: omitting it makes the replay inherit whatever
+    # `EscalationConfig` ships, so the offline row always prices the ladder production runs. Set it
+    # only to SWEEP the knob (0 restores the pre-shortlist every-rank walk); a value pinned here
+    # that disagrees with router.yaml measures a ladder nobody runs.
 
 routing:
   control_model: kimi-k3    # strongest ENABLED frontier = kill-gate baseline (opus-4-6 priced but disabled)

@@ -1,0 +1,167 @@
+# curl → Shunt LIVE tier. AUTHORED, NOT RUN.
+#
+# Identical to compose.escalation.yaml in shape, with exactly one substitution: the
+# `fake-upstream` service is gone and the registry points at a REAL provider base URL.
+# That single swap is the whole difference, which is the point — if the escalation
+# ladder only works against a stub, the swap is where you find out.
+#
+# THIS COSTS REAL MONEY. Four gates stand in front of it and all four must open:
+#   1. `workflow_dispatch` only. The `live` scenario is filtered out of the discover
+#      matrix, so `pull_request` and `schedule` can never reach it — no fork PR and no
+#      cron can spend.
+#   2. The dispatcher must tick the `live` input by hand, on `main`, into a protected
+#      GitHub environment (a human approval step).
+#   3. `secrets.SHUNT_LIVE_API_KEY` must exist. Unset ⇒ the job fails closed.
+#   4. tests/integrations/run_scenario.sh refuses without SHUNT_LIVE_I_ACCEPT_SPEND=yes.
+#
+# The cap is enforced IN THE RUN, not on the invoice: `router.budget.max_spend_usd` is
+# read from SHUNT_LIVE_MAX_SPEND_USD, and the driver sends a fixed, tiny number of
+# short prompts. A live tier whose only cost control is care is not a cost control.
+#
+# Run (deliberately not wired into `make e2e`):
+#   SHUNT_LIVE_I_ACCEPT_SPEND=yes SHUNT_LIVE_API_KEY=... \
+#   SHUNT_LIVE_BASE_URL=https://... SHUNT_LIVE_MODEL_ID=... \
+#     tests/integrations/run_scenario.sh curl live
+
+configs:
+  live_registry:
+    content: |
+      providers:
+        live:
+          base_url: ${SHUNT_LIVE_BASE_URL:?live tier needs SHUNT_LIVE_BASE_URL}
+          api_key_env_var: SHUNT_LIVE_API_KEY
+          litellm_prefix: openai
+      models:
+        ${SHUNT_LIVE_MODEL_ID:?live tier needs SHUNT_LIVE_MODEL_ID}:
+          model_id: ${SHUNT_LIVE_MODEL_ID}
+          provider: live
+          version: live
+          supports_streaming: true
+          supports_cache_control: false
+          pricing:
+            input_cost_per_1m: ${SHUNT_LIVE_INPUT_COST_PER_1M:-1.0}
+            output_cost_per_1m: ${SHUNT_LIVE_OUTPUT_COST_PER_1M:-2.0}
+            price_provider: live
+            price_source: operator
+            price_as_of: "${SHUNT_LIVE_PRICE_AS_OF:-2026-08-08}"
+  live_router:
+    content: |
+      router:
+        models: []
+        budget:
+          max_spend_usd: ${SHUNT_LIVE_MAX_SPEND_USD:-1.00}
+
+services:
+  shunt:
+    # Standalone: this file does NOT `include: ../compose.base.yaml`, precisely so there
+    # is no fake-upstream service to inherit or reset. The base image still carries the
+    # fake registry; the configs below overwrite both files at the paths SHUNT_CONFIG_DIR
+    # already points at, so the router boots against the real provider and nothing else.
+    build:
+      context: ../../tests/integrations
+      dockerfile: Dockerfile.shunt
+      args:
+        SHUNT_BASE_IMAGE: ${SHUNT_BASE_IMAGE:-shunt-router:handshake}
+    environment:
+      SHUNT_HOST: 0.0.0.0
+      SHUNT_PORT: "8080"
+      SHUNT_LIVE_API_KEY: ${SHUNT_LIVE_API_KEY:?live tier needs SHUNT_LIVE_API_KEY}
+      SHUNT_WORK_DIR: /repo
+      SHUNT_SESSION_INACTIVITY_TIMEOUT: "${SHUNT_SESSION_INACTIVITY_TIMEOUT:-1}"
+      SHUNT_DATA_DIR: /state
+    configs:
+      - source: live_registry
+        target: /shunt-harness/fake_registry.yaml
+      - source: live_router
+        target: /shunt-harness/router.yaml
+    volumes:
+      - shunt-state:/state
+    expose:
+      - "8080"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8080/health')
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  curl-escalation:
+    image: curlimages/curl:8.11.1
+    depends_on:
+      shunt:
+        condition: service_healthy
+    environment:
+      SHUNT_ESC_MARKER: ${SHUNT_ESC_MARKER:-SHUNT-ESC-curl}
+      SHUNT_SESSION_INACTIVITY_TIMEOUT: ${SHUNT_SESSION_INACTIVITY_TIMEOUT:-1}
+      # Fixed and small. The live tier proves the swap works; it is not a benchmark.
+      SHUNT_ESC_PROMPTS: "4"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        BASE=http://shunt:8080
+        MARK="$$SHUNT_ESC_MARKER"
+        IDLE="$$SHUNT_SESSION_INACTIVITY_TIMEOUT"
+
+        send() {
+          curl -sf -o /tmp/body.json -D /tmp/head.txt "$$BASE/v1/chat/completions" \
+            -A "shunt-escalation-curl/$$1" \
+            -H "Content-Type: application/json" \
+            -d "{\"model\":\"auto\",\"max_tokens\":32,\"messages\":[{\"role\":\"user\",\"content\":\"$$MARK prompt $$1 — the test suite is failing, fix it\"}]}"
+          date +%s > /tmp/last_send
+          echo "prompt $$1 -> $$(grep -i '^x-shunt-decision:' /tmp/head.txt | tr -d '\r')"
+        }
+
+        ensure_idle() {
+          need=$$((IDLE + 1))
+          while [ "$$(( $$(date +%s) - $$(cat /tmp/last_send) ))" -lt "$$need" ]; do sleep 1; done
+        }
+
+        verified() {
+          curl -sf "$$BASE/admin/loop-health" \
+            | grep -o '"verified_labeled":[0-9]*' | head -n1 | cut -d: -f2
+        }
+
+        wait_verified() {
+          tries=0
+          while [ "$$tries" -lt 300 ]; do
+            v="$$(verified || echo 0)"
+            if [ -n "$$v" ] && [ "$$v" -ge "$$1" ]; then
+              echo "verified_labeled=$$v (>= $$1)"; return 0
+            fi
+            tries=$$((tries + 1)); sleep 1
+          done
+          echo "timed out waiting for verified_labeled >= $$1 (last=$$v)" >&2
+          return 1
+        }
+
+        for i in $$(seq 1 "$$SHUNT_ESC_PROMPTS"); do
+          send "$$i"
+          ensure_idle
+          if [ "$$i" -ge 2 ]; then wait_verified "$$((i - 1))"; fi
+        done
+        echo "OK: live driver finished — run assert-escalation for the verdict"
+
+  assert-escalation:
+    build:
+      context: ../../tests/integrations
+      dockerfile: Dockerfile.shunt
+      args:
+        SHUNT_BASE_IMAGE: ${SHUNT_BASE_IMAGE:-shunt-router:handshake}
+    environment:
+      SHUNT_DATA_DIR: /state
+      SHUNT_ESC_TOOL: curl
+      SHUNT_ESC_MARKER: ${SHUNT_ESC_MARKER:-SHUNT-ESC-curl}
+      SHUNT_ESC_TIMEOUT: ${SHUNT_ESC_TIMEOUT:-180}
+    volumes:
+      - shunt-state:/state
+    entrypoint:
+      - python
+      - /shunt-harness/assert_escalation.py
+
+volumes:
+  shunt-state:

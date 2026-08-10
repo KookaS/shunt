@@ -1,0 +1,79 @@
+# anthropic-python → Shunt ESCALATION scenario, on the Anthropic wire
+# (http://shunt:8080, NO /v1). Same shape as ../curl/compose.escalation.yaml — read
+# that file for the full rationale of why each prompt needs its own User-Agent.
+#
+# Running this leg on the Anthropic wire as well as the OpenAI one is the point: the
+# escalation decision is made in the router, above the wire adapter, and a required leg
+# on each wire is what keeps that true.
+#
+# The verdict is NOT this service's exit code alone: run `assert-escalation` after it.
+include:
+  - ../compose.base.yaml
+
+services:
+  anthropic-python-escalation:
+    image: python:3.12-slim
+    depends_on:
+      shunt:
+        condition: service_healthy
+    environment:
+      SHUNT_ESC_MARKER: ${SHUNT_ESC_MARKER:-SHUNT-ESC-anthropic-python}
+      SHUNT_SESSION_INACTIVITY_TIMEOUT: ${SHUNT_SESSION_INACTIVITY_TIMEOUT:-1}
+      SHUNT_ESC_PROMPTS: ${SHUNT_ESC_PROMPTS:-4}
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        set -eu
+        pip install --quiet --disable-pip-version-check "anthropic>=0.40"
+        python - <<'PY'
+        import json, os, time, urllib.request
+        from anthropic import Anthropic
+
+        BASE = "http://shunt:8080"
+        MARK = os.environ["SHUNT_ESC_MARKER"]
+        IDLE = int(os.environ["SHUNT_SESSION_INACTIVITY_TIMEOUT"])
+        N = int(os.environ["SHUNT_ESC_PROMPTS"])
+
+
+        def verified() -> int:
+            with urllib.request.urlopen(f"{BASE}/admin/loop-health") as resp:
+                return int(json.load(resp)["label_coverage"]["verified_labeled"])
+
+
+        def wait_verified(target: int, timeout: float = 300.0) -> None:
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                seen = verified()
+                if seen >= target:
+                    print(f"verified_labeled={seen} (>= {target})", flush=True)
+                    return
+                time.sleep(1)
+            raise SystemExit(f"timed out waiting for verified_labeled >= {target}")
+
+
+        def send(i: int) -> None:
+            client = Anthropic(
+                base_url=BASE,
+                api_key="ignored",
+                default_headers={"User-Agent": f"shunt-escalation-anthropic-python/{i}"},
+            )
+            raw = client.messages.with_raw_response.create(
+                model="auto",
+                max_tokens=64,
+                messages=[{"role": "user", "content": f"{MARK} prompt {i} — the test suite is failing, fix it"}],
+            )
+            print(f"prompt {i} -> {raw.headers.get('x-shunt-decision')}", flush=True)
+
+
+        for i in range(1, N + 1):
+            sent = time.monotonic()
+            send(i)
+            time.sleep(max(0.0, IDLE + 1 - (time.monotonic() - sent)))
+            if i >= 2:
+                wait_verified(i - 1)
+
+        print(f"OK: anthropic-python drove {N} prompts across {N} sessions — "
+              "run assert-escalation for the verdict")
+        PY

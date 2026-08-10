@@ -18,6 +18,10 @@ class PriceCascade(Strategy):
         # so the reported cost is the whole cascade, not just the returned model's cell.
         self.cascade_total_cost: float = 0.0
         self.cascade_tried_models: list[str] = []
+        # Per-attempt (model, cost), in billing order — what the cache-aware cost model reads.
+        # A cascade re-serving one model on consecutive attempts is exactly where the discount
+        # lands, and the collapsed `cascade_total_cost` cannot express that adjacency.
+        self.cascade_attempts: list[tuple[str, float]] = []
         # False when any tried cell is unmeasured — the true cost/outcome is unknown, so
         # this decision is a coverage gap, not a real fail@$0.
         self.cascade_scorable: bool = True
@@ -28,6 +32,7 @@ class PriceCascade(Strategy):
 
     def select(self, task_id: str, task_meta: dict, matrix: dict) -> str:
         self.cascade_tried_models = []
+        self.cascade_attempts = []
         self.cascade_total_cost = 0.0
         self.cascade_scorable = True
 
@@ -49,7 +54,9 @@ class PriceCascade(Strategy):
             outcome = task_results.get(model, {})
             if not outcome:
                 self.cascade_scorable = False
-            self.cascade_total_cost += outcome.get("cost", 0.0)
+            attempt_cost = float(outcome.get("cost", 0.0))
+            self.cascade_attempts.append((model, attempt_cost))
+            self.cascade_total_cost += attempt_cost
             if outcome.get("pass", False):
                 return model
         return order[-1]

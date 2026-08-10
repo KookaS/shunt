@@ -11,6 +11,26 @@ import json
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+# Name of the env var holding the directory to append one JSON line per POSTed body to.
+# When it is unset, which is always the case in-process, nothing is written at all.
+# Recording exists for the Docker scenarios, which read the log back to answer which
+# tools announce their working directory to the model.
+_RECORD_DIR_ENV = "FAKE_UPSTREAM_RECORD_DIR"
+
+
+def _record(path: str, payload: dict[str, object]) -> None:
+    """Append ``{path, body}`` to ``$FAKE_UPSTREAM_RECORD_DIR/requests.jsonl``, or do nothing."""
+    record_dir = os.environ.get(_RECORD_DIR_ENV)
+    if not record_dir:
+        return
+    line = json.dumps({"path": path, "body": payload}, default=str)
+    with contextlib.suppress(OSError):
+        target = Path(record_dir)
+        target.mkdir(parents=True, exist_ok=True)
+        with (target / "requests.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
 
 
 def _completion_body(model: str) -> str:
@@ -73,6 +93,7 @@ def _handler_for(received: list[str]) -> type[BaseHTTPRequestHandler]:
                 payload: dict[str, object] = {}
                 with contextlib.suppress(json.JSONDecodeError):
                     payload = json.loads(raw)
+                _record(self.path, payload)
                 model = str(payload.get("model", "fake/cheap"))
                 if payload.get("stream"):
                     self._send_sse(_completion_chunks(model))

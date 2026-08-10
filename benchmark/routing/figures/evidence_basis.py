@@ -162,7 +162,11 @@ def _draw_bands(ax: Axes, rows: list[dict]) -> None:
     )
     ax.grid(axis="x", color="#eeeeee", lw=0.6)
     ax.set_axisbelow(True)
-    plot_frame.panel_label(ax, "C · per capability band — where the fill concentrates")
+    # Kept SHORT on purpose. A panel label is laid out before constrained layout knows how
+    # wide this panel will be, so it cannot be shrunk to fit: when an eighth strategy row
+    # widened panel A's category labels, the two narrower panels lost ~20px each and the
+    # old 51-character label ran off the canvas, failing the strict layout audit.
+    plot_frame.panel_label(ax, "C · per band — where the fill concentrates")
 
 
 def _annotations(splits: dict[str, dict[str, float]], bands: list[dict]) -> Annotations:

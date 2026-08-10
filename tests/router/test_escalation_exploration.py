@@ -113,7 +113,7 @@ def test_unflagged_steps_log_no_propensity() -> None:
 
 def test_disabled_and_collapse_suppressed_paths_log_no_propensity() -> None:
     stream = ExplorationStream.from_seed(1)
-    disabled = EscalationConfig(exploration_epsilon=0.5)
+    disabled = EscalationConfig(enabled=False, exploration_epsilon=0.5)
     assert decide_escalation(_flagged(), 5, _ctx(), disabled, stream=stream).exploration is None
     alarmed = EscalationContext(
         current_rank_index=0,

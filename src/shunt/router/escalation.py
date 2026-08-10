@@ -1,7 +1,8 @@
 """Auto-escalation: a repeated verified failure raises one rung at the next boundary."""
 
-# Pure decision logic, no I/O. The engine wires it only when router.yaml enables it (off by
-# default). Boundary-only by construction: a directive applies to the NEXT decision, never
+# Pure decision logic, no I/O. The engine wires it only when router.yaml enables it (ships
+# ON by default; a boot warning covers the enabled-without-a-work_dir state). Boundary-only by
+# construction: a directive applies to the NEXT decision, never
 # mid-cached-turn (cache-safety spine). A "verified same failure seen N times" signal — same
 # normalized failing-check id — steps effort first (cache-safe), then a model rank.
 #
@@ -24,6 +25,13 @@ from shunt.proxy.redaction import redact_secrets
 # against this same tuple, so the two entry points cannot drift apart.
 ESCALATION_LADDERS: Final[tuple[str, ...]] = ("effort_then_rank", "rank_only")
 
+# Fallback for `FailureEvent.exit_code` when a caller reports none. The field is decision-inert
+# (carried and serialized, never read by a routing/escalation decision), so this value only has
+# to be stable across the live and offline paths. It matches the Claude-Code Stop-hook contract
+# (a blocking gate reports exit 2); the off-wire verifier instead reports the SUBPROCESS code
+# (pytest/jest/go=1, cargo=101) and the gate keys on `FailureEvent.blocking`, never on this.
+DEFAULT_FAILURE_EXIT_CODE: Final[int] = 2
+
 
 class EscalationAction(StrEnum):
     """What the next-boundary decision should do."""
@@ -35,9 +43,18 @@ class EscalationAction(StrEnum):
 
 @dataclass(frozen=True)
 class EscalationConfig:
-    """Escalation knobs (mirror ``router.yaml``). ``enabled`` defaults False (kill-gate)."""
+    """Escalation knobs (mirror ``router.yaml``). ``enabled`` defaults True (ships ON)."""
 
-    enabled: bool = False
+    enabled: bool = True
+    # Ships ON by owner choice (2026-08-08), with the honest caveats carried in docs/escalation.md
+    # and configuration.md: the recurrence trigger is a NULL DETECTOR at the live cadence (the
+    # as-shipped counter fires on 727/727 offline runs at the base rate; its only real edge is the
+    # eval-only edit-gated family production cannot run), so no measurement yet shows the shipped
+    # counter to separate outcomes; the ladder's VALUE is real but observational (session-cadence
+    # 2.51x lift). The ε-greedy + logged-propensity path is how the value becomes identified. And
+    # escalation is INERT without a capture.work_dir (no verified-failure signal) — a boot warning
+    # says so; it never fires silently into an unconfigured state.
+    #
     # 2, not 1: intermediate fail-then-fix is normal, so a single verified failure is not
     # escalation-worthy (escalating on the first verified failure is failure-biased).
     #
@@ -51,21 +68,19 @@ class EscalationConfig:
     # the report belongs to the `edit_gated` family, which skips failures before the agent's
     # first edit — a rule this module does not implement, `EscalationPolicy` is `extra="forbid"`
     # with no counting knob, and `benchmark/escalation/deployability.py` classifies as
-    # offline-only. It is not evidence about this default.) `enabled` defaults False for the
-    # same reason: nothing has yet measured this counter to be worth switching on.
+    # offline-only. It is not evidence about this default.)
     # See docs/escalation.md and benchmark/escalation/reports/metrics.json (`policy_sweep.png`).
     escalate_after_n: int = 2
     # A failure that does not RECUR within this many decisions is retired from the counter —
     # this is the user's "+10 calls elapsed" idea kept as a staleness bound, not a trigger.
     stale_window: int = 10
-    # FUTURE hook-stream path only (not the off-wire path). A Claude-Code Stop hook reports a
-    # blocking gate with exit 2; a lint-only red is exit 1. The off-wire verifier instead
-    # reports the SUBPROCESS code (pytest/jest/go=1, cargo=101) and sets FailureEvent.blocking
-    # from result.outcome/is_infra_failure, so counts_as_failure keys on `blocking`, not this.
-    blocking_exit_code: int = 2
     # effort_then_rank: raise the current model's reasoning effort first (cache-safe), step a
     # model rank only on recurrence at the higher effort. "rank_only" skips the effort rung.
     ladder: str = "effort_then_rank"
+    # How many of the CHEAPEST ranks the ladder walks one at a time before jumping straight to
+    # the top rank. 0 disables the jump (every rank is a rung — the behaviour that predates this
+    # knob). See `RouterEngine._next_rung_rank` for the shape and why 3 is the default.
+    rank_shortlist: int = 3
     # SMART-style epsilon-greedy exploration at FLAGGED checkpoints only. 0.0 = fully
     # deterministic (today's behaviour, bit for bit). Above 0 the policy arm is taken with
     # probability 1-epsilon and the HOLD arm with epsilon, and the realized propensity is
@@ -87,6 +102,8 @@ class EscalationConfig:
             raise ValueError(f"escalate_after_n must be > 0, got {self.escalate_after_n}")
         if self.stale_window <= 0:
             raise ValueError(f"stale_window must be > 0, got {self.stale_window}")
+        if self.rank_shortlist < 0:
+            raise ValueError(f"rank_shortlist must be >= 0, got {self.rank_shortlist}")
         if not 0.0 <= self.exploration_epsilon < 1.0:
             raise ValueError(
                 f"exploration_epsilon must be in [0.0, 1.0), got {self.exploration_epsilon}"
@@ -94,6 +111,29 @@ class EscalationConfig:
         if self.ladder not in ESCALATION_LADDERS:
             joined = ", ".join(ESCALATION_LADDERS)
             raise ValueError(f"unknown ladder {self.ladder!r}; allowed: {joined}")
+
+
+def next_rung_rank(from_rank: int, max_rank_index: int, rank_shortlist: int) -> int:
+    """The rank the ladder aims at from *from_rank*: one up inside the shortlist, else the top.
+
+    Shortlist shape: walk the ``rank_shortlist`` cheapest ranks one at a time, then jump.
+    """
+    # THE RULE LIVES HERE, ONCE, because two callers apply it and they must not drift: the live
+    # `RouterEngine._next_rung_rank` and the offline `SessionCascadeStrategy` replay that measures
+    # it. The replay was written before the shortlist existed and walked every rank, so it modelled
+    # a ladder production had stopped running — the exact drift a second copy of this arithmetic
+    # produces. Pure ints, no pool and no config object, so neither side can specialise it.
+    #
+    # WHY A SHORTLIST AND NOT EVERY RUNG. Rank order IS price order, so a pool of N models made the
+    # ladder buy all N-1 intermediate models on the way to a frontier the task was going to need
+    # anyway. Each intermediate rung is paid for AND is only left after another `escalate_after_n`
+    # verified recurrences, so it costs sessions as well as dollars. The shape is the offline
+    # `Price-Cascade`'s (`by_price[:3] + [frontier]`) because that is the shape whose cost was
+    # actually measured on this corpus; a live-only shape would be an unmeasured guess.
+    if rank_shortlist <= 0 or from_rank + 1 < rank_shortlist:
+        return from_rank + 1
+    # `max` keeps the target strictly above `from_rank` in a pool smaller than the shortlist.
+    return max(from_rank + 1, max_rank_index)
 
 
 @dataclass(frozen=True)
@@ -115,9 +155,10 @@ class FailureEvent:
 
     def persistable(self) -> dict[str, object]:
         """The projection that may be stored — `dedup_key` scrubbed like a committable id."""
-        # `dedup_key` IS a failing-check id (a parametrized test id can embed a secret) and the
-        # escalation snapshot lands in PLAINTEXT sqlite `router_state`, so it is redacted here.
-        # Redaction is deterministic, so a recurring key still groups after a restart.
+        # Belt-and-suspenders: `failure_event_from_outcome` already redacts at construction, so
+        # the in-memory log and this snapshot hold the SAME (redacted) string and a recurring key
+        # still groups after a restart. This pass stays so a HAND-BUILT event (tests, a future
+        # caller) can never reach the PLAINTEXT sqlite `router_state` raw.
         out: dict[str, object] = asdict(self)
         out["dedup_key"] = redact_secrets(self.dedup_key)
         return out
@@ -211,10 +252,17 @@ def failure_event_from_outcome(
     # The `blocking` rule is derived via the shared predicate so the two paths cannot drift and the
     # offline sweep optimizes the policy production actually runs. `exit_code` is decision-inert
     # (carried, never read); its default lives HERE so live and offline inherit the same fallback.
+    # `dedup_key` is redacted HERE — the single construction seam — so the IN-MEMORY failure log
+    # and the PLAINTEXT sqlite snapshot hold the SAME string. Without this the snapshot redacted
+    # the key while fresh captures kept it raw, so a restart after a secret-bearing failing-check
+    # id (a parametrized test id can embed a credential) never grouped the two halves and
+    # recurrence silently stopped. Redaction is deterministic, so the redacted key is still a
+    # stable group key — it is "the same failure", just without the secret. `persistable()` keeps
+    # its own (now idempotent) pass as belt-and-suspenders for a hand-built event.
     return FailureEvent(
         decision_index=decision_index,
-        dedup_key=failing_check_id,
-        exit_code=exit_code if exit_code is not None else EscalationConfig().blocking_exit_code,
+        dedup_key=redact_secrets(failing_check_id),
+        exit_code=exit_code if exit_code is not None else DEFAULT_FAILURE_EXIT_CODE,
         success=success,
         confirmed=confirmed,
         blocking=derive_blocking(success, is_infra_failure),
@@ -224,9 +272,9 @@ def failure_event_from_outcome(
 def counts_as_failure(event: FailureEvent, config: EscalationConfig) -> bool:
     """A verified failure counts only if blocking (a capability failure) AND rerun-confirmed."""
     # `blocking` — not the raw exit code — is the gate: the off-wire verifier reports the
-    # subprocess code (1/101), so an `exit_code == blocking_exit_code` test dropped every real
-    # failure. Non-blocking (lint/infra) and unconfirmed (flake) drop out; success never
-    # counts. `config` is retained for the future hook-stream path (see blocking_exit_code).
+    # subprocess code (1/101), so keying on a fixed "blocking" exit code dropped every real
+    # failure. Non-blocking (lint/infra) and unconfirmed (flake) drop out; success never counts.
+    # `config` is unused; it stays in the signature so callers pass the policy uniformly.
     del config
     if event.success:
         return False
@@ -270,14 +318,12 @@ def _ladder_action(ctx: EscalationContext, config: EscalationConfig) -> Escalati
     """Pick the next rung: effort first (cache-safe) then rank, honoring the ceiling."""
     at_rank_ceiling = ctx.current_rank_index >= ctx.max_rank_index
     at_effort_ceiling = ctx.current_effort_index >= ctx.max_effort_index
+    # The count is part of the provenance: a hardcoded suffix reports "x2" under any threshold.
+    reason = f"same_verified_failure_x{config.escalate_after_n}"
     if config.ladder == "effort_then_rank" and not at_effort_ceiling:
-        return EscalationDirective(
-            EscalationAction.RAISE_EFFORT, "same_verified_failure_x2", new_label_window=True
-        )
+        return EscalationDirective(EscalationAction.RAISE_EFFORT, reason, new_label_window=True)
     if not at_rank_ceiling:
-        return EscalationDirective(
-            EscalationAction.RAISE_RANK, "same_verified_failure_x2", new_label_window=True
-        )
+        return EscalationDirective(EscalationAction.RAISE_RANK, reason, new_label_window=True)
     # Nothing higher on either axis — hold, don't thrash.
     return EscalationDirective(EscalationAction.HOLD, "escalation_ceiling")
 
@@ -383,17 +429,32 @@ class _LadderState:
 class EscalationRunner:
     """Pure, engine-state-free driver of the escalation lifecycle over a stream of outcomes."""
 
-    # Owns the failure log AND an abstract ladder position. The log lifecycle and the EFFORT rung
-    # evolve exactly as the live router does: append confirmed failures, and on a verified success
-    # clear the log AND reset effort to the default rung (mirroring the engine's effort-arm pop);
-    # on any non-HOLD directive retire the acted-on window and step effort up to its ceiling. The
-    # live engine builds each per-decision directive through `decide` (seeding its own
-    # concrete effort/rank position) and applies it concretely; the offline replay drives a whole
-    # trajectory through `step`, letting `commit` advance the ladder. The RANK advance in `commit`
-    # (effort-ceiling -> raise rank, reset effort) is a persistent monotone counter used ONLY by the
-    # trajectory replay's isolation model — the engine has no persistent rank ladder (its rank is
-    # re-seeded from the base routing pick each decision), so this is a self-contained upper bound,
-    # not a live-engine reproduction. Log-lifecycle and effort parity are the guaranteed part.
+    # Owns the failure log AND an abstract ladder position, and BOTH rungs now mirror the live
+    # router: append confirmed failures; on a verified success clear the log, reset effort to the
+    # bottom rung AND drop rank back to the base position (mirroring the engine popping the task's
+    # effort arm and its rank floor, which returns the task to base routing); on any non-HOLD
+    # directive retire the acted-on window and step effort, then rank, up to their ceilings. The
+    # live engine builds each per-decision directive through `decide` (seeding its own concrete
+    # effort/rank position) and applies it concretely; the offline replay drives a whole trajectory
+    # through `step`, letting `commit` advance the ladder.
+    #
+    # THE RANK RUNG IS ENGINE-FAITHFUL, under three geometry conditions. The engine persists the
+    # climbed rank per task (its capability-rank floor) and re-serves it on the next decision, so
+    # this abstract monotone counter reproduces it rather than bounding it. What the counter cannot
+    # express is a HETEROGENEOUS pool, because it carries ONE effort ceiling and ONE bottom rung for
+    # every rank: parity therefore requires (i) every model to expose the same number of reasoning
+    # arms — a higher-rank model with fewer arms hits its effort ceiling sooner than the counter
+    # does — and (ii) each model's default arm to be the bottom of its own ladder, since a success
+    # or a rank step resets the abstract effort index to 0 while the engine resets to that default.
+    # The third is the rank SHORTLIST: this counter advances rank by exactly +1, whereas the engine
+    # walks only the `rank_shortlist` cheapest ranks one at a time and then jumps to the top rank.
+    # Parity therefore also requires (iii) a pool of at most `rank_shortlist + 1` ranked models (or
+    # `rank_shortlist = 0`), where the two shapes coincide; above that the engine reaches its rank
+    # ceiling in fewer rungs than the counter and the streams part there. That is a modelling gap in
+    # this counter, not a live bug — the engine's jump is the whole point of the shortlist.
+    # `benchmark/escalation/deployability.py` is where a replay's context is checked against the
+    # production fields, and `tests/escalation/test_parity.py` pins both the parity and the
+    # heterogeneous-ladder boundary against the real engine.
 
     def __init__(
         self,
@@ -407,6 +468,10 @@ class EscalationRunner:
         self._max_effort_index = max_effort_index
         self._max_rank_index = max_rank_index
         self._log: list[FailureEvent] = list(log) if log else []
+        # The rank a verified success falls back to: the caller's starting position IS the base
+        # routing pick in the isolation model, which is what the engine returns to when it pops
+        # the task's rank floor. Resetting to a hardcoded 0 would be that value only by accident.
+        self._base_rank_index = rank_index
         self._state = _LadderState(effort_index, rank_index)
 
     @property
@@ -415,15 +480,16 @@ class EscalationRunner:
         return self._log
 
     def observe(self, *, success: bool, event: FailureEvent | None) -> None:
-        """Clear the window AND reset effort on a verified success; else append the failure."""
+        """Clear the window AND reset the whole ladder on a verified success; else append."""
         if success:
-            # Mirror the live engine's success reset precisely: it pops the task's effort arm
-            # (effort → the model's default rung) but does NOT persist a tier ladder (it re-seeds
-            # tier from the base routing pick each decision), so a verified pass resets effort to 0
-            # and leaves the abstract tier counter untouched. Without the effort reset a later
-            # same-key failure run would jump straight to a rank while the engine climbs effort.
+            # Mirror the live engine's success reset precisely: a verified pass pops BOTH the
+            # task's effort arm (→ the model's default rung) and its rank floor (→ base routing),
+            # because the task is no longer stuck and keeping either would pin it to the expensive
+            # rung on the strength of an old failure. Resetting only effort left this counter a
+            # full rank-cycle ahead of the engine, so it saturated its ceiling early and emitted
+            # HOLD where the engine still had rungs to climb.
             self._log = []
-            self._state = _LadderState(0, self._state.rank_index)
+            self._state = _LadderState(0, self._base_rank_index)
         elif event is not None:
             self._log.append(event)
 
@@ -487,4 +553,5 @@ __all__ = [
     "decide_escalation",
     "derive_blocking",
     "failure_event_from_outcome",
+    "next_rung_rank",
 ]

@@ -7,8 +7,9 @@ description: What runs on Shunt's live request path today (router is called, col
 
 **Status: pre-alpha.** This page describes the live request path — the router calls
 `engine.decide()` on the first turn and chooses a model. Outcomes are recorded
-automatically at session close via off-wire test execution (when configured with a
-`work_dir`), or manually via `shunt flag`. The learning loop is integrated.
+automatically at session close via off-wire test execution (in a resolved `work_dir` —
+by default Shunt's own launch repo), or manually via `shunt flag`. The learning loop is
+integrated.
 
 ## What the live proxy does today
 
@@ -18,8 +19,9 @@ surfaces — OpenAI-compatible `/v1/chat/completions` and Anthropic `/v1/message
 by the router on the first turn. The router calls `engine.decide()` (embedding →
 kNN over verified outcomes, or cold-start to a cheap default). At session close
 (inactivity timeout), outcomes are recorded automatically by re-running the repo's
-tests off the wire (when configured with `SHUNT_WORK_DIR` or `capture.work_dir`),
-or manually via `shunt flag <session_id> good|bad`. The engine then learns from
+tests off the wire — the repo resolved from `capture.work_dirs`, `SHUNT_WORK_DIR` /
+`--work-dir` / `capture.work_dir`, or the validated launch directory — or manually via
+`shunt flag <session_id> good|bad`. The engine then learns from
 verified outcomes, updating the `ConservativeGate` and exploration budget for
 future decisions. That exploration state (the budget's cost cap and the gate's
 banked slack) is persisted to the SQLite store, so a restart resumes it rather
@@ -56,11 +58,17 @@ learns from them for subsequent sessions.
 
 Which algorithm the router runs is one value, `router.strategy`, read from the
 `router.yaml` packaged at `src/shunt/config/router.yaml`. Three strategies are
-live-eligible: `knn` (the default), `always_cheap`, and `always_frontier`. The
-benchmark-only strategies — `oracle`, `random`, and `knn_cascade` — are
-rejected at boot. `knn_cascade` is excluded on purpose: a real
-quality cascade has to verify mid-session and escalate, and that is not one
-cache-safe decision per session. Override the file by putting your own in
+live-eligible: `knn` (the default), `always_cheap`, and `always_frontier`. That
+list is `LIVE_STRATEGIES` in `src/shunt/router/policy.py`, and it is the whole of
+it — every other strategy the benchmark scores (`oracle`, `oracle_reward`,
+`random`, `knn_cascade`, `price_cascade`, `tier_classifier`) is rejected at boot.
+The reasons differ: `oracle` and `oracle_reward` read the task's own verified
+outcome and `random` is not a router at all; the two cascades are excluded on
+purpose, because a real quality cascade has to verify mid-session and escalate,
+and that is not one cache-safe decision per session; `tier_classifier` orders
+models by a capability rank fitted offline from the outcome matrix, which the live
+path cannot compute. Each blocker and its path to live is recorded in
+`benchmark/routing/strategy_class.py`. Override the file by putting your own in
 `$SHUNT_CONFIG_DIR`, or override single values with the `shunt start` flags — see
 [configuration](configuration.md#tune-the-router).
 
@@ -68,7 +76,7 @@ The same file configures an exploration layer (Thompson sampling over the kNN
 neighbourhood, bounded by a rolling exploration-cost budget), and it ships
 enabled. Exploration fires once the router has verified outcomes to be uncertain
 about. Verified outcomes accumulate automatically at session close (via off-wire
-test execution when configured with a `work_dir`), or manually via `shunt flag`.
+test execution in the resolved `work_dir`), or manually via `shunt flag`.
 The knobs are live; exploration behaviour adapts as verified outcomes accumulate.
 
 ## Modules
@@ -92,7 +100,7 @@ session therefore becomes searchable when its outcome is recorded, not when it e
 The router is called on the first turn to decide the session model, validated
 **offline** on the SWE-bench Verified suite (see [benchmark.md](benchmark.md)). The
 learning loop — automatic outcome capture at session close — is now wired. Outcomes
-accumulate via off-wire test re-execution (when configured with a `work_dir`), and
+accumulate via off-wire test re-execution in the resolved `work_dir`, and
 the router adapts over time. Cold-start sessions default to the cheap model until
 verified outcomes build a neighbourhood for kNN to search.
 

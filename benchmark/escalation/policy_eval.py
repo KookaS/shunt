@@ -35,6 +35,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 import statistics
 from dataclasses import dataclass, field
@@ -52,8 +53,10 @@ if TYPE_CHECKING:
 # The smallest arm a rate may be READ off. It changes no statistic — `p_fail_given_quiet` still
 # reports 0/1 = 0.000 for a one-row arm, because that IS the arithmetic — but a figure renders an
 # arm below this as an explicit "undefined (n=k)" placeholder rather than a bar. The as-shipped
-# cell at the shipped knobs fires on 726 of 727 runs, so its quiet arm is a single trajectory and
-# the committed figure drew its 0/1 as a measured "escalating never predicts failure". Corrupting
+# cell at the shipped knobs fires on 727 of 727 runs, so its quiet arm is EMPTY (n=0) and the
+# committed figure draws it as an "undefined (n=0)" placeholder — never a measured rate. (The
+# n=3 cell's one-row quiet arm used to read 0/1 as a measured "escalating never predicts
+# failure"; the floor exists for exactly that arm.) Corrupting
 # the statistic to fix the figure would be the wrong layer; the floor lives where the reading is.
 MIN_ARM: Final[int] = 10
 # Quantile grid for the fire-position ECDF. An 11-point summary, never the per-run array: see the
@@ -204,11 +207,11 @@ class PolicyCell:
             "n_escalated": self.n_escalated,
             "confusion": {"tp": self.tp, "fp": self.fp, "fn": self.fn, "tn": self.tn},
             "precision": _rounded(self.precision),
-            "precision_ci95": [round(v, 4) for v in self.precision_ci],
+            "precision_ci95": rounded_interval(self.precision_ci),
             "recall": round(self.recall, 4),
             "p_fail_given_fired": _rounded(self.precision),
             "p_fail_given_not_fired": _rounded(self.p_fail_given_quiet),
-            "p_fail_given_not_fired_ci95": [round(v, 4) for v in self.quiet_ci],
+            "p_fail_given_not_fired_ci95": rounded_interval(self.quiet_ci),
             "base_failure_rate": round(self.base_failure_rate, 4),
             "lift": _rounded(self.lift),
             "null_auroc": self.null_auroc.to_dict(),
@@ -234,6 +237,17 @@ class PolicyCell:
 def _rounded(value: float | None) -> float | None:
     """Round for the JSON report, keeping an undefined quantity null rather than coercing it."""
     return None if value is None else round(value, 4)
+
+
+def rounded_interval(interval: tuple[float, float]) -> list[float] | None:
+    """Round a 95% interval for the JSON report; a non-finite one (a never-existing arm) is null."""
+    # A cell that never fires (or fires on everything) has no draws on one arm, so its interval is
+    # (nan, nan) — the honest reading in memory. JSON has no NaN literal (RFC 8259), so it must
+    # serialize as null here, matching `precision: null` on the same cell rather than contradicting
+    # it with a `[NaN, NaN]` that strict JSON parsers reject outright.
+    if any(not math.isfinite(v) for v in interval):
+        return None
+    return [round(interval[0], 4), round(interval[1], 4)]
 
 
 @dataclass(frozen=True)

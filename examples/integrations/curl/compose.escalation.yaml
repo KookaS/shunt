@@ -1,0 +1,95 @@
+# curl → Shunt ESCALATION scenario. The wiring leg proves a request reaches Shunt;
+# this one proves Shunt *decides differently* after verified failures.
+#
+# The shape of the run, and why each step is what it is:
+#
+#   1. Four prompts, each with its OWN User-Agent. This is the fix for the defect that
+#      made the hand-driven recipe lie. A session is keyed on sha256(source_ip +
+#      User-Agent), and the request path calls find_or_create BEFORE cleanup_expired —
+#      so a repeat prompt from the same identity REUSES the open session and refreshes
+#      its idle deadline, meaning it never expires under traffic. Four curls then yield
+#      one decision, not four, and the run reports a false negative. A distinct
+#      User-Agent per prompt makes every prompt a new session, deterministically.
+#   2. Prompt N is what sweeps session N-1 shut (cleanup_expired runs on the request
+#      path), which is what fires the off-wire verifier against the red /repo.
+#   3. So: p1 opens S1 · p2 closes S1 → failure 1 · p3 closes S2 → failure 2 ·
+#      p4 is decided with two same-key verified failures in the log → auto_escalation.
+#   4. Between prompts we POLL /admin/loop-health for verified_labeled rather than
+#      sleeping on a guess. The one genuine wait is the inactivity deadline itself —
+#      a configured duration, read from the same env var the router reads.
+#
+# The verdict is NOT this service's grep of a header: run `assert-escalation` after it.
+include:
+  - ../compose.base.yaml
+
+services:
+  curl-escalation:
+    image: curlimages/curl:8.11.1
+    depends_on:
+      shunt:
+        condition: service_healthy
+    environment:
+      SHUNT_ESC_MARKER: ${SHUNT_ESC_MARKER:-SHUNT-ESC-curl}
+      SHUNT_SESSION_INACTIVITY_TIMEOUT: ${SHUNT_SESSION_INACTIVITY_TIMEOUT:-1}
+      SHUNT_ESC_PROMPTS: ${SHUNT_ESC_PROMPTS:-4}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        BASE=http://shunt:8080
+        MARK="$$SHUNT_ESC_MARKER"
+        IDLE="$$SHUNT_SESSION_INACTIVITY_TIMEOUT"
+        N="$$SHUNT_ESC_PROMPTS"
+
+        send() {
+          curl -sf -o /tmp/body.json -D /tmp/head.txt "$$BASE/v1/chat/completions" \
+            -A "shunt-escalation-curl/$$1" \
+            -H "Authorization: Bearer ignored" \
+            -H "Content-Type: application/json" \
+            -d "{\"model\":\"auto\",\"messages\":[{\"role\":\"user\",\"content\":\"$$MARK prompt $$1 — the test suite is failing, fix it\"}]}"
+          date +%s > /tmp/last_send
+          echo "prompt $$1 -> $$(grep -i '^x-shunt-decision:' /tmp/head.txt | tr -d '\r')"
+        }
+
+        # Wait out the session's idle deadline. A duration, not a race: an inactivity
+        # timeout cannot be polled shorter than itself.
+        ensure_idle() {
+          need=$$((IDLE + 1))
+          while [ "$$(( $$(date +%s) - $$(cat /tmp/last_send) ))" -lt "$$need" ]; do sleep 1; done
+        }
+
+        verified() {
+          curl -sf "$$BASE/admin/loop-health" \
+            | grep -o '"verified_labeled":[0-9]*' | head -n1 | cut -d: -f2
+        }
+
+        # Bounded poll on OBSERVED state — the pattern tests/e2e/helpers.py uses.
+        # `tries`, deliberately NOT `i`: POSIX sh has no function-local scope, so an
+        # inner counter named `i` silently rewinds the caller's loop variable and the
+        # driver re-sends prompt 1 forever, never reaching the escalating turn.
+        wait_verified() {
+          tries=0
+          while [ "$$tries" -lt 300 ]; do
+            v="$$(verified || echo 0)"
+            if [ -n "$$v" ] && [ "$$v" -ge "$$1" ]; then
+              echo "verified_labeled=$$v (>= $$1)"; return 0
+            fi
+            tries=$$((tries + 1)); sleep 1
+          done
+          echo "timed out waiting for verified_labeled >= $$1 (last=$$v)" >&2
+          return 1
+        }
+
+        # `for` over a pre-expanded list, not a hand-incremented counter: the loop
+        # variable is re-assigned from the word list every iteration, so no callee can
+        # rewind it. The bound is structural, not a matter of arithmetic going right.
+        for i in $$(seq 1 "$$N"); do
+          send "$$i"
+          ensure_idle
+          # Prompt K closed session K-1, so K-1 verified outcomes must have landed
+          # before the next decision is made. `if`, not `&&`: under `set -e` a false
+          # `&&` test is itself a non-zero status and would abort the loop.
+          if [ "$$i" -ge 2 ]; then wait_verified "$$((i - 1))"; fi
+        done
+        echo "OK: curl drove $$N prompts across $$N sessions — run assert-escalation for the verdict"

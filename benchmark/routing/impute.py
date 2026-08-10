@@ -141,15 +141,28 @@ class _CostModel:
         return _COST_FLOOR
 
 
+def is_zero_work(cell: dict) -> bool:
+    """True iff the cell POSITIVELY records no work: calls and cost both present, both 0."""
+    # Distinct from CENSORED. A censored cell ran, burned tokens and cost money, and only its
+    # pass/fail is unknown; a zero-work cell never executed — the row is an artifact of an
+    # aborted collection, not a measurement. Only the latter is safe to re-collect.
+    #
+    # Both keys MUST be present. A cell that simply omits `calls`/`real_cost` proves nothing
+    # about whether work happened, and defaulting the absent field to 0 would read "I have no
+    # record" as "it never ran" — the reasoning error that turns a missing field into a
+    # fabricated finding. Unknown is not zero, so an incomplete cell is NOT zero-work.
+    if "calls" not in cell or ("real_cost" not in cell and "cost" not in cell):
+        return False
+    return int(cell.get("calls", 0) or 0) == 0 and _real_cost(cell) == 0.0
+
+
 def is_non_observation(cell: dict) -> bool:
     """True iff a cell is a NON-observation (censored / zero-work) — not a real $0 measurement."""
     # A CENSORED cell (step/wall/abandon limit — subsumes the old timeout_flag check), or a cell
     # that made zero priced calls AND recorded $0, is a non-event: no model attempted AND completed
     # observed work. Folding its cost into a pass/fail cost median mis-attributes spend whose true
     # outcome is unknown, poisoning the imputed-cost model.
-    if censoring.is_censored(cell):
-        return True
-    return int(cell.get("calls", 0) or 0) == 0 and _real_cost(cell) == 0.0
+    return censoring.is_censored(cell) or is_zero_work(cell)
 
 
 def _build_cost_model(matrix: dict, order: tuple[str, ...]) -> _CostModel:

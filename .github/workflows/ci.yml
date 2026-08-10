@@ -55,6 +55,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # tests/escalation reads the committed trajectory corpus, which is Git-LFS-tracked;
+          # without lfs:true the reads hit 130-byte pointers and the escalation tests fail.
+          lfs: true
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -96,6 +100,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -109,6 +115,12 @@ jobs:
         # package (see pyproject.toml packages.find), so a by-path invocation
         # would fail with ModuleNotFoundError.
         run: uv run python -m benchmark.runner.check_integrity --check-derived
+      - name: Committed figures are not stale
+        # `--check-figures` proves the committed PNGs / metrics.json / figures.json were drawn
+        # from the CURRENT code+config, without regenerating anything (seconds, no spend). A code
+        # change to a strategy, the escalation policy, or the registry leaves the committed figures
+        # stale — this is the gate that makes it unquotable rather than silently wrong.
+        run: uv run python -m benchmark.pipeline --check-figures
 
   # Advisory whole-program hygiene — runs separately so its slower/noisier
   # tools never block the fast pre-commit path. Reports, does not fail the build.

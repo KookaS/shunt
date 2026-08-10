@@ -8,3 +8,10 @@ wire: openai
 service: langchain
 expected_model: qwen3.7-plus
 best_effort: false   # required leg — must pass
+
+# Scenarios this tool runs (workflow matrix = tool x scenario):
+#   wiring     — one request reaches Shunt and a decision rides back (compose.yaml)
+#   escalation — N prompts across session boundaries make Shunt escalate on verified
+#                failures (compose.escalation.yaml + the assert-escalation sidecar)
+#   live       — workflow_dispatch only, real provider, hard spend cap (compose.live.yaml)
+scenarios: [wiring]

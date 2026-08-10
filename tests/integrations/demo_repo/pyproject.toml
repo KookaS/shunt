@@ -1,0 +1,14 @@
+# The escalation scenario's verified-failure source. Shunt's off-wire verifier
+# auto-detects a Python suite from `[tool.pytest.ini_options]`, then runs pytest
+# here at every session close — so this repo IS the harness's ground truth.
+#
+# `addopts = ""`: the verifier runs `python -m pytest` with its own flags, and an
+# inherited addopts (coverage, xdist, strict markers) would move the exit code for
+# reasons unrelated to the check below.
+#
+# `python_files = red_check.py`: the failing check is deliberately NOT named
+# `test_*.py`, so Shunt's own suite (testpaths = ["tests", ...]) never collects it.
+# This line opts it back in for the verifier, whose rootdir is /repo.
+[tool.pytest.ini_options]
+addopts = ""
+python_files = "red_check.py"

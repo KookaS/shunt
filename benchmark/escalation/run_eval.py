@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import logging
+import math
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
@@ -938,6 +939,21 @@ def _save_plots(report: EvalReport, out_dir: Path, metrics_dir: Path | None = No
         # NOT `run`: this figure scores every trajectory, not the stamped subset.
         _draw_session(report.session_cadence, out_dir, _session_run_annotations(report), provenance)
     _write_metrics(report, metrics_dir if metrics_dir is not None else _metrics_dir_for(out_dir))
+    if _committed_home(out_dir):
+        # Record the pipeline's freshness manifest now that the figures ARE drawn, so
+        # `benchmark.pipeline --check-figures` stays green after a canonical `make escalation-eval`
+        # — otherwise this run leaves the escalation job's digest stale in
+        # `benchmark/routing/figure_inputs.json` and the gate that proves the committed figures
+        # current fails until someone re-runs the full pipeline. After, not before: a draw that
+        # failed must leave the manifest stale (red gate), never falsely current.
+        try:
+            from benchmark.pipeline import write_figure_manifest  # noqa: PLC0415
+
+            write_figure_manifest()
+        except Exception:  # noqa: BLE001 — freshness bookkeeping must never fail the eval itself
+            logger.warning(
+                "escalation eval: could not refresh the figure-inputs manifest", exc_info=True
+            )
 
 
 def _draw_decision(
@@ -1092,8 +1108,22 @@ def _write_metrics(report: EvalReport, out_dir: Path) -> None:
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "metrics.json").write_text(
-        json.dumps(_metrics_payload(report), indent=2, sort_keys=True) + "\n"
+        # `_finite` last, as belt-and-suspenders: a cell that never fires legitimately carries a
+        # (nan, nan) interval in memory, and JSON has no NaN literal (RFC 8259) — a strict parser
+        # rejects the file outright, so non-finite floats serialize as null instead.
+        json.dumps(_finite_json(_metrics_payload(report)), indent=2, sort_keys=True) + "\n"
     )
+
+
+def _finite_json(value: object) -> object:
+    """Recursively replace non-finite floats with ``None`` so metrics.json stays RFC 8259-valid."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _finite_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite_json(v) for v in value]
+    return value
 
 
 def _metrics_payload(report: EvalReport) -> dict[str, object]:
@@ -1194,7 +1224,7 @@ def _sweep_scalars(cell: PolicyCell) -> dict[str, object]:
         "stale_window": cell.stale_window,
         "n_escalated": cell.n_escalated,
         "precision": None if cell.precision is None else round(cell.precision, 4),
-        "precision_ci95": [round(v, 4) for v in cell.precision_ci],
+        "precision_ci95": policy_eval.rounded_interval(cell.precision_ci),
         "auroc": round(cell.null_auroc.observed, 4),
         "length_baseline_auroc": (
             None if cell.length_baseline_auroc is None else round(cell.length_baseline_auroc, 4)

@@ -96,6 +96,9 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
         # Cascade metadata (reset per :meth:`select` call)
         self.cascade_total_cost: float = 0.0
         self.cascade_tried_models: list[str] = []
+        # Per-attempt (model, cost), in billing order — see PriceCascade for why the collapsed
+        # total cannot serve the cache-aware cost model.
+        self.cascade_attempts: list[tuple[str, float]] = []
         # False when the cascade path (any tried model, or the frontier fallback)
         # lands on an unmeasured matrix cell — the true cost/outcome is unknown, so
         # this decision is a coverage gap, not a real fail@$0.
@@ -108,6 +111,7 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
     def select(self, task_id: str, task_meta: dict, matrix: dict) -> str:
         if not matrix.get("results"):
             self.cascade_tried_models = []
+            self.cascade_attempts = []
             self.cascade_total_cost = 0.0
             self.cascade_scorable = False
             return cheapest_priced_model(matrix)
@@ -115,6 +119,7 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
             self._build(matrix)
 
         self.cascade_tried_models = []
+        self.cascade_attempts = []
         self.cascade_total_cost = 0.0
         self.cascade_scorable = True
 
@@ -127,7 +132,9 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
             outcome = task_results.get(model, {})
             if not outcome:
                 self.cascade_scorable = False
-            self.cascade_total_cost += outcome.get("cost", 0.0)
+            attempt_cost = float(outcome.get("cost", 0.0))
+            self.cascade_attempts.append((model, attempt_cost))
+            self.cascade_total_cost += attempt_cost
             if outcome.get("pass", False):
                 return model
 
@@ -142,7 +149,9 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
         frontier_outcome = task_results.get(frontier, {})
         if not frontier_outcome:
             self.cascade_scorable = False
-        self.cascade_total_cost += frontier_outcome.get("cost", 0.0)
+        frontier_cost = float(frontier_outcome.get("cost", 0.0))
+        self.cascade_attempts.append((frontier, frontier_cost))
+        self.cascade_total_cost += frontier_cost
         return frontier
 
     # ------------------------------------------------------------------

@@ -114,17 +114,28 @@ def _log_config_disclosure(
         )
 
 
-def _capture_auto_configured(policy: RouterPolicy) -> bool:
+def _build_work_dir_resolver(policy: RouterPolicy, launch_dir: str) -> WorkDirResolver:
+    """The one resolver shared by the engine's decide-side key and the capture side."""
+    return WorkDirResolver.from_config(
+        work_dir=policy.capture.work_dir,
+        work_dirs=policy.capture.work_dirs,
+        launch_dir=launch_dir,
+        trust_launch_dir=policy.capture.trust_launch_dir,
+    )
+
+
+def _capture_auto_configured(resolver: WorkDirResolver) -> bool:
     """True when off-wire capture can auto-record outcomes (a work_dir is resolvable).
 
-    With one set, a verified Tier-2 downshift outcome feeds the in-process ConservativeGate
-    at session close, so the downshift gate can open within this process's lifetime.
+    Asks the RESOLVER, not the policy: the launch-directory layer is validated at runtime,
+    so config alone cannot say whether capture armed, and a disclosure that guesses lies.
     """
-    capture = policy.capture
-    return bool(os.environ.get("SHUNT_WORK_DIR") or capture.work_dir or capture.work_dirs)
+    return resolver.armed_layer() is not None
 
 
-def _log_exploration_disclosure(policy: RouterPolicy, *, cold_start_active: bool) -> None:
+def _log_exploration_disclosure(
+    policy: RouterPolicy, resolver: WorkDirResolver, *, cold_start_active: bool
+) -> None:
     """Loud one-line startup disclosure of the exploration state (least-surprise)."""
     # Must not promise spending that cannot happen. The gate is COLD-START, not "any
     # outcome exists": while cold-start is active the engine returns before it can
@@ -152,7 +163,7 @@ def _log_exploration_disclosure(policy: RouterPolicy, *, cold_start_active: bool
         # auto-capture (a configured work_dir) feeds verified downshift outcomes back
         # in-process at session close, so the gate CAN open; with manual-only `shunt flag`
         # (a separate CLI process writing SQLite) slack stays 0 and a downshift never fires.
-        if _capture_auto_configured(policy):
+        if _capture_auto_configured(resolver):
             logger.warning(
                 "Shunt downshift exploration is ARMED (conservative_alpha=%.2f): the "
                 "gate banks slack from auto-captured verified downshift outcomes at session "
@@ -311,25 +322,47 @@ def _effective_exploration(policy: RouterPolicy) -> ExplorationPolicy | None:
     return policy.exploration
 
 
-def _log_capture_disclosure(policy: RouterPolicy) -> None:
+def _log_capture_disclosure(policy: RouterPolicy, resolver: WorkDirResolver) -> None:
     """Say whether automatic outcome capture can run, or is manual-only (least-surprise)."""
-    # Off-wire capture needs an operator-configured repo root. With none set, no session
-    # can auto-label — the loop is inert and `shunt flag` is the only outcome-write path.
-    if _capture_auto_configured(policy):
+    # Off-wire capture needs a repo root: an operator-configured one, or Shunt's own
+    # validated launch directory. With none, no session can auto-label — the loop is inert
+    # and `shunt flag` is the only outcome-write path. Naming WHICH layer armed it matters:
+    # "capture is ON" alone leaves an operator unable to tell a configured repo from the
+    # working directory they happened to launch in — whose tests are about to be executed.
+    layer = resolver.armed_layer()
+    if layer is not None:
         logger.info(
-            "Shunt capture is ON: verified outcomes are recorded automatically at session "
-            "close by re-running the repo's tests off the wire."
+            "Shunt capture is ON via %s: verified outcomes are recorded automatically at "
+            "session close by re-running THAT repo's tests off the wire — which executes the "
+            "tree's own test code (conftest.py, build.rs, npm scripts).",
+            layer,
         )
     else:
         logger.warning(
-            "Shunt capture is MANUAL-ONLY: no work_dir configured (SHUNT_WORK_DIR / "
-            "capture.work_dir), so no session is labelled automatically. Record outcomes "
-            "with `shunt flag`, or set a work_dir to enable off-wire auto-capture."
+            "Shunt capture is MANUAL-ONLY: no work_dir resolved (SHUNT_WORK_DIR / "
+            "capture.work_dir / --work-dir, and the launch directory is not a git repo with "
+            "a detectable test framework, or capture.trust_launch_dir is false), so no "
+            "session is labelled automatically. Record outcomes with `shunt flag`, or set "
+            "a work_dir."
+        )
+    # Escalation's ONLY signal is a verified failure, which needs the repo above. Escalation
+    # ships ON, so enabled-without-a-work_dir is the common default state — it must not brick
+    # the router, but it must NEVER be silent: without this warning an operator would think
+    # escalation is working while it can fire on nothing.
+    if policy.escalation.enabled and not _capture_auto_configured(resolver):
+        logger.warning(
+            "Auto-escalation is ENABLED but capture resolved no repo, so it will NOT fire: "
+            "it re-runs the REPO's tests at session close and has no repo to verify. Launch "
+            "shunt from inside your repo, or set SHUNT_WORK_DIR / capture.work_dir / "
+            "--work-dir to arm it. (docs/escalation.md)"
         )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Sampled FIRST, before the embedder-warm thread or any worker exists: a chdir by any
+    # of them would otherwise silently repoint the launch-directory layer at another tree.
+    launch_dir = os.getcwd()
     session_manager = SessionManager(
         inactivity_timeout=_INACTIVITY_TIMEOUT,
         grace_period=_GRACE_PERIOD,
@@ -346,16 +379,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     trust_neighbors = _resolve_embedding_trust(embedder, outcome_store)
     _log_config_disclosure(policy, model_pool, embedder, fingerprint_trusted=trust_neighbors)
     _log_missing_credentials(model_pool)
+    # One resolver, shared by the engine (decide-side task key) and the capture worker
+    # (capture-side task key) so both key escalation on the SAME repo. Built BEFORE the
+    # exploration disclosure, which must report whether capture actually armed.
+    resolver = _build_work_dir_resolver(policy, launch_dir)
     _log_exploration_disclosure(
         policy,
+        resolver,
         cold_start_active=ColdStartStrategy().is_active_effective(
             _index.effective_labeled(), _index.effective_tier2()
         ),
-    )
-    # One resolver, shared by the engine (decide-side task key) and the capture worker
-    # (capture-side task key) so both key escalation on the SAME repo.
-    resolver = WorkDirResolver.from_config(
-        work_dir=policy.capture.work_dir, work_dirs=policy.capture.work_dirs
     )
     engine = _build_engine(
         model_pool,
@@ -403,11 +436,11 @@ def _build_verifier(policy: RouterPolicy) -> AutoDetectVerifier | RerunConfirmin
     """Off-wire verifier, rerun-confirmed when escalation is on so a flake never trips it.
 
     Rerun-confirm re-runs a failing suite on unchanged state (fail-then-pass = flake, abstained);
-    default capture behaviour is unchanged while escalation ships OFF.
+    default capture behaviour is unchanged by escalation's enabled state (it ships ON).
     """
-    base = AutoDetectVerifier()
+    base = AutoDetectVerifier(timeout=policy.capture.verify_timeout_seconds)
     if policy.escalation.enabled:
-        return RerunConfirmingVerifier(base)
+        return RerunConfirmingVerifier(base, reruns=policy.capture.rerun_confirmations)
     return base
 
 
@@ -432,7 +465,7 @@ def _wire_capture(
     resolver: WorkDirResolver,
 ) -> CaptureWorker:
     """Build the capture worker+coordinator and wire close→enqueue."""
-    _log_capture_disclosure(policy)
+    _log_capture_disclosure(policy, resolver)
     coordinator = CaptureCoordinator(
         resolver=resolver,
         verifier=_build_verifier(policy),

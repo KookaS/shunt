@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import random
 from collections import defaultdict
+from dataclasses import dataclass
 from statistics import mean
 
 
@@ -162,12 +163,31 @@ def compare_to_oracle(
     }
 
 
+@dataclass(frozen=True)
+class BootstrapCIs:
+    """Percentile CIs from one task-resampling bootstrap: quality, regret and COST."""
+
+    # Cost gets a CI for the same reason quality always had one, only more so: the per-task cost
+    # distribution here is heavy-tailed (a handful of tasks carry most of the gap between two
+    # arms), so a point total is fragile in a way a pass rate is not. The resample is by TASK, the
+    # same unit the other two use, so all three CIs describe one uncertainty.
+    avgperf: tuple[float, float]
+    cumreg: tuple[float, float]
+    total_cost: tuple[float, float]
+    avg_cost: tuple[float, float]
+
+
 def bootstrap_ci(
     strategy_decisions: list[tuple[str, str, bool, float]],
     oracle_decisions: list[tuple[str, str, bool, float]],
     n_bootstrap: int = 1000,
     gamma: float = 0.1,
-) -> tuple[tuple[float, float], tuple[float, float]]:
+) -> BootstrapCIs:
+    """Task-resampled 95% percentile CIs on AvgPerf%, CumReg, TotalCost and AvgCost."""
+    # NAIVE cost only. Cache-aware cost is adjacency-dependent — the discount exists because one
+    # attempt immediately followed another on the same model — and resampling tasks with
+    # replacement shreds that ordering, so a resampled cache-aware total is not the statistic it
+    # is named after. The cache-aware column is a point estimate by construction.
     task_groups: dict[str, list] = defaultdict(list)
     for d in strategy_decisions:
         task_groups[d[0]].append(d)
@@ -176,11 +196,14 @@ def bootstrap_ci(
         oracle_groups[d[0]].append(d)
 
     task_ids = list(task_groups.keys())
+    zero = (0.0, 0.0)
     if not task_ids:
-        return ((0.0, 0.0), (0.0, 0.0))
+        return BootstrapCIs(avgperf=zero, cumreg=zero, total_cost=zero, avg_cost=zero)
 
     boot_avgperf: list[float] = []
     boot_cumreg: list[float] = []
+    boot_total_cost: list[float] = []
+    boot_avg_cost: list[float] = []
 
     for _ in range(n_bootstrap):
         sample_ids = random.choices(task_ids, k=len(task_ids))
@@ -194,14 +217,21 @@ def bootstrap_ci(
         comparison = compare_to_oracle(sample_decisions, sample_oracle, gamma=gamma)
         boot_avgperf.append(metrics["AvgPerf%"])
         boot_cumreg.append(comparison["CumReg"])
+        boot_total_cost.append(metrics["TotalCost"])
+        boot_avg_cost.append(metrics["AvgCost"])
 
     alpha = int(0.025 * n_bootstrap)
-    boot_avgperf.sort()
-    boot_cumreg.sort()
-    avgperf_ci = (round(boot_avgperf[alpha], 2), round(boot_avgperf[n_bootstrap - 1 - alpha], 2))
-    cumreg_ci = (round(boot_cumreg[alpha], 4), round(boot_cumreg[n_bootstrap - 1 - alpha], 4))
 
-    return avgperf_ci, cumreg_ci
+    def _pct(draws: list[float], digits: int) -> tuple[float, float]:
+        draws.sort()
+        return (round(draws[alpha], digits), round(draws[n_bootstrap - 1 - alpha], digits))
+
+    return BootstrapCIs(
+        avgperf=_pct(boot_avgperf, 2),
+        cumreg=_pct(boot_cumreg, 4),
+        total_cost=_pct(boot_total_cost, 4),
+        avg_cost=_pct(boot_avg_cost, 6),
+    )
 
 
 def compute_cost_decomposition(

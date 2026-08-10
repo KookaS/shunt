@@ -12,6 +12,8 @@ from typing import Any, Final, Protocol
 
 import numpy as np
 
+from shunt.proxy.redaction import redact_secrets
+
 from .index import HNSWIndex
 from .loop_health import LoopHealthSnapshot
 from .schema import run_migrations
@@ -239,7 +241,12 @@ class OutcomeStore:
                 """,
                 (
                     session_id,
-                    prompt_text,
+                    # Redacted at rest: this is the only free-text sink that reached the DB
+                    # raw, and a user prompt routinely pastes a key or token. The embedding
+                    # blob is computed upstream from the live text, so redaction changes what
+                    # a REINDEX re-embeds (a secret is noise to the router), never the
+                    # decision this session already made.
+                    redact_secrets(prompt_text),
                     embedding_blob,
                     model_chosen,
                     cost,

@@ -3,6 +3,15 @@
 # service that drives Shunt at http://shunt:8080. This is the single wiring
 # source, so a per-tool file only describes the tool (no Shunt/upstream repeated).
 #
+# Two scenarios share this substrate:
+#   wiring      — the tool reaches Shunt and a decision rides back (compose.yaml)
+#   escalation  — N prompts across session boundaries make Shunt escalate on
+#                 VERIFIED failures (compose.escalation.yaml + assert-escalation)
+# The escalation arming below (a red repo, SHUNT_WORK_DIR, a short inactivity
+# timeout) is unconditional: it costs the wiring leg nothing — a single request
+# never closes a session — and keeping one substrate keeps the two scenarios from
+# drifting into different deployments.
+#
 # Requires Docker Compose >= 2.20 (top-level `include:`). Build context is the
 # shunt repo root so the shared Dockerfiles and fake_registry.yaml resolve.
 services:
@@ -10,6 +19,13 @@ services:
     build:
       context: ../../tests/integrations
       dockerfile: Dockerfile.fake
+    environment:
+      # Append every POSTed body to /record/requests.jsonl. That log is what answers
+      # "which agentic CLIs announce their working directory?" — measured from what
+      # the upstream actually receives, not from anyone's claim about the CLI.
+      FAKE_UPSTREAM_RECORD_DIR: /record
+    volumes:
+      - handshake-record:/record
     expose:
       - "9099"
     healthcheck:
@@ -35,6 +51,20 @@ services:
       SHUNT_HOST: 0.0.0.0
       SHUNT_PORT: "8080"
       FAKE_UPSTREAM_API_KEY: dummy
+      # Arm off-wire capture at the deterministically-red repo baked into the image at
+      # /repo (tests/integrations/demo_repo, see Dockerfile.shunt). The explicit env var
+      # is the stable seam: it is layer 2 of WorkDirResolver's precedence and needs no
+      # git root, no launch-directory heuristic and no CLI flag.
+      SHUNT_WORK_DIR: /repo
+      # Short on purpose: the escalation scenario needs SESSION BOUNDARIES, and a
+      # boundary is an idle deadline. The driver reads the same value, so the two
+      # cannot drift.
+      SHUNT_SESSION_INACTIVITY_TIMEOUT: "${SHUNT_SESSION_INACTIVITY_TIMEOUT:-1}"
+      # The outcome store on a named volume, so the verdict sidecar can read the
+      # router's OWN state rather than trust a client's stdout.
+      SHUNT_DATA_DIR: /state
+    volumes:
+      - shunt-state:/state
     depends_on:
       fake-upstream:
         condition: service_healthy
@@ -49,3 +79,31 @@ services:
       interval: 2s
       timeout: 3s
       retries: 20
+
+  # The escalation scenario's verdict. Never started by `up` (it carries a profile);
+  # the runner invokes it with `compose run --rm assert-escalation` AFTER the tool's
+  # driver has exited, so its exit code is the leg's verdict.
+  assert-escalation:
+    profiles:
+      - escalation
+    build:
+      context: ../../tests/integrations
+      dockerfile: Dockerfile.shunt
+      args:
+        SHUNT_BASE_IMAGE: ${SHUNT_BASE_IMAGE:-shunt-router:handshake}
+    environment:
+      SHUNT_DATA_DIR: /state
+      FAKE_UPSTREAM_RECORD_DIR: /record
+      SHUNT_ESC_TOOL: ${SHUNT_ESC_TOOL:-unknown}
+      SHUNT_ESC_MARKER: ${SHUNT_ESC_MARKER:-SHUNT-ESC}
+      SHUNT_ESC_TIMEOUT: ${SHUNT_ESC_TIMEOUT:-120}
+    volumes:
+      - shunt-state:/state
+      - handshake-record:/record
+    entrypoint:
+      - python
+      - /shunt-harness/assert_escalation.py
+
+volumes:
+  shunt-state:
+  handshake-record:

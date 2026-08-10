@@ -18,7 +18,15 @@ import numpy as np
 
 from benchmark import config
 from benchmark.plot_frame import Annotations
-from benchmark.routing import censoring, figures, impute, metrics, plot_style, summary
+from benchmark.routing import (
+    censoring,
+    figures,
+    impute,
+    metrics,
+    plot_style,
+    selection_guard,
+    summary,
+)
 from benchmark.routing.figures import arm_manipulation as fig_arms
 from benchmark.routing.figures import cache_economics as fig_cache
 from benchmark.routing.figures import complementarity as fig_complementarity
@@ -149,13 +157,27 @@ def print_summary(results: list[dict[str, str]]) -> None:
     results.csv source of truth (no committed derived CSV).
     """
     rows = sorted(results, key=lambda r: float(r.get("Reward", 0)), reverse=True)
-    cols = ["strategy", "n_pass", "AvgPerf%", "TotalCost", "AvgCost", "Reward", "Pareto"]
+    # Both cost models are columns, never one standing in for the other, and `subset_selected`
+    # rides beside them so a coverage-selected row cannot be read as a full-sample row.
+    cols = [
+        "strategy",
+        "n_pass",
+        "AvgPerf%",
+        "TotalCost",
+        "TotalCost_cacheaware",
+        "AvgCost",
+        "Reward",
+        "Pareto",
+        "subset_selected",
+    ]
     widths = {c: max(len(c), *(len(str(r.get(c, ""))) for r in rows)) for c in cols}
     header = "  ".join(c.ljust(widths[c]) for c in cols)
     print(header)
     print("-" * len(header))
     for row in rows:
         print("  ".join(str(row.get(c, "")).ljust(widths[c]) for c in cols))
+    for line in selection_guard.rows_footer(rows):
+        print(line)
 
 
 # ---------------------------------------------------------------------------

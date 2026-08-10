@@ -1,6 +1,6 @@
 ---
 title: Error detection & auto-escalation
-description: How Shunt detects a real, verified failure — never a model's self-report — and, when the same failure repeats, escalates one rung at the next session boundary. Off by default and opt-in.
+description: How Shunt detects a real, verified failure — never a model's self-report — and, when the same failure repeats, escalates one rung at the next session boundary. Ships enabled, armed when a repo is resolved (explicit or auto-detected from launch directory).
 ---
 
 # Error detection & auto-escalation
@@ -11,10 +11,14 @@ for you to intervene. This page explains how a failure is detected, what makes o
 worth escalating, how the ladder climbs, the safety rails around it, and where it
 does nothing.
 
-**It ships OFF.** Auto-escalation is opt-in (`router.escalation.enabled: false` by
-default). It is wired on the live routing path, so turning it on takes effect
-immediately — but you turn it on deliberately, once you have a verified-outcome
-signal for it to act on. The config knobs are in
+**It ships ON** (owner choice, 2026-08-08) — with the honest caveats in
+[Limitations](#limitations-read-before-relying-on-it): the recurrence *trigger* is a null detector at
+the live cadence, so no measurement yet shows it to separate outcomes; the value is the *ladder's*,
+measured observationally (2.51× at session cadence). **It is armed when a repo is resolved** — escalation's only verified-failure signal is the repo's tests re-run off the wire.
+The repo is resolved in order: explicit `capture.work_dir` / `capture.work_dirs` map, `SHUNT_WORK_DIR` env var, or the validated launch
+directory (when `trust_launch_dir: true`, the default). With a `git` repo at launch, `cd myrepo && shunt start` captures with zero configuration.
+Without any repo, a boot warning names which layer arm and says escalation is enabled but not armed; it is never silently inert.
+The config knobs are in
 [Configuration → Auto-escalate on repeated verified failure](configuration.md#auto-escalate-on-repeated-verified-failure).
 
 Its sibling is [the routing model](routing.md), which picks the model *before* any
@@ -90,7 +94,7 @@ non-model producer: your test suite, re-run off the wire.
   a verified outcome. The runner is auto-detected from the repo: **pytest** (Python),
   **jest**/**vitest** (a `package.json`), **`go test`** (a `go.mod`), or **`cargo
   test`** (a `Cargo.toml`). No `work_dir`, no framework, no signal — Shunt writes
-  nothing and never guesses. See [Feedback](feedback.md#1-automatic--off-wire-test-execution-the-signal-that-matters).
+  nothing and never guesses. See [Feedback](feedback.md#1-automatic-off-wire-test-execution-the-signal-that-matters).
 - **Flake guard.** A test that fails then passes on unchanged state is a flake, not a
   regression. A failing run is re-run to confirm; if it does not reproduce, the result
   is abstained (it feeds neither the router nor escalation). Only a failure that
@@ -129,6 +133,54 @@ memory and keyed per repo (`work_dir`); `shunt flag` runs in a separate process 
 session's outcome row, so a human-flagged failure never trips an escalation. Feeding human labels
 into escalation would need the failure log moved to the same store — a design change, not a wiring
 detail.
+
+## Which runners are supported
+
+The classifier that turns a test run into `success` / `failure` / `environment` is
+language-agnostic in design and runner-specific in coverage. It is built and tested
+against four families today:
+
+| Runner | Language(s) | Detected from |
+|---|---|---|
+| pytest | Python | `pyproject.toml` / `setup.cfg` / a dev requirements file |
+| jest / vitest | JavaScript / TypeScript | a `package.json` *declaring* jest or vitest |
+| `go test` | Go | a `go.mod` |
+| `cargo test` | Rust | a `Cargo.toml` |
+
+Detection is a **single multi-stage classifier**, not one parser per runner, so every
+language gets the same treatment:
+
+1. **Exit code first.** `0` = pass (with the nothing-ran caveat below); pytest's
+   `2/3/4/5` (interrupted / internal error / usage / nothing collected) and a signal
+   death (`128+N` or a negative code) are infrastructure by
+   definition — no bigger model fixes a session that never validly ran. Rust's `101`
+   is deliberately NOT in that set: it is `cargo test`'s test-failure exit, and a
+   failing run is classified `failure` via the `failures:` marker below, exactly like
+   pytest's `1`.
+2. **Positive proof a test ran and failed** — pytest's `FAILED <nodeid>` and `N
+   failed` tails, Go's `--- FAIL:`, Rust's `failures:` block, jest's `Tests: … N
+   failed`. These win over every "environmental-looking" phrase below, because an
+   assertion can quote any of them verbatim (`assert "cannot find module" in out`).
+3. **Environment / collection markers** only when no run-and-failed proof exists —
+   `ImportError` / `ModuleNotFoundError` while collecting, `cannot find module`
+   (jest / go build), `unresolved import` / `can't find crate for` (Rust).
+4. **Nothing-selected is never a pass** — `0 passed`, `collected 0 items`, `no tests
+   ran`, `no test files` mean *no measurement*, unless the same run also counted at
+   least one passing test (a real green tail overrides its own absence marker).
+
+The **dedup key** — what makes a recurring failure "the same failure" — is likewise
+language-agnostic: the first test node id the runner prints (`path::Test::case`,
+`path::case`, `file::Test::case`), or a hash of the failure detail with run-to-run
+volatility (timings, addresses, temp paths, timestamps, random seeds, pids) stripped.
+
+**Coverage is a starting point, not a ceiling.** The marker vocabularies are
+enumerated for these four families; the classifier's *shape* — exit code, positive
+proof, environment markers, absence markers — is deliberately runner-independent, so
+extending it to PHPUnit, RSpec/minitest, GTest/CTest, Maven/Gradle, `dotnet test`,
+sbt, R CMD check, or any TAP-emitting runner is a vocabulary addition plus a fixture
+test, not a new mechanism. A run that prints none of the markers and exits with a code
+that says nothing is classified **unknown** — never a fabricated pass — which keeps
+the rule safe until the vocabulary catches up.
 
 ## Triggers — when it escalates
 
@@ -200,19 +252,45 @@ passed — ~7% of steps, on 310 of 799 runs), and the key names the spec's test,
 
 ## The ladder — effort first, then rank
 
-The default ladder is `effort_then_rank`, and it climbs **one rung per step, never
-straight to the top**:
+The default ladder is `effort_then_rank`, and it climbs **one rung per step** — where a
+rung is a reasoning arm, or a *shortlisted* rank rather than every rank:
 
 1. **Raise reasoning effort first.** The router bumps the *current model* up one
    reasoning arm (e.g. `medium` → `high`). It is the **same model**, so the provider's
    prompt-cache namespace is unchanged — this rung is cache-safe. The higher arm's
    request params are applied to the outbound call, overriding any the client sent.
 2. **Then step a rank.** Only once the model's reasoning arms are exhausted — or if the
-   model declares no reasoning arms at all — does the router step to the next model
-   rank (the next-higher-price model). The new model starts at its *own* default
-   arm, not mid-ladder.
+   model declares no reasoning arms at all — does the router step up a model rank. The
+   new model starts at its *own* default arm, not mid-ladder.
 3. **Hold at the top.** At the ceiling (top rank, top arm) escalation holds rather than
    thrashing.
+
+### The rank rung is a shortlist, not every model
+
+Rank order *is* price order. So a ladder that stepped one rank at a time would buy every
+model between the cheap end and the frontier — and each of those intermediate rungs is
+only left after **another** `escalate_after_n` verified recurrences, so it costs sessions
+as well as money. On a task that keeps failing, those mid-tier models are paid for on the
+way to a frontier model the task was going to need anyway.
+
+So the rank rung walks only the **`rank_shortlist` cheapest ranks** individually (3 by
+default), and the rung that leaves them **jumps straight to the top rank**. With ten live
+models the ladder reaches the frontier in three rank rungs instead of nine, and never
+bills ranks 3–8. The shape mirrors the offline `Price-Cascade` strategy's shortlist
+(`benchmark/routing/strategies/price_cascade.py`) — the cheap end of the ladder, then the
+escalation target of last resort — because that is the shape whose cost this repo has
+actually measured. Set `rank_shortlist: 0` to restore the every-rank walk.
+
+The jump is bounded on both sides:
+
+- It never overshoots. The top rank is the ceiling; past it escalation holds.
+- It never lands below the rank the task already climbed to (the floor, below), and the
+  next rung is measured from that floor rather than from a cheaper model a health gap
+  forced onto the task.
+- **An unhealthy target degrades once, not rung by rung.** If the top rank — and
+  everything above the target — is unavailable, the router serves the most capable
+  *healthy* model still above the current one. It does not quietly fall back to stepping
+  one rank at a time through the mid-tier the shortlist exists to skip.
 
 **A rank step buys price, not measured capability.** Rank is a model's position in the
 registry, and the registry is ordered by price — which is not a capability ordering. On
@@ -228,6 +306,34 @@ Set `ladder: rank_only` to skip the effort rung and step ranks directly. The eff
 rung needs a model that declares [reasoning arms](configuration.md#reasoning-effort-optional);
 a model without them has no effort headroom and steps rank immediately.
 
+### A climbed rank sticks until the tests go green
+
+Base routing has no memory of the ladder. Cold start serves a fixed cheap model and the
+kNN router re-picks from the corpus of past outcomes; neither knows this repo already
+climbed a rung. So Shunt remembers the rank a task escalated to and re-serves it at the
+start of every later decision for that task — across sessions, and across a restart.
+
+That memory is what makes the ladder a ladder. Without it the next session drops back to
+the cheap model, fails the same check, and climbs the same single rung again. And again.
+A task could never reach the frontier no matter how often it failed.
+
+What the floor does, precisely:
+
+- **Keyed per task** — the same repo (`work_dir`) identity the failure log uses. One
+  project's floor never lifts another project's routing.
+- **Held, not climbed.** Re-serving a rung escalates nothing, so the decision reports
+  [`escalation_floor`](routing.md#the-reason-tokens), not `auto_escalation`. The model is
+  still imposed by the failure signal rather than chosen by the policy, so the turn is
+  marked non-policy exactly like an escalated one — the learner never trains a forced
+  model as a free choice.
+- **It only ever goes up.** A transient health gap that forces a cheaper pick cannot
+  lower a floor the task already earned. If every model at or above the floor is
+  unhealthy, Shunt serves the base pick rather than failing the request.
+- **Success retires it.** A verified green suite drops the rank floor and the
+  reasoning-effort arm together, and the task returns to ordinary base routing. The pass
+  is the evidence it is no longer stuck; holding the floor would pin the repo to an
+  expensive model on the strength of a bug that is already fixed.
+
 ## Safety — the rails
 
 - **Never mid-cached-turn.** An escalation applies only at the **next session
@@ -237,14 +343,18 @@ a model without them has no effort headroom and steps rank immediately.
 - **Routing-collapse guard.** If the recent model-choice distribution is degenerate —
   the expensive tail dominates, or choice-entropy collapses — a routing-collapse alarm
   **suppresses further escalation** so the router cannot ossify onto costly models.
-  The same signal is exposed at `GET /admin/loop-health`.
+  The guard abstains during **cold start**: the cold-start router defaults every
+  session to one cheap model, so its choice distribution is degenerate by design and
+  the alarm must not fire on that state (it would globally suppress escalation exactly
+  when verified failures first accumulate). The same signal is exposed at
+  `GET /admin/loop-health`.
 - **Escalated turns don't train the policy.** An escalation is imposed by the failure
   signal, not chosen by the policy, so an escalated turn is recorded as non-policy: its
   selection propensity and candidate scores are neutralized, and it opens a fresh label
   window. The learner never mistakes a forced escalation for a free policy win.
-- **State survives a restart.** The failure log and per-task ladder position are
-  snapshotted, so a restart resumes where it left off rather than forgetting a
-  half-climbed ladder.
+- **State survives a restart.** The failure log, the per-task reasoning-effort arm and
+  the per-task rank floor are all snapshotted, so a restart resumes a half-climbed
+  ladder rather than forgetting it and starting the climb over.
 
 ## Why it is built this way
 
@@ -276,18 +386,22 @@ rely on it.
   full-price re-read of the cached context. Any escalation that could only pay off by
   breaking the cache is not worth having, so the directive waits for the next session.
 
-## Limitations — read before enabling
+## Limitations — read before relying on it
 
 Be honest with yourself about where this does nothing:
 
-- **Off by default, and for a reason.** With no verified-outcome history, every
-  cheap-model failure would look escalation-worthy and nothing would be learned. Turn
-  it on once you have a handful of labelled sessions (roughly 5–10) so the trigger has
-  something real to act on.
-- **No `work_dir`, no automatic signal.** Auto-escalation is inert until you point
-  Shunt at a repo it can test. Without that, auto-escalation has *no* signal at all: `shunt flag`
-  feeds the routing learner, not the in-process escalation log, so a repo with no `work_dir`
-  produces no verified failure the escalation rule can count.
+- **Ships ON, but the trigger is unproven at the live cadence.** No measurement yet shows the
+  shipped recurrence counter to separate outcomes (as-shipped it fires on 727/727 offline runs
+  at the base rate; its only real edge is the eval-only edit-gated family production cannot
+  run). The value is the ladder's, measured observationally at session cadence (2.51×). Treat
+  it as a mechanism with positive but not-yet-identified value; the ε-greedy + logged-propensity
+  path is how it becomes measurable.
+- **No repo resolved, no automatic signal.** Auto-escalation is inert until Shunt can resolve
+  and test a repo. Without one, auto-escalation has *no* signal at all: `shunt flag`
+  feeds the routing learner, not the in-process escalation log, so a task with no resolved `work_dir`
+  produces no verified failure the escalation rule can count. A repo is resolved if explicitly
+  configured, supplied via `SHUNT_WORK_DIR` or `--work-dir`, or auto-detected from the validated
+  launch directory. The router warns at boot which layer (if any) is armed; it is never silently inert.
 - **No tests, no signal — the vibecode case.** A repo with no test suite produces no
   verified outcome, so auto-escalation does nothing there. It cannot escalate on a
   signal that does not exist.
@@ -318,25 +432,50 @@ Be honest with yourself about where this does nothing:
 - **A pre-human-label mechanism, still being proven.** This is the day-one learning
   signal that works before any human-rating flow exists. Whether cheap-first routing
   plus verify-and-escalate beats always-frontier at equal quality is what Shunt is
-  still validating; treat auto-escalation as opt-in until that holds for your own
-  workflow.
+  still validating; it ships ON, but treat it as unproven (consider disabling it)
+  until that holds for your own workflow.
 
-## Turn it on
+### Pros and cons at a glance
 
-Escalation ships off and is configured through `router.yaml` — there is no CLI flag
-(`shunt start --config-override '...'` does not exist; the `start` flags cover only routing
-strategy, exploration, and budget). Set it in your `router.yaml`:
+**Why use this model.** Because a model's self-report is the least trustworthy signal
+available, and a re-run of your own tests is the cheapest one that cannot be talked
+out of. The decision is a count you can read off the config — no learned risk model
+you would have to trust before it was checked — and it only ever acts at the next
+session boundary, so it cannot break the prompt cache. The [rationale](#why-it-is-built-this-way)
+and the full [limitations](#limitations-read-before-relying-on-it) are above; the table is the summary.
+
+| Pros | Cons |
+|---|---|
+| Verified: re-runs *your* suite off the wire, never trusts the agent | Inert without a resolved repo, and inert on a repo with no tests |
+| Counting rule — one parameter, fully inspectable | Grades nothing: a trivial assertion = a total collapse |
+| Recurrence, not a single red: intermediate fail-then-fix never escalates | Needs repeats across *sessions*; nothing rescues a failing session in flight |
+| Effort-first rung keeps the same model → cache-safe by construction | Effort rung needs a model that declares reasoning arms |
+| Different failures never aggregate; success clears the slate | An unenumerated runner's volatile output never accumulates recurrence |
+| Escalated turns are non-policy; collapse guard caps runaway escalation | Ships ON, but the trigger is unproven at live cadence (null detector); ladder value observational |
+| SWE-only by design today, but runner-extensible (see above) | Requires Shunt beside your code + toolchain on the same machine |
+
+## Turn it on (it is already on — arm it)
+
+Escalation ships enabled and is configured through `router.yaml` — there is no escalation config override flag
+(`shunt start --config-override '...'` does not exist). What arms it is a resolved repo — explicit config,
+the `--work-dir` flag, or the validated launch directory. To arm escalation, set the `work_dir`
+(and, if you want a different threshold than the shipped prior, the escalation knobs) in your `router.yaml`:
 
 ```yaml
 router:
+  capture:
+    work_dir: /path/to/your/repo   # Optional — explicit repo; auto-detected from launch dir if not set
   escalation:
-    enabled: true
-    escalate_after_n: 2         # same-key verified failures before a step
-    stale_window: 10            # a failure not recurring within N decisions retires
-    ladder: effort_then_rank    # or rank_only
+    enabled: true                  # shipped default; only present here for explicitness
+    escalate_after_n: 2            # same-key verified failures before a step
+    stale_window: 10               # a failure not recurring within N decisions retires
+    ladder: effort_then_rank       # or rank_only
 ```
 
-The knob reference, including the reserved `blocking_exit_code` field, is in
+Enabled without any resolved repo is not a load error, but the
+router warns at boot which layer (if any) is armed; if none, escalation is enabled but not armed.
+
+The full knob reference is in
 [Configuration](configuration.md#auto-escalate-on-repeated-verified-failure).
 
 ## Measuring whether escalation actually helps
@@ -515,7 +654,7 @@ What the rest of the report means:
   interval that could exclude its own point estimate (the shipped cell once read
   `0.421 [0.606, 0.788]`). On the current corpus the gate clears
   at the **edit-gated** `escalate_after_n=3` /
-  `stale_window=1000` (AUROC 0.724 against the null 95% [0.500, 0.542], adjusted p = 0.0005 over 2000 permutations), so
+  `stale_window=1000` (AUROC 0.724 against the null 95% [0.5, 0.5489], adjusted p = 0.0005 over 2000 permutations), so
   the status is `OK_OFFLINE_ONLY` and the verdict names the winning cell (and its family), not a model. The policy null is a
   BLOCK permutation — whole challenge blocks are shuffled, so outcomes move between challenges
   while the global multiset is preserved — because this half's claim is unconditional and the
@@ -572,7 +711,7 @@ What the rest of the report means:
   base rate), and the high end (40, 50) probes past the corpus's ~31-step median where the
   remaining precision is run-length selection. `ladder` is pinned: the detection metric reads
   whether the policy fired, not which rung it climbed, so it cannot move the headline. The
-  shipped configuration (n=3, `stale=10`) is guaranteed a row, highlighted on the sweep table,
+  shipped configuration (n=2, `stale=10`) is guaranteed a row, highlighted on the sweep table,
   and the report **flags** a better cell and never changes the shipped default. On this corpus
   the `stale=10` rows stop firing at n ≥ 12 — the window cannot hold enough recurrences —
   while the `stale=1000` rows reach a null-clearing edge at high n.
@@ -629,7 +768,7 @@ a reader could be actively misled — one red line. The rest is here.
 
 ![Who is in the sample, and whether the edge survives the confounds](assets/figures/escalation/corpus_and_coverage.png)
 
-*6 models · 727/799 trajectories stamped · prefix depth 10 admits 344/727 at base rate 0.503 vs corpus 0.421 · 727/799 runs scored*
+*6 models · 727/822 trajectories stamped · prefix depth 10 admits 344/727 at base rate 0.503 vs corpus 0.421 · 727/822 runs scored*
 
 > **Caveat.** Panels B/C use the eval-only edit-gated counter; panel D's prefix score reads per-step fields production lacks.
 
@@ -641,17 +780,17 @@ a reader could be actively misled — one red line. The rest is here.
 
 **Notes.** Stamping coverage tracks capture DATE, and capture date correlates with model, so model and coverage are confounded on this corpus and cannot be separated from it. A single-class stratum contributes no comparable pairs and is DROPPED from the within-strata AUROCs rather than scored at chance. AUROC pooled 0.781 · within-model 0.746 · within-challenge 0.711. 727 scored trajectories, status=OK_OFFLINE_ONLY. OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'. canonical cell: OFFLINE-ONLY UPPER BOUND — the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'.
 
-**Limits.** Panel D's population is length-selected by construction: the anti-leak margin excludes every short run, and short runs resolve more often, so the admitted base rate is higher than the corpus's by design rather than by accident. 72/799 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
+**Limits.** Panel D's population is length-selected by construction: the anti-leak margin excludes every short run, and short runs resolve more often, so the admitted base rate is higher than the corpus's by design rather than by accident. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
 
-<!-- n: models=6, stamped=727, trajectories=799 -->
+<!-- n: models=6, stamped=727, trajectories=822 -->
 
 ### What firing costs: the eval-only edit-gated trigger pre-empts more than it interrupts {#fig-escalation-budget}
 
 ![What firing costs: the eval-only edit-gated trigger pre-empts more than it interrupts](assets/figures/escalation/escalation_budget.png)
 
-*435 fired runs · median fire at step 13 of 31 · 6287 steps pre-empted vs 3946 interrupted (1.59:1) · 727/799 runs scored*
+*435 fired runs · median fire at step 13 of 31 · 6287 steps pre-empted vs 3946 interrupted (1.59:1) · 727/822 runs scored*
 
-> **Caveat.** 72 of 799 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.
+> **Caveat.** 95 of 822 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.
 
 **Reading.** Left: where in a run the trigger fires, as a fraction of the run's total steps, drawn as an ECDF for the runs that ultimately FAILED and for the runs that were RESOLVED. A curve that rises early means the trigger fires early in those runs. Right: the steps that sit AFTER the trigger point, totalled over every fired run and split by how the run ended. On a failed run that work was spent and lost, so escalating there PRE-EMPTS it; on a resolved run the agent went on to fix the task, so escalating INTERRUPTS work that was about to pay off. The ratio between the two bars is the trigger's budget case.
 
@@ -661,7 +800,7 @@ a reader could be actively misled — one red line. The rest is here.
 
 **Notes.** Aggregates only. The per-run timing arrays these summarise are deliberately not kept: the same reasoning that deleted the lead-time figure — on this corpus a lead time is largely the run length minus a constant. Steps are agent decisions, not wall-clock and not dollars. This is a work ledger, not a cost estimate. median fire position 0.433 of the run on failed runs, 0.419 on resolved ones. 727 scored trajectories, status=OK_OFFLINE_ONLY. OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'. canonical cell: OFFLINE-ONLY UPPER BOUND — the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'.
 
-**Limits.** COUNTERFACTUAL BY ARITHMETIC, not by measurement: no logged trajectory escalated, so 'pre-empted' is what firing would have cut short assuming the run would otherwise have continued unchanged. See the scope strip. The ledger's ratio is driven mostly by ARM SIZE, not by timing: most of it is simply that more of the fired runs failed. Read it beside the fire-position panel, which is where a timing claim would have to come from — and where the two curves nearly coincide. 72/799 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
+**Limits.** COUNTERFACTUAL BY ARITHMETIC, not by measurement: no logged trajectory escalated, so 'pre-empted' is what firing would have cut short assuming the run would otherwise have continued unchanged. See the scope strip. The ledger's ratio is driven mostly by ARM SIZE, not by timing: most of it is simply that more of the fired runs failed. Read it beside the fire-position panel, which is where a timing claim would have to come from — and where the two curves nearly coincide. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
 
 <!-- n: fired_positioned=435 -->
 
@@ -669,9 +808,9 @@ a reader could be actively misled — one red line. The rest is here.
 
 ![Counting the reproduction phase is what decides the answer: AUROC 0.601 vs 0.781](assets/figures/escalation/escalation_decision.png)
 
-*base rate 0.421 · AUROC as-shipped 0.601 · edit-gated 0.781 · 727/799 runs scored*
+*base rate 0.421 · AUROC as-shipped 0.601 · edit-gated 0.781 · 727/822 runs scored*
 
-> **Caveat.** 72 of 799 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.
+> **Caveat.** 95 of 822 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.
 
 **Reading.** Left: the COMPLETE ROC of the recurrence score as a continuous statistic — each run is scored by the largest number of times one failing-check id recurred inside the shipped stale_window, and the curve sweeps every threshold, so it has a point at every possible escalate_after_n rather than only the swept grid. Two curves: as-shipped (every same-key failure counted) and edit-gated (failures before the agent's first edit-like action are not counted). The grey band is the score's own challenge-block permutation null. Middle: P(run failed | score >= t) against t for both families, with the corpus base rate as the no-skill line. Right: what share of the corpus each threshold fires on. The shipped escalate_after_n is marked on both right-hand panels.
 
@@ -681,7 +820,7 @@ a reader could be actively misled — one red line. The rest is here.
 
 **Notes.** stale_window is held FIXED at the shipped value for BOTH curves. It is a knob in its own right — the as-shipped score reaches 0.728 at stale_window=1000 — so letting it vary between the two curves would have credited the counting change with a window change. The AUROC of the score bounds what ANY single escalate_after_n can reach. score null 95% [0.472, 0.548], p=0.0005 over 2000 challenge-block shuffles. 727 scored trajectories, status=OK_OFFLINE_ONLY. OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'.
 
-**Limits.** Per-step cadence and eval-only: the live router has no per-step action stream to gate on, so the edit-gated family measures what a per-step detector could do, not what ships. Association only — no stored trajectory contains an escalation that actually happened. 72/799 trajectories have no per-step verified outcomes and are excluded from this figure.
+**Limits.** Per-step cadence and eval-only: the live router has no per-step action stream to gate on, so the edit-gated family measures what a per-step detector could do, not what ships. Association only — no stored trajectory contains an escalation that actually happened. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure.
 
 <!-- n: stamped_runs=727 -->
 
@@ -689,7 +828,7 @@ a reader could be actively misled — one red line. The rest is here.
 
 ![The shipped counter sits at the base rate; edit-gated counting separates outcomes](assets/figures/escalation/operating_point.png)
 
-*both at escalate_after_n=2, stale_window=10 · base rate 0.421 · as-shipped fires 727/727 at P(fail|fired)=0.421 · edit-gated fires 435/727 at 0.593 vs 0.164 quiet · 727/799 runs scored*
+*both at escalate_after_n=2, stale_window=10 · base rate 0.421 · as-shipped fires 727/727 at P(fail|fired)=0.421 · edit-gated fires 435/727 at 0.593 vs 0.164 quiet · 727/822 runs scored*
 
 > **Caveat.** as-shipped not-escalated arm n=0: below the n=10 floor, drawn as undefined
 
@@ -701,7 +840,7 @@ a reader could be actively misled — one red line. The rest is here.
 
 **Notes.** Both pairs are at the SAME knobs, so the only thing that differs between them is how the counter treats the reproduction phase. The intervals are a CHALLENGE-level bootstrap: the corpus is drawn from ~166 challenges, each attempted by several model/effort arms, so a row-level interval is roughly 2x too narrow. as-shipped at escalate_after_n=2, stale_window=10; fired on 727/727; P(fail|fired)=0.421 [0.346, 0.486] vs quiet n/a; AUROC 0.500 against a run-length-only 0.500. edit-gated at escalate_after_n=2, stale_window=10; fired on 435/727; P(fail|fired)=0.593 [0.513, 0.659] vs quiet 0.164; AUROC 0.711 against a run-length-only 0.570. 727 scored trajectories, status=OK_OFFLINE_ONLY. OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'. canonical cell: OFFLINE-ONLY UPPER BOUND — the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'.
 
-**Limits.** Association, not causation — see the scope strip: no logged trajectory escalated. Two operating points; the sweep figure shows every other configuration. 72/799 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
+**Limits.** Association, not causation — see the scope strip: no logged trajectory escalated. Two operating points; the sweep figure shows every other configuration. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
 
 <!-- n: fired=435, quiet=292 -->
 
@@ -709,9 +848,9 @@ a reader could be actively misled — one red line. The rest is here.
 
 ![Every swept configuration, in both counting modes, against one base rate](assets/figures/escalation/policy_sweep.png)
 
-*30 configurations x 2 counting modes · A = as-shipped · B = edit-gated · shipped default highlighted · len-only = the AUROC run length alone reaches at that cell's flag count · 727/799 runs scored*
+*30 configurations x 2 counting modes · A = as-shipped · B = edit-gated · shipped default highlighted · len-only = the AUROC run length alone reaches at that cell's flag count · 727/822 runs scored*
 
-> **Caveat.** 72 of 799 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.
+> **Caveat.** 95 of 822 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.
 
 **Reading.** One row per configuration of the two coupled knobs — escalate_after_n and stale_window, with the escalation ladder pinned to the shipped one. The A columns are as-shipped counting (every same-key verified failure counts); the shaded B columns are the same configuration with the reproduction phase excluded, i.e. failures before the agent's first edit-like action are not escalation evidence. Per family: how many trajectories the cell fired on, P(run failed | fired), and the AUROC of the fired flag against the terminal outcome. The row that IS the shipped default is highlighted.
 
@@ -721,7 +860,7 @@ a reader could be actively misled — one red line. The rest is here.
 
 **Notes.** The table is drawn rather than plotted because the sweep has too few distinct results to carry a colour channel honestly. The interval is the CHALLENGE-level bootstrap, not a Wilson interval over rows: the corpus is drawn from ~166 challenges, so rows are not independent draws and a row-level interval is roughly 2x too narrow. 30 configurations per family; highest P(fail|fired) is 0.950 at edit-gated escalate_after_n=50 (stale_window=1000) against a base rate of 0.421. 727 scored trajectories, status=OK_OFFLINE_ONLY. OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'.
 
-**Limits.** Every number here is unadjusted for the 60 configurations compared side by side; the family-wise correction lives in each cell's null, not in this table. A configuration that never fires has no P(fail|fired) at all and prints n/a. 30 of 60 configurations across both families clear the base failure rate; every other cell in this table does not. 72/799 trajectories have no per-step verified outcomes and are excluded from this figure.
+**Limits.** Every number here is unadjusted for the 60 configurations compared side by side; the family-wise correction lives in each cell's null, not in this table. A configuration that never fires has no P(fail|fired) at all and prints n/a. 30 of 60 configurations across both families clear the base failure rate; every other cell in this table does not. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure.
 
 <!-- n: configurations=30 -->
 
@@ -729,7 +868,7 @@ a reader could be actively misled — one red line. The rest is here.
 
 ![At production cadence, escalating after a cheap failure beats retrying cheap](assets/figures/escalation/session_value.png)
 
-*45 overlap tasks · escalate 21/37 vs retry 7/31 · lift 2.51x · paired difference +0.342 [+0.130, +0.547] · 799/799 runs read*
+*48 overlap tasks · escalate 25/45 vs retry 7/34 · lift 2.70x · paired difference +0.350 [+0.172, +0.515] · 822/822 runs read*
 
 > **Caveat.** Observational: the arms ran in parallel and frontier coverage was adaptive.
 
@@ -739,8 +878,8 @@ a reader could be actively misled — one red line. The rest is here.
 
 **Terms.** *frontier* — the two most expensive models present in the corpus. *cheap* — the cheapest model present — the base pick and the retry counterfactual. *overlap subset* — tasks with >=2 cheap sessions AND a frontier session.
 
-**Notes.** At session cadence the detector is trivially satisfied — the failed cheap session carries the task's target failing-check id — so this measures the LADDER's value, not the trigger's detection quality. The dashed line is the cheap model's UNCONDITIONAL base rate. The bars condition on a cheap failure on the same task, so the line is not a ceiling for them. instance-level bootstrap over 45 overlap tasks, not Wilson over sessions: several frontier sessions on one task are one draw, not several. 799 trajectories read at session cadence (per-step stamping not required), status=OK_OFFLINE_ONLY.
+**Notes.** At session cadence the detector is trivially satisfied — the failed cheap session carries the task's target failing-check id — so this measures the LADDER's value, not the trigger's detection quality. The dashed line is the cheap model's UNCONDITIONAL base rate. The bars condition on a cheap failure on the same task, so the line is not a ceiling for them. instance-level bootstrap over 48 overlap tasks, not Wilson over sessions: several frontier sessions on one task are one draw, not several. 822 trajectories read at session cadence (per-step stamping not required), status=OK_OFFLINE_ONLY.
 
-**Limits.** Observational: the arms ran in parallel and which tasks got frontier coverage was adaptive. Small n — read the interval, not the point estimate. Production's ladder steps one price rank at a time; this collapses it to its endpoint. Scored on ALL 799 trajectories, not the 727-run per-step-stamped subset the other escalation figures use: a session outcome is read from the run header, so an unstamped run is still scorable here.
+**Limits.** Observational: the arms ran in parallel and which tasks got frontier coverage was adaptive. Small n — read the interval, not the point estimate. Production's ladder steps one price rank at a time; this collapses it to its endpoint. Scored on ALL 822 trajectories, not the 727-run per-step-stamped subset the other escalation figures use: a session outcome is read from the run header, so an unstamped run is still scorable here.
 
-<!-- n: escalate_sessions=37, overlap_instances=45, retry_sessions=31 -->
+<!-- n: escalate_sessions=45, overlap_instances=48, retry_sessions=34 -->

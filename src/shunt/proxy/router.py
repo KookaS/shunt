@@ -22,6 +22,7 @@ from starlette.concurrency import run_in_threadpool
 from shunt.models import ModelConfig, ModelPool
 from shunt.models.config import arm_api_params
 from shunt.models.config import model_fingerprint as _resolve_fingerprint
+from shunt.proxy.redaction import redact_secrets
 from shunt.proxy.wire_signals import WireSignalCollector
 from shunt.session import Session, SessionManager
 
@@ -739,14 +740,21 @@ class ProxyRouter:
                     raise  # fail fast — auth / bad request
                 last_error = exc
                 self._pool.mark_unhealthy(candidate)
-                logger.warning("Model %s failed with %s; trying next", candidate, exc)
+                # Redacted: the fail-fast above covers only 400/401/403, so a 402
+                # insufficient-balance body — which quotes the submitted key back —
+                # reaches this line, at the DEFAULT level, once per candidate.
+                logger.warning(
+                    "Model %s failed with %s; trying next", candidate, redact_secrets(str(exc))
+                )
                 continue
             except Exception as exc:
                 if isinstance(exc, UpstreamError) and exc.status_code in (400, 401, 403):
                     raise
                 last_error = exc
                 self._pool.mark_unhealthy(candidate)
-                logger.warning("Model %s failed with %s; trying next", candidate, exc)
+                logger.warning(
+                    "Model %s failed with %s; trying next", candidate, redact_secrets(str(exc))
+                )
                 continue
 
         raise UpstreamError(

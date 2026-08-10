@@ -252,7 +252,7 @@ class TestBandNeverOverflowsTheCanvas:
         ("narrow glyphs", ("x" * 9 + " ") * 30),
         (
             "real subtitle",
-            "escalate_after_n=3, stale_window=10 · base 0.421 · fires 726/727 · 727/799 scored",
+            "escalate_after_n=2, stale_window=10 · base 0.421 · fires 727/727 · 727/799 scored",
         ),
         (
             "capitalised",

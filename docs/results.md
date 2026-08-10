@@ -9,17 +9,29 @@ Everything on this page is measured on our own benchmark. Where a result is a
 null, it is reported as a null. Nothing here uses a precomputed leaderboard
 number.
 
-The short version: cheap-first routing with verified escalation reaches
-always-frontier quality for a fraction of the cost ($21.12 against $88.61 over
-the full suite; $15.61 against $46.65 on the measured-only subset), the machine
-learning contributes nothing to that saving, and the escalation signal is real
-but sits in the recurrence policy at the shipped threshold once the reproduction
-phase is excluded, not in the
-prefix risk model (which reads no skill). The saving comes from mechanism, not
-prediction.
+The short version: cheap-first allocation with verified escalation reaches
+always-frontier quality for a fraction of the cost, and — new this cycle — it
+now does so on a **cache-safe** strategy rather than only on a blocked one.
+`Session-Cascade`, which makes one decision per session and is what a default
+install actually runs, costs **$23.46 cache-aware at 96.67%** on the 180-task
+scoring path, against `Price-Cascade`'s $22.07 at the same pass rate and
+Always-Frontier's $91.15 at 95.00%. On the harder, fully-measured 61-task set it
+costs **$25.50 at 90.16%** against Always-Frontier's $33.53 at 88.52%. Details,
+both sets, and every interval: [Routing at session
+cadence](#routing-at-session-cadence).
 
-We do **not** claim the project's make-or-break gate is passed. The reasons are
-in [Routing results](#routing-results).
+Two things temper it. The margin is much smaller on measured cells than on
+imputed ones — the four-fold saving above is largely an artifact of imputation,
+and we now show both bases side by side rather than let you find that yourself.
+And the machine learning still contributes nothing: the saving comes from
+mechanism, not prediction. The escalation signal is real but sits in the
+recurrence policy at the shipped threshold once the reproduction phase is
+excluded, not in the prefix risk model (which reads no skill).
+
+We do **not** claim the project's make-or-break gate is passed — that gate is
+written about the owner's own coding-agent workflow, and everything here is
+SWE-bench. The reasons are in [Routing results](#routing-results) and
+[This is not the make-or-break gate](#this-is-not-the-make-or-break-gate).
 
 ## How to read this page
 
@@ -120,39 +132,56 @@ strategies used to embed the manifest `description` — `<repo>@<commit12> - res
 manifest has been rebuilt with the real statements (median 1185 characters),
 `routing_text()` prefers them, and every row below is recomputed on that basis.
 
-Routing quality **fell**: kNN went from 81.71% to **78.29%**, which is inside noise of
-Always-Cheap's 77.14%, and Tier-Classifier from 67.43% to **65.71%**. The 106-character
+Routing quality **fell**: kNN went from 81.71% to **78.89%**, which is inside noise of
+Always-Cheap's 77.22%, and Tier-Classifier from 67.43% to **65.56%**. The 106-character
 label was not merely uninformative — it was mildly *leaky*, because the repo name it
 carried is a weak proxy for task difficulty. Given the correct input, the learned router
 is not distinguishable from the trivial policy. The zero-ML rows (Oracle, Price-Cascade,
 Always-Cheap, Always-Frontier) use no embeddings and are unchanged.
 
-Seven strategies, scored on the same 175 tasks (25 unscorable), from
-[`strategy_summary.csv`](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/strategy_summary.csv):
+Seven **router-selection** strategies — each one a rule for picking the model a
+task *starts* on — scored on the same 180 tasks (20 unscorable), from
+[`strategy_summary.csv`](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/strategy_summary.csv).
+An eighth scored strategy, `Session-Cascade`, is not a selection rule at all: it
+models the escalation *layer* over whatever base routing chose, so it gets [its
+own section](#routing-at-session-cadence) rather than a row here. Costs in this
+table are naive per-task sums, cache-blind:
 
 | strategy | passes | pass rate | 95% CI | total cost | avg cost/task | cumulative regret |
 |---|---:|---:|---|---:|---:|---:|
-| Oracle (hindsight, not deployable) | 169 | 96.57% | 93.71–98.86 | $14.37 | $0.0821 | 0.00 |
-| Price-Cascade | 169 | 96.57% | 93.71–98.86 | $21.12 | $0.1207 | 0.68 |
-| kNN-cascade | 169 | 96.57% | 93.71–98.86 | $23.72 | $0.1355 | 0.94 |
-| Always-Frontier | 168 | 96.00% | 93.14–98.86 | $88.61 | $0.5063 | 8.42 |
-| kNN | 137 | 78.29% | 72.00–84.00 | $10.29 | $0.0588 | 31.59 |
-| Always-Cheap | 135 | 77.14% | 70.86–83.43 | $1.41 | $0.0080 | 32.70 |
-| Tier-Classifier | 115 | 65.71% | 58.86–72.57 | $3.52 | $0.0201 | 52.91 |
+| Oracle (hindsight, not deployable) | 174 | 96.67% | 93.89–98.89 | $15.18 | $0.0843 | 0.00 |
+| Price-Cascade (blocked, not deployable) | 174 | 96.67% | 93.89–98.89 | $22.07 | $0.1226 | 0.69 |
+| kNN-cascade (blocked, not deployable) | 174 | 96.67% | 93.89–98.89 | $24.95 | $0.1386 | 0.98 |
+| Always-Frontier | 171 | 95.00% | 91.67–97.78 | $91.15 | $0.5064 | 10.60 |
+| kNN | 142 | 78.89% | 72.78–84.44 | $11.61 | $0.0645 | 31.64 |
+| Always-Cheap | 139 | 77.22% | 71.11–83.33 | $1.39 | $0.0077 | 33.62 |
+| Tier-Classifier (blocked, not deployable) | 118 | 65.56% | 58.33–72.78 | $9.46 | $0.0526 | 55.43 |
+
+Only `Always-Frontier`, `kNN` and `Always-Cheap` name a strategy the router will
+accept — `LIVE_STRATEGIES` in `src/shunt/router/policy.py` is the allowlist, and
+`router.strategy` is validated against it at boot. The other four rows are real
+measurements of things you cannot configure; `benchmark/routing/strategy_class.py`
+carries each one's blocker and its path to live.
 
 ### The result that matters is which strategy gets there
 
 `Price-Cascade` uses no embeddings, no nearest neighbours, and no training. It
 tries the models in ascending price order and stops at the first one whose patch
-passes. Of the deployable strategies whose quality interval overlaps
-Always-Frontier's, it is the cheapest in the table.
+passes. Setting aside the hindsight `Oracle`, it is the cheapest row in the table
+whose quality interval overlaps Always-Frontier's — and it is **not purchasable
+today**. Stopping at the first passing patch requires a verified outcome
+mid-session; that is more than one decision per session and it breaks
+cache-safety, so `price_cascade` is rejected at boot. The $22.07 @ 96.67%
+operating point measures a mechanism, not a product capability.
 
-The learned `kNN-cascade` costs **more** ($23.72 against $21.12) for the same 96.57%. The machine
-learning is not paying for itself. What buys the quality back is **verified
-escalation**.
+The learned `kNN-cascade` costs **more** ($24.95 against $22.07) for the same
+96.67%, and is blocked on the same cache-safety ground. The machine learning is
+not paying for itself. What buys the quality back is **verified escalation** —
+which is why the shipped router carries an escalation ladder rather than a
+cascade, at a lower ceiling (see [escalation](escalation.md)).
 
 Even the regret ordering is unresolved: Price-Cascade's bootstrap interval on
-total regret is [0.43, 0.96] and kNN-cascade's is [0.56, 1.17]. They overlap.
+total regret is [0.43, 0.98] and kNN-cascade's is [0.61, 1.39]. They overlap.
 
 ### Measured versus projected
 
@@ -160,13 +189,13 @@ That table is still part projection. Of the dollars behind it:
 
 | strategy | projected share of cost | projected passes |
 |---|---:|---:|
-| Always-Cheap | 3.7% | 10 of 135 |
-| Oracle | 4.8% | 14 of 169 |
-| Tier-Classifier | 8.1% | 8 of 118 |
-| **Price-Cascade** | **21.9%** | 23 of 169 |
-| **kNN-cascade** | **22.3%** | 31 of 169 |
-| kNN | 30.7% | 30 of 143 |
-| **Always-Frontier** | **44.5%** ($39.44 of $88.61) | 85 of 168 |
+| Always-Cheap | 3.6% | 10 of 139 |
+| Oracle | 4.7% | 14 of 174 |
+| Tier-Classifier | 24.5% | 32 of 118 |
+| **Price-Cascade** | **21.3%** | 23 of 174 |
+| **kNN-cascade** | **21.5%** | 27 of 174 |
+| kNN | 34.8% | 28 of 142 |
+| **Always-Frontier** | **46.5%** ($42.42 of $91.15) | 89 of 171 |
 
 Every projected cell is filled `pass=True`. Imputation is not neutral: the
 always-frontier baseline is charged full price on tasks a cheaper model
@@ -180,8 +209,14 @@ So we cut to the subset where **no cell on either path was projected**. On those
 - Price-Cascade: **$15.61 @ 93.1%**
 
 Price-Cascade is $31.03 cheaper, with 1 versus 0 discordant task, McNemar exact
-**p = 1.000**. The saving survives measurement at roughly a third of the
-baseline's cost, with no quality difference resolved either way.
+**p = 1.000**. The saving survives measurement, with no quality difference
+resolved either way.
+
+That 87-task cut is *pairwise*: it keeps the tasks where the **two strategies
+being compared** both landed on measured cells, so it admits a different task set
+for every pair. A stricter basis — every strategy measured on the same tasks —
+now exists, and on it the saving is much smaller than a third of the baseline.
+See [the correction](#the-correction-the-saving-is-much-smaller-on-measured-cells).
 
 ### Why we still do not call the gate passed
 
@@ -203,9 +238,217 @@ Three reasons, which we would rather state than have you find.
 
 ### The plain kNN strategy is weaker still
 
-It buys about 4.6pp of pass rate over always-cheapest for roughly 9.5× the cost,
-and that margin sits far inside both intervals: [76.0, 87.4] against
-[70.9, 83.4]. Indistinguishable at this sample size.
+It buys about 1.7pp of pass rate over always-cheapest for roughly 8.4× the cost,
+and that margin sits far inside both intervals: [72.8, 84.4] against
+[71.1, 83.3]. Indistinguishable at this sample size.
+
+## Routing at session cadence
+
+Both cascades above are cheap because they retry *inside* a task and read a
+verified outcome after every attempt. That is precisely what the router rejects
+at boot. So the interesting question was never "how cheap is a cascade" — it was
+**how much of that survives when the ladder is paced the way Shunt actually runs
+it.**
+
+`Session-Cascade` answers it. One decision per session; the effort rung first
+(same model, higher reasoning — the prompt cache survives), the rank rung only
+once effort is exhausted; the climbed rank persists into the next session; every
+attempt is billed. Nothing switches inside a cached turn, so it is cache-safe by
+construction rather than by policy.
+
+**It is the mechanism that ships.** `escalation.enabled: true` and
+`escalation.rank_shortlist: 3` are the defaults in
+`src/shunt/config/router.yaml`, so this ladder runs in a default install.
+`benchmark/routing/strategy_class.py` nonetheless classifies the row **BLOCKED**,
+and the blocker is narrow and worth stating exactly: `Session-Cascade` is not a
+`router.strategy` value, because it is not a router. It models the escalation
+**layer** sitting over whatever base routing chose, and no `router.strategy`
+value can name a different layer. **The name is blocked; the mechanism is not.**
+Do not read that row as something you cannot run — unlike `Price-Cascade`, you
+are running it.
+
+One modelling assumption, stated up front. The live counter escalates on
+*recurrence of the same normalized failing-check id*, and `results.csv` records a
+per-cell pass/fail with no failure identity. The replay therefore gives each task
+one stable key, so every failure of a task recurs identically. That is the
+assumption most favourable to escalation — the ladder climbs as fast as the
+policy ever could — which makes every cost below a **lower bound** on live spend,
+never an optimistic one.
+
+### The two task sets, and why totals do not cross between them
+
+The result is reported on two bases, chosen because they are biased in **opposite
+directions**.
+
+> **Read this before comparing anything.** Set A has 180 tasks and set B has 61.
+> Total costs are sums over tasks, so a set-A total and a set-B total are not
+> comparable. Compare only *within* a set. Pass rates and orderings do carry
+> across; dollar totals do not.
+
+**Set A — the shipped scoring path, coverage-completed, 180 tasks.** 35% of its
+cells are monotone-imputed. Its subset guard, verbatim:
+
+> scored on 180/200 tasks selected by coverage; deepseek-v4-flash passes 75.9%
+> here vs 10.0% on the 20 dropped (+65.9pp) — difficulty-biased, not a random
+> sample
+
+| strategy | pass rate | 95% CI | naive cost | naive 95% CI | cache-aware cost |
+|---|---:|---|---:|---|---:|
+| Oracle (hindsight — bound) | 96.67% | — | $15.18 | [8.70, 23.53] | $15.18 |
+| Price-Cascade (blocked) | 96.67% | 93.89–98.89 | $22.07 | [14.15, 31.74] | $22.07 |
+| **Session-Cascade, `rank_shortlist=3` (shipped)** | **96.67%** | 93.89–98.89 | $27.68 | [18.18, 38.73] | **$23.46** |
+| kNN-cascade (blocked) | 96.67% | 93.89–98.89 | $24.95 | [15.83, 35.31] | $24.95 |
+| Session-Cascade, `rank_shortlist=0` (pre-shortlist) | 96.57% | 93.71–98.86 | $48.19 | [29.32, 69.57] | $35.79 |
+| Always-Frontier | 95.00% | 91.67–97.78 | $91.15 | [84.53, 99.09] | $91.15 |
+| kNN (shipped router) | 78.89% | 72.78–84.44 | $11.61 | [7.71, 16.06] | $11.61 |
+| Always-Cheap | 77.22% | 71.11–83.33 | $1.39 | [1.23, 1.57] | $1.39 |
+| Tier-Classifier (blocked) | 65.56% | — | $9.46 | [7.36, 11.97] | $9.46 |
+
+**Set B — raw, un-imputed, fully-measured tasks only: 61 scorable of 69.** Every
+cell here was actually run. Its subset guard, verbatim:
+
+> scored on 61/69 tasks selected by coverage; deepseek-v4-flash passes 50.8% here
+> vs 0.0% on the 8 dropped (+50.8pp) — difficulty-biased, not a random sample
+
+| strategy | pass rate | 95% CI | naive cost | naive 95% CI | cache-aware cost |
+|---|---:|---|---:|---|---:|
+| Price-Cascade | 90.16% | 81.97–96.72 | $23.91 | [15.89, 32.97] | $23.91 |
+| **Session-Cascade, `rank_shortlist=3` (shipped)** | **90.16%** | 81.97–96.72 | $30.26 | [20.80, 41.70] | **$25.50** |
+| Session-Cascade, `rank_shortlist=0` | 90.16% | 81.97–96.72 | $64.53 | [41.38, 89.37] | $47.14 |
+| Always-Frontier | 88.52% | 80.33–95.08 | $33.53 | [27.42, 40.30] | $33.53 |
+| kNN-cascade | 88.52% | 80.33–96.72 | $34.21 | [28.01, 41.39] | $34.21 |
+| kNN | 80.00% | 70.00–90.00 | $28.87 | [22.38, 37.26] | $28.87 |
+| Always-Cheap | 50.00% | 38.71–62.90 | $0.65 | [0.50, 0.81] | $0.65 |
+
+Note the guards run in **opposite directions**. Set A drops the tasks the cheap
+model almost never solves, so it is biased easy; set B drops tasks the cheap
+model *never* solves, from a pool where it solves only half, so it is biased
+hard. Always-Cheap reads 77.14% on one and 50.00% on the other, which is how far
+apart the two selections are. **The ordering survives both. That is the
+load-bearing point** — not either set's dollar figure.
+
+### Cache-aware against naive
+
+Both cost columns are reported because they are different quantities, and only
+one of them is the bill.
+
+`Session-Cascade` is the **only** strategy in either table the cache term moves.
+That is not an accident of the model: it is the only strategy that re-serves the
+*same* model on consecutive attempts, because its first escalation rung raises
+reasoning effort rather than rank. Every other strategy here either never retries
+or steps to a different model on each attempt, which forfeits the cached prefix,
+so its naive and cache-aware totals are the same number.
+
+The size of the term tracks how much same-model repetition each configuration
+does. At `rank_shortlist=3` it removes 15% of the naive total on set A ($27.68 →
+$23.46) and 16% on set B ($30.26 → $25.50). At `rank_shortlist=0`, which walks
+every rank instead of jumping over the shortlist, the ladder is longer, repeats
+more, and the term removes 26% and 27% respectively — a bigger discount on a much
+worse total.
+
+**Caching is scoped per task.** A task is one session, and the discount applies
+to repeated attempts within it. Summing a whole run as a single cached sequence
+would be wrong: consecutive tasks are different sessions with different prefixes,
+and charging them at the cache-read rate would invent a discount no provider
+offers. The per-model discount and input share behind these numbers are measured
+from the registry and the corpus; the hit rate is assumed at 90% and flagged as
+assumed wherever it is reported — see
+[cache economics](routing.md#fig-cache-economics) for how far that assumption can
+move the figure.
+
+### What the paired test says
+
+Total-cost intervals in the tables above are per-strategy and overlap freely,
+which resolves almost nothing. The paired per-task bootstrap does better: it
+compares strategies on the *same* task, so the task-difficulty variance that
+inflates those intervals cancels. Set A, cache-aware, 2000 draws over the 175
+shared tasks:
+
+| comparison | Δ cost | 95% CI | reading |
+|---|---:|---|---|
+| `sl=3` vs Price-Cascade | +$1.37 | [+0.82, +2.00] | real, and small |
+| `sl=2` vs Price-Cascade | +$0.76 | [−0.06, +1.85] | not distinguishable |
+| `sl=3` vs kNN-cascade | −$1.23 | [−3.42, +0.73] | not distinguishable |
+| `sl=3` vs `sl=0` | −$13.30 | [−21.00, −6.42] | the shortlist pays |
+| `sl=3` vs Always-Frontier | −$66.12 | [−74.19, −57.90] | the headline |
+| `sl=2` vs `sl=3` | +$0.61 | [−0.42, +1.47] | not distinguishable |
+
+So: paying one decision per session instead of one per attempt costs $1.37 over
+`Price-Cascade` on this set, and buys cache-safety and a mechanism you can
+actually enable. Against `kNN-cascade` the two are not distinguishable. Against
+Always-Frontier the gap is large and the interval is nowhere near zero.
+
+The last row is why the shipped default stays at 3. `rank_shortlist=2` is not
+distinguishable from 3 against either `Price-Cascade` or 3 itself, so there is no
+evidence to move the default. We are not tuning on a difference we cannot
+resolve.
+
+Quality is a separate axis and it resolves less. On set A, `Session-Cascade` and
+`Price-Cascade` read an identical 96.67%, and Always-Frontier's 95.00% sits
+inside every one of those intervals. On set B the shipped ladder's 90.16%
+[81.97, 96.72] point estimate is above Always-Frontier's 88.52% [80.33, 95.08],
+but the intervals overlap heavily: **the two are not distinguishable on quality**,
+and we do not claim the ladder passes more tasks. What set B shows is a cost
+result at quality that is not resolved as different — and note that no paired
+bootstrap was run on set B, so its cost gap is weaker evidence than set A's.
+
+### The correction: the saving is much smaller on measured cells
+
+This is the part we held back until this measurement existed, and it revises what
+this page used to lead with.
+
+Read the two sets against each other on the same comparison:
+
+| basis | imputed share | Price-Cascade vs Always-Frontier | Session-Cascade `sl=3` (cache-aware) vs Always-Frontier |
+|---|---|---|---|
+| Set A (180 tasks) | 35% of cells | $22.07 vs $91.15 — **76% cheaper** | $23.46 vs $91.15 — **74% cheaper** |
+| Set B (61 tasks) | none, 100% measured | $23.91 vs $33.53 — **29% cheaper** | $25.50 vs $33.53 — **24% cheaper** |
+
+A four-fold saving becomes roughly a quarter. Both bases put the cascade family
+below the fixed-frontier baseline, so the *direction* holds on measured data —
+but the **magnitude is mostly imputation**, and it collapses in the direction you
+would expect once you see the mechanism: every imputed cell is filled
+`pass=True`, which charges Always-Frontier full price on tasks a cheaper model
+demonstrably solved. That fill is exactly where a router's apparent saving comes
+from, and set B removes it.
+
+Set B is also a stricter basis than the 87-task subset in [Measured versus
+projected](#measured-versus-projected) above. That one is *pairwise*
+co-measured — it keeps tasks where the two strategies being compared both landed
+on measured cells, which is a different, more permissive filter per comparison.
+Set B requires every strategy's cells to be measured on the same tasks, so all
+seven rows are scored on one honest basis. Where the two disagree about how much
+survives, prefer set B.
+
+We are stating this plainly rather than reporting the flattering basis and
+letting a reader discover the other one.
+
+### This is not the make-or-break gate
+
+It is strong evidence *toward* it, and it is not it.
+
+The project's kill gate is specific: beat fixed-frontier-with-caching, at equal
+quality, **on the owner's own coding-agent workflow.** Everything above is
+SWE-bench Verified — a different corpus, a different task distribution, and a
+harness where the pass signal is the task's own test suite rather than a working
+repository's. A result on SWE-bench does not discharge a gate written about
+day-to-day agent traffic, and we are not going to let the two blur together
+because the numbers came out well.
+
+Three further reasons the gate stays open, unchanged by this measurement:
+
+1. **Both task sets are coverage-selected, and both guards say so.** Neither is a
+   pre-registered random sample; they are biased in opposite directions, which is
+   why the ordering surviving both is the claim rather than either total.
+2. **The quality axis still flatters any retry strategy.** A ladder scored on
+   whether *some* attempt passed is a best-of-N statistic; Always-Frontier's is
+   single-shot. The cost axis is honest because every attempt is billed. The
+   quality axis is not, and we still do not know how to remove that.
+3. **The shipped router's own selection still misses the bar.** The paired
+   non-inferiority test on the kNN router against fixed-frontier is *inferior* by
+   more than the pre-registered 5pp margin on all three evidence bases — see
+   [the kill-gate figure](routing.md#fig-kill-gate). The ladder above sits over
+   base routing; it does not repair it.
 
 ## Why the learned router adds nothing
 
@@ -279,10 +522,10 @@ roadmap.
 
 | | cost | saving vs always-frontier | what it requires |
 |---|---:|---:|---|
-| Always-Frontier | $88.61 | — | nothing |
-| **Price-Cascade** | **$21.12** | **76.2%** | **nothing** |
+| Always-Frontier | $91.15 | — | nothing |
+| **Price-Cascade** (blocked) | **$22.07** | **75.8%** | **no prediction — but mid-session verification, which is why it is not deployable** |
 | Difficulty-only oracle | $14.25* | 83.9%* | perfect difficulty prediction |
-| Oracle (exact model) | $14.37 | 83.8% | + hindsight token counts |
+| Oracle (exact model) | $15.18 | 83.3% | + hindsight token counts |
 
 A **difficulty-only oracle**, one that always picks the cheapest model that
 solves the task and ignores which specific model it is, agrees with the full
@@ -291,7 +534,7 @@ essentially no "one magic model for this task" effect to capture. The Oracle is
 almost entirely *"use cheap when cheap works"*.
 
 That splits the headroom in two. **Both shares below are of the headroom itself,
-the $74.24 gap between Always-Frontier and the Oracle, not of the baseline's
+the $75.97 gap between Always-Frontier and the Oracle, not of the baseline's
 total cost:**
 
 - **~90% of the headroom is mechanically available.** Collectable today by
@@ -304,7 +547,7 @@ total cost:**
   here (see the caveat opening [Routing results](#routing-results)).
 
 To make the two denominators reconcilable: that ~9% residual is **~8% of
-Always-Frontier's total cost** (about $6.9 of $88.61). Different denominator, same
+Always-Frontier's total cost** (about $6.9 of $91.15). Different denominator, same
 dollars.
 
 The honest conclusion is neither "routing works" nor "there is nothing here". It
@@ -343,7 +586,7 @@ tuned against that was tuned against a clock.
 
 ### The shipped threshold is a coin flip — because it counts the reproduction phase
 
-The shipped default (`escalate_after_n=3`, `stale_window=10`) fires on **726 of
+The shipped default (`escalate_after_n=2`, `stale_window=10`) fires on **727 of
 727** trajectories: P(fail | fired) = **0.421** — exactly the
 base rate, lift 1.00, no edge. This is not a tuning accident: every run, resolved or not,
 starts by reproducing the bug, so the first one or two replayed steps are red on the target
@@ -369,13 +612,12 @@ and strongly:
 
 These rows are the `stale_window=1000` cells — a window wide enough to hold n recurrences, and
 the family the *status verdict* is selected from. They are **not** the shipped configuration:
-Shunt ships `stale_window=10`, and every committed figure draws that cell (edit-gated n=3:
-fires 356/727, P(fail|fired)=0.640, AUROC 0.721). The two differ by 0.003 AUROC; quote whichever
-you mean, and say which. (The n=2 row is
-identical across windows). The full 30-cell-per-family grid — every `escalate_after_n` from 1 to
+Shunt ships `escalate_after_n=2, stale_window=10`, and every committed figure draws that canonical
+cell (edit-gated n=2: fires 435/727, P(fail|fired)=0.593, AUROC 0.711). The n=2 row is
+identical across windows. The full 30-cell-per-family grid — every `escalate_after_n` from 1 to
 50 at both windows — is on the sweep-table figures and in the report JSON.
 
-The n=3 cell clears the family-wise permutation null (AUROC **0.724** against [0.500, 0.542],
+The n=3 cell clears the family-wise permutation null (AUROC **0.724** against [0.5, 0.5489],
 adjusted p = 0.0005 over 2000 permutations) **and** the length-stratified null (0.724 against [0.498, 0.563]) — so the
 edge is recurrence beyond run length, not the length of the runs it selects. It fires on 358 of
 727 runs — a useful fraction, not a tail. This is the honest read of the escalation idea:
@@ -393,7 +635,7 @@ recurrences needs a window at least that wide, and the grid sweeps the window
 over {10, 1000}. Its only edge sits at thresholds no one would ship (see the edit-gated family
 above for the same mechanism at the shipped threshold):
 
-- The shipped default (`escalate_after_n=3`, `stale_window=10`) fires on **726 of
+- The shipped default (`escalate_after_n=2`, `stale_window=10`) fires on **727 of
   727** trajectories: P(fail | fired) = **0.421** — exactly the
   base rate, lift 1.00, no edge. It fires on essentially everything because reproduction
   failures recur at step 1–2.
@@ -406,7 +648,7 @@ above for the same mechanism at the shipped threshold):
   an interval for it). The n=30 cell's marginal interval is **[0.606, 0.788]**, so
   the numbers quoted against it are the ones the report prints.
 - The n=30 cell clears the gate outright: AUROC **0.662** against the
-  max-over-cells family-wise null 95% **[0.500, 0.549]**, adjusted **p = 0.005**.
+  max-over-cells family-wise null 95% **[0.5, 0.5541]**, adjusted **p = 0.005**.
   The harness's `OK_OFFLINE_ONLY` badge, however, is carried by the edit-gated n=3 cell above
   (AUROC 0.724 at stale_window=1000 — the best SKILLED cell, selected across both families and maxT-corrected, which is NOT the shipped cell the figures draw), not by this one; the gate itself is
   described on
@@ -569,18 +811,24 @@ behind it, and a documented figure cannot go missing.
 Routing: the mechanism works, the model does not, and the gate is not passed —
 but the routing null is a null on a suite whose minimum detectable effect sits
 far above any plausible routing signal, so it bounds our resolution rather than
-the idea. The next moves are a designed measured run to replace the
-opportunistic 87-task subset, sized against that floor, and better routing
-models (bigram and linear, calibrated classifiers, better selection rules)
-evaluated against the same nulls.
+the idea. What changed this cycle is that the mechanism no longer has to be
+quoted from a strategy the router refuses to run: the escalation ladder at
+session cadence is cache-safe, ships enabled, and reaches the blocked cascades'
+operating point for $1.37 more on the 175-task set ([session
+cadence](#routing-at-session-cadence)). What also changed is the size of the
+prize — on fully-measured tasks the cascade family is ~25% cheaper than
+fixed-frontier rather than ~75%, and the difference was imputation. The next
+moves are a designed measured run to replace both opportunistic subsets, sized
+against that floor, and better routing models (bigram and linear, calibrated
+classifiers, better selection rules) evaluated against the same nulls.
 
 Escalation: the recurrence mechanism works, and the shipped implementation was
-counting the wrong failures. As shipped, `escalate_after_n=3` counts the
-reproduction phase — every run's first reds are the target bug at t=0 — so it
-fires on 726/727 runs and reads the base rate: a coin flip. Gated on
-failures after the agent's first edit, the same rule separates at the
-shipped threshold (n=3: AUROC 0.724, P(fail|fired)=0.642, fires on 358/727; n=2
-already reads AUROC 0.711 at P=0.593), clearing both
+counting the wrong failures. As shipped, the counter counts the reproduction
+phase — every run's first reds are the target bug at t=0 — so it
+fires on 727/727 runs and reads the base rate: a coin flip. Gated on
+failures after the agent's first edit, the same rule separates: at the shipped
+threshold n=2 it reads AUROC 0.711 at P(fail|fired)=0.593 (fires 435/727), and
+the family's best cell, n=3, reaches AUROC 0.724 at P=0.642 (358/727), both clearing
 the family-wise and the length-stratified nulls. At the session cadence the
 ladder's value is large: escalating to a frontier model after a cheap session
 failed resolves 2.5× more tasks than a same-cost retry (observational). The prefix

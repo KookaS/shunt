@@ -53,7 +53,16 @@ def test_same_key_twice_escalates() -> None:
     # effort already at ceiling → the ladder steps rank
     d = decide_escalation(events, current_index=2, ctx=_ctx(effort=2, max_effort=2), config=_ON)
     assert d.action is EscalationAction.RAISE_RANK
-    assert d.reason == "same_verified_failure_x2"
+    assert d.reason == f"same_verified_failure_x{_ON.escalate_after_n}"
+
+
+def test_reason_string_carries_the_configured_threshold() -> None:
+    # A hardcoded "_x2" suffix lied in provenance under any other threshold.
+    cfg = EscalationConfig(enabled=True, escalate_after_n=3)
+    events = [_fail(0), _fail(1), _fail(2)]
+    d = decide_escalation(events, current_index=3, ctx=_ctx(effort=2, max_effort=2), config=cfg)
+    assert d.action is EscalationAction.RAISE_RANK
+    assert d.reason == "same_verified_failure_x3"
 
 
 # ── AC-A2: a single failure, or two DIFFERENT keys, does NOT escalate ──────────
@@ -161,7 +170,7 @@ def test_recurrence_within_window_escalates() -> None:
 
 # ── AC-A "default OFF": disabled config always holds (kill-gate discipline) ────
 def test_disabled_config_always_holds() -> None:
-    default = EscalationConfig()  # enabled defaults False
+    default = EscalationConfig(enabled=False)  # explicitly off — the shipped default is now ON
     assert default.enabled is False
     d = decide_escalation([_fail(0), _fail(1)], current_index=2, ctx=_ctx(), config=default)
     assert d.action is EscalationAction.HOLD

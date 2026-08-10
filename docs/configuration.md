@@ -49,8 +49,8 @@ starts from before real outcomes accumulate — is derived from the model's tota
 list price (`input_cost_per_1m + output_cost_per_1m`, cheapest = weakest prior), so
 a live-routable model also needs a `pricing` block. (Pre-alpha note: the live
 proxy now calls `engine.decide()` to choose a model on the first turn. Outcomes can be
-recorded manually via `shunt flag`, or captured automatically at session close once you
-configure a capture work_dir (see [Tune the router](#tune-the-router)); with neither, the
+recorded manually via `shunt flag`, or captured automatically at session close from a
+resolved capture work_dir (see [Tune the router](#tune-the-router)); with neither, the
 router typically cold-starts every session to the cheap default — see [architecture.md](architecture.md).
 Registering models sets up the pool the router uses for decision seeding and
 makes them scoreable in the offline benchmark.) The two `supports_*` fields below
@@ -320,31 +320,74 @@ verified outcomes accumulate.
 
 ### Record verified outcomes automatically
 
-Exploration and the kNN neighbourhood only learn from *verified* outcomes. By default
-those are recorded by hand (`shunt flag <session_id> good|bad`). To capture them
-automatically, point Shunt at the repo it should test when a session goes idle:
+Exploration and the kNN neighbourhood only learn from *verified* outcomes. Shunt records
+them by re-running your repo's test suite off the request path when a session goes idle —
+pytest / jest / `go test` / `cargo test`, auto-detected — and labelling the session with
+the result.
+
+The common case needs no configuration:
+
+```console
+$ cd ~/my-repo && shunt start
+Shunt capture is ON via launch directory (/home/you/my-repo): verified outcomes are
+recorded automatically at session close by re-running THAT repo's tests off the wire …
+```
+
+Shunt resolves the repo in this order, stopping at the first that yields one:
+
+| # | Layer | Validated? |
+|---|---|---|
+| 1 | `capture.work_dirs[<tool_identity>]` — a repo per client | no (operator path) |
+| 2 | `SHUNT_WORK_DIR` env / `shunt start --work-dir PATH` / `capture.work_dir` | no (operator path) |
+| 3 | **Shunt's own launch directory**, promoted to its git root | yes — see below |
+| 4 | none → capture is `MANUAL-ONLY` (`shunt flag <session_id> good|bad`) | — |
+
+A path announced by a *client on the wire* is never a layer, at any setting: a
+request-supplied path becoming a test-runner working directory is remote code execution.
+
+Layer 3 is the one Shunt picks on its own, so it checks that it *can* run: the launch
+directory is accepted only when it resolves (`realpath`) to a real directory that sits
+inside a git repository which declares a test framework Shunt can detect. Anything else
+falls through to `MANUAL-ONLY`. Those are capability checks, not a trust boundary — the
+directory is the one you `cd`'d into before starting Shunt, so it is confined to no set of
+permitted roots and a repo at `/srv`, `/opt` or a container bind-mount arms exactly like
+one under `$HOME`. Set `trust_launch_dir: false` to disable the layer outright — the right
+choice on a shared or multi-tenant host, and the only gate on it.
+
+> **Arming a work_dir arms arbitrary code execution.** Verifying an outcome means running
+> that tree's own test command, and a test command runs the tree's code: pytest imports
+> its `conftest.py`, `cargo test` compiles its `build.rs`, `npm test` runs its scripts.
+> Point Shunt only at repositories you would run tests in yourself. Validation on layer 3
+> narrows *which* directory is chosen; it does not sandbox what the suite then does.
+
+The full set of knobs:
 
 ```yaml
 router:
   capture:
-    work_dir: /path/to/your/repo        # single repo — the dogfooding default
-    # work_dirs:                        # or several repos, keyed by tool identity:
+    work_dir: /path/to/your/repo        # layer 2 — a single explicit repo
+    # work_dirs:                        # layer 1 — several repos, keyed by tool identity:
     #   <tool_identity>: /path/to/repo-a
+    trust_launch_dir: true              # layer 3 on (default)
+    verify_timeout_seconds: null        # null ⇒ 120s per verification run
+    rerun_confirmations: 2              # re-runs before a failing suite is believed
     # full_content: false               # opt-in encrypted full-content trajectory capture
     # trajectory_dir: null              # null ⇒ a local dir OUTSIDE the repo
 ```
 
-`full_content` (default off) additionally records redacted, encrypted per-step trajectories
-for offline detector evaluation — see
-[Error detection & auto-escalation → Capturing your own trajectories](escalation.md#capturing-your-own-trajectories-opt-in-encrypted-local-only).
+| Field | Default | Meaning |
+|---|---|---|
+| `work_dir` | `null` | One repo to verify against. `SHUNT_WORK_DIR` and `shunt start --work-dir` override it. |
+| `work_dirs` | `{}` | Per-`tool_identity` repo map, checked before `work_dir`. |
+| `trust_launch_dir` | `true` | Allow the launch-directory layer. `false` refuses it whatever the directory is — the way to keep a shared host manual-only. |
+| `verify_timeout_seconds` | `null` (⇒ `120`) | Wall-clock budget for **one** verification run. A suite that exceeds it is recorded as nothing at all, so on a large repo the whole loop is a silent no-op until you raise this. Each run logs its duration at debug level and warns past 70% of the budget. |
+| `rerun_confirmations` | `2` | How many times a *failing* suite is re-run before the failure is believed (most pass→fail transitions are flakes). Worst case `1 + N` runs, each up to the timeout. **Minimum 1**: an unconfirmed failure is discarded by the escalation gate, so `0` would silently disable auto-escalation — the schema rejects it. To stop re-running, set `escalation.enabled: false`. |
+| `full_content` | `false` | Opt-in redacted+encrypted per-step trajectories — see [Capturing your own trajectories](escalation.md#capturing-your-own-trajectories-opt-in-encrypted-local-only). |
+| `trajectory_dir` | `null` | Where that encrypted plane is written; `null` ⇒ outside the repo. |
 
-or set `SHUNT_WORK_DIR=/path/to/your/repo` (it overrides the file's single `work_dir`).
-At session close Shunt re-runs the repo's test suite off the request path — pytest /
-jest / `go test` / `cargo test`, auto-detected — and records the pass/fail as a verified
-outcome. A session with no configured work_dir, or whose tests can't be detected or run,
-is left unlabeled: Shunt never guesses an outcome, and the test path comes only from your
-config, never from a request. Startup states which mode is in force (`Shunt capture is
-ON` / `MANUAL-ONLY`).
+A session whose repo cannot be resolved, or whose tests cannot be detected or run, is left
+unlabeled: Shunt never guesses an outcome. Startup states which mode is in force and, when
+it is on, **which layer** armed it (`Shunt capture is ON via …` / `MANUAL-ONLY`).
 
 A router that never tries a model it is unsure about never learns which ones it
 can trust, so the shipped default spends a bounded slice of your budget probing
@@ -386,27 +429,27 @@ default fails the *same* verified check repeatedly — no human command needed. 
 the knob reference; how detection, triggering, the ladder, and the safety rails work is
 covered in full on the [Error detection & auto-escalation](escalation.md) page.
 
-It ships **OFF**. The block and its defaults:
+It ships **ON** (owner choice, 2026-08-08). The block and its defaults:
 
 ```yaml
 router:
   escalation:
-    enabled: false              # shipped OFF — opt-in
+    enabled: true               # shipped ON — armed when a repo is resolved (explicit or auto-detected)
     escalate_after_n: 2         # same verified failure seen this many times
     stale_window: 10            # failures not recurring within N decisions retire
-    blocking_exit_code: 2       # FUTURE: hook-stream path only; off-wire gate gates on outcome/is_infra_failure
-    ladder: effort_then_rank    # effort_then_rank | rank_only (one rank per step, never straight to the top)
+    ladder: effort_then_rank    # effort_then_rank | rank_only (rank_only skips the effort rung)
+    rank_shortlist: 3           # the 3 cheapest ranks are rungs; the rung above them is the top rank
     exploration_epsilon: 0.0    # 0 = deterministic; above 0 randomizes flagged checkpoints
     exploration_seed: null      # null ⇒ the router draws a seed and records it on every decision
 ```
 
 | Field | Default | Meaning |
 |---|---|---|
-| `enabled` | `false` | Master switch. Off ships nothing; on wires escalation into the live decision path. |
+| `enabled` | `true` | Master switch. On wires escalation into the live decision path; it fires only once capture resolves a repo to verify. |
 | `escalate_after_n` | `2` | Same-key verified failures required before a step. `1` would escalate on the first red, which is failure-biased (intermediate fail-then-fix is normal). `2` is a **prior, not a tuned value** — under the counter the product runs, every low threshold measures at chance ([escalation](escalation.md#two-things-this-sweep-does-not-establish)), so no measurement prefers one over another. |
 | `stale_window` | `10` | A failure not recurring within this many decisions is retired from the counter. |
 | `ladder` | `effort_then_rank` | `effort_then_rank` raises reasoning effort first (cache-safe), then steps to the next-higher-rank model. `rank_only` skips the effort rung. |
-| `blocking_exit_code` | `2` | Reserved for a future hook-stream path — **not read by the current off-wire gate** (see below). |
+| `rank_shortlist` | `3` | How many of the *cheapest* ranks the ladder walks one at a time. The rung that leaves them jumps straight to the **top rank** instead of buying every model in between — rank order is price order, and each intermediate rung costs another `escalate_after_n` recurrences to leave. `0` restores the every-rank walk. See [the ladder](escalation.md#the-rank-rung-is-a-shortlist-not-every-model). |
 | `exploration_epsilon` | `0.0` | Fraction of *flagged* checkpoints where the escalation is randomly withheld, so its value becomes measurable. `0.0` is fully deterministic. A **separate** opt-in: `enabled: true` alone never randomizes. |
 | `exploration_seed` | `null` | Seed for that randomization. `null` means shunt draws one and records it on every decision, so any logged propensity stays reproducible. |
 
@@ -414,28 +457,33 @@ Escalation triggers only on **confirmed, verified capability failures** — the 
 re-run via `work_dir` at session close. A manual `shunt flag <session_id> bad` feeds the
 routing learner (the outcome index), but it runs in a separate process and never reaches the
 in-process escalation log, so it does not trip escalation. Non-blocking results
-(lint-only or infrastructure failures) and unconfirmed flakes never count. Enable it by
-setting `escalation.enabled: true` in a `router.yaml`:
+(lint-only or infrastructure failures) and unconfirmed flakes never count. Escalation's
+only signal is the repo's tests re-run off the wire, so it is **inert until capture
+resolves a repo** — an explicit `capture.work_dir` / `capture.work_dirs`, or the validated
+launch directory ([Record verified outcomes automatically](#record-verified-outcomes-automatically)).
+Where none resolves, it is **not** a load error, but the router warns at boot that
+escalation is enabled and not armed:
 
 ```yaml
 router:
   escalation:
-    enabled: true
+    enabled: true               # the shipped default
+  capture:
+    work_dir: /path/to/repo     # REQUIRED for escalation to fire — no repo, no verified signal
 ```
 
 There is no `--config-override` CLI flag. `shunt start` only exposes the routing-strategy
-flags (`--strategy`, `--explore`, `--explore-budget-frac`); escalation knobs have no CLI or
+flags (`--strategy`, `--explore`, `--explore-budget-frac`) and `--work-dir`; escalation
+knobs have no CLI or
 environment override and are configured exclusively through `router.yaml` (the file at
 `$SHUNT_CONFIG_DIR/router.yaml`, else `~/.config/shunt/router.yaml`, else the packaged
 default), which is loaded whole — so copy the packaged file before editing it.
 
-> **Note on `blocking_exit_code`:** reserved for a future hook-stream path (where a Stop
-> hook reports exit 2 for a blocking gate and exit 1 for lint). The **current off-wire
-> gate** (test suite re-run via `work_dir`) distinguishes capability failures from
-> lint/infra failures using the verifier's `outcome` field and `is_infra_failure` flag,
-> not raw exit codes, so test-runner-specific codes (pytest/jest=1, cargo=101) are
-> normalized correctly. The off-wire gate works with your test suite as-is, regardless
-> of its exit-code vocabulary.
+> **There is no exit-code knob.** The off-wire gate (test suite re-run via `work_dir`)
+> distinguishes capability failures from lint/infra failures using the verifier's
+> `outcome` field and `is_infra_failure` flag, not raw exit codes, so test-runner-specific
+> codes (pytest/jest=1, cargo=101) are normalized correctly. The gate works with your test
+> suite as-is, regardless of its exit-code vocabulary.
 
 ### Prior seeding from offline model estimates
 

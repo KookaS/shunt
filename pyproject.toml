@@ -36,6 +36,12 @@ dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
   "pytest-cov>=5.0",
+  # Model-based state-machine testing for the escalation ladder. The ladder is a pure state
+  # machine over (rank, effort, failure window), so its multi-hop behaviour — climb, restart,
+  # exhaustion, interleaving — is provable with ZERO model calls. Hand-written cases only ever
+  # covered a single hop; the sequences that matter are the long ones, and Hypothesis shrinks a
+  # failure to the minimal one. See tests/router/test_ladder_statemachine.py.
+  "hypothesis>=6.112",
   "ruff>=0.8",
   "mypy>=1.13",
   "pre-commit>=4.0",
@@ -224,3 +230,8 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 disallow_untyped_calls = false
 warn_return_any = false
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.112",
+]

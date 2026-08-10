@@ -97,18 +97,18 @@ class SessionCadenceReport:
                 "n": self.n_escalated,
                 "resolved": self.n_escalated_resolved,
                 "rate": round(self.escalate_rate, 4),
-                "ci95": [round(v, 4) for v in self.escalate_ci],
+                "ci95": _rounded_interval(self.escalate_ci),
             },
             "cheap_retry": {
                 "n": self.n_retried,
                 "resolved": self.n_retried_resolved,
                 "rate": round(self.retry_rate, 4),
-                "ci95": [round(v, 4) for v in self.retry_ci],
+                "ci95": _rounded_interval(self.retry_ci),
             },
             "lift": _rounded(self.lift),
             "paired_difference": {
                 "estimate": _rounded(self.diff_estimate),
-                "ci95": [_rounded(v) for v in self.diff_ci],
+                "ci95": _rounded_interval(self.diff_ci),
                 "excludes_zero": self.diff_excludes_zero,
                 "n_instances": self.n_instances_resampled,
             },
@@ -123,6 +123,14 @@ class SessionCadenceReport:
 
 def _rounded(value: float | None) -> float | None:
     return None if value is None else round(value, 4)
+
+
+def _rounded_interval(interval: tuple[float, float]) -> list[float] | None:
+    """Round a 95% interval; a non-finite one (an arm with no resamples) is null, matching
+    ``policy_eval.rounded_interval`` so the JSON null shape is uniform across the payload."""
+    if any(not math.isfinite(v) for v in interval):
+        return None
+    return [round(interval[0], 4), round(interval[1], 4)]
 
 
 def _price_ranks(trajectories: Sequence[Trajectory]) -> dict[str, int]:

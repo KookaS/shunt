@@ -30,7 +30,7 @@
 # cell with `No module named 'minisweagent'`. Pass extra flags via ARGS=…, e.g.
 # `make benchmark-live ARGS="--live --max-cost 2"`.
 
-.PHONY: docs docs-build stop help benchmark benchmark-live offline-replay escalation-eval model-coverage state-capture-check state-capture-mark state-export state-import state-verify replay-inputs routing-report benchmark-figures check-figures reconcile-cost
+.PHONY: e2e docs docs-build stop help benchmark benchmark-live offline-replay escalation-eval model-coverage state-capture-check state-capture-mark state-export state-import state-verify replay-inputs routing-report benchmark-figures check-figures reconcile-cost
 .DEFAULT_GOAL := help
 
 DOCS_REQS := docs/requirements.txt
@@ -39,6 +39,8 @@ BENCH := uv run --extra benchmark python -m
 ARGS ?=
 
 help:
+	@echo "make e2e             Run the tool->Shunt handshake harness over Docker (no spend)"
+	@echo "                       TOOL=curl  one tool     SCENARIO=escalation  one scenario"
 	@echo "make docs            Serve docs locally with live reload (http://127.0.0.1:8000)"
 	@echo "make docs-build      Build docs strictly (what CI runs before gh-pages deploy)"
 	@echo "make stop            Stop all Shunt services started from this repo"
@@ -57,6 +59,21 @@ help:
 	@echo "make benchmark-figures Regenerate the standalone routing figures + manifest (no spend)"
 	@echo "make check-figures   Verify the committed standalone figures are current (seconds)"
 	@echo "make reconcile-cost  Reconcile tracked cost vs the real bill (ARGS=\"--billed 35 --timestamp 2026-07-27T00:00:00\")"
+
+# The tool→Shunt handshake harness, over Docker, against a fake upstream: no key, no
+# spend. With no TOOL it runs every declared (tool, scenario) leg and reports which
+# failed; with TOOL=<name> it runs that tool alone, and SCENARIO= narrows further.
+#
+#   make e2e                                  every leg
+#   make e2e TOOL=curl                        curl's wiring + escalation
+#   make e2e TOOL=curl SCENARIO=escalation    one leg
+#
+# The `live` scenario is deliberately NOT reachable from here — it spends real money and
+# is gated behind explicit env vars in run_scenario.sh.
+TOOL ?=
+SCENARIO ?=
+e2e:
+	@tests/integrations/e2e.sh $(TOOL) $(SCENARIO)
 
 # Live-reload preview. Ctrl-C to stop. This is the same config gh-pages ships.
 docs:
