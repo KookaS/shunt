@@ -113,8 +113,9 @@ SPEC = FigureSpec(
         ),
     ),
     notes=(
-        "The decomposition is computed only over tasks where both arms passed, so it is a "
-        "cost comparison at genuinely equal quality on those tasks.",
+        "The decomposition is computed only over tasks where both arms were measured "
+        "(scorable — never a coverage-gap, censored, or imputed fill) and both passed, so it "
+        "is a cost comparison at genuinely equal quality on those tasks.",
     ),
     limitations=(
         "The bandit is an illustrative inline learner drawn for this figure only, not a "

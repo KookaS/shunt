@@ -10,8 +10,12 @@
 # BIJECTION: PNG in docs/assets/figures/<half>/ <-> row in benchmark/<half>/figures.json <-> section
 # in the half's doc. One-way presence would miss the failure that actually bites — a RETIRED
 # figure whose docs section survives it, describing a plot nobody can look at. It also checks
-# the three rendered strings are byte-identical between the manifest and the prose, so the doc
-# quotes the figure rather than an older draft of it.
+# the four rendered strings are byte-identical between the manifest and the prose — title,
+# subtitle, caveat and NOTES — so the doc quotes the figure rather than an older draft of it.
+# The per-model/per-strategy note rows carry every data-adjacent claim the canvas does not, so
+# they are the strings most likely to be hand-corrected in one place and left stale in the
+# other; byte-locking them is what makes a hand-written correction a gate failure instead of a
+# silent drift.
 #
 # Semantic freshness is NOT in scope and is not checkable here; that is the docs-drift
 # subagent's job. This gate proves the sections exist, are complete, and quote the canvas.
@@ -59,6 +63,9 @@ _IMAGE = re.compile(r"^!\[[^\]]*\]\((?P<url>\S+?\.png)\)\s*$", re.M)
 _SUBTITLE = re.compile(r"^\*(?P<text>[^*].*?)\*\s*$", re.M)
 _CAVEAT = re.compile(r"^>\s+\*\*Caveat\.\*\*\s+(?P<text>.+?)\s*$", re.M)
 _BLOCK = re.compile(r"^\*\*(?P<label>Reading|What to look for|Terms|Notes|Limits)\.\*\*", re.M)
+# A Notes block runs from its label to the next `**Label.**` block (or the section end); it may
+# legitimately span lines, because every note is joined onto its own line.
+_NOTES_TEXT = re.compile(r"^\*\*Notes\.\*\*\s*(?P<text>.*?)(?=^\*\*|\Z)", re.M | re.S)
 
 _REQUIRED_BLOCKS = ("Reading", "What to look for")
 _BLOCK_ORDER = ("Reading", "What to look for", "Terms", "Notes", "Limits")
@@ -145,7 +152,52 @@ def _check_section(
         )
 
     out.extend(_check_caveat(doc, section, row))
+    out.extend(_check_notes(doc, section, row))
     out.extend(_check_blocks(doc, section, row))
+    return out
+
+
+def _check_notes(doc: str, section: Section, row: dict[str, Any]) -> list[Finding]:
+    """The docs '**Notes.**' block must quote the manifest's notes, one note per line."""
+    # Notes are the manifest field with the least structural pressure: title/subtitle/caveat
+    # are all checked, but a per-model note row can be rewritten in the docs with nothing red
+    # — which is exactly how the note rows went factually wrong while every other gate stayed
+    # green. Joining on the newline keeps each note's provenance visible in the diff.
+    out: list[Finding] = []
+    notes = row.get("notes") or []
+    expected = "\n".join(str(n) for n in notes) if notes else None
+    block = _NOTES_TEXT.search(section.body)
+    if expected and block is None:
+        out.append(
+            Finding(
+                doc,
+                section.line,
+                0,
+                f"section {{#fig-{section.slug}}} has no '**Notes.**' block but the figure "
+                f"renders {len(notes)} note(s)",
+            )
+        )
+    elif expected and block and block.group("text").strip() != expected:
+        out.append(
+            Finding(
+                doc,
+                section.line,
+                0,
+                f"section {{#fig-{section.slug}}} Notes block does not quote the canvas notes.\n"
+                f"    canvas: {expected!r}\n"
+                f"    docs:   {block.group('text').strip()!r}",
+            )
+        )
+    elif expected is None and block is not None:
+        out.append(
+            Finding(
+                doc,
+                section.line,
+                0,
+                f"section {{#fig-{section.slug}}} documents notes the figure does not render "
+                f"— delete the Notes block or add the notes to the FigureSpec",
+            )
+        )
     return out
 
 

@@ -53,6 +53,82 @@ def _completion_body(model: str) -> str:
     )
 
 
+# The canned function call every fake tool-call response makes. Name comes from the
+# request's first declared tool; id + arguments are fixed so tests can assert them.
+_TOOL_CALL_ID = "call_abc123"
+_TOOL_CALL_ARGUMENTS = '{"path": "main.py"}'
+
+
+def _tool_call_body(model: str, tool_name: str) -> str:
+    """A non-streaming ChatCompletion whose only assistant turn is a function call."""
+    usage = {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12, "cost": 0.0001}
+    return json.dumps(
+        {
+            "id": "fake-cmpl-tool",
+            "object": "chat.completion",
+            "created": 0,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": _TOOL_CALL_ID,
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": _TOOL_CALL_ARGUMENTS,
+                                },
+                            }
+                        ],
+                    },
+                }
+            ],
+            "usage": usage,
+        }
+    )
+
+
+def _tool_usage() -> dict[str, object]:
+    """The usage object every fake tool-call response reports (incl. a real cost)."""
+    return {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12, "cost": 0.0001}
+
+
+def _tool_call_chunks(model: str, tool_name: str) -> list[str]:
+    """SSE frames for a streamed function call: role, id+name, one argument fragment,
+    finish_reason=tool_calls, a usage-only trailing chunk (include_usage shape), DONE."""
+    base = {"id": "fake-cmpl-tool", "object": "chat.completion.chunk", "created": 0, "model": model}
+
+    def frame(delta: dict[str, object], finish: str | None) -> str:
+        chunk = {**base, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+        return f"data: {json.dumps(chunk)}\n\n"
+
+    name_delta = {
+        "tool_calls": [
+            {
+                "index": 0,
+                "id": _TOOL_CALL_ID,
+                "type": "function",
+                "function": {"name": tool_name, "arguments": ""},
+            }
+        ]
+    }
+    args_delta = {"tool_calls": [{"index": 0, "function": {"arguments": _TOOL_CALL_ARGUMENTS}}]}
+    usage_chunk = {**base, "choices": [], "usage": _tool_usage()}
+    return [
+        frame({"role": "assistant", "content": None}, None),
+        frame(name_delta, None),
+        frame(args_delta, None),
+        frame({}, "tool_calls"),
+        f"data: {json.dumps(usage_chunk)}\n\n",
+        "data: [DONE]\n\n",
+    ]
+
+
 def _completion_chunks(model: str) -> list[str]:
     """SSE frames for a streamed ChatCompletion: leading role delta (required — the
     ai-sdk `openai-compatible` provider drops all text without it), content, stop, DONE."""
@@ -74,10 +150,75 @@ def _models_body() -> str:
     return json.dumps({"object": "list", "data": [{"id": "fake/cheap", "object": "model"}]})
 
 
-def _handler_for(received: list[str]) -> type[BaseHTTPRequestHandler]:
-    """Build a handler bound to one request log."""
+def _requested_tool_name(payload: dict[str, object]) -> str | None:
+    """The first function tool the request declared, or None when it declared none."""
+    for tool in payload.get("tools") or []:
+        if not isinstance(tool, dict):
+            continue
+        function = tool.get("function")
+        if isinstance(function, dict) and isinstance(function.get("name"), str):
+            return function["name"]
+    return None
 
-    class Handler(BaseHTTPRequestHandler):
+
+def _chat_completion_response(payload: dict[str, object]) -> tuple[bool, list[str]]:
+    """What one /chat/completions request should receive: (is_sse, frames|body).
+
+    When the request declared tools, answer with a function call (the model obeying the
+    tool schema); otherwise with plain text. A request without tools is unchanged.
+    """
+    model = str(payload.get("model", "fake/cheap"))
+    tool_name = _requested_tool_name(payload)
+    if payload.get("stream"):
+        chunks = (
+            _tool_call_chunks(model, tool_name)
+            if tool_name is not None
+            else _completion_chunks(model)
+        )
+        return True, chunks
+    body = _tool_call_body(model, tool_name) if tool_name is not None else _completion_body(model)
+    return False, [body]
+
+
+class _BaseHandler(BaseHTTPRequestHandler):
+    """Response helpers shared by every fake-upstream handler."""
+
+    def _send(self, status: int, body: str) -> None:
+        payload = body.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _send_sse(self, frames: list[str]) -> None:
+        """Stream SSE frames; connection-close (HTTP/1.0) delimits the stream."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        for frame in frames:
+            self.wfile.write(frame.encode())
+            self.wfile.flush()
+
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib's name
+        """Silence per-request stderr logging."""
+
+
+def _parse_body(raw: bytes) -> dict[str, object]:
+    """The POSTed JSON body, or {} when it is not valid JSON."""
+    payload: dict[str, object] = {}
+    with contextlib.suppress(json.JSONDecodeError):
+        payload = json.loads(raw)
+    return payload
+
+
+def _handler_for(
+    received: list[str], bodies: list[dict[str, object]] | None = None
+) -> type[BaseHTTPRequestHandler]:
+    """Build a handler bound to one request log (and an optional in-memory body log)."""
+
+    class Handler(_BaseHandler):
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's contract
             received.append(f"GET {self.path}")
             if self.path.endswith("/models"):
@@ -86,42 +227,21 @@ def _handler_for(received: list[str]) -> type[BaseHTTPRequestHandler]:
             self._send(404, json.dumps({"error": {"message": f"Path not found: {self.path}"}}))
 
         def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's contract
+            received.append(f"POST {self.path}")
+            if not self.path.endswith("/chat/completions"):
+                self._send(404, json.dumps({"error": {"message": f"Path not found: {self.path}"}}))
+                return
             length = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(length) if length else b"{}"
-            received.append(f"POST {self.path}")
-            if self.path.endswith("/chat/completions"):
-                payload: dict[str, object] = {}
-                with contextlib.suppress(json.JSONDecodeError):
-                    payload = json.loads(raw)
-                _record(self.path, payload)
-                model = str(payload.get("model", "fake/cheap"))
-                if payload.get("stream"):
-                    self._send_sse(_completion_chunks(model))
-                    return
-                self._send(200, _completion_body(model))
+            payload = _parse_body(raw)
+            _record(self.path, payload)
+            if bodies is not None:
+                bodies.append(payload)
+            is_sse, frames = _chat_completion_response(payload)
+            if is_sse:
+                self._send_sse(frames)
                 return
-            self._send(404, json.dumps({"error": {"message": f"Path not found: {self.path}"}}))
-
-        def _send(self, status: int, body: str) -> None:
-            payload = body.encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-
-        def _send_sse(self, frames: list[str]) -> None:
-            """Stream SSE frames; connection-close (HTTP/1.0) delimits the stream."""
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            for frame in frames:
-                self.wfile.write(frame.encode())
-                self.wfile.flush()
-
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib's name
-            """Silence per-request stderr logging."""
+            self._send(200, frames[0])
 
     return Handler
 
@@ -131,7 +251,9 @@ class FakeUpstream:
 
     def __init__(self, host: str = "127.0.0.1", port: int = 0) -> None:
         self.received: list[str] = []
-        self._server = ThreadingHTTPServer((host, port), _handler_for(self.received))
+        # Parsed POST bodies, in order — so tests can assert what the upstream RECEIVED.
+        self.bodies: list[dict[str, object]] = []
+        self._server = ThreadingHTTPServer((host, port), _handler_for(self.received, self.bodies))
         self._thread = threading.Thread(
             target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
         )

@@ -258,6 +258,63 @@ A **censored** cell (`stop_reason ∈ {step_limit, wall_limit, abandoned}`) is t
   (marked unscorable), so it never counts as a clean `pass=False` that understates a model's
   quality. Cost for censored cells is already excluded from the cost model (above).
 
+### Kill-gate coverage floor (pre-registered)
+
+**The first-milestone kill-gate verdict may only be called (PASS / FAIL / INCONCLUSIVE) when ≥90% of the
+cells in BOTH arms of the comparison are MEASURED** — a real cell on the committed corpus, not an
+imputed one. This floor is pre-registered here, on the record, so a verdict can never again be
+quoted off a matrix whose decisive cells are mostly imputed (a prior analytical matrix was 38.5%
+imputed with every imputed cell filled pass, so a published ~12% saving lived entirely in those
+cells).
+
+- **Both arms** means the router arm AND the control (fixed-frontier) arm on the same scored task
+  set.
+- **Measured** means the cell's `pass` and `cost` come from a real provider call recorded in
+  `results.csv` with a non-`ERROR` integrity status — never a monotone-imputed fill, never a
+  synthetic row.
+- **Below the floor, the verdict is UNTESTED** — not PASS, not FAIL. Reports may publish measured
+  numbers, but no verdict line.
+- The gate currently sits below this floor: on the 200-task set, the control (`kimi-k3`) has
+  ~50.6% of cells measured, and only 74 tasks have all six models measured. Closing the control
+  gap is the bounded recollection of the step-limit-censored cells (the recollection work keyed
+  on the `step_limit` staleness anchor below); the floor is what makes that spend meaningful
+  rather than cosmetic.
+
+**The verdict is a tracked, deterministic artifact.** Each run writes
+`benchmark/runner/kill_gate_verdict.json` — the verdict, both cost ratios (cache-aware and
+naive), the cache-aware ratio's paired-task 90% bootstrap CI (cache cost is scoped per
+task, so a whole-task resample preserves within-task adjacency), `n`, the scorable subset,
+and the coverage guard. It is a pure function of the
+committed inputs (no timestamps, no paths), so two regenerations over the same corpus are
+byte-identical and a verdict move shows up as a one-line diff on a tracked file. The
+human-readable `kill_gate.log` stays gitignored (free-form, run-local); the JSON is what
+version control audits.
+
+### Collection-param anchors and the mixed-budget history
+
+Every row in `results.csv` records the **regime it was collected under** (added when the
+recollection work landed): `step_limit` and `cost_limit` (the agent-scaffold caps in force),
+`scaffold_version` (the installed `mini-swe-agent`), `sampling_hash` (SHA256 of the merged
+request kwargs — base scaffold kwargs + routing target + reasoning-arm params, auth secrets
+excluded), and `prompt_hash` (SHA256 of the scaffold's system+instance templates). A row that
+ships with an empty hash is a **legacy** row written before these columns existed; empty anchors
+are never a staleness event (grandfathered — the paid cell is not recollected on an unknown).
+
+Three of the five are **staleness anchors**: raising `live.step_limit`, upgrading the scaffold's
+prompt templates, or changing the merged request kwargs marks affected cells stale so they
+recompute rather than serve an outcome from a different regime. The `step_limit` anchor fires
+**only for step-limit-censored cells** — a cell that hit the old cap gets the new budget; a cell
+that solved or finished naturally is regime-independent and stays valid.
+
+The corpus has a mixed budget history that the anchor makes visible. `step_limit` was 250 for
+the July cells (upstream's default) until the `_DEFAULT_STEP_LIMIT = 70` changeover on
+2026-07-27, then 70 for the August cells. The rows backfill this from `computed_at`: 1185 rows
+record `step_limit=250`, 39 record `70`. The 92 cells with `calls > 70`, all dated
+2026-07-17..2026-07-27, are the lower bound of the 250-regime collection. In 2026-08 the caps
+were raised together to `step_limit=150` / `cost_limit=4.0` (from a measured hazard, not
+passers' percentiles — see `benchmark.yaml`), so the 20 cells censored at 70 are now stale and
+candidates for bounded recollection.
+
 ### Unsolvable tasks
 
 A task no model solves (`s*` undefined) counts as a fail — at its own cost — for **every**
@@ -318,6 +375,42 @@ imputation:
 The cost/quality plots carry this disclosure in their footer NOTE section — the imputed
 fraction, the measured violation rate, and the conservative-assumption caveat — so no
 reader mistakes a completed matrix for a fully measured one.
+
+### Full message-list capture (per-run transcript dumps)
+
+Every live cell also writes its **full agent message list** — the system prompt, the reasoning
+text, the tool calls, the per-call `usage` envelope — to a gitignored scratch. It is produced by
+setting mini-swe-agent's `output_path` to
+`benchmark/runner/artifacts/message_lists/<trajectory_id>.json`; `DefaultAgent.run()` persists
+it (via `self.save(self.config.output_path)` in its `finally` block) after every step, so even a
+wedged or killed run leaves the trajectory it reached. The dump pairs one-to-one with the two
+existing per-cell artifacts, all keyed by the same trajectory id:
+
+| Artifact | Path | Committed? |
+|---|---|---|
+| Escalation trajectory (normalized action/observation trace) | `benchmark/escalation/data/live/<trajectory_id>.jsonl` | yes (LFS, scrubbed) |
+| Per-step `git diff` snapshots | `benchmark/runner/artifacts/step_snapshots/<trajectory_id>/step_NNNN.diff` | no (scratch) |
+| **Full message list** | `benchmark/runner/artifacts/message_lists/<trajectory_id>.json` | **no (scratch)** |
+
+The message list is the *runnable* agent: the normalized trace is enough to replay for analysis,
+not enough to reconstitute an agent. The dump is what makes a future run **resumable and
+replayable**; the 822 existing trajectories predate it and cannot be retrofitted.
+
+**Retention policy.** Dumps live in the gitignored scratch alongside the per-step snapshot
+scratch, one file per cell, last-write-wins per trajectory id. Nothing deletes them
+automatically; they are regenerable from the next live run of the same cell, and **deleting them
+is always safe** — unlike a missing snapshot scratch, a missing dump never blocks offline replay
+or stamping (the committed header's `snapshot_steps` plus the per-step scratch already cover
+that); it only forfeits the raw transcript for that cell. Capture is observe-only: a dump write
+failure is swallowed, so a paid run's outcome, cost and exit status never depend on it (the same
+contract `_attach_snapshot_recorder` and `_capture_escalation_trajectory` hold).
+
+**Security.** The dump is a **raw, unredacted transcript**: the message list passes through
+`redact_secrets` nowhere. An agent may echo anything inside its container, so treat every dump as
+untrusted output — it is kept out of git (the `benchmark/runner/artifacts/` ignore rule), never
+published, and stays on the collection host. gitleaks gates commits, and the committed escalation
+corpus is independently scrubbed on its own write path (`schema.dump_jsonl`); neither protects a
+dump that never enters git, which is why it must not.
 
 ## Relationship to src/shunt/
 

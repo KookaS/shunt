@@ -37,7 +37,7 @@ A cell is **censored** when its true pass/fail is *unknown*. A censored cell is
 neither a pass nor a fail, so it is dropped from analysis rather than counted as a
 failure. Two causes:
 
-- **`step_limit`** — the agent hit its step budget (currently 70 steps) without
+- **`step_limit`** — the agent hit its step budget (currently 150 steps) without
   finishing. We can't tell whether more steps would have solved the task, so the
   outcome is unknown, not a failure.
 - **`wall_limit`** (legacy) — an earlier harness abandoned a cell at a 600-second
@@ -111,7 +111,7 @@ difficulty signal has not yet cleared the bar. This dataset is how that question
 answered as coverage grows.
 
 The **cost-at-equal-quality comparison** — router versus a strong single frontier model
-at matched quality — has a tighter coverage limit than the 177 usable tasks suggest. It
+at matched quality — has a tighter coverage limit than the 177 usable tasks suggest. It <!-- frozen-value: n=177, date=2026-07-28, run=cece0fd -->
 can only use tasks where **both** the router's chosen model **and** the frontier baseline
 have real, measured cells at equal quality. Because the frontier model is the most
 expensive and is run sparingly, the number of such paired tasks is currently small

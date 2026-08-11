@@ -1,0 +1,8 @@
+___________________________________ summary ____________________________________
+  py38: commands succeeded
+  py39: commands failed
+ERROR: InvocationError for command /venv/bin/pytest tests (exited with code 1)
+___________________________________ summary ____________________________________
+  py38: commands succeeded
+  py39: commands failed
+ERROR: InvocationError for command /venv/bin/pytest tests (exited with code 1)

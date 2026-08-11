@@ -40,6 +40,14 @@ DIFF_COMMAND: Final[str] = f"git -C {TESTBED} diff HEAD"
 SNAPSHOT_ROOT: Final[Path] = Path(__file__).resolve().parent / "artifacts" / "step_snapshots"
 _STEP_GLOB: Final[str] = "step_*.diff"
 
+# Local, gitignored scratch holding each live cell's FULL agent message list (mini-swe-agent's
+# `output_path` dump, written by DefaultAgent.run() in its finally block). Keyed by trajectory id
+# EXACTLY like the per-step snapshot dir and the committed trajectory jsonl
+# (`escalation/data/live/<trajectory_id>.jsonl`), so the three artifacts pair one-to-one. The dump
+# is a RAW, UNREDACTED transcript — the message list passes through `redact_secrets` nowhere — so
+# treat it as untrusted output: never commit it, never publish it, keep it on the collection host.
+MESSAGE_LIST_ROOT: Final[Path] = Path(__file__).resolve().parent / "artifacts" / "message_lists"
+
 
 class StepSnapshotRecorder:
     """Capture a per-step ``git diff HEAD`` via an injected exec callable (observe-only)."""
@@ -89,10 +97,17 @@ def read_snapshots(trajectory_id: str, root: Path = SNAPSHOT_ROOT) -> dict[int, 
     return snapshots
 
 
+def message_list_path(trajectory_id: str, root: Path = MESSAGE_LIST_ROOT) -> Path:
+    """The gitignored scratch path holding one trajectory's full agent message list."""
+    return root / f"{trajectory_id}.json"
+
+
 __all__ = [
     "DIFF_COMMAND",
+    "MESSAGE_LIST_ROOT",
     "SNAPSHOT_ROOT",
     "StepSnapshotRecorder",
+    "message_list_path",
     "read_snapshots",
     "snapshot_dir",
     "write_snapshots",

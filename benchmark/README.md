@@ -42,7 +42,8 @@ statuses below are the current audit of that contract:
 - **YES — replay a collected run in a container.** `runner/offline_replay.py` rebuilds each
   captured step inside that instance's prebuilt SWE-bench image and re-derives its verified
   outcome through SWE-bench's own grader. No model call, no spend. Cost is measured rather than
-  guessed (~3.5 s median per step; ~104 worker-hours for the full 799-trajectory corpus) — see
+  guessed (~3.5 s median per step; ~104 worker-hours for the full escalation corpus, whose size is
+  `benchmark.escalation.corpus.census()`) — see
   *What a re-replay costs* in [`docs/benchmark.md`](../docs/benchmark.md). Not to be confused with
   `benchmark/Dockerfile` + `compose.yaml`, which containerise the **harness itself** for a
   simulated `run_matrix`. This item is the **re-derive** leg, and it is not the $0 one:
@@ -66,7 +67,8 @@ statuses below are the current audit of that contract:
   numbers is worse than a refusal. So a clone can re-score policies unconditionally, and re-derive
   outcomes once it has Docker, the images, and HF access.
 - **YES — backtest a policy over the corpus.** The loop you actually iterate in.
-  `make escalation-eval` re-scores the escalation detector over all 799 trajectories in ~90 s;
+  `make escalation-eval` re-scores the escalation detector over the whole committed corpus
+  (trajectory count per `benchmark.escalation.corpus.census()`) in ~90 s;
   `benchmark.routing.run_eval` does the same for routing strategies over `results.csv`. No
   containers, no requests. Train/eval splits are offline too: escalation uses grouped CV
   (`prefix_eval`, grouped by challenge so no instance straddles a fold), routing has a
@@ -99,7 +101,8 @@ statuses below are the current audit of that contract:
   each step's `action` — a field the live decision never receives, and one no `EscalationPolicy`
   knob can ask for. The numbers are real; they bound a policy production does not run.
 - **PARTLY — all benchmark data in git.** Tracked: `routing/results.csv`, the 500 instance
-  specs, `routing/data/challenges.json`, the 799 trajectory JSONL files with their per-step
+  specs, `routing/data/challenges.json`, the committed trajectory JSONL files (one per live
+  session, counted by `benchmark.escalation.corpus.census()`) with their per-step
   stamps, `manifest.json`, `admissibility.json`, `stamp_ledger.json`, and the report PNGs.
   Untracked: the per-step diffs above, the ~100 GB image set, and the HF dataset rows. Everything
   needed to **re-score** is in git; what is needed to **re-derive** is not. **LFS caveat:**

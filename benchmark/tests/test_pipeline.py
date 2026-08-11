@@ -152,7 +152,8 @@ def test_simulated_run_skips_stamp(stub: _Recorder) -> None:
 def test_stamp_timeout_fails_the_stage_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
     # A timed-out replay leaves the trajectory carrying whatever it was stamped with BEFORE, so
     # swallowing it (the old `skipping straggler` warning) is how fabricated outcomes survive a
-    # rebuild that reports success. The stage now fails; isolation still lets report/figures run.
+    # rebuild that reports success. The stage now fails, and the failure halts the stages after
+    # it that consume the stamped corpus — evaluate/report/figures must not run on it.
     rec = _Recorder(raise_for={pipeline.OFFLINE_REPLAY: subprocess.TimeoutExpired("cmd", 5.0)})
     monkeypatch.setattr(pipeline, "run_module", rec)
     monkeypatch.setattr(config, "load", lambda *a, **k: {})
@@ -167,9 +168,37 @@ def test_stamp_timeout_fails_the_stage_loudly(monkeypatch: pytest.MonkeyPatch) -
     )
     result = pipeline.run_pipeline(_args(live=True))
     assert result.outcomes[pipeline.STAMP] == "failed"
+    assert result.outcomes[pipeline.EVALUATE] == "skipped"
+    assert result.outcomes[pipeline.REPORT] == "skipped"
+    assert result.outcomes[pipeline.FIGURES] == "skipped"
     assert result.returncode == 1
     assert reaped == ["traj1"]  # the timed-out replay's container is not left running
-    assert pipeline.ROUTING_REPORT in rec.modules
+    assert pipeline.ESCALATION_EVAL not in rec.modules
+    assert pipeline.ROUTING_REPORT not in rec.modules
+    assert all(job.module not in rec.modules for job in pipeline.STANDALONE_FIGURES)
+
+
+def test_a_failed_stamp_halts_its_downstream_stages(
+    stub: _Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A stage failure must never let a downstream stage consume its outputs: when STAMP fails,
+    # the stages that read the stamped corpus (evaluate/report/figures) are recorded _SKIPPED
+    # and their modules must not run. The loop still finishes and the pipeline returns the
+    # failure code — the isolation boundary holds, only the dependent stages are halted.
+    def boom(_args: argparse.Namespace, _state: pipeline.PipelineState) -> None:
+        raise pipeline.StageError("stamp exploded")
+
+    monkeypatch.setitem(pipeline._STAGE_FUNCS, pipeline.STAMP, boom)
+    result = pipeline.run_pipeline(_args(live=True))
+    assert result.outcomes[pipeline.STAMP] == "failed"
+    assert result.outcomes[pipeline.EVALUATE] == "skipped"
+    assert result.outcomes[pipeline.REPORT] == "skipped"
+    assert result.outcomes[pipeline.FIGURES] == "skipped"
+    assert pipeline.RUN_MATRIX in stub.modules  # the upstream stage still ran
+    assert pipeline.ESCALATION_EVAL not in stub.modules
+    assert pipeline.ROUTING_REPORT not in stub.modules
+    assert all(job.module not in stub.modules for job in pipeline.STANDALONE_FIGURES)
+    assert result.returncode == 1
 
 
 def test_report_stage_failure_is_isolated(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -186,7 +215,9 @@ def test_report_stage_failure_is_isolated(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(pipeline, "_real_cost", lambda: 0.0)
     result = pipeline.run_pipeline(_args(live=False))
     assert result.outcomes[pipeline.REPORT] == "failed"
+    assert result.outcomes[pipeline.FIGURES] == "skipped"
     assert result.returncode == 1
+    assert all(job.module not in rec.modules for job in pipeline.STANDALONE_FIGURES)
 
 
 def test_consolidated_summary_is_emitted(
@@ -479,6 +510,148 @@ class TestStandaloneFigureFreshness:
         fingerprinted or the committed figures silently outlive the registry."""
         inputs = pipeline._data_inputs()
         assert any(p.name == "models.yaml" and "config" in str(p) for p in inputs)
+
+    # ------------------------------------------------------------------ instrument validity
+    # The freshness gate can LIE: the pipeline used to record a CRASHED stage's digest as
+    # fresh, so a FAILED render passed the staleness gate. A gate that can lie certifies
+    # nothing it has ever passed, so its verdicts were not quotable until it cleared a positive
+    # control (it DETECTS a crashed render) paired with a negative control (the same job run
+    # clean reports fresh — not always stale). The manifest write is now conditional on each
+    # job's success, and a failed job leaves NO entry behind (absent, never merely unchanged).
+    # ------------------------------------------------------------------
+
+    def test_crashed_figure_job_records_no_digest_and_is_reported_stale(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """POSITIVE CONTROL: a job that exits non-zero records NO digest.
+
+        The crashed job's manifest entry is ABSENT (not merely unchanged) and
+        `stale_figures()` names it — the assembled gate DETECTS the crashed render.
+        """
+        monkeypatch.setattr(pipeline, "write_figure_manifest", _REAL_WRITE_MANIFEST)
+        manifest = tmp_path / "figure_inputs.json"
+        _REAL_WRITE_MANIFEST(manifest)
+        assert pipeline.stale_figures(manifest) == []
+        crashed = next(job for job in pipeline.STANDALONE_FIGURES if job.name == "viz_knn")
+
+        def crashing(module: str, argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            rc = 1 if module == crashed.module else 0
+            return subprocess.CompletedProcess([module], rc, stdout="", stderr="")
+
+        monkeypatch.setattr(pipeline, "run_module", crashing)
+        with pytest.raises(pipeline.StageError):
+            pipeline.stage_figures(_args(), pipeline.PipelineState(), manifest=manifest)
+        recorded = json.loads(manifest.read_text())
+        assert crashed.name not in recorded  # entry absent, not merely unchanged
+        assert pipeline.stale_figures(manifest) == [crashed.name]  # gate names the crash
+
+    def test_clean_figure_run_of_the_same_job_is_reported_fresh(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """NEGATIVE CONTROL: the SAME job run clean reports fresh.
+
+        The positive control is not passing by always saying stale: a clean run of the
+        figure stage certifies every standalone job current again.
+        """
+        monkeypatch.setattr(pipeline, "write_figure_manifest", _REAL_WRITE_MANIFEST)
+        manifest = tmp_path / "figure_inputs.json"
+        _REAL_WRITE_MANIFEST(manifest)
+        assert pipeline.stale_figures(manifest) == []
+
+        def clean(module: str, argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess([module], 0, stdout="", stderr="")
+
+        monkeypatch.setattr(pipeline, "run_module", clean)
+        pipeline.stage_figures(_args(), pipeline.PipelineState(), manifest=manifest)
+        recorded = json.loads(manifest.read_text())
+        assert all(job.name in recorded for job in pipeline.STANDALONE_FIGURES)
+        assert pipeline.stale_figures(manifest) == []
+
+    def test_a_stage_that_raises_records_no_digest(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Raising-module variant: a stage whose producer RAISES (not just a non-zero exit)
+        also certifies nothing — the crashed job's entry is absent from the manifest."""
+        monkeypatch.setattr(pipeline, "write_figure_manifest", _REAL_WRITE_MANIFEST)
+        manifest = tmp_path / "figure_inputs.json"
+        _REAL_WRITE_MANIFEST(manifest)
+        crashed = next(job for job in pipeline.STANDALONE_FIGURES if job.name == "viz_knn")
+
+        def exploding(
+            module: str, argv: list[str], **_: object
+        ) -> subprocess.CompletedProcess[str]:
+            if module == crashed.module:
+                raise RuntimeError("render crashed")
+            return subprocess.CompletedProcess([module], 0, stdout="", stderr="")
+
+        monkeypatch.setattr(pipeline, "run_module", exploding)
+        with pytest.raises(pipeline.StageError):
+            pipeline.stage_figures(_args(), pipeline.PipelineState(), manifest=manifest)
+        recorded = json.loads(manifest.read_text())
+        assert crashed.name not in recorded
+        assert pipeline.stale_figures(manifest) == [crashed.name]
+
+    def test_a_failed_report_stage_leaves_no_digest(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A REPORT stage that fails must not certify its figures fresh."""
+        monkeypatch.setattr(pipeline, "write_figure_manifest", _REAL_WRITE_MANIFEST)
+        manifest = tmp_path / "figure_inputs.json"
+        _REAL_WRITE_MANIFEST(manifest)
+        assert pipeline.stale_figures(manifest) == []
+
+        def failing(module: str, argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            rc = 1 if module == pipeline.ROUTING_REPORT else 0
+            return subprocess.CompletedProcess([module], rc, stdout="", stderr="")
+
+        monkeypatch.setattr(pipeline, "run_module", failing)
+        with pytest.raises(pipeline.StageError):
+            pipeline.stage_report(_args(), pipeline.PipelineState(), manifest=manifest)
+        recorded = json.loads(manifest.read_text())
+        assert "report" not in recorded  # the crashed report's digest is absent
+        assert pipeline.stale_figures(manifest) == ["report"]
+
+    def test_a_successful_report_stage_certifies_only_its_own_job(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A stage certifies ONLY the jobs it actually drew — never the standalone/escalation
+        figures it did not regenerate."""
+        monkeypatch.setattr(pipeline, "write_figure_manifest", _REAL_WRITE_MANIFEST)
+        manifest = tmp_path / "figure_inputs.json"
+        _REAL_WRITE_MANIFEST(manifest)
+        for job in pipeline.STANDALONE_FIGURES:
+            _REAL_WRITE_MANIFEST(manifest, jobs=(), drop=(job.name,))
+        assert sorted(json.loads(manifest.read_text())) == ["report", "run_eval"]
+
+        def clean(module: str, argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess([module], 0, stdout="", stderr="")
+
+        monkeypatch.setattr(pipeline, "run_module", clean)
+        pipeline.stage_report(_args(), pipeline.PipelineState(), manifest=manifest)
+        recorded = json.loads(manifest.read_text())
+        assert "report" in recorded  # its own job is certified fresh
+        assert "run_eval" in recorded  # untouched jobs are preserved
+        assert all(job.name not in recorded for job in pipeline.STANDALONE_FIGURES)
+
+    def test_a_failed_evaluate_stage_leaves_no_digest(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """An EVALUATE stage that fails must not certify its figures fresh."""
+        monkeypatch.setattr(pipeline, "write_figure_manifest", _REAL_WRITE_MANIFEST)
+        manifest = tmp_path / "figure_inputs.json"
+        _REAL_WRITE_MANIFEST(manifest)
+        assert pipeline.stale_figures(manifest) == []
+
+        def failing(module: str, argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            rc = 1 if module == pipeline.ESCALATION_EVAL else 0
+            return subprocess.CompletedProcess([module], rc, stdout="", stderr="")
+
+        monkeypatch.setattr(pipeline, "run_module", failing)
+        with pytest.raises(pipeline.StageError):
+            pipeline.stage_evaluate(_args(), pipeline.PipelineState(), manifest=manifest)
+        recorded = json.loads(manifest.read_text())
+        assert "run_eval" not in recorded
+        assert pipeline.stale_figures(manifest) == ["run_eval"]
 
 
 def _module_origin(name: str) -> Path | None:

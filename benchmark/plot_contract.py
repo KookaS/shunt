@@ -28,13 +28,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 from matplotlib.table import Table
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.backend_bases import RendererBase
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
     from matplotlib.text import Text
     from matplotlib.transforms import BboxBase
@@ -180,7 +181,11 @@ def _audit_tick_labels(fig: Figure, renderer: RendererBase, canvas: BboxBase) ->
 def audit(fig: Figure, *, band_top_px: float | None = None) -> list[Violation]:
     """Draw once, then check every artist's real device-space extent."""
     fig.canvas.draw()
-    renderer: RendererBase = fig.canvas.get_renderer()
+    # `fig.canvas` is typed as the abstract FigureCanvasBase (no get_renderer on the stubs),
+    # but this whole module is Agg-specific (the module docstring pins the backend), and
+    # FigureCanvasAgg is what `figure.canvas` actually is. Cast, don't ignore: an editor that
+    # later widens the module to a non-Agg backend gets a real error here, not a silenced one.
+    renderer: RendererBase = cast("FigureCanvasAgg", fig.canvas).get_renderer()
     canvas = fig.bbox
 
     violations = _audit_canvas(fig, renderer, canvas)

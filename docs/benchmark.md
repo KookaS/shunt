@@ -94,8 +94,10 @@ It composes five existing stages in order and prints one consolidated summary:
 
 1. **collect** — `run_matrix` runs the outcome matrix (honours `--strategy`, `--live`,
    `--max-cost`, `--max-cost-overshoot`, `--workers`, `--timeout`, `--step-limit`,
-   `--max-start-failures`, `--max-consecutive-failures`, `--check-images`).
-   `--step-limit` (default from `benchmark.yaml` `live.step_limit`, 70) is the **primary**,
+   `--max-start-failures`, `--max-consecutive-failures`, `--check-images`, and — for the
+   `full` strategy — `--cells`, a comma-separated `cid:model:arm` list that recollects exactly
+   those named cells, bypassing cache classification, e.g. a censored-cell pilot at a new cap).
+   `--step-limit` (default from `benchmark.yaml` `live.step_limit`, 150) is the **primary**,
    model-speed-agnostic per-cell bound: every model gets the same number of agent steps
    regardless of inference speed (wall-clock timing unfairly penalises slow models). `--timeout`
    (default 1800s) is a **generous graceful** wall-clock backstop — it is the agent's own
@@ -336,8 +338,9 @@ the better part of a day of container time. The two get confused, so keep them a
 | **Re-replay trajectories** to re-derive verified outcomes (`--restamp`) | `make state-import`, Docker + the SWE-bench images, HF dataset access | hours |
 | **Evaluate a new model** | live inference | real API spend — *cannot be done offline* |
 
-Re-scoring is the loop you iterate in. `make escalation-eval` over the 799-trajectory
-escalation corpus, with its default 200-permutation nulls, takes **~90 s** — no containers, no
+Re-scoring is the loop you iterate in. `make escalation-eval` over the committed
+escalation corpus (trajectory/step counts via `benchmark.escalation.corpus.census()`),
+with its default 200-permutation nulls, takes **~90 s** — no containers, no
 requests. [Routing evaluation](#routing-evaluation) below is the same idea for routing
 strategies over `results.csv`.
 
@@ -373,9 +376,9 @@ corpus lets you re-score **policies** over **existing** model runs — that is i
 
 ### What a re-replay costs
 
-Measured on the 799-trajectory / 166-instance / 29,422-step escalation corpus, from rebuild
-logs covering 76% of the steps. Six workers on a 16-core, 15.9 GB host with every image
-already pulled.
+Measured on the committed escalation corpus (trajectory/step counts via
+`benchmark.escalation.corpus.census()`), from rebuild logs covering 76% of the steps. Six workers
+on a 16-core, 15.9 GB host with every image already pulled.
 
 | Unit | Median | Aggregate mean |
 |---|---:|---:|
@@ -451,8 +454,8 @@ Metrics per strategy:
 | AvgPerf_ci_lower / AvgPerf_ci_upper | 95% bootstrap CI on AvgPerf% (resample tasks, B=1000) |
 | TotalCost | Total backend model cost (USD), summed raw over every billed attempt |
 | TotalCost_ci_lower / TotalCost_ci_upper | 95% bootstrap CI on TotalCost (same task resample as AvgPerf%). Cost here is heavy-tailed, so the point total does not travel alone |
-| TotalCost_cacheaware | TotalCost once a repeat of the same model on consecutive attempts banks its cache-read discount. Point estimate only — cache savings are adjacency-dependent, so resampling tasks would destroy the ordering the statistic is defined over |
-| AvgCost_ci_lower / AvgCost_ci_upper / AvgCost_cacheaware | The per-task forms of the three above |
+| TotalCost_cacheaware | TotalCost once a repeat of the same model on consecutive attempts banks its cache-read discount. Cache cost is scoped PER TASK (one task = one session, so a discount fires only on a within-task repeat), which is exactly why resampling whole tasks is safe here — each task's attempt adjacency survives — and the paired CI is emitted as TotalCost_cacheaware_ci_lower / TotalCost_cacheaware_ci_upper |
+| AvgCost_ci_lower / AvgCost_ci_upper / AvgCost_cacheaware / AvgCost_cacheaware_ci_lower / AvgCost_cacheaware_ci_upper | The per-task forms of the above, including the cache-aware CI |
 | Reward | `Σ(1.0 × passed − γ × cost)` per task (γ=0.1 default) |
 | CumReg | `total(oracle_reward) − total(strategy_reward)` |
 | CumReg_ci_lower / CumReg_ci_upper | 95% bootstrap CI on CumReg |
@@ -599,10 +602,12 @@ Escalating to a model that was never run would make the task unscorable rather
 than answer it, and a different escalation target on each cascade would make the
 zero-ML baseline and the learned router incomparable.
 
-The embedding-based strategies are **offline evaluation strategies**, not live product behavior —
-the proxy today forwards to a cheap default and calls none of them. The cascade
+The embedding-based strategies other than the shipped single-shot kNN router are
+**offline evaluation strategies**, not live product behavior — the proxy wires in the
+router engine (it decides the first turn; see below), but the multi-attempt cascade
 (try-verify-escalate) exists only here in the benchmark; it is not implemented on
-the live request path.
+the live request path, where escalation happens once per session boundary, not per
+attempt.
 
 ### What the offline eval found about routing
 
@@ -617,7 +622,7 @@ Scored offline, the embedding-based routing strategies split by workload:
   strategies embedded the short `description` label rather than the task's
   `problem_statement`, so it was pending re-measurement. The manifest has since been
   rebuilt with the real statements (2026-08-05), and the re-measured numbers fell:
-  kNN 78.89% is inside noise of Always-Cheap — a settled null, not a coverage gap
+  kNN 78.26% is inside noise of Always-Cheap — a settled null, not a coverage gap
   ([Results](results.md#routing-results)). The router is wired into the live proxy
   (it decides the first turn), outcomes are recorded automatically at session close
   (via off-wire test re-execution when configured), and the learning loop is live.
@@ -732,8 +737,7 @@ equal coverage across the whole suite is guaranteed by **ladder collection mode*
 versus fixed-frontier on the *same* completed task set — with its confidence interval, and
 it stays honest when that interval crosses zero (equal quality is reported as equal, not
 spun as a win). On the current coverage-incomplete data, the cheapest strategy that
-matches fixed-frontier quality is `Price-Cascade` (**+0.6 pp, CI crosses zero →
-statistically equal**, at roughly **76% lower cost** on the shared measurable set) — but
+matches fixed-frontier quality is `Price-Cascade` (**+1.6 pp, CI crosses zero → statistically equal**, at roughly **72% lower cost** on the shared measurable set) — but <!-- generated-by: benchmark.routing.report:paired_quality_contrast -->
 it is **blocked, not deployable**: the router rejects `price_cascade` at boot, because
 stopping at the first passing patch needs a verified outcome mid-session and that is not
 one cache-safe decision per session. So this is a bound on what the mechanism is worth,

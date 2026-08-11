@@ -30,7 +30,7 @@
 # cell with `No module named 'minisweagent'`. Pass extra flags via ARGS=…, e.g.
 # `make benchmark-live ARGS="--live --max-cost 2"`.
 
-.PHONY: e2e docs docs-build stop help benchmark benchmark-live offline-replay escalation-eval model-coverage state-capture-check state-capture-mark state-export state-import state-verify replay-inputs routing-report benchmark-figures check-figures reconcile-cost
+.PHONY: e2e docs docs-build stop help benchmark benchmark-live offline-replay escalation-eval model-coverage state-capture-check state-capture-mark state-export state-import state-verify replay-inputs routing-report benchmark-figures check-figures reconcile-cost live-smoke
 .DEFAULT_GOAL := help
 
 DOCS_REQS := docs/requirements.txt
@@ -59,6 +59,7 @@ help:
 	@echo "make benchmark-figures Regenerate the standalone routing figures + manifest (no spend)"
 	@echo "make check-figures   Verify the committed standalone figures are current (seconds)"
 	@echo "make reconcile-cost  Reconcile tracked cost vs the real bill (ARGS=\"--billed 35 --timestamp 2026-07-27T00:00:00\")"
+	@echo "make live-smoke      One real, cheap session through Shunt against a real provider (ARGS=\"--live\")"
 
 # The tool→Shunt handshake harness, over Docker, against a fake upstream: no key, no
 # spend. With no TOOL it runs every declared (tool, scenario) leg and reports which
@@ -166,3 +167,10 @@ check-figures:
 # --billed is the owner-read Requesty dashboard figure; --timestamp is required.
 reconcile-cost:
 	$(BENCH) benchmark.cost_reconcile $(ARGS)
+
+# One real, cheap session through the shipped proxy against a real provider — the
+# live smoke (docs/live-smoke-runbook.md). Gated IN THE SCRIPT, not here: it refuses
+# without --live/--confirm AND an interactive TTY confirmation, so a bare `make
+# live-smoke` can never spend. Run supervised and tee the output.
+live-smoke:
+	uv run python benchmark/runner/live_smoke.py $(ARGS)

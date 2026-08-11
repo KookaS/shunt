@@ -1,0 +1,7 @@
+ ✓ src/widget.test.ts (2 tests) 4ms
+ ❯ src/widget.test.ts > parses input (1 test) 2ms
+   AssertionError: expected 2 to be 3
+   ❯ src/widget.test.ts:9:15
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)

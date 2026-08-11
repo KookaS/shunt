@@ -20,6 +20,7 @@ from benchmark.routing.validate import (
     BAD_STOP_REASON,
     MALFORMED_NUMERIC,
     MALFORMED_TIMESTAMP,
+    MISSING_COLLECTION_FIELD,
     PASS_STOP_MISMATCH,
     SUSPICIOUS_ZERO,
     TIMEOUT_FLAG_MISMATCH,
@@ -52,6 +53,11 @@ _COLUMNS: Final[list[str]] = [
     "image_digest",
     "computed_at",
     "stop_reason",
+    "step_limit",
+    "cost_limit",
+    "scaffold_version",
+    "sampling_hash",
+    "prompt_hash",
 ]
 
 
@@ -75,6 +81,11 @@ def _row(**over: object) -> dict:
         "image_digest": "sha256:x",
         "computed_at": "2026-07-25T18:50:14.557864+00:00",
         "stop_reason": "solved",
+        "step_limit": "150",
+        "cost_limit": "4.0",
+        "scaffold_version": "2.4.5",
+        "sampling_hash": "sh",
+        "prompt_hash": "ph",
     }
     base.update(over)
     return base
@@ -184,6 +195,41 @@ def test_timeout_flag_true_on_step_limit_is_error() -> None:
     # step_limit is censored but NOT a timeout stop ⇒ timeout_flag must be False.
     row = _row(**{"pass": "False", "stop_reason": "step_limit", "timeout_flag": "True"})
     assert TIMEOUT_FLAG_MISMATCH in _codes(validate.validate_row(row, PRICING))
+
+
+# ── collection-param provenance ───────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["step_limit", "cost_limit", "scaffold_version", "sampling_hash", "prompt_hash"],
+)
+def test_row_missing_collection_field_is_error(field: str) -> None:
+    row = _row()
+    del row[field]
+    violations = validate.validate_row(row, PRICING)
+    missing = [v for v in violations if v.code == MISSING_COLLECTION_FIELD]
+    assert len(missing) == 1
+    assert missing[0].severity is Severity.ERROR
+
+
+def test_empty_collection_field_is_not_error() -> None:
+    # The grandfather rule: a legacy row may carry an EMPTY anchor (never recollect it).
+    # Only an ABSENT column is a schema error.
+    row = _row(**{"sampling_hash": "", "prompt_hash": "", "scaffold_version": ""})
+    assert validate.validate_row(row, PRICING) == []
+
+
+def test_cli_gate_exits_nonzero_on_missing_collection_column(tmp_path, monkeypatch) -> None:
+    # A CSV whose header lacks the collection-param columns: every parsed row misses them.
+    results = tmp_path / "results.csv"
+    header = ",".join(c for c in _COLUMNS if c != "step_limit")
+    with results.open("w", newline="") as fh:
+        fh.write(header + "\n")
+        fh.write("astropy__astropy-1,kimi-k3,high,True,0.05,100000,5000,12\n")
+    monkeypatch.setattr(config, "load_pricing", lambda *a, **k: PRICING)
+    monkeypatch.setattr(config, "load", lambda *a, **k: None)
+    assert vr.main(["--results", str(results)]) == 1
 
 
 # ── well-formedness ───────────────────────────────────────────────────────────

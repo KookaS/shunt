@@ -154,6 +154,8 @@ trust rules: [Feedback](feedback.md).
 - [Benchmark](benchmark.md) — run the offline model-capability and routing evals
 - [Benchmark dataset](benchmark-data.md) — what data is collected and usable, censored cells, outliers, collection modes
 - [Benchmark design](benchmark-design.md) — two-tree structure, strategy interface
+- [Live smoke](live-smoke-runbook.md) — run one real, cheap session through Shunt against a real provider
+- [Free-tier smoke](free-tier-smoke.md) — the weekly, zero-cost CI check against a real $0 model
 
 ## Status
 

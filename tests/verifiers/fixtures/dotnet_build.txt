@@ -1,0 +1,2 @@
+  test.cs(9,16): error CS0246: The type or namespace name 'Widget' could not be found (are you missing a using directive or an assembly reference?)
+Build FAILED.

@@ -26,7 +26,7 @@ def test_the_configured_timeout_reaches_the_subprocess_verifier() -> None:
 
 def test_an_unset_timeout_keeps_the_shipped_default() -> None:
     verifier = _build_verifier(_policy())
-    assert verifier._inner._timeout == 120  # type: ignore[attr-defined,union-attr]
+    assert verifier._inner._timeout == 1800  # type: ignore[attr-defined,union-attr]
 
 
 def test_the_configured_rerun_count_reaches_the_flake_guard() -> None:

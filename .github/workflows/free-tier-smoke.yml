@@ -1,0 +1,75 @@
+name: Free-tier smoke (real wire, $0, opt-in)
+
+# WHAT THIS PROVES, AND WHY IT IS A SEPARATE WORKFLOW.
+#
+# The integration handshake proves wiring against a FAKE upstream; the owner-run
+# live smoke proves a real session against a real provider but needs an
+# interactive owner (and spends ~$0.10). This job is the free complement: one
+# tiny completion through the real proxy against a genuinely-$0 OpenRouter
+# `:free` model, with the decision headers and the captured session row verified
+# machine-checkably. It uses a DEDICATED config directory (configs/free-tier/)
+# via SHUNT_CONFIG_DIR — never the shipped registry, where a $0 model would rank
+# cheapest-first and change production routing.
+#
+# WHY OPT-IN IS STRUCTURAL, LIKE provider-probe.yml: this job depends on an
+# upstream third-party API and a real secret. If it ran on push/pull_request,
+# the day OpenRouter is down or drops the :free tier, every unrelated PR in the
+# repo turns red for a reason no contributor caused. So there is no `push:` or
+# `pull_request:` trigger here, and ci.yml never calls this file. The two
+# triggers below — weekly cron + manual dispatch — are the only ways it runs.
+#
+# WHY ADVISORY (continue-on-error): the job's purpose is measurement, not gating.
+# A provider outage, a transient 5xx, or an OpenRouter pricing change fails this
+# job and that is useful news — but it must never redden an unrelated commit. A
+# green PR never depends on OpenRouter being up; the verdict artifact is where
+# the failure is read.
+#
+# WHY SECRET-SKIP, NOT SECRET-FAIL: the smoke requires OPENROUTER_API_KEY. On a
+# repo without that secret set, the job prints a visible SKIP and exits 0 (the
+# smoke refuses to run without the key, so nothing is sent and nothing is
+# billed) — coverage grows the moment the secret exists, with no edit here.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Monday 04:47 UTC. Off-peak, off-the-hour, and offset from the
+    # keyless probe (04:17), the auth check (04:31) and the handshake (06:00) so
+    # the scheduled jobs do not contend.
+    - cron: "47 4 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  # 1 = this is the CI context: the smoke may run non-interactively and auto-accepts
+  # the spend confirmation because the target model is asserted $0 (`:free`).
+  SHUNT_FREE_TIER_CI: "1"
+
+jobs:
+  free-tier-smoke:
+    name: one real $0 completion
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true # advisory: a provider outage is news, not a PR blocker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --extra dev --extra benchmark --extra capture
+      - name: Run the free-tier smoke
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          uv run python -m benchmark.runner.free_tier_smoke
+      - name: Upload the run artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: free-tier-smoke
+          path: benchmark/runner/artifacts/free-tier-smoke/
+          if-no-files-found: warn

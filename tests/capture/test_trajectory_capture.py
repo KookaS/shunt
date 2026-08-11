@@ -78,18 +78,40 @@ def test_redaction_scrubs_secret_from_every_free_text_field() -> None:
     assert _SECRET not in redacted.metadata["note"]
 
 
-def test_live_plane_writes_only_encrypted_bytes(tmp_path) -> None:
+def test_live_plane_writes_only_encrypted_bytes_and_round_trips(tmp_path) -> None:
     pytest.importorskip("cryptography")
-    sink = LiveTrajectorySink(tmp_path, _fernet_key())
+    key = _fernet_key()
+    sink = LiveTrajectorySink(tmp_path, key)
     sink.write([_record_with_secret()])
     written = next(tmp_path.glob("*.traj.enc")).read_bytes()
     # ciphertext only — no plaintext secret, no plaintext free-text prose on disk
     assert _SECRET.encode() not in written
     assert b"Authorization" not in written
     assert b"leaked" not in written
+    # the encrypt -> redact -> decrypt round-trip: every ciphertext line decrypts to the
+    # REDACTED record (defense in depth), never the raw one
+    import json
+
+    from cryptography.fernet import Fernet
+
+    decrypt = Fernet(key)
+    payloads = [decrypt.decrypt(line) for line in written.splitlines() if line]
+    assert payloads
+    for payload in payloads:
+        assert _SECRET.encode() not in payload
+        record = json.loads(payload.decode("utf-8"))
+        # redaction ran before encryption: the free-text fields survive as keys but carry no
+        # secret, and the behaviour fields round-trip unchanged
+        assert record["exit_code"] == 1
+        assert record["success"] is False
+        assert record["blocking"] is True
+        assert _SECRET not in record["observation"]
+        assert _SECRET not in record["action"]
+        assert _SECRET not in (record["args"] or "")
+        assert _SECRET not in record["result"]
 
 
-def test_live_plane_restricts_dir_and_file_permissions(tmp_path) -> None:
+def test_encrypted_live_plane_restricts_dir_and_file_permissions(tmp_path) -> None:
     pytest.importorskip("cryptography")
     import stat
 

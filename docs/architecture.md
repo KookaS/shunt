@@ -88,7 +88,7 @@ The knobs are live; exploration behaviour adapts as verified outcomes accumulate
 | **models/** | Provider config: model pool, price-derived capability rank, fallback chain | **Yes** (read at startup) |
 | **router/** | Decision core: embed prompt via fastembed, kNN retrieval via hnswlib, selection rule → model chosen via outcome feedback or cold-start | **Yes** — called on first turn; learns from verified outcomes |
 | **capture/** | Off-wire outcome capture: session-close triggers, work-dir resolver, coordinator, background worker | **Yes** — wired at session-close to run verifiers async |
-| **verifiers/** | Async outcome verification: auto-detect and run pytest / jest / go test / cargo test per project | **Yes** — called at session close by capture worker |
+| **verifiers/** | Async outcome verification: auto-detect and run the repo's test runner (pytest / jest / go test / cargo test / Maven / dotnet test / RSpec / PHPUnit / GTest / …) per project | **Yes** — called at session close by capture worker |
 | **db/** | SQLite persistence for sessions, outcomes, HNSW index (append-only events + materialized view) | **Yes** — sessions persist on each turn; learning loop is live |
 
 Every session's embedding is persisted, but only a session that carries a **recorded

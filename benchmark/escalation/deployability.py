@@ -42,6 +42,7 @@ from dataclasses import dataclass, fields
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
+from benchmark.escalation import schema
 from shunt.router.escalation import EscalationContext, FailureEvent
 
 if TYPE_CHECKING:
@@ -58,7 +59,11 @@ CONTEXT_FIELDS: Final[frozenset[str]] = frozenset(
 OFFLINE_SOURCE: Final[dict[str, str]] = {
     "decision_index": "decision_index",
     "dedup_key": "failing_check_id",
-    "exit_code": "exit_code",
+    # Production's `FailureEvent.exit_code` is the off-wire check's rc; offline that is the
+    # REPLAY HARNESS's return code, so the record carries it in `replay_rc`, never in the
+    # step's OWN `exit_code` (the two referents stay separate). `_context_value` resolves it
+    # via `schema.replay_returncode`, which also reads the legacy spelling in `exit_code`.
+    "exit_code": "replay_rc",
     "success": "success",
     "confirmed": "confirmed",
     "blocking": "blocking",
@@ -116,6 +121,17 @@ class ProjectedContext:
     missing: frozenset[str]
 
 
+def _context_value(step: StepView, source: str | None) -> object:
+    """Resolve one OFFLINE_SOURCE attribute onto the step, honouring the exit-code compat read."""
+    if source is None:
+        return None
+    if source == "replay_rc":
+        # The offline record's exit-code analogue is the replay harness's return code, which
+        # committed corpora carried in `exit_code` before `replay_rc` existed.
+        return schema.replay_returncode(step)
+    return getattr(step, source, None)
+
+
 def project_step(step: StepView) -> ProjectedContext:
     """Project an offline replay record onto what production holds at a decision boundary."""
     # `is None`, never falsiness: `success=False` and `decision_index=0` are filled values, and
@@ -124,7 +140,7 @@ def project_step(step: StepView) -> ProjectedContext:
     missing: set[str] = set()
     for name in sorted(CONTEXT_FIELDS):
         source = OFFLINE_SOURCE.get(name)
-        value = getattr(step, source, None) if source is not None else None
+        value = _context_value(step, source)
         if value is None:
             missing.add(name)
         else:

@@ -602,7 +602,7 @@ def evaluate(
     # coverage note. `prefix_eval` re-applies the same filter inside `corpus_census` — that is not
     # redundancy to be tidied away: the gate must live where a direct `evaluate_depth` caller
     # cannot skip it, and filtering an already-filtered corpus is idempotent, so this path's
-    # numbers are unchanged (`n_excluded_unstamped` reads 0 here and 8 on the raw 799).
+    # numbers are unchanged (`n_excluded_unstamped` reads 0 here and the raw-corpus count there).
     stamped = [t for t in trajectories if features.is_stamped(t)]
     multistep = [t for t in trajectories if not datasets.is_degenerate(t)]
     policy_cells = policy_eval.evaluate(stamped, _with_shipped(grid), n_permutations=n_permutations)
@@ -805,7 +805,7 @@ def _session_run_annotations(report: EvalReport) -> Annotations:
     # `session_cadence()` is handed every trajectory and reads only `header.terminal_resolved`
     # and `header.n_steps` — both present on an unstamped run — so the per-step stamping split
     # is irrelevant to it. Inheriting `_run_annotations` told a reader this figure scored
-    # 727/799 and excluded 72, and neither is true of it.
+    # n_stamped/n_trajectories and excluded the unstamped rest, and neither is true of it.
     return Annotations(
         subtitle_facts=(f"{report.n_trajectories}/{report.n_trajectories} runs read",),
         # Deliberately NOT `_run_caveat`: its lowest-severity branch is the per-step drop line,
@@ -922,38 +922,67 @@ def _save_plots(report: EvalReport, out_dir: Path, metrics_dir: Path | None = No
     canonical_scope = _merge(run, _canonical_annotations(report))
     provenance = _provenance(report, out_dir)
     cell = canonical_cell(report)
-    _draw_decision(report, out_dir, run, provenance)
-    _draw_corpus(report, out_dir, canonical_scope, provenance)
-    if cell is not None:
-        _draw_operating_point(report, cell, out_dir, canonical_scope, provenance)
-        _draw_budget(cell, out_dir, canonical_scope, provenance)
-    else:
-        # Only reachable on a hand-built report: `evaluate` guarantees the shipped point is in
-        # both grids. The per-cell figures are skipped rather than drawn off some other cell — a
-        # figure titled with the canonical operating point that plots a different one IS the
-        # defect this whole redesign removes.
-        logger.error("no edit-gated cell matches the shipped knobs; per-cell figures skipped")
-    if report.policy_cells:
-        _draw_sweep(report, out_dir, run, provenance)
-    if report.session_cadence is not None:
-        # NOT `run`: this figure scores every trajectory, not the stamped subset.
-        _draw_session(report.session_cadence, out_dir, _session_run_annotations(report), provenance)
-    _write_metrics(report, metrics_dir if metrics_dir is not None else _metrics_dir_for(out_dir))
+    try:
+        _draw_decision(report, out_dir, run, provenance)
+        _draw_corpus(report, out_dir, canonical_scope, provenance)
+        if cell is not None:
+            _draw_operating_point(report, cell, out_dir, canonical_scope, provenance)
+            _draw_budget(cell, out_dir, canonical_scope, provenance)
+        else:
+            # Only reachable on a hand-built report: `evaluate` guarantees the shipped point is in
+            # both grids. The per-cell figures are skipped rather than drawn off some other cell — a
+            # figure titled with the canonical operating point that plots a different one IS the
+            # defect this whole redesign removes.
+            logger.error("no edit-gated cell matches the shipped knobs; per-cell figures skipped")
+        if report.policy_cells:
+            _draw_sweep(report, out_dir, run, provenance)
+        if report.session_cadence is not None:
+            # NOT `run`: this figure scores every trajectory, not the stamped subset.
+            _draw_session(
+                report.session_cadence, out_dir, _session_run_annotations(report), provenance
+            )
+        _write_metrics(
+            report, metrics_dir if metrics_dir is not None else _metrics_dir_for(out_dir)
+        )
+    except BaseException:
+        # A draw that failed must leave the freshness manifest STALE, never falsely current: a
+        # crashed render records no digest, and the figures already committed may be partial.
+        _retract_figure_manifest(out_dir)
+        raise
     if _committed_home(out_dir):
         # Record the pipeline's freshness manifest now that the figures ARE drawn, so
         # `benchmark.pipeline --check-figures` stays green after a canonical `make escalation-eval`
         # — otherwise this run leaves the escalation job's digest stale in
         # `benchmark/routing/figure_inputs.json` and the gate that proves the committed figures
         # current fails until someone re-runs the full pipeline. After, not before: a draw that
-        # failed must leave the manifest stale (red gate), never falsely current.
+        # failed must leave the manifest stale (red gate), never falsely current. Scoped to the
+        # escalation job: this eval drew ONLY the escalation figures — it must not certify the
+        # routing/report figures it never touched.
         try:
-            from benchmark.pipeline import write_figure_manifest  # noqa: PLC0415
+            from benchmark.pipeline import (
+                ESCALATION_FIGURES,
+                write_figure_manifest,  # noqa: PLC0415
+            )
 
-            write_figure_manifest()
+            write_figure_manifest(jobs=ESCALATION_FIGURES)
         except Exception:  # noqa: BLE001 — freshness bookkeeping must never fail the eval itself
             logger.warning(
                 "escalation eval: could not refresh the figure-inputs manifest", exc_info=True
             )
+
+
+def _retract_figure_manifest(out_dir: Path) -> None:
+    """Delete the escalation job's digest from the pipeline freshness manifest (best effort)."""
+    if not _committed_home(out_dir):
+        return
+    try:
+        from benchmark.pipeline import ESCALATION_FIGURES, write_figure_manifest  # noqa: PLC0415
+
+        write_figure_manifest(jobs=(), drop=tuple(job.name for job in ESCALATION_FIGURES))
+    except Exception:  # noqa: BLE001 — freshness bookkeeping must never fail the eval itself
+        logger.warning(
+            "escalation eval: could not retract the figure-inputs manifest", exc_info=True
+        )
 
 
 def _draw_decision(

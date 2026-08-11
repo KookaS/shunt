@@ -84,7 +84,8 @@ router:
   capture:
     work_dir: null
     # work_dirs: { "<tool_identity_hash>": "/path/to/repo" }   # per-tool override map
-    # Wall-clock budget for ONE verification run. null ⇒ 120s. Raise it on a big repo:
+    # Wall-clock budget for ONE verification run. null ⇒ 1800s (30 min — the floor for a real
+    # repo suite; 120s made the capture loop a silent no-op on anything bigger than a toy).
     # a suite slower than the budget times out, records NOTHING, and the loop is a silent
     # no-op. Each run logs its duration at debug, and WARNS past 70% of the budget.
     verify_timeout_seconds: null
@@ -114,6 +115,17 @@ router:
   # batch-first — the index is a rebuildable projection, not updated online per outcome.
   refit:
     every_n_outcomes: 50
+
+  # Per-session spend cap. Once a session's cumulative PROVIDER-REPORTED cost
+  # (usage.cost — never a locally derived price) reaches max_spend_usd, the router
+  # REFUSES further routing for that session: a clean 402 error naming the cap, never
+  # a fabricated success. A SOFT ceiling at the next request boundary: the request that
+  # crosses the cap completes, the following one is refused. null (the default) =
+  # unlimited. 0.0 refuses every request.
+  # This is the key the live tier's spend cap documents (compose.live.yaml /
+  # SHUNT_LIVE_MAX_SPEND_USD); the exploration budget above is a separate, softer knob.
+  budget:
+    max_spend_usd: null
 
   # Which registry models (src/shunt/config/models.yaml) the live router may pick.
   # Empty/absent = every registry model. This is core + the latest frontier models,

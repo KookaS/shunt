@@ -91,8 +91,8 @@ def record_snapshot_provenance(
     # For a corpus captured before `snapshot_steps` existed. The count is read off the local,
     # gitignored scratch, so on any other host every count comes back 0 — and 0 is the one value
     # that authorises the offline replay to CLEAR a trajectory. Running this on a fresh clone
-    # would therefore rewrite all 799 headers to 0 and hand the next rebuild a licence to wipe the
-    # corpus. "Collection host only" has to be a wall, not a docstring, so the wrong-host
+    # would therefore rewrite every committed header to 0 and hand the next rebuild a licence to
+    # wipe the corpus. "Collection host only" has to be a wall, not a docstring, so the wrong-host
     # SIGNATURE is what is checked: no scratch root at all, or a scratch that holds diffs for not
     # one trajectory. A downgrade check alone cannot see this, because a not-yet-migrated header
     # reads `None` — which is exactly the corpus this command exists to migrate.

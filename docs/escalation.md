@@ -14,7 +14,8 @@ does nothing.
 **It ships ON** (owner choice, 2026-08-08) — with the honest caveats in
 [Limitations](#limitations-read-before-relying-on-it): the recurrence *trigger* is a null detector at
 the live cadence, so no measurement yet shows it to separate outcomes; the value is the *ladder's*,
-measured observationally (2.51× at session cadence). **It is armed when a repo is resolved** — escalation's only verified-failure signal is the repo's tests re-run off the wire.
+measured observationally at session cadence (3.02× — see the
+[session-value figure](#fig-session-value), the authoritative committed measurement). **It is armed when a repo is resolved** — escalation's only verified-failure signal is the repo's tests re-run off the wire.
 The repo is resolved in order: explicit `capture.work_dir` / `capture.work_dirs` map, `SHUNT_WORK_DIR` env var, or the validated launch
 directory (when `trust_launch_dir: true`, the default). With a `git` repo at launch, `cd myrepo && shunt start` captures with zero configuration.
 Without any repo, a boot warning names which layer arm and says escalation is enabled but not armed; it is never silently inert.
@@ -45,7 +46,7 @@ flowchart TD
   IN["Input: a closed session, with a work_dir configured<br/>(never the model's own claim)"] --> P1
 
   subgraph PRE["Pre-processing — off-wire verification"]
-    P1["Auto-detect the runner from repo files:<br/>pytest · jest/vitest · go test · cargo test"]
+    P1["Auto-detect the runner from repo files:<br/>pytest · jest/vitest · go test · cargo test<br/>· Maven/Gradle · dotnet test · RSpec/PHPUnit · …"]
     P1 --> P2["Run it; capture stdout + stderr and the exit code"]
     P2 --> P3["Classify — exit code first, then regex:<br/>success · capability failure · infra/unknown"]
     P3 --> P4["Re-run a failure to confirm it reproduces;<br/>abstain if it does not (flake guard)"]
@@ -91,9 +92,11 @@ non-model producer: your test suite, re-run off the wire.
 
 - **Off-wire re-run.** At session close, if you have configured a `work_dir`, Shunt
   re-runs *that repo's* test suite off the request path and records the pass/fail as
-  a verified outcome. The runner is auto-detected from the repo: **pytest** (Python),
-  **jest**/**vitest** (a `package.json`), **`go test`** (a `go.mod`), or **`cargo
-  test`** (a `Cargo.toml`). No `work_dir`, no framework, no signal — Shunt writes
+  a verified outcome. The runner is auto-detected from the repo (see
+  [Which runners are supported](#which-runners-are-supported)) — **pytest** (Python),
+  **jest**/**vitest** (a `package.json`), **`go test`** (a `go.mod`), **`cargo
+  test`** (a `Cargo.toml`), Maven/Gradle, `dotnet test`, RSpec, PHPUnit, GTest/CTest,
+  and more. No `work_dir`, no framework, no signal — Shunt writes
   nothing and never guesses. See [Feedback](feedback.md#1-automatic-off-wire-test-execution-the-signal-that-matters).
 - **Flake guard.** A test that fails then passes on unchanged state is a flake, not a
   regression. A failing run is re-run to confirm; if it does not reproduce, the result
@@ -119,7 +122,8 @@ non-model producer: your test suite, re-run off the wire.
   failing test's node id where the runner prints one (`path::Test::case`), or a
   normalized hash of the failure detail otherwise — with timings, hex addresses,
   temp paths, timestamps, randomized run seeds (a runner that prints its own
-  `random seed:` / `PYTHONHASHSEED`), subprocess pids, and pytest's `--durations`
+  `random seed:` / `PYTHONHASHSEED`), subprocess pids, JUnit XML `time="…"`
+  attributes, and pytest's `--durations`
   block stripped, so the *same* recurring failure hashes to the same key run to run.
   The durations block is dropped whole rather than value-normalized: it is sorted by
   time, so run-to-run jitter permutes the lines and normalizing only the numbers still
@@ -137,50 +141,85 @@ detail.
 ## Which runners are supported
 
 The classifier that turns a test run into `success` / `failure` / `environment` is
-language-agnostic in design and runner-specific in coverage. It is built and tested
-against four families today:
+language-agnostic in design and runner-specific in coverage. Every row of the matrix
+below is a coverage contract — a captured pass, a genuine failure and a collection
+error per family live in `tests/verifiers/fixtures/`, and all are classified by the
+*same* multi-stage rule, never a per-framework parser.
 
-| Runner | Language(s) | Detected from |
+| Language(s) | Runners recognized | Detected from |
 |---|---|---|
-| pytest | Python | `pyproject.toml` / `setup.cfg` / a dev requirements file |
-| jest / vitest | JavaScript / TypeScript | a `package.json` *declaring* jest or vitest |
-| `go test` | Go | a `go.mod` |
-| `cargo test` | Rust | a `Cargo.toml` |
+| Python | pytest · unittest · nose2 · tox | `pyproject.toml` / `setup.cfg` / `pytest.ini` / `conftest.py` / a dev requirements file |
+| JavaScript / TypeScript | Jest · Vitest · node:test · mocha · jasmine · karma · ava | a `package.json` declaring the runner, or `node --test` |
+| Go | `go test` (testify / Ginkgo emit through it) | a `go.mod` |
+| Rust | `cargo test` (libtest) | a `Cargo.toml` |
+| Java | Maven Surefire / Failsafe · Gradle (JUnit 4/5, TestNG) | a `pom.xml` or `build.gradle(.kts)` |
+| C#/.NET | `dotnet test` (VSTest) — xUnit · NUnit · MSTest | a `*.csproj` / `*.sln` |
+| Ruby | minitest · RSpec · test-unit · Cucumber | a `Gemfile` declaring one, or a `.rspec` |
+| PHP | PHPUnit · Pest · Behat · Codeception | `composer.json` declaring one, or a `phpunit*.xml` |
+| C/C++ | GoogleTest · CTest · Catch2 · doctest · Boost.Test | a `CMakeLists.txt` with `enable_testing` / `add_test` |
+| Swift | XCTest (`swift test`) | a `Package.swift` |
+| Shell | bats (TAP) · shunit2 | `*.bats` files, or scripts calling shunit2 |
+| Perl | prove / Test::More (TAP) | `t/*.t`, `Makefile.PL` / `Build.PL` |
+| R | testthat · R CMD check | a `DESCRIPTION` suggesting testthat |
+| Elixir | ExUnit (`mix test`) | a `mix.exs` |
+| Haskell | hspec · tasty · HUnit | `*.cabal` / `package.yaml` / `stack.yaml` |
 
 Detection is a **single multi-stage classifier**, not one parser per runner, so every
 language gets the same treatment:
 
-1. **Exit code first.** `0` = pass (with the nothing-ran caveat below); pytest's
-   `2/3/4/5` (interrupted / internal error / usage / nothing collected) and a signal
-   death (`128+N` or a negative code) are infrastructure by
-   definition — no bigger model fixes a session that never validly ran. Rust's `101`
-   is deliberately NOT in that set: it is `cargo test`'s test-failure exit, and a
-   failing run is classified `failure` via the `failures:` marker below, exactly like
-   pytest's `1`.
-2. **Positive proof a test ran and failed** — pytest's `FAILED <nodeid>` and `N
-   failed` tails, Go's `--- FAIL:`, Rust's `failures:` block, jest's `Tests: … N
-   failed`. These win over every "environmental-looking" phrase below, because an
-   assertion can quote any of them verbatim (`assert "cannot find module" in out`).
-3. **Environment / collection markers** only when no run-and-failed proof exists —
-   `ImportError` / `ModuleNotFoundError` while collecting, `cannot find module`
-   (jest / go build), `unresolved import` / `can't find crate for` (Rust).
-4. **Nothing-selected is never a pass** — `0 passed`, `collected 0 items`, `no tests
-   ran`, `no test files` mean *no measurement*, unless the same run also counted at
-   least one passing test (a real green tail overrides its own absence marker).
+1. **Exit code first.** `0` = pass (with the nothing-ran caveat below); a signal
+   death (`128+N` or a negative code) and pytest's `2/3/4/5` (interrupted / internal
+   error / usage / nothing collected) are infrastructure by definition — no bigger
+   model fixes a session that never validly ran. The red exits are everything else:
+   `1` (pytest, jest, go, Maven, Gradle, dotnet, RSpec, minitest, CTest, xctest,
+   mix, hspec, R CMD check), cargo's `101` — gated on the `test result:` /
+   `failures:` markers, so a compile error at `101` is infra, not a red — and
+   PHPUnit's `1` (failure) and `2` (errored test). PHPUnit's `2` is deliberately a
+   red: its `ShellExitCodeCalculator` maps a test ERROR to `2`, unlike pytest where
+   `2` means interrupted. karma is the one marker-gated exception: it exits `0` even
+   when tests fail, so its `Executed … (N FAILED)` summary is proof of a red at exit
+   `0`.
+2. **Machine-readable channels first.** When the output carries **JUnit XML** (a
+   `<testsuite … tests="N" failures="Y" errors="Z">` with `<failure>` / `<error>`
+   testcases) or **TAP** (`TAP version`, a `1..N` plan, `ok N` / `not ok N` lines),
+   the counts are read straight from the channel. pytest `--junitxml`, Surefire
+   `TEST-*.xml`, Gradle test-results, PHPUnit `--log-junit` and gtest
+   `--gtest_output=xml` emit the first; node:test, bats, prove and tasty emit the
+   second. Only when neither channel is present does the regex fallback run.
+3. **Positive proof a test ran and failed** — pytest's `FAILED <nodeid>` and `N
+   failed` tails, Go's `--- FAIL:`, Rust's `failures:` block, Jest's `Tests: … N
+   failed`, Maven's `Tests run: … Failures: N`, dotnet's `Failed!`, RSpec /
+   minitest's `N failures`, PHPUnit's `FAILURES!` / `ERRORS!`, gtest's
+   `[  FAILED  ]`, CTest's `The following tests FAILED:`, xctest's
+   `Test Case '…' failed`, ExUnit's `N tests, M failures`, and each family's
+   count-summary line. These win over every "environmental-looking" phrase below,
+   because an assertion can quote any of them verbatim (`assert "cannot find module"
+   in out`).
+4. **Environment / collection markers** only when no run-and-failed proof exists —
+   import / compile / link failures (`ImportError while importing`, `cannot find
+   module`, `unresolved import` / `error[E…]`, `COMPILATION ERROR`, `error CS…`,
+   `Build FAILED`, `fatal error:`, `cannot load such file`, `PHP Fatal error:`,
+   `could not find module`, `Can't locate … in @INC`), plus a selector that found
+   nothing to run.
+5. **Nothing-selected is never a pass** — `0 passed`, `collected 0 items`, `no tests
+   ran`, `Ran 0 tests`, `no test files`, a TAP `1..0` plan or a JUnit `tests="0"`
+   mean *no measurement*, unless the same run also counted at least one passing test
+   (a real green tail overrides its own absence marker).
 
 The **dedup key** — what makes a recurring failure "the same failure" — is likewise
 language-agnostic: the first test node id the runner prints (`path::Test::case`,
 `path::case`, `file::Test::case`), or a hash of the failure detail with run-to-run
-volatility (timings, addresses, temp paths, timestamps, random seeds, pids) stripped.
+volatility (timings, addresses, temp paths, timestamps, XML `time="…"` attributes,
+random seeds, pids) stripped.
 
 **Coverage is a starting point, not a ceiling.** The marker vocabularies are
-enumerated for these four families; the classifier's *shape* — exit code, positive
-proof, environment markers, absence markers — is deliberately runner-independent, so
-extending it to PHPUnit, RSpec/minitest, GTest/CTest, Maven/Gradle, `dotnet test`,
-sbt, R CMD check, or any TAP-emitting runner is a vocabulary addition plus a fixture
-test, not a new mechanism. A run that prints none of the markers and exits with a code
-that says nothing is classified **unknown** — never a fabricated pass — which keeps
-the rule safe until the vocabulary catches up.
+enumerated per family above, but the classifier's *shape* — exit code, machine-
+readable channel, positive proof, environment markers, absence markers — is
+deliberately runner-independent, so adding the next runner (sbt, pytest-describe,
+dart test, …) is a vocabulary addition plus a fixture test, not a new mechanism. A
+run that prints none of the markers and exits with a code that says nothing is
+classified **unknown** — never a fabricated pass — which keeps the rule safe until
+the vocabulary catches up.
 
 ## Triggers — when it escalates
 
@@ -237,9 +276,9 @@ What the stamp actually measures, so the premise is read correctly:
 - **The recurrence edge this produces is real but partly run-length.** Because the counter
   starts at the first reproduction failure, the shipped `escalate_after_n: 2` fires on nearly
   every run, and the discrimination that emerges at high thresholds trades on long runs. Measured
-  over the 727 stamped runs: the n=30 cell's AUROC 0.662 is only 0.097 above the 0.565 that run
-  length alone scores at the same flag count, and it clears a length-stratified null (0.662 against
-  [0.538, 0.583]) — so recurrence adds signal beyond length, but about 40% of the raw excess
+  over the 723 stamped runs: the n=30 cell's AUROC 0.658 is only 0.097 above the 0.561 that run
+  length alone scores at the same flag count, and it clears a length-stratified null (0.658 against
+  [0.536, 0.582]) — so recurrence adds signal beyond length, but about 40% of the raw excess
   over chance is the length selection. The policy sweep in
   [Results → Escalation](results.md#escalation-results) reports both references on every cell.
 
@@ -247,7 +286,7 @@ What the stamp actually measures, so the premise is read correctly:
 predicts failure is what the policy sweep measures; it is not reported here as an unconditional
 "same-key wins" claim because the honest answer carries the run-length caveat above. Two residual
 defects stay on record: a step that could not be reconstructed is stamped green (unmeasured, not
-passed — ~7% of steps, on 310 of 799 runs), and the key names the spec's test, so "same error" is
+passed — ~7% of steps, on 310 of the committed corpus's runs), and the key names the spec's test, so "same error" is
 "same graded test still failing", which is the state the whole-spec gate measures.
 
 ## The ladder — effort first, then rank
@@ -351,7 +390,11 @@ What the floor does, precisely:
 - **Escalated turns don't train the policy.** An escalation is imposed by the failure
   signal, not chosen by the policy, so an escalated turn is recorded as non-policy: its
   selection propensity and candidate scores are neutralized, and it opens a fresh label
-  window. The learner never mistakes a forced escalation for a free policy win.
+  window. The learner never mistakes a forced escalation for a free policy win. The
+  recorded rule is restated too: `selection_rule_used` names the rule that produced the
+  model that ran, so after an escalation it reads `auto_escalation` (a rung was climbed)
+  or `escalation_floor` (the task's remembered rank was re-served) — never the base pick's
+  rule.
 - **State survives a restart.** The failure log, the per-task reasoning-effort arm and
   the per-task rank floor are all snapshotted, so a restart resumes a half-climbed
   ladder rather than forgetting it and starting the climb over.
@@ -391,9 +434,10 @@ rely on it.
 Be honest with yourself about where this does nothing:
 
 - **Ships ON, but the trigger is unproven at the live cadence.** No measurement yet shows the
-  shipped recurrence counter to separate outcomes (as-shipped it fires on 727/727 offline runs
+  shipped recurrence counter to separate outcomes (as-shipped it fires on 723/723 offline runs
   at the base rate; its only real edge is the eval-only edit-gated family production cannot
-  run). The value is the ladder's, measured observationally at session cadence (2.51×). Treat
+  run). The value is the ladder's, measured observationally at session cadence (3.02×, as
+  committed in the [session-value figure](#fig-session-value)). Treat
   it as a mechanism with positive but not-yet-identified value; the ε-greedy + logged-propensity
   path is how it becomes measurable.
 - **No repo resolved, no automatic signal.** Auto-escalation is inert until Shunt can resolve
@@ -581,10 +625,10 @@ before the agent's first edit-like action are treated as the reproduction phase 
 at t=0) and are **not counted**. This is why the shipped threshold looks like a coin flip at all
 — the as-shipped counter trips on every run's reproduction failures — and it is where the real
 edge lives. On the current corpus the edit-gated family separates at the shipped threshold
-— at the shipped `escalate_after_n=2` it fires on 435/727 runs with P(fail|fired)=0.593
-(lift 1.41) and AUROC 0.711, and the family's best cell, n=3, reaches 358/727 at
-P(fail|fired)=0.642 (lift 1.53) and AUROC 0.724, clearing both the family-wise and the
-length-stratified nulls; the as-shipped n=2 cell fires on 727/727 at the base rate. The two
+— at the shipped `escalate_after_n=2` it fires on 431/723 runs with P(fail|fired)=0.589
+(lift 1.41) and AUROC 0.710, and the family's best cell, n=3, reaches 354/723 at
+P(fail|fired)=0.638 (lift 1.53) and AUROC 0.722, clearing both the family-wise and the
+length-stratified nulls; the as-shipped n=2 cell fires on 723/723 at the base rate. The two
 families are reported side by side (PR/ROC curves draw both; the edit-gated sweep gets its own
 table figure), and `best_skilled_cell` reads across them. `count_from_first_edit` is an
 **eval-only** knob: the live router has no per-step action stream to gate on, so the edit-gated
@@ -619,8 +663,9 @@ once per **closed session**: the off-wire verifier runs at the session boundary 
 records at most one failure event per capture. The offline replay emits one event per **step**
 — it walks a stored trajectory and asks the escalation runner for a directive at every
 decision, so an 8-step run yields 8 events. Every trajectory in
-`benchmark/escalation/data/live/` is a single session: 799 files, 799 distinct ids, median 31
-steps. At the live cadence each would contribute exactly **one** event, and the shipped
+`benchmark/escalation/data/live/` is a single session (one per committed file, distinct ids —
+trajectory and step counts via `benchmark.escalation.corpus.census()`). At the live cadence
+each would contribute exactly **one** event, and the shipped
 `escalate_after_n: 2` could not fire even once on the whole corpus. So what the sweep measures
 is recurrence *within* one session's steps, which is not the quantity the shipped rule counts.
 Any `escalate_after_n` result it reports — including a cell it flags as better than the
@@ -654,7 +699,7 @@ What the rest of the report means:
   interval that could exclude its own point estimate (the shipped cell once read
   `0.421 [0.606, 0.788]`). On the current corpus the gate clears
   at the **edit-gated** `escalate_after_n=3` /
-  `stale_window=1000` (AUROC 0.724 against the null 95% [0.5, 0.5489], adjusted p = 0.0005 over 2000 permutations), so
+  `stale_window=1000` (AUROC 0.722 against the null 95% [0.5, 0.5499], adjusted p = 0.0005 over 2000 permutations), so
   the status is `OK_OFFLINE_ONLY` and the verdict names the winning cell (and its family), not a model. The policy null is a
   BLOCK permutation — whole challenge blocks are shuffled, so outcomes move between challenges
   while the global multiset is preserved — because this half's claim is unconditional and the
@@ -768,98 +813,107 @@ a reader could be actively misled — one red line. The rest is here.
 
 ![Who is in the sample, and whether the edge survives the confounds](assets/figures/escalation/corpus_and_coverage.png)
 
-*6 models · 727/822 trajectories stamped · prefix depth 10 admits 344/727 at base rate 0.503 vs corpus 0.421 · 727/822 runs scored*
-
+*6 models · 723/822 trajectories stamped · prefix depth 10 admits 340/723 at base rate 0.497 vs corpus 0.418 · 723/822 runs scored*
 > **Caveat.** Panels B/C use the eval-only edit-gated counter; panel D's prefix score reads per-step fields production lacks.
-
 **Reading.** A: the share of each model's trajectories that carry per-step verified outcomes, with 95% Wilson intervals and the counts printed — a run without them cannot fire the trigger at all and is excluded from every per-step metric. B: per model, P(run failed | fired) against P(run failed | quiet) at the canonical cell, drawn as a dumbbell; a model whose two ends coincide contributes no separation. C: the recurrence score's AUROC pooled, then computed WITHIN each model and WITHIN each challenge and pooled by comparable pairs — the drop between them is how much of the pooled number is the confound rather than the score. D: the prefix risk model's admission waterfall at its reported depth, with the admitted population's base failure rate against the corpus's.
 
 **What to look for.** In C the within-strata bars must stay well above chance: if the pooled edge disappears once ranking happens inside a model or inside a challenge, the score is reading which model or which task the run belongs to. In D read the two base rates against each other — an admitted population failing far more often than the corpus is a different population, and a null measured on it is a coverage gap, not a falsification.
 
 **Terms.** *stamped* — the offline container replay wrote per-step verified outcomes for this run. *canonical cell* — the eval-only edit-gated counter at the shipped knobs (panels B, C). *within-model AUROC* — ranked only against runs of the same model, pooled by pair count. *admission margin* — runs that reached the depth but leave too few steps unread after it.
 
-**Notes.** Stamping coverage tracks capture DATE, and capture date correlates with model, so model and coverage are confounded on this corpus and cannot be separated from it. A single-class stratum contributes no comparable pairs and is DROPPED from the within-strata AUROCs rather than scored at chance. AUROC pooled 0.781 · within-model 0.746 · within-challenge 0.711. 727 scored trajectories, status=OK_OFFLINE_ONLY. OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'. canonical cell: OFFLINE-ONLY UPPER BOUND — the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'.
-
+**Notes.** Stamping coverage tracks capture DATE, and capture date correlates with model, so model and coverage are confounded on this corpus and cannot be separated from it.
+A single-class stratum contributes no comparable pairs and is DROPPED from the within-strata AUROCs rather than scored at chance.
+AUROC pooled 0.778 · within-model 0.746 · within-challenge 0.709
+723 scored trajectories, status=OK_OFFLINE_ONLY
+OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
+canonical cell: OFFLINE-ONLY UPPER BOUND — the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
 **Limits.** Panel D's population is length-selected by construction: the anti-leak margin excludes every short run, and short runs resolve more often, so the admitted base rate is higher than the corpus's by design rather than by accident. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
 
-<!-- n: models=6, stamped=727, trajectories=822 -->
+<!-- n: models=6, stamped=723, trajectories=822 -->
 
 ### What firing costs: the eval-only edit-gated trigger pre-empts more than it interrupts {#fig-escalation-budget}
 
 ![What firing costs: the eval-only edit-gated trigger pre-empts more than it interrupts](assets/figures/escalation/escalation_budget.png)
 
-*435 fired runs · median fire at step 13 of 31 · 6287 steps pre-empted vs 3946 interrupted (1.59:1) · 727/822 runs scored*
-
-> **Caveat.** 95 of 822 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.
-
+*431 fired runs · median fire at step 13 of 31 · 6099 steps pre-empted vs 3946 interrupted (1.55:1) · 723/822 runs scored*
+> **Caveat.** 99 of 822 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.
 **Reading.** Left: where in a run the trigger fires, as a fraction of the run's total steps, drawn as an ECDF for the runs that ultimately FAILED and for the runs that were RESOLVED. A curve that rises early means the trigger fires early in those runs. Right: the steps that sit AFTER the trigger point, totalled over every fired run and split by how the run ended. On a failed run that work was spent and lost, so escalating there PRE-EMPTS it; on a resolved run the agent went on to fix the task, so escalating INTERRUPTS work that was about to pay off. The ratio between the two bars is the trigger's budget case.
 
 **What to look for.** Want the pre-empted bar clearly taller than the interrupted one — that ratio is what the trigger buys per unit of disruption. In the left panel, want the failed-run curve to the LEFT of the resolved one: firing earlier on the runs that were going to fail is the whole point.
 
 **Terms.** *edit-gated* — failures before the agent's first edit-like action are not counted. *fire position* — the step index the policy first escalated at, over the run's length. *pre-empted* — steps after the trigger on runs that ultimately failed. *interrupted* — steps after the trigger on runs that were ultimately resolved.
 
-**Notes.** Aggregates only. The per-run timing arrays these summarise are deliberately not kept: the same reasoning that deleted the lead-time figure — on this corpus a lead time is largely the run length minus a constant. Steps are agent decisions, not wall-clock and not dollars. This is a work ledger, not a cost estimate. median fire position 0.433 of the run on failed runs, 0.419 on resolved ones. 727 scored trajectories, status=OK_OFFLINE_ONLY. OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'. canonical cell: OFFLINE-ONLY UPPER BOUND — the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'.
-
+**Notes.** Aggregates only. The per-run timing arrays these summarise are deliberately not kept: the same reasoning that deleted the lead-time figure — on this corpus a lead time is largely the run length minus a constant.
+Steps are agent decisions, not wall-clock and not dollars. This is a work ledger, not a cost estimate.
+median fire position 0.442 of the run on failed runs, 0.419 on resolved ones
+723 scored trajectories, status=OK_OFFLINE_ONLY
+OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
+canonical cell: OFFLINE-ONLY UPPER BOUND — the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
 **Limits.** COUNTERFACTUAL BY ARITHMETIC, not by measurement: no logged trajectory escalated, so 'pre-empted' is what firing would have cut short assuming the run would otherwise have continued unchanged. See the scope strip. The ledger's ratio is driven mostly by ARM SIZE, not by timing: most of it is simply that more of the fired runs failed. Read it beside the fire-position panel, which is where a timing claim would have to come from — and where the two curves nearly coincide. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
 
-<!-- n: fired_positioned=435 -->
+<!-- n: fired_positioned=431 -->
 
 ### Counting the reproduction phase is what decides the answer: AUROC 0.601 vs 0.781 {#fig-escalation-decision}
 
 ![Counting the reproduction phase is what decides the answer: AUROC 0.601 vs 0.781](assets/figures/escalation/escalation_decision.png)
 
-*base rate 0.421 · AUROC as-shipped 0.601 · edit-gated 0.781 · 727/822 runs scored*
-
-> **Caveat.** 95 of 822 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.
-
+*base rate 0.418 · AUROC as-shipped 0.600 · edit-gated 0.778 · 723/822 runs scored*
+> **Caveat.** 99 of 822 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.
 **Reading.** Left: the COMPLETE ROC of the recurrence score as a continuous statistic — each run is scored by the largest number of times one failing-check id recurred inside the shipped stale_window, and the curve sweeps every threshold, so it has a point at every possible escalate_after_n rather than only the swept grid. Two curves: as-shipped (every same-key failure counted) and edit-gated (failures before the agent's first edit-like action are not counted). The grey band is the score's own challenge-block permutation null. Middle: P(run failed | score >= t) against t for both families, with the corpus base rate as the no-skill line. Right: what share of the corpus each threshold fires on. The shipped escalate_after_n is marked on both right-hand panels.
 
 **What to look for.** The two curves must differ. If they do, the reproduction phase — not the recurrence mechanism — is what the as-shipped counter is measuring, and the gap between them is its size. Read the middle panel at the shipped threshold: the edit-gated precision there is the operating point every other figure in this set uses.
 
 **Terms.** *recurrence score* — max same-key verified-failure count a run reaches in the window. *edit-gated* — failures before the agent's first edit-like action are not counted. *null band* — central 95% of ROC curves under challenge-block label shuffles.
 
-**Notes.** stale_window is held FIXED at the shipped value for BOTH curves. It is a knob in its own right — the as-shipped score reaches 0.728 at stale_window=1000 — so letting it vary between the two curves would have credited the counting change with a window change. The AUROC of the score bounds what ANY single escalate_after_n can reach. score null 95% [0.472, 0.548], p=0.0005 over 2000 challenge-block shuffles. 727 scored trajectories, status=OK_OFFLINE_ONLY. OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'.
-
+**Notes.** stale_window is held FIXED at the shipped value for BOTH curves. It is a knob in its own right — the as-shipped score reaches 0.728 at stale_window=1000 — so letting it vary between the two curves would have credited the counting change with a window change.
+The AUROC of the score bounds what ANY single escalate_after_n can reach.
+score null 95% [0.474, 0.550], p=0.0005 over 2000 challenge-block shuffles
+723 scored trajectories, status=OK_OFFLINE_ONLY
+OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
 **Limits.** Per-step cadence and eval-only: the live router has no per-step action stream to gate on, so the edit-gated family measures what a per-step detector could do, not what ships. Association only — no stored trajectory contains an escalation that actually happened. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure.
 
-<!-- n: stamped_runs=727 -->
+<!-- n: stamped_runs=723 -->
 
 ### The shipped counter sits at the base rate; edit-gated counting separates outcomes {#fig-operating-point}
 
 ![The shipped counter sits at the base rate; edit-gated counting separates outcomes](assets/figures/escalation/operating_point.png)
 
-*both at escalate_after_n=2, stale_window=10 · base rate 0.421 · as-shipped fires 727/727 at P(fail|fired)=0.421 · edit-gated fires 435/727 at 0.593 vs 0.164 quiet · 727/822 runs scored*
-
+*both at escalate_after_n=2, stale_window=10 · base rate 0.418 · as-shipped fires 723/723 at P(fail|fired)=0.418 · edit-gated fires 431/723 at 0.589 vs 0.164 quiet · 723/822 runs scored*
 > **Caveat.** as-shipped not-escalated arm n=0: below the n=10 floor, drawn as undefined
-
 **Reading.** Left: at the SAME shipped knobs, the share of runs that ultimately failed among those the policy escalated and among those it left alone — for BOTH counting modes. The left pair is the configuration the product actually ships, which fires on essentially every run: its escalated bar sits on the dashed base rate and its not-escalated arm holds so few runs that no rate can be read off it, so it is drawn as a hatched 'undefined' box rather than as a measured 0.000. The right pair is the same rule with the reproduction phase excluded. Intervals are the central 95% of the same challenge-bootstrap resamples, so the two arms of a pair are paired draw-for-draw. Right: the CANONICAL (edit-gated) cell's AUROC against TWO nulls — the family-wise max-over-cells challenge-block null (grey), which asks whether any cell in the sweep could reach this by chance, and the length-stratified null (blue), which shuffles failures inside equal-count run-length bins and so asks whether firing predicts failure BEYOND what the lengths of the fired runs already predict.
 
 **What to look for.** The left pair IS the negative result and it belongs on a canvas, not in a table row: a shipped configuration whose escalated bar sits on the base rate is a null detector. Then want the right pair's escalated bar clearly above both the dashed line and its own quiet bar, and the red observed line to the right of BOTH null distributions. Clearing the grey null alone is not enough: the challenge-block shuffle destroys the run-length association along with everything else, so a cell whose firing is really length selection can clear it and still sit inside the blue one.
 
 **Terms.** *as-shipped* — every same-key verified failure counts, which is what production runs. *canonical cell* — edit-gated counting at the shipped escalate_after_n/stale_window. *family-wise null* — max AUROC over the swept cells under one shared block shuffle. *length-stratified null* — failures shuffled within equal-count run-length bins.
 
-**Notes.** Both pairs are at the SAME knobs, so the only thing that differs between them is how the counter treats the reproduction phase. The intervals are a CHALLENGE-level bootstrap: the corpus is drawn from ~166 challenges, each attempted by several model/effort arms, so a row-level interval is roughly 2x too narrow. as-shipped at escalate_after_n=2, stale_window=10; fired on 727/727; P(fail|fired)=0.421 [0.346, 0.486] vs quiet n/a; AUROC 0.500 against a run-length-only 0.500. edit-gated at escalate_after_n=2, stale_window=10; fired on 435/727; P(fail|fired)=0.593 [0.513, 0.659] vs quiet 0.164; AUROC 0.711 against a run-length-only 0.570. 727 scored trajectories, status=OK_OFFLINE_ONLY. OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'. canonical cell: OFFLINE-ONLY UPPER BOUND — the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'.
-
+**Notes.** Both pairs are at the SAME knobs, so the only thing that differs between them is how the counter treats the reproduction phase.
+The intervals are a CHALLENGE-level bootstrap: the corpus is drawn from ~166 challenges, each attempted by several model/effort arms, so a row-level interval is roughly 2x too narrow.
+as-shipped at escalate_after_n=2, stale_window=10; fired on 723/723; P(fail|fired)=0.418 [0.343, 0.484] vs quiet n/a; AUROC 0.500 against a run-length-only 0.500
+edit-gated at escalate_after_n=2, stale_window=10; fired on 431/723; P(fail|fired)=0.589 [0.508, 0.655] vs quiet 0.164; AUROC 0.710 against a run-length-only 0.568
+723 scored trajectories, status=OK_OFFLINE_ONLY
+OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
+canonical cell: OFFLINE-ONLY UPPER BOUND — the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
 **Limits.** Association, not causation — see the scope strip: no logged trajectory escalated. Two operating points; the sweep figure shows every other configuration. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
 
-<!-- n: fired=435, quiet=292 -->
+<!-- n: fired=431, quiet=292 -->
 
 ### Every swept configuration, in both counting modes, against one base rate {#fig-policy-sweep}
 
 ![Every swept configuration, in both counting modes, against one base rate](assets/figures/escalation/policy_sweep.png)
 
-*30 configurations x 2 counting modes · A = as-shipped · B = edit-gated · shipped default highlighted · len-only = the AUROC run length alone reaches at that cell's flag count · 727/822 runs scored*
-
-> **Caveat.** 95 of 822 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.
-
+*30 configurations x 2 counting modes · A = as-shipped · B = edit-gated · shipped default highlighted · len-only = the AUROC run length alone reaches at that cell's flag count · 723/822 runs scored*
+> **Caveat.** 99 of 822 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.
 **Reading.** One row per configuration of the two coupled knobs — escalate_after_n and stale_window, with the escalation ladder pinned to the shipped one. The A columns are as-shipped counting (every same-key verified failure counts); the shaded B columns are the same configuration with the reproduction phase excluded, i.e. failures before the agent's first edit-like action are not escalation evidence. Per family: how many trajectories the cell fired on, P(run failed | fired), and the AUROC of the fired flag against the terminal outcome. The row that IS the shipped default is highlighted.
 
 **What to look for.** Compare the A and B columns row by row. A configuration whose P(fail|fired) sits at the base rate has no measured value at all; the gap between the A and B columns of the SAME row is the reproduction phase's contribution, isolated from every other knob. The two knobs are coupled — reaching n recurrences needs a window at least that wide — which is why the stale_window=10 rows stop firing above n=10.
 
 **Terms.** *A* — as-shipped counting. *B* — edit-gated counting (failures before the first edit excluded). *P(fail)* — share of the runs this cell fired on that ultimately failed. *len-only* — the AUROC a pure 'run length >= t' predictor reaches at THIS cell's flag count — the ceiling run length alone can explain, so an AUROC no higher than it is length selection rather than recurrence.
 
-**Notes.** The table is drawn rather than plotted because the sweep has too few distinct results to carry a colour channel honestly. The interval is the CHALLENGE-level bootstrap, not a Wilson interval over rows: the corpus is drawn from ~166 challenges, so rows are not independent draws and a row-level interval is roughly 2x too narrow. 30 configurations per family; highest P(fail|fired) is 0.950 at edit-gated escalate_after_n=50 (stale_window=1000) against a base rate of 0.421. 727 scored trajectories, status=OK_OFFLINE_ONLY. OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'.
-
+**Notes.** The table is drawn rather than plotted because the sweep has too few distinct results to carry a colour channel honestly.
+The interval is the CHALLENGE-level bootstrap, not a Wilson interval over rows: the corpus is drawn from ~166 challenges, so rows are not independent draws and a row-level interval is roughly 2x too narrow.
+30 configurations per family; highest P(fail|fired) is 0.947 at edit-gated escalate_after_n=50 (stale_window=1000) against a base rate of 0.418
+723 scored trajectories, status=OK_OFFLINE_ONLY
+OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
 **Limits.** Every number here is unadjusted for the 60 configurations compared side by side; the family-wise correction lives in each cell's null, not in this table. A configuration that never fires has no P(fail|fired) at all and prints n/a. 30 of 60 configurations across both families clear the base failure rate; every other cell in this table does not. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure.
 
 <!-- n: configurations=30 -->
@@ -868,18 +922,22 @@ a reader could be actively misled — one red line. The rest is here.
 
 ![At production cadence, escalating after a cheap failure beats retrying cheap](assets/figures/escalation/session_value.png)
 
-*48 overlap tasks · escalate 25/45 vs retry 7/34 · lift 2.70x · paired difference +0.350 [+0.172, +0.515] · 822/822 runs read*
+*48 overlap tasks · escalate 28/45 vs retry 7/34 · lift 3.02x · paired difference +0.416 [+0.239, +0.581] · 822/822 runs read*
+*Produced by `benchmark/escalation/session_eval.py` (`session_cadence`) and
+`benchmark/escalation/plots.py` (`session_value`) over the committed corpus — the caption is
+generated from the data, so its counts and lift are re-derivable, not editorial.*
 
 > **Caveat.** Observational: the arms ran in parallel and frontier coverage was adaptive.
-
 **Reading.** Read on EVERY trajectory in the corpus, not the per-step-stamped subset the other escalation figures score: a session outcome comes off the run header, so a run without per-step stamps still counts here. Measured on the overlap subset — tasks carrying BOTH a second cheap session and a frontier session, so the two arms are read on the same tasks. Left: after a cheap session failed a task, the share of FRONTIER sessions on that task that resolved it (escalate) against the share of a SECOND cheap session that resolved it (retry). Both intervals resample whole INSTANCES, because several frontier sessions on one task are not independent draws. Right: the PAIRED difference, escalate minus retry, on those same instance resamples, with its 95% interval and zero marked.
 
 **What to look for.** The right panel is the answer. Two marginal intervals that fail to overlap is a conservative test of a difference; the paired distribution IS the difference, and the claim holds only if its interval excludes zero.
 
 **Terms.** *frontier* — the two most expensive models present in the corpus. *cheap* — the cheapest model present — the base pick and the retry counterfactual. *overlap subset* — tasks with >=2 cheap sessions AND a frontier session.
 
-**Notes.** At session cadence the detector is trivially satisfied — the failed cheap session carries the task's target failing-check id — so this measures the LADDER's value, not the trigger's detection quality. The dashed line is the cheap model's UNCONDITIONAL base rate. The bars condition on a cheap failure on the same task, so the line is not a ceiling for them. instance-level bootstrap over 48 overlap tasks, not Wilson over sessions: several frontier sessions on one task are one draw, not several. 822 trajectories read at session cadence (per-step stamping not required), status=OK_OFFLINE_ONLY.
-
-**Limits.** Observational: the arms ran in parallel and which tasks got frontier coverage was adaptive. Small n — read the interval, not the point estimate. Production's ladder steps one price rank at a time; this collapses it to its endpoint. Scored on ALL 822 trajectories, not the 727-run per-step-stamped subset the other escalation figures use: a session outcome is read from the run header, so an unstamped run is still scorable here.
+**Notes.** At session cadence the detector is trivially satisfied — the failed cheap session carries the task's target failing-check id — so this measures the LADDER's value, not the trigger's detection quality.
+The dashed line is the cheap model's UNCONDITIONAL base rate. The bars condition on a cheap failure on the same task, so the line is not a ceiling for them.
+instance-level bootstrap over 48 overlap tasks, not Wilson over sessions: several frontier sessions on one task are one draw, not several
+822 trajectories read at session cadence (per-step stamping not required), status=OK_OFFLINE_ONLY
+**Limits.** Observational: the arms ran in parallel and which tasks got frontier coverage was adaptive. Small n — read the interval, not the point estimate. Production's ladder steps one price rank at a time; this collapses it to its endpoint. Scored on ALL 822 trajectories, not the 723-run per-step-stamped subset the other escalation figures use: a session outcome is read from the run header, so an unstamped run is still scorable here.
 
 <!-- n: escalate_sessions=45, overlap_instances=48, retry_sessions=34 -->

@@ -35,8 +35,8 @@ line learned from your own passing tests, not a guess.**
 Most coding-agent requests are routine work a cheap open-weight model handles
 fine; only a hard tail needs a frontier model. Today your agent pays frontier
 prices for all of it. Both halves of that claim hold on our data: always routing
-to the cheapest model already solves **77.4%** of scored tasks, and price does
-not buy capability — `deepseek-v4-flash` at $0.42/Mtok solves 68.3% while
+to the cheapest model already solves **75.5%** of scored tasks, and price does
+not buy capability — `deepseek-v4-flash` at $0.42/Mtok solves 68.9% while
 `gpt-5-mini` at 5× the price solves 54.5%.
 
 ## The solution
@@ -171,8 +171,8 @@ Conflating them makes every number ambiguous, so we keep them apart throughout.
 The escalation model is a **first attempt**, inspired by the published
 [ACRouter](https://arxiv.org/abs/2606.22902) design. The recurrence rule carries
 a real edge at the **shipped** threshold once the reproduction phase is excluded:
-gated on failures after the agent's first edit, the best cell is `escalate_after_n=3` — 358
-of 727 runs at P(fail|fired)=0.642 with AUROC 0.724 (n=2 already reads AUROC 0.711),
+gated on failures after the agent's first edit, the best cell is `escalate_after_n=3` — 354
+of 723 runs at P(fail|fired)=0.638 with AUROC 0.722 (n=2 already reads AUROC 0.710),
 clearing both the family-wise
 and length-stratified nulls. As shipped (counting every same-key failure including
 the reproduction phase) it fires on every run and reads exactly the base rate.
@@ -215,7 +215,10 @@ lock is the cache-safety guarantee. Depth: [docs/routing.md](docs/routing.md).
 **The escalation model** is two stages, and only the first involves pattern matching.
 At session close Shunt re-runs *your* repo's suite off the wire — **pytest** (Python),
 **jest / vitest** (JavaScript/TypeScript), **`go test`** (Go), **`cargo test`** (Rust),
-auto-detected from the repo's files — and classifies the result by exit code
+plus Maven/Gradle (Java), `dotnet test` (C#/.NET), RSpec/minitest (Ruby), PHPUnit
+(PHP), GoogleTest/CTest (C/C++), XCTest (Swift), bats (Shell), prove (Perl),
+testthat (R), ExUnit (Elixir) and hspec/tasty/HUnit (Haskell) — auto-detected from
+the repo's files — and classifies the result by exit code
 first, then by regex over the output: did tests really run and fail, or was this an
 environment error? A genuine failure is re-run to confirm it is not a flake, then
 given a **dedup key**: the failing test's node id, or a hash of the detail with
@@ -224,9 +227,11 @@ the *same* key reaches `escalate_after_n` confirmed, non-infrastructural failure
 inside a window of recent decisions, the router raises the current model's reasoning
 effort — same model, so the prompt cache survives — and only steps to a pricier model
 once that ladder is exhausted. Different failures never add up; a passing suite wipes
-the slate. Those four runner families are what the classifier is *built and tested*
-on today; it is designed to be extended to any runner whose output reports pass/fail
-(see [which runners are supported](docs/escalation.md#which-runners-are-supported)).
+the slate. The runner matrix below is what the classifier is *built and tested*
+on today — pytest, jest/vitest, go test, cargo test, Maven/Gradle, dotnet, RSpec,
+PHPUnit, GTest/CTest, XCTest, bats, shunit2, prove, testthat, ExUnit and
+hspec/tasty; it is designed to be extended to any runner whose output reports
+pass/fail (see [which runners are supported](docs/escalation.md#which-runners-are-supported)).
 Depth: [docs/escalation.md](docs/escalation.md).
 
 **One verified outcome per session, not per step.** The verifier runs at session
@@ -256,9 +261,11 @@ It does not watch an attempt unfold and step in mid-flight.
 ### Scope: SWE tasks today
 
 Both models handle **software-engineering work only**. The routing corpus is coding
-tasks, and escalation's only verified signal is a repository's own test suite — today
-pytest, jest/vitest, `go test` and `cargo test` (the classifier is built to extend to
-any runner that reports pass/fail). Point
+tasks, and escalation's only verified signal is a repository's own test suite — from
+pytest, jest/vitest, `go test` and `cargo test` through Maven/Gradle, `dotnet test`,
+RSpec, PHPUnit, GTest/CTest, XCTest, bats, prove, testthat, ExUnit and hspec/tasty
+(the classifier is one runner-independent rule that recognizes any runner that
+reports pass/fail). Point
 Shunt at a notebook, a market analysis, or a piece of prose and it still proxies and
 forwards — but the routing decision has no evidence behind it and nothing grades the
 result afterwards.
@@ -343,8 +350,8 @@ same n. A working positive control beside a negative result.
 ![Embedding signal](docs/assets/figures/routing/embedding_signal.png)
 
 **Does the escalation trigger fire on the runs that fail?** At the shipped
-configuration, no: it fires on 727 of 727 runs and lands exactly on the base rate.
-Counting only failures *after* the agent's first edit separates outcomes 0.593 vs
+configuration, no: it fires on 723 of 723 runs and lands exactly on the base rate.
+Counting only failures *after* the agent's first edit separates outcomes 0.589 vs
 0.164 at the shipped threshold — but that variant is eval-only, because production
 has no per-step action stream to gate on.
 
@@ -357,30 +364,30 @@ headline, stated plainly:
 
 > **The escalation ladder at session cadence — one decision per session,
 > cache-safe by construction, and enabled in a default install — now reaches the
-> blocked mid-session cascades at equal quality. On the 180-task scoring path it
-> costs $23.46 cache-aware at 96.67%, against Price-Cascade's $22.07 at the same
-> pass rate and Always-Frontier's $91.15 at 95.00%. On the harder fully-measured
-> 61-task set it costs $25.50 at 90.16% against Always-Frontier's $33.53 at
-> 88.52%.**
+> blocked mid-session cascades at equal quality. On the 184-task scoring path it
+> costs $28.71 cache-aware at 96.74%, against Price-Cascade's $27.11 at the same
+> pass rate and Always-Frontier's $96.02 at 95.11%. On the harder fully-measured
+> 74-task set it costs $28.76 at 90.91% against Always-Frontier's $37.63 at
+> 86.36%.**
 > The saving is real and comes from *mechanism*, not prediction — the machine
 > learning still contributes nothing. And it is much smaller on measured cells
 > than on imputed ones: see the correction below.
 
-**Set A — the 180-task scoring path** (35% of cells monotone-imputed). Naive
+**Set A — the 184-task scoring path** (35% of cells monotone-imputed). Naive
 totals are cache-blind sums; the cache-aware column is what a provider would
 bill. Only `Session-Cascade` re-serves the same model on consecutive attempts, so
 it is the only row the cache term moves.
 
 | strategy | pass rate | 95% CI | naive cost | cache-aware cost |
 |---|---:|---|---:|---:|
-| Oracle (hindsight — a bound, never deployable) | 96.7% | 93.9–98.9 | $15.18 | $15.18 |
-| Price-Cascade (blocked — not deployable) | 96.7% | 93.9–98.9 | $22.07 | $22.07 |
-| **Session-Cascade, `rank_shortlist=3` (ships enabled)** | **96.7%** | 93.9–98.9 | $27.68 | **$23.46** |
-| kNN-cascade (blocked — not deployable) | 96.7% | 93.9–98.9 | $24.95 | $24.95 |
-| Always-Frontier | 95.0% | 91.7–97.8 | $91.15 | $91.15 |
-| kNN | 78.9% | 72.8–84.4 | $11.61 | $11.61 |
-| Always-Cheap | 77.2% | 71.1–83.3 | $1.39 | $1.39 |
-| Tier-Classifier (blocked — not deployable) | 65.6% | — | $9.46 | $9.46 |
+| Oracle (hindsight — a bound, never deployable) | 96.7% | 94.0–98.9 | $18.33 | $18.33 |
+| Price-Cascade (blocked — not deployable) | 96.7% | 94.0–98.9 | $27.11 | $27.11 |
+| **Session-Cascade, `rank_shortlist=3` (ships enabled)** | **96.7%** | 94.0–98.9 | $33.56 | **$28.71** |
+| kNN-cascade (blocked — not deployable) | 96.7% | 94.0–98.9 | $30.44 | $30.44 |
+| Always-Frontier | 95.1% | 91.9–97.8 | $96.02 | $96.02 |
+| kNN | 78.3% | 72.3–84.2 | $13.21 | $13.21 |
+| Always-Cheap | 75.5% | 69.0–81.5 | $1.50 | $1.50 |
+| Tier-Classifier (blocked — not deployable) | 65.8% | — | $11.53 | $11.53 |
 
 `Session-Cascade` is the one row here whose *mechanism* you are already running.
 It is classified blocked, and the blocker is only the **name**: it is not a
@@ -404,20 +411,20 @@ embedding does not buy routing quality. See
 [Results](docs/results.md#routing-results).
 
 **The correction: the saving is much smaller on measured cells.** Set B is the
-raw, un-imputed basis — 61 scorable tasks of 69, every cell actually run, and
-biased *hard* where set A is biased easy. **Set A has 180 tasks and set B has 61,
+raw, un-imputed basis — 74 scorable tasks, every cell actually run, and
+biased *hard* where set A is biased easy. **Set A has 184 tasks and set B has 74,
 so totals do not compare across them; compare only within a set.**
 
 | basis | Price-Cascade vs Always-Frontier | Session-Cascade `sl=3` (cache-aware) vs Always-Frontier |
 |---|---|---|
-| Set A — 180 tasks, 35% imputed | $22.07 vs $91.15 — **76% cheaper** | $23.46 vs $91.15 — **74% cheaper** |
-| Set B — 61 tasks, 100% measured | $23.91 vs $33.53 — **29% cheaper** | $25.50 vs $33.53 — **24% cheaper** |
+| Set A — 184 tasks, 35% imputed | $27.11 vs $96.02 — **72% cheaper** | $28.71 vs $96.02 — **70% cheaper** |
+| Set B — 74 tasks, 100% measured | $27.10 vs $37.63 — **28% cheaper** | $28.76 vs $37.63 — **24% cheaper** |
 
 A four-fold saving becomes roughly a quarter. The direction holds on measured
 data; the magnitude is mostly imputation, and the ordering survives two selections
 biased in opposite directions — that last part is the load-bearing claim, not
-either total. On set B the ladder's 90.16% [81.97, 96.72] point estimate is above
-Always-Frontier's 88.52% [80.33, 95.08], but the intervals overlap: the two are
+either total. On set B the ladder's 90.91% [83.33, 96.97] point estimate is above
+Always-Frontier's 86.36% [80.33, 93.94], but the intervals overlap: the two are
 **not distinguishable on quality**. Full tables, both subset guards verbatim, and
 the paired bootstrap:
 [Routing at session cadence](docs/results.md#routing-at-session-cadence).
@@ -477,7 +484,7 @@ claim. Task identity accounts for ~57% of outcome variance, so there is structur
 there; this encoder does not reach it.
 
 Routing quality *fell* when the input was corrected: kNN went from 81.71% to
-**78.89%**, which is inside noise of always-cheap's 77.22%. The 106-character label
+**78.26%**, which is inside noise of always-cheap's 75.54%. The 106-character label
 was not merely uninformative, it was mildly leaky — the repo name it carried is a
 weak difficulty proxy. Given the right input, the learned router is not
 distinguishable from the trivial policy. Figures:
@@ -546,7 +553,7 @@ least not for a shallow-prefix detector, which is why that half still reads
 `NO_SKILL`; the escalation results now attribute the signal to the recurrence
 rule at the **shipped** threshold once the reproduction phase is excluded
 (eval-only; status `OK_OFFLINE_ONLY` at the edit-gated `escalate_after_n=3`,
-AUROC 0.724, see [docs/results.md](docs/results.md#escalation-results)).
+AUROC 0.722, see [docs/results.md](docs/results.md#escalation-results)).
 The prefix evaluation could only ever have detected a detector at AUROC ≥ 0.59.
 The raw features hint at ≈ 0.52 — squarely inside the blind spot. Resolving it
 needs roughly four times the distinct challenges (152 → ~640); more runs per
@@ -555,13 +562,13 @@ variance ~3×.
 
 **What survives all of it:** the cascade result. It is untouched by every defect
 above, because it uses no model, so there was no model to get wrong — and it is
-no longer only a measurement. `Price-Cascade` at $22.07 against Always-Frontier's
-$91.15 is still blocked at boot and still unrunnable, but the session-cadence
-ladder reaches the same 96.67% for $23.46 cache-aware, is cache-safe by
+no longer only a measurement. `Price-Cascade` at $27.11 against Always-Frontier's
+$96.02 is still blocked at boot and still unrunnable, but the session-cadence
+ladder reaches the same 96.74% for $28.71 cache-aware, is cache-safe by
 construction, and ships enabled. What the audit and the un-imputed basis together
 sharpened is the *size*: on fully-measured tasks the saving is ~25%, not ~75%.
 And ~90% of the headroom is mechanical, which bounds the entire remaining prize
-for a perfect difficulty predictor at **about $6.9 on a $22.07 base**. That number
+for a perfect difficulty predictor at **about $7.0 on a $96.02 base**. That number
 is the honest answer to "how much is routing intelligence worth here", and it is
 small.
 
@@ -581,7 +588,7 @@ Where the work goes next, in priority order.
   randomisation at flagged checkpoints with logged propensities fixes it.
 - **More routing algorithms.** kNN is the first, not a commitment. Bigram and
   linear models, calibrated classifiers, better selection rules.
-- **More distinct challenges.** Offline re-stamping is done — 727 of 799
+- **More distinct challenges.** Offline re-stamping is done — 723 of 822
   trajectories carry verified per-step outcomes — but they cluster on only 152
   challenges, and that clustering, not the trajectory count, is what caps what
   the eval can resolve.
@@ -604,7 +611,7 @@ Early is the best time to shape this. Concretely, here is what helps most:
   with the data.
 - 🚨 **Ideas on the escalation model.** The genuinely unsolved one. What signal in
   an agent's trajectory actually predicts failure early enough to be worth acting
-  on? We have 727 labelled trajectories and a harness that will tell you honestly
+  on? We have 723 labelled trajectories and a harness that will tell you honestly
   whether your idea works. Rules, n-grams, embeddings, small classifiers, fusion
   of several weak signals — open to anything.
 - 🧠 **Ideas on the routing model.** kNN is a starting point. If you have reason to
@@ -627,5 +634,6 @@ layout, and capabilities: [docs/architecture.md](docs/architecture.md).
 **[Apache-2.0](LICENSE)** — free for everyone, with a patent grant.
 
 Security disclosures: [SECURITY.md](SECURITY.md) ·
-Community standards: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+Community standards: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) ·
+Trademark policy: [TRADEMARK.md](TRADEMARK.md)
 </content>

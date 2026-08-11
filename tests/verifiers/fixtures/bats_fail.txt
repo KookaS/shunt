@@ -1,0 +1,7 @@
+1..3
+ok 1 file_has_correct_content
+not ok 2 command_exits_cleanly
+# (in test file test/cli.bats, line 8)
+#   `[ "$status" -eq 0 ]' failed
+#   status: 1
+ok 3 invalid_input_rejected

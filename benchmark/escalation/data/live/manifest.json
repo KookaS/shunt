@@ -2462,10 +2462,10 @@
       "terminal_resolved": false
     },
     "pydata__xarray-7229__zai-glm-5.2__think": {
-      "content_sha256": "e85bf300cc7237369a6407821a0732c5869186462481bb4b15f99543e3c0eb6c",
-      "n_steps": 70,
-      "snapshot_steps": null,
-      "terminal_resolved": false
+      "content_sha256": "d468276ecbca1d177eeb3cac8e159cf5679bc3ce9d45f165020e16c290f2b10a",
+      "n_steps": 56,
+      "snapshot_steps": 55,
+      "terminal_resolved": true
     },
     "pydata__xarray-7233__deepseek-v4-flash__high": {
       "content_sha256": "525e651e5c51f3297c5a12205624790205f0ac0baf0337382702105b6638c5b9",
@@ -3782,10 +3782,10 @@
       "terminal_resolved": false
     },
     "sphinx-doc__sphinx-7590__zai-glm-5.2__think": {
-      "content_sha256": "f15694e83bafd40b0f95acd2ad2305ede8e45f8efdaf67f4c23a9b8a520833b7",
-      "n_steps": 70,
-      "snapshot_steps": null,
-      "terminal_resolved": false
+      "content_sha256": "968951c713143a7fc757cc806433be60e305501958d77924da32fbeb5e38935c",
+      "n_steps": 47,
+      "snapshot_steps": 46,
+      "terminal_resolved": true
     },
     "sphinx-doc__sphinx-7757__deepseek-v4-flash__high": {
       "content_sha256": "7df6e69dc34a31c405c03b91c89be3b63322b173314881a090fc092bf1a68cc3",
@@ -3968,9 +3968,9 @@
       "terminal_resolved": false
     },
     "sphinx-doc__sphinx-8548__zai-glm-5.2__think": {
-      "content_sha256": "526ff4a0222881961e0d144da1f930c610e78aa01d00a245affc013007dea4d1",
-      "n_steps": 70,
-      "snapshot_steps": null,
+      "content_sha256": "695000ce3eaaf647e09fd2f0d76f6ea5a78c73d5ab479498f0539dd7be80b137",
+      "n_steps": 95,
+      "snapshot_steps": 94,
       "terminal_resolved": false
     },
     "sphinx-doc__sphinx-8551__deepseek-v4-flash__high": {
@@ -4634,9 +4634,9 @@
       "terminal_resolved": false
     },
     "sympy__sympy-16597__zai-glm-5.2__think": {
-      "content_sha256": "3b97e2f6c16303b6115c2fe1ac58f5c720d960d2fc0e344a94257aec1c98b0d4",
-      "n_steps": 70,
-      "snapshot_steps": null,
+      "content_sha256": "9bbd4997473a1d1e14a36207474c7f1543875b3d30da00581803565b483bfaf3",
+      "n_steps": 32,
+      "snapshot_steps": 31,
       "terminal_resolved": false
     },
     "sympy__sympy-17139__deepseek-v4-flash__high": {
@@ -4742,10 +4742,10 @@
       "terminal_resolved": false
     },
     "sympy__sympy-17630__kimi-k3__max": {
-      "content_sha256": "d395537bb62d936f63ee873df23229050c99911e4e4287c2df12c6a043e8e850",
-      "n_steps": 70,
-      "snapshot_steps": 70,
-      "terminal_resolved": false
+      "content_sha256": "74df03c91931895a6c7d8885616ce5195f3ca4a3deb9a1bd2bad4fa656b3c45a",
+      "n_steps": 69,
+      "snapshot_steps": 68,
+      "terminal_resolved": true
     },
     "sympy__sympy-17630__qwen3.7-plus__nothink": {
       "content_sha256": "a00300e8a3eb87af28af6f8d8a35b14f7d4fd149b0537b4e71f3c792e2c1787f",

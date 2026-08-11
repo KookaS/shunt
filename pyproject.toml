@@ -53,6 +53,12 @@ docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
 # encryption at rest (Fernet/AES). Kept OUT of the core wheel — a deployment that
 # never sets `capture.full_content: true` never installs it; the sink imports it
 # lazily and errors clearly if the feature is enabled without this extra.
+# Also backs the TEST suite: `tests/capture/test_trajectory_capture.py` exercises
+# the encrypt -> redact -> decrypt round-trip, so CI's test job installs this extra
+# (`uv sync --extra dev --extra benchmark --extra capture`) — the encryption-at-rest
+# security surface must RUN, never skip for a missing dependency. Deliberately not
+# merged into `dev`: it stays opt-in for a deployment and is added explicitly where
+# the tests are run.
 capture = ["cryptography>=43"]
 # Extra runtime deps the eval harness (benchmark/) needs beyond the core.
 # swebench: the official SWE-bench evaluation harness (invoked via `python -m

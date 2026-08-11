@@ -14,9 +14,13 @@
 #   3. `secrets.SHUNT_LIVE_API_KEY` must exist. Unset ⇒ the job fails closed.
 #   4. tests/integrations/run_scenario.sh refuses without SHUNT_LIVE_I_ACCEPT_SPEND=yes.
 #
-# The cap is enforced IN THE RUN, not on the invoice: `router.budget.max_spend_usd` is
-# read from SHUNT_LIVE_MAX_SPEND_USD, and the driver sends a fixed, tiny number of
-# short prompts. A live tier whose only cost control is care is not a cost control.
+# The cap is a REAL per-session hard-stop, enforced on recorded spend: the router reads
+# `router.budget.max_spend_usd` from SHUNT_LIVE_MAX_SPEND_USD, and once a session's
+# cumulative provider-reported cost (usage.cost, never a local price) reaches it, the
+# router refuses further routing for that session — a clean error naming the cap, not a
+# fabricated success. The driver also sends a fixed, tiny number of short prompts, so
+# the fixed count (primary) and the per-session cap (backstop) together bound the bill.
+# A live tier whose only cost control is care is not a cost control.
 #
 # Run (deliberately not wired into `make e2e`):
 #   SHUNT_LIVE_I_ACCEPT_SPEND=yes SHUNT_LIVE_API_KEY=... \

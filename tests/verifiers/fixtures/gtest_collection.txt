@@ -1,0 +1,3 @@
+/usr/bin/ld: /tmp/cc0a2b1.o: in function `main':
+test_main.cc:(.text+0x3a): undefined reference to `Widget::parse(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >)'
+collect2: error: ld returned 1 exit status

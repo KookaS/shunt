@@ -1,0 +1,17 @@
+============================= test session starts ==============================
+collected 4 items
+
+widget_test.py F...
+
+============================== FAILURES ========================================
+_______________________________ test_parse ____________________________________
+
+    def test_parse():
+>       assert parse("1+1") == 3
+E       AssertionError: assert 2 == 3
+
+widget_test.py:9: AssertionError
+=========================== short test summary info ============================
+FAILED widget_test.py::test_parse - AssertionError: assert 2 == 3
+========================= 1 failed, 3 passed in 0.05s ==========================
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="4" time="0.05" timestamp="2026-08-11T10:00:00.000000" hostname="host"><testcase classname="widget_test" name="test_does_thing" time="0.001" /><testcase classname="widget_test" name="test_parse" time="0.001"><failure message="AssertionError: assert 2 == 3">assert 2 == 3</failure></testcase></testsuite></testsuites>

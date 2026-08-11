@@ -1,10 +1,10 @@
 """The SHIPPED policy, graded at the unit it actually acts on: one trajectory, one decision."""
 
-# The old harness pooled 29 422 prefixes from 799 runs, which inflates n by ~37x (prefixes inside a
-# run are near-perfectly correlated) and summed `n_escalated` across all 12 sweep cells, printing
-# 4980 escalations for 799 trajectories. Here one trajectory is one row, `n_escalated` is per cell,
-# and the headline is the question the product asks: given the policy fired, is this run more
-# likely to fail than a run picked at random?
+# The old harness pooled every prefix from the whole corpus, which inflates n by ~37x (prefixes
+# inside a run are near-perfectly correlated) and summed `n_escalated` across all 12 sweep cells,
+# printing one escalations total for the whole corpus. Here one trajectory is one row,
+# `n_escalated` is per cell, and the headline is the question the product asks: given the policy
+# fired, is this run more likely to fail than a run picked at random?
 #
 # ONE TRAJECTORY IS NOT ONE INDEPENDENT OBSERVATION, AND THIS HALF USED TO PRETEND IT WAS. The
 # corpus is 727 stamped runs drawn from 166 challenges (152 among stamped; every challenge is

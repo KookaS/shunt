@@ -131,6 +131,82 @@ class TestAutoDetectVerifier:
             lang = self.v.detect(tmpdir)
             assert lang == "typescript"
 
+    # The Framework matrix's tier2 detection hooks, one per newly supported language family.
+
+    @pytest.mark.parametrize(
+        ("filename", "body", "expected"),
+        [
+            ("pom.xml", "<project/>", "java"),
+            ("build.gradle", "plugins { id 'java' }", "java"),
+            ("App.csproj", '<Project Sdk="Microsoft.NET.Sdk"/>', "dotnet"),
+            ("widget.sln", "", "dotnet"),
+            ("Gemfile", "gem 'rspec'", "ruby"),
+            (".rspec", "--format documentation", "ruby"),
+            ("composer.json", '{"require-dev": {"phpunit/phpunit": "^10"}}', "php"),
+            ("phpunit.xml", "<phpunit/>", "php"),
+            ("CMakeLists.txt", "enable_testing()\nadd_test(NAME t COMMAND t)", "cpp"),
+            ("Package.swift", "// swift-tools-version:5.9", "swift"),
+            ("package.json", '{"devDependencies": {"mocha": "^10"}}', "typescript"),
+            ("package.json", '{"scripts": {"test": "node --test"}}', "typescript"),
+        ],
+    )
+    def test_detect_new_language_families(self, filename: str, body: str, expected: str) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / filename).write_text(body)
+            lang = self.v.detect(tmpdir)
+            assert lang == expected, f"{filename} should detect as {expected}"
+
+    def test_detect_shell_from_bats_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "test").mkdir()
+            (Path(tmpdir) / "test" / "cli.bats").write_text("@test 'runs' {\n  true\n}\n")
+            assert self.v.detect(tmpdir) == "shell"
+
+    def test_detect_perl_from_t_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            t_dir = Path(tmpdir) / "t"
+            t_dir.mkdir()
+            (t_dir / "widget.t").write_text("use Test::More tests => 1;\nok 1;\n")
+            assert self.v.detect(tmpdir) == "perl"
+
+    def test_detect_r_from_description_with_testthat(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "DESCRIPTION").write_text("Suggests: testthat\n")
+            assert self.v.detect(tmpdir) == "r"
+
+    def test_detect_elixir_from_mix_exs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "mix.exs").write_text("defmodule W.Mixfile do\nend\n")
+            assert self.v.detect(tmpdir) == "elixir"
+
+    def test_detect_haskell_from_cabal_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "widget.cabal").write_text("cabal-version: 2.4\n")
+            assert self.v.detect(tmpdir) == "haskell"
+
+    def test_detect_python_precedence_over_new_families(self) -> None:
+        # A polyglot tree whose operator almost certainly wants pytest verified wins python.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+            (Path(tmpdir) / "pom.xml").write_text("<project/>")
+            (Path(tmpdir) / "Cargo.toml").write_text('[package]\nname = "x"\nversion = "0.1.0"\n')
+            assert self.v.detect(tmpdir) == "python"
+
+    def test_detect_go_over_new_lower_precedence_families(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "go.mod").write_text("module example.com/x\ngo 1.21\n")
+            (Path(tmpdir) / "mix.exs").write_text("defmodule X do\nend\n")
+            assert self.v.detect(tmpdir) == "go"
+
+    def test_detect_still_none_for_ambiguous_marker_files(self) -> None:
+        # A bare Makefile, a bare tests/ directory or a bare Rakefile is NOT a detection hook:
+        # those files are common in non-test contexts, so guessing on them would mis-detect.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "Makefile").write_text("all:\n\t@true\n")
+            (Path(tmpdir) / "tests").mkdir()
+            (Path(tmpdir) / "Rakefile").write_text("task :build\n")
+            assert self.v.detect(tmpdir) is None
+
 
 # ── A: failing-check dedup key + exit code parsing ─────────────────────────────
 from shunt.verifiers.tier2 import _failing_check_id  # noqa: E402

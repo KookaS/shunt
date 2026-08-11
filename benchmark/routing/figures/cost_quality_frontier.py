@@ -138,8 +138,9 @@ SPEC = FigureSpec(
         "discount and input share are measured — see cache_economics.png for the range that "
         "assumption spans.",
         "The horizontal interval belongs to the NAIVE total and is not transplanted onto the "
-        "cache-aware marker. No bootstrap interval on cache-aware cost is published, so the "
-        "sampling uncertainty of the plotted x is bracketed by the naive one, not measured.",
+        "cache-aware marker. The cache-aware ratio's own 90% bootstrap CI is published by the "
+        "kill gate (cache cost is scoped per task, so a whole-task resample preserves it) — "
+        "not transplanted onto this plot.",
         "Pass rates are scored on the coverage-completed matrix, whose imputed cells are all "
         "pass=True — see evidence_basis.png for how much of each strategy's number that is.",
         "The scored set is chosen by coverage, not at random: the collector runs the "
@@ -424,6 +425,18 @@ def _standing(name: str, pareto: set[str]) -> str:
     return "live, on the frontier" if name in pareto else "live, but dominated"
 
 
+def per_strategy_note_rows(rows: list[dict]) -> list[str]:
+    """The one per-strategy note row per summary row — DERIVED from the results table,
+    never hand-written, so a note row cannot drift from the numbers it quotes."""
+    pareto = _live_pareto(rows)
+    return [
+        f"{r['strategy']}: {usd(_cost(r))} cache-aware / {usd(_num(r, _NAIVE_KEY))} naive, "
+        f"{float(r['AvgPerf%']):.2f}% "
+        f"(n={int(float(r.get('n_tasks', 0) or 0))}, {_standing(str(r['strategy']), pareto)})"
+        for r in rows
+    ]
+
+
 def _subset_clause(shown: list[dict]) -> str:
     """The selection warning, from the summary's own subset_note — '' when it reports none."""
     # This outranks the live/non-live count for the red line: non-liveness is already carried
@@ -488,12 +501,7 @@ def _annotations(ctx: ctxmod.RoutingContext, pareto: set[str], aiq: float) -> An
                 f"{usd(lo)}–{usd(hi)} (95% bootstrap)"
             )
     facts.append(f"area under the live frontier {aiq:.3f}")
-    notes = [
-        f"{r['strategy']}: {usd(_cost(r))} cache-aware / {usd(_num(r, _NAIVE_KEY))} naive, "
-        f"{float(r['AvgPerf%']):.2f}% "
-        f"(n={int(float(r.get('n_tasks', 0) or 0))}, {_standing(str(r['strategy']), pareto)})"
-        for r in ctx.rows
-    ]
+    notes = per_strategy_note_rows(ctx.rows)
     notes.extend(_pareto_crosscheck(ctx.rows, pareto))
     subset = next((str(r.get("subset_note") or "") for r in ctx.rows if r.get("subset_note")), "")
     if subset:

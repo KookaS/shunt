@@ -1,0 +1,7 @@
+[INFO] --- compiler:3.13.0:compile (default-compile) @ widget ---
+[INFO] /x/src/main/java/com/x/Widget.java: 5: error: cannot find symbol
+[ERROR] COMPILATION ERROR :
+[INFO] /x/src/main/java/com/x/Widget.java:[5,13] cannot find symbol
+[INFO] symbol:   method parse(String)
+[INFO] location: class com.x.Widget
+[INFO] BUILD FAILURE

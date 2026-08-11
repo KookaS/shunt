@@ -26,7 +26,7 @@ from shunt.db.store import OutcomeStore, SessionProvenance
 from shunt.log_config import configure_logging
 from shunt.models import ModelPool
 from shunt.proxy.redaction import header_safe, redact_secrets
-from shunt.proxy.router import ProxyRouter, UpstreamError
+from shunt.proxy.router import BudgetExceededError, ProxyRouter, UpstreamError
 from shunt.router.cold_start import ColdStartStrategy
 from shunt.router.embedder import Embedder, embedding_cache_dir
 from shunt.router.engine import RouterEngine
@@ -90,6 +90,12 @@ def _log_config_disclosure(
         _GRACE_PERIOD,
         _RETRY_COUNT,
     )
+    cap = (
+        "unlimited"
+        if policy.budget.max_spend_usd is None
+        else f"${policy.budget.max_spend_usd:.6f}"
+    )
+    logger.info("Shunt config | budget: max_spend_usd=%s", cap)
     if embedder is not None:
         # The RESOLVED embedder (from embedding.yaml, env applied), not the raw env var —
         # plus whether its fingerprint matches the stored corpus space.
@@ -411,6 +417,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         session_manager=session_manager,
         retry_count=_RETRY_COUNT,
         engine=engine,
+        max_spend_usd=policy.budget.max_spend_usd,
     )
     app.state.session_manager = session_manager
     app.state.model_pool = model_pool
@@ -525,6 +532,16 @@ def _store_session_with_provenance(
         fallback_chain_triggered=False,
         router_propensity=1.0,
     )
+    # FALLBACK HONESTY: when the engine locked model A but the retry/fallback loop
+    # actually served model B (A failed upstream), the engine's decision-time
+    # provenance still names A — the model that was CHOSEN, not the model that RAN.
+    # The sessions.model_chosen COLUMN is already the served model (what kNN learns
+    # from), but decision_provenance.model_chosen is what `shunt explain` prints, so
+    # a fallback session would explain as "chose A, fallback: no" while serving B.
+    # Correct the provenance to the served model and mark the fallback.
+    served_model = provenance.get("model_chosen")
+    if served_model is not None and served_model != model_name:
+        provenance = {**provenance, "model_chosen": model_name, "fallback_chain_triggered": True}
     session.decision_provenance = provenance
     outcome_store.store_session(
         session_id=session.session_id,
@@ -584,6 +601,16 @@ async def _build_decision_headers(
         "X-Shunt-Decision": header_safe(f"{model_name}; reason={reason}"),
         "X-Shunt-Session-Id": session.session_id,
     }
+
+
+def _error_response_headers(headers: dict[str, str], exc: UpstreamError) -> dict[str, str]:
+    """Mark a permanent refusal so a retry-happy SDK stops: the budget cap is not transient."""
+    if isinstance(exc, BudgetExceededError):
+        # The OpenAI SDK obeys `x-should-retry: false` before its status-code check, so the
+        # header is the belt-and-suspenders on top of 402 — even a client that normalizes
+        # 402 into a retry path must honor it.
+        return {**headers, "x-should-retry": "false"}
+    return headers
 
 
 @app.get("/health")
@@ -700,7 +727,9 @@ async def chat_completions(request: Request) -> Response:
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": {"message": safe, "type": "proxy_error"}},
-            headers=await _build_decision_headers(session, "error", safe),
+            headers=_error_response_headers(
+                await _build_decision_headers(session, "error", safe), exc
+            ),
         )
     except Exception as exc:
         safe = redact_secrets(str(exc))
@@ -758,7 +787,9 @@ async def messages(request: Request) -> Response:
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": {"message": safe, "type": "proxy_error"}},
-            headers=await _build_decision_headers(session, "error", safe),
+            headers=_error_response_headers(
+                await _build_decision_headers(session, "error", safe), exc
+            ),
         )
     except Exception as exc:
         safe = redact_secrets(str(exc))

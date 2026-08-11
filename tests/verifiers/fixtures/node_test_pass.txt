@@ -1,0 +1,3 @@
+ok 1 - test widget returns value
+ok 2 - test widget throws on bad input
+1..2

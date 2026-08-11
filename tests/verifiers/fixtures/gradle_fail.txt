@@ -1,0 +1,9 @@
+> Task :test
+com.x.WidgetTest > parsesInput FAILED
+    org.opentest4j.AssertionFailedError at WidgetTest.java:9
+1 test completed, 1 failed
+
+FAILURE: Build failed with an exception.
+* What went wrong:
+Execution failed for task ':test'.
+> There were failing tests. See the report at: file:///x/build/reports/tests/test/index.html

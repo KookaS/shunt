@@ -69,6 +69,7 @@ def test_rank_escalation_provenance_names_the_served_model() -> None:
     assert reason == "auto_escalation"
     assert served != base  # a rank step CHANGES the served model — the broken path
     assert prov["model_chosen"] == served
+    assert prov["selection_rule_used"] == "auto_escalation"
     assert prov["auto_escalated"] is True
 
 
@@ -80,6 +81,7 @@ def test_effort_escalation_provenance_names_the_served_model() -> None:
     assert served == "qwen"  # an effort step keeps the model (cache-safe)
     assert prov["escalated_reasoning_arm"] == "high"
     assert prov["model_chosen"] == "qwen"
+    assert prov["selection_rule_used"] == "auto_escalation"
 
 
 def test_floor_held_provenance_names_the_served_model() -> None:
@@ -94,6 +96,7 @@ def test_floor_held_provenance_names_the_served_model() -> None:
     assert reason == "escalation_floor"
     assert served == escalated
     assert prov["model_chosen"] == served
+    assert prov["selection_rule_used"] == "escalation_floor"
     assert prov["auto_escalated"] is True
 
 
@@ -109,8 +112,9 @@ def test_non_policy_provenance_clears_a_stale_downshift() -> None:
     )
     directive = EscalationDirective(EscalationAction.RAISE_RANK, "verified_failures")
 
-    prov = RouterEngine._non_policy_provenance(base, directive, "glm")
+    prov = RouterEngine._non_policy_provenance(base, directive, "glm", "auto_escalation")
 
     assert prov["model_chosen"] == "glm"
+    assert prov["selection_rule_used"] == "auto_escalation"
     assert prov["downshift"] is False
     assert prov["router_propensity"] is None

@@ -1,0 +1,7 @@
+
+Widget
+  does the thing
+  parses input
+
+Finished in 0.02 seconds (files took 0.11 seconds to load)
+2 examples, 0 failures

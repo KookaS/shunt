@@ -184,8 +184,18 @@ def live_config() -> dict:
 
 
 def live_step_limit() -> int:
-    """PRIMARY model-speed-agnostic per-cell agent-step ceiling (default 70; see benchmark.yaml)."""
-    return int(live_config().get("step_limit", 70))
+    """PRIMARY model-speed-agnostic per-cell agent-step ceiling (default 150)."""
+    return int(live_config().get("step_limit", 150))
+
+
+def live_cost_limit() -> float:
+    """Per-cell USD cost ceiling passed to the agent scaffold (default 4.0; see benchmark.yaml)."""
+    # mini-swe-agent's own AgentConfig default is 3.0 — a scaffold default that would
+    # otherwise govern paid runs silently (the "undeclared default" this accessor exists to
+    # end). A declared key means the cap a run obeys is recorded where the run is configured.
+    # The value MOVES WITH ``step_limit``: the two are raised together, so a budget increase
+    # cannot relabel step censors as cost censors under a lying label.
+    return float(live_config().get("cost_limit", 4.0))
 
 
 def _pricing_dict() -> dict:
@@ -665,6 +675,15 @@ def load_results(path: str | Path | None = None) -> dict:
                     timeout_flag=_bool_field(row.get("timeout_flag", "")),
                     stop_reason=str(row.get("stop_reason") or ""),
                 ),
+                # Collection-param provenance: the regime the cell was
+                # collected under. Carried through so ``_is_stale`` can anchor on
+                # step_limit/sampling_hash/prompt_hash; legacy rows backfilled before
+                # the columns existed carry "" (grandfathered to a staleness no-op).
+                "step_limit": str(row.get("step_limit") or ""),
+                "cost_limit": str(row.get("cost_limit") or ""),
+                "scaffold_version": str(row.get("scaffold_version") or ""),
+                "sampling_hash": str(row.get("sampling_hash") or ""),
+                "prompt_hash": str(row.get("prompt_hash") or ""),
             }
     return results
 

@@ -1,0 +1,6 @@
+<testsuite name="com.x.WidgetTest" time="0.012" tests="4" errors="0" skipped="0" failures="0">
+  <testcase name="doesThing" classname="com.x.WidgetTest" time="0.001"/>
+  <testcase name="parsesInput" classname="com.x.WidgetTest" time="0.001"/>
+  <testcase name="roundtrips" classname="com.x.WidgetTest" time="0.002"/>
+  <testcase name="rejectsBad" classname="com.x.WidgetTest" time="0.001"/>
+</testsuite>

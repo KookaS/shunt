@@ -1,0 +1,15 @@
+running 2 tests
+test widget::does_thing ... ok
+test widget::parses_input ... FAILED
+
+failures:
+
+---- widget::parses_input stdout ----
+assertion `left == right` failed
+  left: 2
+ right: 3
+
+failures:
+    widget::parses_input
+
+test result: FAILED. 1 failed; 1 passed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s

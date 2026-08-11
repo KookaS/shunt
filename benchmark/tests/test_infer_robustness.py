@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Any, Final
 
 import litellm
@@ -17,7 +18,7 @@ from minisweagent.models.litellm_model import LitellmModel
 from minisweagent.models.utils.retry import retry
 
 from benchmark import config
-from benchmark.routing import censoring
+from benchmark.routing import censoring, integrity
 from benchmark.runner import image_version, infer, run_matrix, swebench_harness, swebench_specs
 
 _LOG: Final = logging.getLogger("test-infer-robustness")
@@ -249,13 +250,37 @@ class TestStepLimitAndBounds:
     """FIX A/B: step_limit is the primary bound; wall = passed timeout; watchdog > wall."""
 
     def test_overlay_carries_step_limit_and_wall(self) -> None:
-        overlay = infer._scaffold_config_overlay("m", {}, timeout=1800, step_limit=70)
+        overlay = infer._scaffold_config_overlay(
+            "m", {}, timeout=1800, step_limit=70, cost_limit=3.0, trajectory_id="t__m__d"
+        )
         assert overlay["agent"]["step_limit"] == 70  # PRIMARY model-speed-agnostic bound
         assert overlay["agent"]["wall_time_limit_seconds"] == 1800  # internal graceful wall
+        assert overlay["agent"]["cost_limit"] == 3.0  # declared per-cell USD cap
+
+    def test_overlay_sets_output_path_keyed_by_trajectory_in_scratch(self) -> None:
+        # The overlay wires mini-swe-agent's `output_path` to the gitignored scratch, keyed
+        # by trajectory id so the dump pairs with the escalation trajectory jsonl and the
+        # per-step snapshot dir (make_trajectory_id is the single shared key).
+        from benchmark.runner.step_snapshots import MESSAGE_LIST_ROOT, message_list_path
+
+        trajectory_id = "psf__requests-1142__kimi-k3__default"
+        overlay = infer._scaffold_config_overlay(
+            "m", {}, timeout=1800, step_limit=150, cost_limit=4.0, trajectory_id=trajectory_id
+        )
+        out = overlay["agent"]["output_path"]
+        assert out == str(message_list_path(trajectory_id))
+        assert out.startswith(str(MESSAGE_LIST_ROOT))  # inside the gitignored scratch
 
     def test_default_step_limit_matches_config(self) -> None:
         config.load("benchmark/benchmark.yaml")
         assert config.live_step_limit() == infer._DEFAULT_STEP_LIMIT
+
+    def test_default_cost_limit_matches_config(self) -> None:
+        config.load("benchmark/benchmark.yaml")
+        # The explicit key ends the scaffold-default-only governance: a run's cap is recorded
+        # where the run is configured, not silently inherited from mini-swe-agent's 3.0. It
+        # MOVES WITH step_limit (both raised together, so a budget increase cannot relabel).
+        assert config.live_cost_limit() == 4.0
 
     def test_external_watchdog_strictly_greater_than_wall(self) -> None:
         # THE ordering invariant: the graceful internal wall must fire BEFORE the hard watchdog,
@@ -265,22 +290,36 @@ class TestStepLimitAndBounds:
 
     def test_generate_patch_live_forwards_step_limit_and_timeout(self, monkeypatch) -> None:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "x")
-        captured: dict[str, int] = {}
+        captured: dict[str, int | float] = {}
 
-        def _cap(spec, model, scaffold, arm, *, timeout, step_limit):
+        def _cap(spec, model, scaffold, arm, *, timeout, step_limit, cost_limit=None):
             captured.update(timeout=timeout, step_limit=step_limit)
+            if cost_limit is not None:
+                captured["cost_limit"] = cost_limit
             return infer.AgentPatch(patch="", in_tok=0, out_tok=0, calls=0, cost=0.0)
 
         monkeypatch.setattr(infer, "_invoke_scaffold", _cap)
         infer.generate_patch_live(_spec(), "m", timeout=123, step_limit=88)
         assert captured == {"timeout": 123, "step_limit": 88}
 
+    def test_generate_patch_live_forwards_cost_limit(self, monkeypatch) -> None:
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "x")
+        captured: dict[str, object] = {}
+
+        def _cap(spec, model, scaffold, arm, *, timeout, step_limit, cost_limit=None):
+            captured["cost_limit"] = cost_limit
+            return infer.AgentPatch(patch="", in_tok=0, out_tok=0, calls=0, cost=0.0)
+
+        monkeypatch.setattr(infer, "_invoke_scaffold", _cap)
+        infer.generate_patch_live(_spec(), "m", cost_limit=5.5)
+        assert captured["cost_limit"] == 5.5
+
     def test_run_live_cell_forwards_step_limit(self, monkeypatch, tmp_path) -> None:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "x")
         monkeypatch.setattr(swebench_specs, "load_spec", lambda iid: _spec())
         captured: dict[str, int] = {}
 
-        def _cap(spec, model, *, arm, timeout, step_limit):
+        def _cap(spec, model, *, arm, timeout, step_limit, cost_limit=None):
             captured.update(timeout=timeout, step_limit=step_limit)
             raise infer.AgentRunTimeoutError("stop before harness")
 
@@ -381,8 +420,10 @@ class TestStopReasonOnSuccessPath:
         monkeypatch.setattr(
             infer,
             "generate_patch_live",
-            lambda spec, model, arm="default", timeout=None, step_limit=None: infer.AgentPatch(
-                patch="diff", in_tok=1, out_tok=1, calls=1, cost=0.1, exit_status=exit_status
+            lambda spec, model, arm="default", timeout=None, step_limit=None, cost_limit=None: (
+                infer.AgentPatch(  # noqa: E501
+                    patch="diff", in_tok=1, out_tok=1, calls=1, cost=0.1, exit_status=exit_status
+                )
             ),
         )
         report = tmp_path / "r.json"
@@ -402,6 +443,16 @@ class TestStopReasonOnSuccessPath:
         assert out["stop_reason"] == censoring.SOLVED
         assert out["pass"] is True
         assert out["timeout_flag"] is False
+
+    def test_success_path_records_collection_params(self, monkeypatch, tmp_path) -> None:
+        # Every live outcome carries the regime it was collected under, so a
+        # later change to the caps / scaffold / kwargs / prompt can stale it.
+        out = self._run(monkeypatch, tmp_path, resolved=True, exit_status="Submitted")
+        assert out["step_limit"] == str(infer._DEFAULT_STEP_LIMIT)
+        assert out["cost_limit"] == str(config.live_cost_limit())
+        assert out["scaffold_version"] == integrity.scaffold_version()
+        assert out["sampling_hash"] == integrity.sampling_hash("m", "default")
+        assert out["prompt_hash"] == integrity.scaffold_prompt_hash()
 
     def test_unsolved_when_finished_but_not_resolved(self, monkeypatch, tmp_path) -> None:
         out = self._run(monkeypatch, tmp_path, resolved=False, exit_status="Submitted")
@@ -500,3 +551,114 @@ def test_capture_records_the_snapshot_count_the_run_actually_produced(
 
     written = next(tmp_path.glob("*.jsonl"))
     assert schema.load_jsonl(written).header.snapshot_steps == 0
+
+
+class TestMessageListOutputWrite:
+    """The full message-list dump (mini-swe-agent `output_path`) is observe-only."""
+
+    def test_write_failure_never_alters_run_outcome(self) -> None:
+        # A dump write failure must never change a paid run's returned outcome, cost or
+        # exit status. DefaultAgent.run() writes the dump from a finally block, so without the
+        # hardening a write failure would propagate and poison the run — with it, the returned
+        # outcome is byte-identical whether or not the dump succeeds.
+        from benchmark.runner.infer import _harden_output_write
+
+        class _Agent:
+            def __init__(self) -> None:
+                self.fail = False
+                self.attempts = 0
+
+            def save(self, path: str) -> dict[str, object]:
+                self.attempts += 1
+                if self.fail:
+                    raise OSError("disk full")
+                return {"info": {}}
+
+            def run(self, task: str) -> dict[str, object]:
+                try:
+                    return {"exit_status": "Submitted", "submission": "diff"}
+                finally:
+                    self.save("/scratch/x.json")
+
+        agent = _Agent()
+        _harden_output_write(agent)
+        good = agent.run("t")
+        agent.fail = True
+        bad = agent.run("t")  # must return identically despite the failing dump
+
+        assert bad == good  # outcome, cost, exit status all unchanged
+        assert agent.attempts == 2  # the dump was still attempted on both runs
+
+    def test_harden_output_write_is_a_noop_when_save_is_missing(self) -> None:
+        from benchmark.runner.infer import _harden_output_write
+
+        _harden_output_write(object())  # must not raise
+
+    def test_scaffold_save_writes_full_message_list_via_output_path(self, tmp_path: Path) -> None:
+        # The mechanism this story relies on, proven against the INSTALLED scaffold: setting
+        # `output_path` makes DefaultAgent.run() persist the full message list via
+        # `self.save(...)` in a finally block — no extra write path in the harness needed.
+        from minisweagent.agents.default import DefaultAgent  # noqa: PLC0415
+        from minisweagent.exceptions import LimitsExceeded  # noqa: PLC0415
+
+        class _FakeModel:
+            config: Any = {}
+
+            def format_message(self, **kwargs: Any) -> dict[Any, Any]:
+                return {
+                    "role": kwargs.get("role"),
+                    "content": kwargs.get("content"),
+                    "extra": kwargs.get("extra") or {},
+                }
+
+            def format_observation_messages(
+                self,
+                message: dict[Any, Any],
+                outputs: list[dict[Any, Any]],
+                template_vars: dict[str, Any] | None = None,
+            ) -> list[dict[Any, Any]]:
+                return []
+
+            def query(self, messages: list[dict[str, str]], **kwargs: Any) -> dict[Any, Any]:
+                raise LimitsExceeded(
+                    {
+                        "role": "exit",
+                        "content": "LimitsExceeded",
+                        "extra": {"exit_status": "LimitsExceeded", "submission": ""},
+                    }
+                )
+
+            def get_template_vars(self, **kwargs: Any) -> dict[str, Any]:
+                return {}
+
+            def serialize(self) -> dict[Any, Any]:
+                return {"model": {}}
+
+        class _FakeEnv:
+            config: Any = {}
+
+            def get_template_vars(self, **kwargs: Any) -> dict[str, Any]:
+                return {}
+
+            def execute(self, action: dict[Any, Any], cwd: str = "") -> dict[str, Any]:
+                return {"output": "", "returncode": 0}
+
+            def serialize(self) -> dict[Any, Any]:
+                return {"environment": {}}
+
+        dump = tmp_path / "traj__m__d.json"
+        agent = DefaultAgent(
+            _FakeModel(),
+            _FakeEnv(),
+            system_template="sys {{task}}",
+            instance_template="task {{task}}",
+            output_path=dump,
+        )
+        result = agent.run("fix it")
+        assert result.get("exit_status") == "LimitsExceeded"
+        assert dump.exists()
+        import json  # noqa: PLC0415
+
+        data = json.loads(dump.read_text())
+        assert data["messages"] == agent.messages  # the FULL message list, not the trace
+        assert any(m["role"] == "exit" for m in data["messages"])

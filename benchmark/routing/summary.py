@@ -37,10 +37,14 @@ SUMMARY_FIELDS: Final[tuple[str, ...]] = (
     "TotalCost_ci_lower",
     "TotalCost_ci_upper",
     "TotalCost_cacheaware",
+    "TotalCost_cacheaware_ci_lower",
+    "TotalCost_cacheaware_ci_upper",
     "AvgCost",
     "AvgCost_ci_lower",
     "AvgCost_ci_upper",
     "AvgCost_cacheaware",
+    "AvgCost_cacheaware_ci_lower",
+    "AvgCost_cacheaware_ci_upper",
     "Reward",
     "CumReg",
     "CumReg_ci_lower",
@@ -197,7 +201,16 @@ def compute_strategy_rows(
     prices = cache_prices(sorted(matrix.get("models", {})))
     rows = [
         _strategy_row(
-            s, matrix, tasks, oracle_decisions, oracle_unscorable, gamma, bootstrap, prices, probe
+            s,
+            matrix,
+            tasks,
+            oracle_decisions,
+            oracle_unscorable,
+            gamma,
+            bootstrap,
+            prices,
+            probe,
+            seed=seed,
         )
         for s in strategies
     ]
@@ -253,6 +266,7 @@ def _strategy_row(  # noqa: PLR0913
     bootstrap: int,
     prices: dict[str, CachePrice] | None = None,
     probe: dict | None = None,
+    seed: int = 42,
 ) -> dict:
     decisions, strat_unscorable, attempts = evaluate_billed(strategy, matrix, tasks)
     # A task is comparable only if BOTH the strategy and the oracle landed on a
@@ -267,7 +281,15 @@ def _strategy_row(  # noqa: PLR0913
         oracle_aligned = oracle_decisions
     metrics = compute_metrics(decisions, gamma=gamma)
     comparison = compare_to_oracle(decisions, oracle_aligned, gamma=gamma)
-    cis = bootstrap_ci(decisions, oracle_aligned, bootstrap, gamma=gamma)
+    cis = bootstrap_ci(
+        decisions,
+        oracle_aligned,
+        bootstrap,
+        gamma=gamma,
+        seed=seed,
+        attempts=attempts,
+        prices=prices,
+    )
     cache_total = _cache_aware_cost(decisions, attempts, prices or {})
     n = len(decisions)
     probe_matrix = matrix if probe is None else probe
@@ -286,7 +308,11 @@ def _strategy_row(  # noqa: PLR0913
         **metrics,
         **comparison,
         "TotalCost_cacheaware": round(cache_total, 4),
+        "TotalCost_cacheaware_ci_lower": cis.total_cost_cacheaware[0],
+        "TotalCost_cacheaware_ci_upper": cis.total_cost_cacheaware[1],
         "AvgCost_cacheaware": round(cache_total / n, 6) if n else 0.0,
+        "AvgCost_cacheaware_ci_lower": cis.avg_cost_cacheaware[0],
+        "AvgCost_cacheaware_ci_upper": cis.avg_cost_cacheaware[1],
         "AvgPerf_ci_lower": cis.avgperf[0],
         "AvgPerf_ci_upper": cis.avgperf[1],
         "CumReg_ci_lower": cis.cumreg[0],

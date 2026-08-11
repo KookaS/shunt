@@ -116,18 +116,22 @@ def _stamp_terminal(step: StepView, resolved: bool) -> StepView:
     return replace(stamped, blocking=schema.recompute_blocking(stamped))
 
 
-def stamp_step(step: StepView, outcome: VerifierResult) -> StepView:
-    """Stamp a per-step verified outcome onto a StepView (shared by the live map + offline replay).
-
-    A capability failure carries its failing-check id (→ dedup key); a success or an infra/env
-    error keeps the non-failure default (no id, non-blocking). Deterministic harness ⇒ confirmed.
-    """
+def stamp_step(step: StepView, outcome: VerifierResult, *, replay: bool = False) -> StepView:
+    """Stamp a per-step verified outcome onto a StepView (live map + offline replay)."""
+    # A capability failure carries its failing-check id (→ dedup key); a success or an
+    # infra/env error keeps the non-failure default (no id, non-blocking). Deterministic
+    # harness ⇒ confirmed. ``replay`` picks WHICH field the outcome's exit code lands in:
+    #   replay=False (LIVE map) → the step's OWN exit code → ``exit_code``;
+    #   replay=True (OFFLINE replay) → the REPLAY HARNESS's rc → ``replay_rc``, and the
+    #   step's own ``exit_code`` is cleared (the committed step never carried one).
+    # Never the two conflated under one name — the one source of the two-referent defect.
     is_failure = outcome.outcome == "failure"
     stamped = replace(
         step,
         success=not is_failure,
         failing_check_id=outcome.failing_check_id if is_failure else None,
-        exit_code=outcome.exit_code,
+        exit_code=None if replay else outcome.exit_code,
+        replay_rc=outcome.exit_code if replay else step.replay_rc,
         is_infra_failure=outcome.is_infra_failure,
         confirmed=True,
     )
@@ -147,6 +151,7 @@ def unstamp_step(step: StepView) -> StepView:
         success=True,
         failing_check_id=None,
         exit_code=None,
+        replay_rc=None,
         is_infra_failure=False,
         confirmed=False,
     )
@@ -164,8 +169,8 @@ def unstamp_trajectory(traj: Trajectory) -> Trajectory:
     #
     # The terminal step is NOT cleared to nothing: its `confirmed` comes from the SWE-bench
     # grading harness (`header.terminal_resolved`), a different instrument that this gate says
-    # nothing about. Its `exit_code` IS cleared — `_stamp_terminal` never wrote that, so any value
-    # there is a leftover from the per-step replay this gate just invalidated.
+    # nothing about. Its `exit_code`/`replay_rc` ARE cleared — `_stamp_terminal` never wrote
+    # those, so any value there is a leftover from the per-step replay this gate just invalidated.
     steps = [unstamp_step(s) for s in traj.steps]
     if steps:
         steps[-1] = _stamp_terminal(steps[-1], traj.header.terminal_resolved)
@@ -179,7 +184,11 @@ def restamp_trajectory(traj: Trajectory, step_outcomes: Mapping[int, VerifierRes
     # the persisted trajectory directly. The terminal step's harness `resolved` label is re-asserted
     # last so an intermediate test outcome can never override the authoritative grade.
     steps = [
-        stamp_step(s, step_outcomes[s.step_index]) if s.step_index in step_outcomes else s
+        # `replay=True`: offline outcomes carry the replay harness's process return code, which
+        # must land in `replay_rc` (never `exit_code`) — the two referents stay separate.
+        stamp_step(s, step_outcomes[s.step_index], replay=True)
+        if s.step_index in step_outcomes
+        else s
         for s in traj.steps
     ]
     if steps:

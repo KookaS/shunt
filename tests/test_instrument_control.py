@@ -106,17 +106,45 @@ class TestThePlantedCorpus:
 
     def test_every_task_text_is_distinct(self) -> None:
         matrix, task_ids, _f, _r = ic.build_control_matrix()
-        texts = {matrix["tasks"][tid]["description"] for tid in task_ids}
+        texts = {matrix["tasks"][tid]["problem_statement"] for tid in task_ids}
         assert len(texts) == len(task_ids)
 
     def test_the_corpus_mirrors_the_field_shape_routing_text_resolves_through(self) -> None:
-        # The control plants into `description` because that is the field the committed corpus
-        # resolves through. A task meta carrying a field the real one does not have would be
-        # certifying a code path no real task takes.
+        # The control plants into `problem_statement` because that is the field the committed
+        # corpus resolves through (routing_text prefers it over `description`). A task meta
+        # carrying a field the real one does not have would be certifying a code path no real
+        # task takes.
         matrix, task_ids, _f, _r = ic.build_control_matrix()
         meta = matrix["tasks"][task_ids[0]]
-        assert "problem_statement" not in meta
-        assert set(meta) == {"description", "repo"}
+        assert "description" not in meta
+        assert "problem_statement" in meta
+        assert set(meta) == {"problem_statement", "repo"}
+
+    def test_the_planted_text_length_matches_the_corpus_median_within_tolerance(self) -> None:
+        # The control used to plant ~106-char labels while the real corpus's
+        # routing channel is ~1180 chars — a positive control on ~9x shorter inputs exercises a
+        # different embedding regime. The planted texts must sit at the corpus median.
+        matrix, task_ids, _f, _r = ic.build_control_matrix()
+        control_lens = [len(matrix["tasks"][tid]["problem_statement"]) for tid in task_ids]
+        control_median = float(np.median(control_lens))
+        corpus_median = float(ic.corpus_median_chars())
+        assert abs(control_median - corpus_median) / corpus_median <= 0.2, (
+            f"control median {control_median} vs corpus median {corpus_median}"
+        )
+
+    def test_the_planted_text_is_longer_than_the_old_label_regime(self) -> None:
+        # The defect was a ~106-char label; the fix must have moved the control well past it.
+        matrix, task_ids, _f, _r = ic.build_control_matrix()
+        control_lens = [len(matrix["tasks"][tid]["problem_statement"]) for tid in task_ids]
+        assert float(np.median(control_lens)) >= 1000
+
+    def test_an_empty_corpus_median_raises_a_clear_error(self, monkeypatch) -> None:
+        # An empty corpus turned `np.median([])` NaN and then `int(NaN)` into a raw
+        # ValueError naming nothing. It must raise a named error that identifies the
+        # missing corpus instead.
+        monkeypatch.setattr(ic, "_corpus_problem_statements", lambda: ())
+        with pytest.raises(ValueError, match="no problem statements"):
+            ic.corpus_median_chars()
 
     def test_results_block_agrees_with_the_gate_outcome_matrix(self) -> None:
         # Asserted at BOTH arm counts. `_results_for` and the returned outcome matrix are two

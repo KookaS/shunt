@@ -1,0 +1,6 @@
+> Task :test
+com.x.WidgetTest > doesThing PASSED
+com.x.WidgetTest > parsesInput PASSED
+
+BUILD SUCCESSFUL in 2s
+4 actionable tasks: 4 executed

@@ -277,7 +277,9 @@ class TestInfraFailure:
         monkeypatch.setattr(
             infer,
             "generate_patch_live",
-            lambda spec, model, arm="default", timeout=None, step_limit=None: self._patch(),
+            lambda spec, model, arm="default", timeout=None, step_limit=None, cost_limit=None: (  # noqa: E501
+                self._patch()
+            ),
         )
         monkeypatch.setattr(
             infer.swebench_harness,
@@ -299,7 +301,9 @@ class TestInfraFailure:
         monkeypatch.setattr(
             infer,
             "generate_patch_live",
-            lambda spec, model, arm="default", timeout=None, step_limit=None: self._patch(),
+            lambda spec, model, arm="default", timeout=None, step_limit=None, cost_limit=None: (  # noqa: E501
+                self._patch()
+            ),
         )
         monkeypatch.setattr(
             infer.swebench_harness,

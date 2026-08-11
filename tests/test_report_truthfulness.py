@@ -389,3 +389,33 @@ class TestNoReadingOrGoalStringReachesTheCanvas:
             )
             assert spec.reading not in rendered
             assert spec.goal not in rendered
+
+
+class TestPairedQualityContrastIsRegenerable:
+    # The published number must equal what the committed generator emits from committed
+    # data, byte for byte — regenerating the report reproduces it, and when the corpus
+    # grows the number goes stale loudly instead of silently.
+    """benchmark.md's Price-Cascade-vs-frontier headline (paired quality contrast)."""
+
+    _DOC = Path("docs/benchmark.md")
+
+    def test_regeneration_reproduces_the_published_fragment(self) -> None:
+        generated = report.paired_quality_contrast()
+        assert generated  # non-empty
+        # The doc quotes the generator's numbers (bold markers split the fragment).
+        doc_text = self._DOC.read_text(encoding="utf-8")
+        plain = doc_text.replace("**", "")
+        assert generated in plain, (
+            "benchmark.md no longer contains the generated paired-quality fragment. "
+            f"generated: {generated!r}"
+        )
+
+    def test_published_number_matches_generator_numbers(self) -> None:
+        # Byte-for-byte on the numeric claims: what the generator prints is what the
+        # the doc publishes the corrected numbers, not the stale n=180 ones.
+        generated = report.paired_quality_contrast()
+        doc_text = self._DOC.read_text(encoding="utf-8")
+        plain = doc_text.replace("**", "")
+        for token in generated.replace("→", "").split():
+            if token and token[0] in "+-0123456789":
+                assert token in plain, f"generated number {token!r} missing from benchmark.md"

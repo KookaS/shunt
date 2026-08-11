@@ -1,0 +1,16 @@
+PHPUnit 10.5.3 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.2.2
+
+.E                                                                  2 / 2 (100%)
+
+Time: 00:00.081, Memory: 10.00 MB
+
+There was 1 error:
+
+1) WidgetTest::testParse
+/x/tests/WidgetTest.php:9
+Error: Call to undefined method Widget::parse()
+
+ERRORS!
+Tests: 2, Assertions: 1, Errors: 1, Failures: 0.

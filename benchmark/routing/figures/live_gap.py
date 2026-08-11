@@ -63,6 +63,13 @@ _ROLE: Final[Mapping[StrategyClass, str]] = MappingProxyType(
 # narrower and floating-point ties on identical pass counts drop out of it.
 _BAND_PP: Final[float] = 1.0
 
+# The honest subtitle/caveat when no live strategy reaches the bound's quality: there is
+# nothing to price, because none of the headroom is purchasable today. Stated in words
+# because a "$0.00" for the empty live set is a fabricated price.
+_NO_LIVE_IN_BAND: Final[str] = (
+    "no live strategy reaches this band — none of the headroom is buyable today"
+)
+
 
 def _rows(ctx: ctxmod.RoutingContext) -> list[tuple[str, StrategyClass, float, float]]:
     """(name, class, total cost, pass rate) for every scored, priced strategy row."""
@@ -87,10 +94,15 @@ def _at_bound_quality(
     return ceiling, sorted(band, key=lambda r: r[2])
 
 
-def _cheapest(band: list[tuple[str, StrategyClass, float, float]], cls: StrategyClass) -> float:
-    """Cheapest total cost in `band` for one class, or 0.0 when the class is absent."""
+def _cheapest(
+    band: list[tuple[str, StrategyClass, float, float]], cls: StrategyClass
+) -> float | None:
+    """Cheapest total cost in `band` for one class, or None when the class is absent."""
+    # A sentinel 0.0 for an absent class reads as a real price ("cheapest live $0.00") and
+    # turns `live - bound` non-positive, silently dropping the figure's own caveat. None
+    # makes the absence a state the call sites must render, not a price they can print.
     costs = [r[2] for r in band if r[1] is cls]
-    return min(costs) if costs else 0.0
+    return min(costs) if costs else None
 
 
 SPEC = FigureSpec(
@@ -209,7 +221,9 @@ def _draw_spans(ax: Axes, band: list[tuple[str, StrategyClass, float, float]]) -
         (bound, blocked, _SPAN_SHUT, -0.85, "not buyable by any strategy"),
     ]
     for lo, hi, colour, y, label in spans:
-        if lo <= 0 or hi <= 0 or hi <= lo:
+        # A missing class makes its bracket undrawable, and that is the honest state: when
+        # no live strategy reaches the band there is no blue "wiring work" span to show.
+        if lo is None or hi is None or hi <= lo:
             continue
         ax.plot([lo, hi], [y, y], color=colour, lw=1.6, zorder=5)
         for x in (lo, hi):
@@ -262,19 +276,33 @@ def _annotations(
     live = _cheapest(band, StrategyClass.LIVE)
     blocked = _cheapest(band, StrategyClass.BLOCKED)
     bound = _cheapest(band, StrategyClass.BOUND)
-    total = live - bound
     facts = [
         f"{len(band)} of {len(rows)} strategies reach {ceiling:.2f}% ± {_BAND_PP:.0f}pp",
-        f"cheapest live {usd(live)} · cheapest blocked {usd(blocked)} · bound {usd(bound)}",
     ]
     caveat = None
-    if total > 0 and blocked > 0:
-        share = (live - blocked) / total
-        facts.append(f"blocked strategies hold {share:.0%} of the live-to-bound headroom")
-        caveat = (
-            f"{share:.0%} of the headroom sits behind a blocker, so it is a to-do, not a "
-            "measured saving."
-        )
+    if live is None:
+        # Honest answer when no live strategy reaches the band: state it in words instead
+        # of printing a price for the empty set. This ALSO replaces the headroom caveat —
+        # with no live row there is no live-to-bound span to call a to-do, so the absence
+        # statement IS the red line; it must never be silently dropped (the 0.0 sentinel
+        # made `live - bound` non-positive and the caveat vanished without a trace).
+        facts.append(_NO_LIVE_IN_BAND)
+        caveat = _NO_LIVE_IN_BAND
+    else:
+        prices = [f"cheapest live {usd(live)}"]
+        if blocked is not None:
+            prices.append(f"cheapest blocked {usd(blocked)}")
+        if bound is not None:
+            prices.append(f"bound {usd(bound)}")
+        facts.append(" · ".join(prices))
+        total = live - bound if bound is not None else 0.0
+        if total > 0 and blocked is not None:
+            share = (live - blocked) / total
+            facts.append(f"blocked strategies hold {share:.0%} of the live-to-bound headroom")
+            caveat = (
+                f"{share:.0%} of the headroom sits behind a blocker, so it is a to-do, not a "
+                "measured saving."
+            )
     notes = [f"{name}: {usd(cost)}, {perf:.2f}% ({cls.value})" for name, cls, cost, perf in band]
     return Annotations(
         subtitle_facts=tuple(facts),

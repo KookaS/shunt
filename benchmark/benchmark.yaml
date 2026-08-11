@@ -148,9 +148,21 @@ ladder:
 # GRACEFUL secondary backstop set from --timeout (default 1800s), and an external watchdog fires
 # strictly LATER (+300s) as a hard last resort for a genuine single-call hang — so a normal slow
 # run always terminates gracefully with its real usage.cost captured, never abandoned at $0.
-# step_limit 70 justified from benchmark/escalation/data/live: passers' step counts p90=58, p95=68.
+# step_limit 150 is justified from the measured HAZARD, not passers' percentiles (the old p90=58 /
+# p95=68 rationale was survivorship-biased — conditioning on cells that passed says nothing about
+# cells still alive at step 70). Of the 92 corpus cells still running at step 70 under the old
+# 250-step budget, 37 (40.2%) went on to pass; 35 of those 37 (95%) finished by step 150, so 150 is
+# where censoring drops from a ~40% loss to a ~2% tail. Raised together with cost_limit so the
+# budget increase cannot relabel cost censors as step censors.
 live:
-  step_limit: 70
+  step_limit: 150
+  # Per-cell USD cost ceiling passed to the agent scaffold. 4.0 MOVES WITH step_limit (the two are
+  # raised together: a 150-step kimi-k3 cell projects to ~$2.6, so the step cap binds before the
+  # cost cap and a legitimately step-limited run is never mislabelled a cost censor). A declared
+  # key means the cap a run obeys is recorded where the run is configured. The scaffold raises
+  # LimitsExceeded for BOTH limits and the censoring layer maps it to stop_reason=step_limit, so
+  # raising the step cap alone converts step censors into cost censors under a label that lies.
+  cost_limit: 4.0
 
 paths:
   challenges: routing/data/challenges.json        # curated input, relative to config.py dir

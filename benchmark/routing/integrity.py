@@ -5,6 +5,7 @@ Stale detection compares a cell's stored version_hash/model_version to current.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 from typing import Final
@@ -20,6 +21,11 @@ from shunt.models.config import ModelConfig, arm_api_params
 # timestamp) is AUDIT-ONLY and is NEVER a staleness key. ``stop_reason`` (why a cell
 # stopped — see benchmark.routing.censoring) is AUDIT-ONLY and never a staleness key;
 # it is appended LAST so legacy rows lacking it still parse (derived on read).
+# The five collection-param columns record the regime a cell was
+# collected under: ``step_limit`` / ``cost_limit`` (the agent-scaffold caps in force),
+# ``scaffold_version`` (installed mini-swe-agent), ``sampling_hash`` (merged request
+# kwargs) and ``prompt_hash`` (scaffold system+instance templates). ``step_limit``,
+# ``sampling_hash`` and ``prompt_hash`` are staleness anchors; the rest are audit-only.
 CACHE_COLUMNS: Final[tuple[str, ...]] = (
     "version_hash",
     "model_version",
@@ -30,6 +36,11 @@ CACHE_COLUMNS: Final[tuple[str, ...]] = (
     "image_digest",
     "computed_at",
     "stop_reason",
+    "step_limit",
+    "cost_limit",
+    "scaffold_version",
+    "sampling_hash",
+    "prompt_hash",
 )
 # Full results.csv header, original outcome columns first for backward-compat.
 # ``reasoning`` follows ``model`` and, together with them, forms the cache key:
@@ -152,6 +163,83 @@ def arm_hashes(models: dict[str, ModelConfig]) -> dict[str, dict[str, str]]:
             out[name] = {}
             continue
         out[name] = {arm.id: arm_hash_value(model, arm.id) for arm in model.reasoning.arms}
+    return out
+
+
+@functools.lru_cache(maxsize=1)
+def scaffold_version() -> str:
+    """The installed mini-swe-agent version; UNKNOWN_VERSION if not importable."""
+    # Collection-param provenance for results rows: a ``pip install -U`` of the scaffold
+    # changes the live agent; the recorded version tells which scaffold regime a row was
+    # collected under.
+    try:
+        import minisweagent  # noqa: PLC0415
+    except ImportError:
+        return UNKNOWN_VERSION
+    return str(getattr(minisweagent, "__version__", UNKNOWN_VERSION))
+
+
+@functools.lru_cache(maxsize=1)
+def scaffold_prompt_hash() -> str:
+    """SHA256 of the installed scaffold's system+instance templates (prompt-drift anchor)."""
+    # The prompt lives in the installed ``minisweagent`` package, so a scaffold upgrade
+    # silently changes it; this hash turns that silent drift into a staleness event. Empty
+    # string when unimportable — the anchor then degrades to a no-op (see run_matrix._anchor_stale).
+    try:
+        from minisweagent.config import builtin_config_dir, get_config_from_spec  # noqa: PLC0415
+    except ImportError:
+        return ""
+    try:
+        scaffold_cfg = get_config_from_spec(
+            str(builtin_config_dir / "benchmarks" / "swebench.yaml")
+        )
+        agent = dict(scaffold_cfg.get("agent", {}) or {})
+        rendered = str(agent.get("system_template", "")) + str(agent.get("instance_template", ""))
+    except Exception:  # noqa: BLE001 (provenance is best-effort: absence means no anchor)
+        return ""
+    return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
+@functools.lru_cache(maxsize=256)
+def sampling_hash(model: str, arm: str) -> str:
+    """SHA256 of the merged request kwargs the scaffold would send for (model, arm) today."""
+    # The merged kwargs — scaffold ``model_kwargs`` base, the routing target's ``api_base``,
+    # and the arm's verbatim API params — are what ``infer._scaffold_model_kwargs`` builds for
+    # a live call, minus auth secrets (a rotated key must not stale paid cells; the hash
+    # anchors the CONFIG, not the credential). Empty string when unimportable/unregistered.
+    try:
+        from minisweagent.config import builtin_config_dir, get_config_from_spec  # noqa: PLC0415
+
+        scaffold_cfg = get_config_from_spec(
+            str(builtin_config_dir / "benchmarks" / "swebench.yaml")
+        )
+        base = dict((scaffold_cfg.get("model", {}) or {}).get("model_kwargs", {}) or {})
+    except ImportError:
+        return ""
+    except Exception:  # noqa: BLE001 (provenance is best-effort: absence means no anchor)
+        return ""
+    info = config.load_pricing().get(model)
+    if not isinstance(info, dict):
+        return ""
+    target: dict[str, object] = {}
+    if str(info.get("route", "")).startswith("openai/"):
+        target["api_base"] = str(info.get("base_url", ""))
+    merged = {**base, **target, **config.arm_api_params(model, arm)}
+    merged.pop("api_key", None)
+    canonical = json.dumps(merged, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def sampling_hash_map(models: list[str]) -> dict[str, dict[str, str]]:
+    """Map each model to {arm_id: sampling_hash} for its declared arms (staleness anchor)."""
+    out: dict[str, dict[str, str]] = {}
+    resolved = config.resolved_models()
+    for name in models:
+        model = resolved.get(name)
+        if model is None or model.reasoning is None:
+            out[name] = {}
+            continue
+        out[name] = {arm.id: sampling_hash(name, arm.id) for arm in model.reasoning.arms}
     return out
 
 

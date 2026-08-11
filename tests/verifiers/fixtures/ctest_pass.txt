@@ -1,0 +1,7 @@
+Test project /workspace/build
+    Start 1: widget_does_thing
+  1/2 Test #1: widget_does_thing ...............   Passed    0.01 sec
+    Start 2: widget_parses
+  2/2 Test #2: widget_parses ...................   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 2

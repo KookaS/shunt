@@ -16,6 +16,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: true
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
       - name: Secret scan (LFS corpus)
         # The pre-commit gitleaks hook only sees the staged diff's Git-LFS POINTERS, so a real
         # secret inside a committed benchmark trajectory would sail through it. Scan the actual
@@ -24,9 +28,17 @@ jobs:
         # IGNORES .gitignore, so pointing it at the repo root would also read the dev's
         # root-level .env.
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz
-          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
           gitleaks dir --no-banner --config .gitleaks.toml benchmark/escalation/data/
+      - name: Secret scan (full checked-out tree)
+        # The pre-commit gitleaks hook is `--staged`, which is VACUOUS in CI: on a clean
+        # checkout nothing is staged, so 0 bytes get scanned. The LFS step above only covers
+        # benchmark/escalation/data/. This step scans the WHOLE working tree (tracked content,
+        # LFS content included) with the allowlist config passed explicitly. `detect` rather
+        # than `dir` because detect respects .gitignore: the repo's root-level `.env` and
+        # caches are gitignored, so they are never read even if this is ever run on a dev
+        # machine where one exists.
+        run: |
+          gitleaks detect --no-banner --config .gitleaks.toml --redact .
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -65,7 +77,10 @@ jobs:
       - name: Install dependencies
         run: |
           pip install uv
-          uv sync --extra dev --extra benchmark
+          # `--extra capture` installs cryptography, which the encryption-at-rest tests
+          # (tests/capture/test_trajectory_capture.py) need to RUN rather than skip —
+          # see the `capture` extra's comment in pyproject.toml.
+          uv sync --extra dev --extra benchmark --extra capture
       - name: Embedding pipeline (faithful fake — no ONNX download)
         # Proves the real embedding SETUP (embed -> store -> HNSW index -> kNN query) works
         # end-to-end via a fidelity-checked FakeEmbedder that mirrors the real Embedder's

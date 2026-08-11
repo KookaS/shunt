@@ -1,0 +1,6 @@
+t/widget.t .......... 1/?
+t/widget.t .......... ok
+t/parser.t .......... ok
+All tests successful.
+Files=2, Tests=6,  0 wallclock secs ( 0.02 usr +  0.01 sys = 0.03 CPU)
+Result: PASS

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
+from benchmark.escalation import schema
 from shunt.router.escalation import (
     EscalationAction,
     EscalationConfig,
@@ -88,9 +89,9 @@ def is_edit_action(action: str) -> bool:
 # `EscalationRunner.step` once per StepView — instrumented, an 8-step trajectory produces 8 calls.
 # Live, an event is produced once PER CLOSED SESSION: `CaptureCoordinator.capture` runs the
 # off-wire verifier once for a closed session and reaches `record_outcome` at most once per
-# capture. Every trajectory in `data/live/` is a single session (799 files, 799 distinct
-# trajectory ids, median 31 steps, longest 247), so at the live cadence a whole trajectory
-# contributes exactly ONE event — so the shipped rule (escalate_after_n >= 2) could never fire
+# capture. Every trajectory in `data/live/` is a single session (one header + its ordered
+# StepViews), so at the live cadence a whole trajectory contributes exactly ONE event — so the
+# shipped rule (escalate_after_n >= 2) could never fire
 # on this corpus at all. What the sweep measures is recurrence across the steps within one
 # session, which is not the quantity the shipped rule counts. It is not repairable on this
 # corpus — a session-cadence replay needs trajectories spanning several sessions, and none of
@@ -197,9 +198,12 @@ def _step_failure_event(step: StepView) -> FailureEvent | None:
     return failure_event_from_outcome(
         decision_index=step.decision_index,
         failing_check_id=step.failing_check_id,
-        # None-preserving: the shared constructor owns the missing-exit_code default so this
-        # matches the live engine's stored value byte-for-byte (parity by construction).
-        exit_code=step.exit_code,
+        # The exit code of the OFF-WIRE CHECK that produced this failure. Offline that is the
+        # replay harness's process return code — read via `replay_returncode`, which also reads
+        # the legacy spelling committed corpora carried in `exit_code` before the two-referent
+        # split. None-preserving: the shared constructor owns the missing-exit_code default so
+        # this matches the live engine's stored value byte-for-byte (parity by construction).
+        exit_code=schema.replay_returncode(step),
         success=step.success,
         is_infra_failure=step.is_infra_failure,
         confirmed=step.confirmed,

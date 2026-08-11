@@ -1,0 +1,13 @@
+Started
+..F..
+
+Failures:
+  1) Widget does the thing
+   Message:
+     Expected 2 to be 3.
+   Stack:
+     at <Jasmine>
+     at UserContext.<anonymous> (/x/spec/widget.spec.js:8)
+
+2 specs, 1 failure
+Finished in 0.03 seconds

@@ -1,0 +1,16 @@
+PHPUnit 10.5.3 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.2.2
+
+.F                                                                  2 / 2 (100%)
+
+Time: 00:00.079, Memory: 10.00 MB
+
+There was 1 failure:
+
+1) WidgetTest::testParse
+/x/tests/WidgetTest.php:9
+Failed asserting that 2 matches expected 3.
+
+FAILURES!
+Tests: 2, Assertions: 2, Failures: 1, Errors: 0.

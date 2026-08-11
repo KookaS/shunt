@@ -66,6 +66,11 @@ benchmark/routing/artifacts/
 # Per-step code snapshots for offline verified-outcome replay — ephemeral session scratch,
 # regenerable from a live run, NEVER committed.
 benchmark/runner/artifacts/
+# Full agent message-list dumps (mini-swe-agent `output_path`) — RAW, UNREDACTED transcripts.
+# Subsumed by the artifacts/ rule above; kept explicit so the pairing with the per-step snapshot
+# scratch is documented and survives any future un-ignore of a sibling subdir. Untrusted output:
+# never commit, never publish, collection-host only.
+benchmark/runner/artifacts/message_lists/
 results_k*_sr*_ms*.csv
 # Derived per-strategy summary — regenerated into reports/ (below); never the
 # legacy committed path.
@@ -73,6 +78,13 @@ benchmark/routing/strategy_summary.csv
 
 # Logs
 *.log
+# The kill-gate verdict is the ONE tracked run-output exception: it is a deterministic,
+# diffable JSON artifact (benchmark/runner/kill_gate_verdict.json) that a reviewer diffs
+# to see a verdict move. It was renamed out of the *.log class on purpose — never pull it
+# under a blanket artifact rule, and never reintroduce a kill_gate.log-style free-form
+# verdict that version control cannot audit. Explicit negation so a future ignore rule
+# cannot silently swallow it.
+!benchmark/runner/kill_gate_verdict.json
 
 # Editor / OS
 .vscode/

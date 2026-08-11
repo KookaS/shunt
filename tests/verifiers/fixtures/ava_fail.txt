@@ -1,0 +1,8 @@
+
+  ✘ widget returns a value (5ms)
+
+  test/widget.test.js:8
+
+  AssertionError: expected 2 to equal 3
+
+  ℹ 1 test failed

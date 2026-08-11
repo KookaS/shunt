@@ -98,7 +98,7 @@ class TestArmRequestWiring:
     def test_generate_patch_live_threads_arm_to_scaffold(self, monkeypatch):
         captured: dict[str, str] = {}
 
-        def fake_invoke(spec, model, scaffold, arm, timeout=None, step_limit=None):
+        def fake_invoke(spec, model, scaffold, arm, **kwargs):
             captured["arm"] = arm
             return infer.AgentPatch(patch="p", in_tok=1, out_tok=1, calls=1, cost=0.0)
 

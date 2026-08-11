@@ -75,6 +75,64 @@ def test_stamp_step_infra_is_never_a_capability_failure() -> None:
     assert stamped.blocking is False  # infra never counts toward escalation
 
 
+# ── exit_code (the step's own code) vs replay_rc (the replay harness's rc) ──
+
+
+def test_live_stamp_writes_the_steps_own_exit_code_never_replay_rc() -> None:
+    # The LIVE map's outcome carries the agent step's own exit code → `exit_code`.
+    live = stamp_step(make_step(step_index=1), _fail(_KEY))
+    assert live.exit_code == 1
+    assert live.replay_rc is None
+
+
+def test_offline_restamp_writes_replay_rc_never_exit_code() -> None:
+    # The OFFLINE replay's outcome carries the container run's rc → `replay_rc`; the step's own
+    # `exit_code` is cleared, so the two referents never share one field.
+    base = make_trajectory([make_step(step_index=i) for i in range(3)], terminal_resolved=True)
+    restamped = restamp_trajectory(base, {0: _fail(_KEY), 1: _fail(_KEY)})
+    assert restamped.steps[0].replay_rc == 1
+    assert restamped.steps[0].exit_code is None
+    assert restamped.steps[1].replay_rc == 1
+    assert restamped.steps[1].exit_code is None
+    # the never-replayed step keeps both unset
+    assert restamped.steps[2].replay_rc is None
+
+
+def test_the_two_referents_never_conflated_by_stamp_step() -> None:
+    # Same input outcome, two sources: the live stamp and the offline restamp must land the
+    # numeric value in DIFFERENT fields, and never both.
+    outcome = _fail(_KEY)
+    live = stamp_step(make_step(step_index=0), outcome)
+    offline = stamp_step(make_step(step_index=0), outcome, replay=True)
+    assert live.exit_code == offline.replay_rc == 1
+    assert live.replay_rc is None
+    assert offline.exit_code is None
+
+
+def test_replay_returncode_reads_both_spellings() -> None:
+    # Backward-compat contract: a reader wanting the replay rc reads `replay_rc` first, then
+    # falls back to the legacy `exit_code` spelling committed corpora were written in.
+    from benchmark.escalation import schema
+
+    legacy = make_step(step_index=0, exit_code=7)  # pre-split corpus shape
+    assert legacy.replay_rc is None
+    assert schema.replay_returncode(legacy) == 7
+    new = make_step(step_index=0, exit_code=None, replay_rc=7)
+    assert schema.replay_returncode(new) == 7
+    # a live step carrying its OWN exit code and no replay rc reads as its own code
+    live = make_step(step_index=0, exit_code=3)
+    assert schema.replay_returncode(live) == 3
+
+
+def test_unstamp_clears_replay_rc_with_the_other_stamps() -> None:
+    stamped = make_step(
+        step_index=0, success=False, failing_check_id=_KEY, exit_code=4, replay_rc=4
+    )
+    cleared = unstamp_step(stamped)
+    assert cleared.exit_code is None
+    assert cleared.replay_rc is None
+
+
 # ── parser side-channel map ─────────────────────────────────────────────────
 
 

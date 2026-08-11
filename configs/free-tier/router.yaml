@@ -1,0 +1,48 @@
+# Free-tier router policy — used ONLY by the weekly free-tier smoke
+# (benchmark/runner/free_tier_smoke.py, driven from configs/free-tier/ via
+# SHUNT_CONFIG_DIR). It mirrors the shipped router.yaml so the smoke routes
+# under the same production policy, with one difference: `models:` names only
+# the single $0 OpenRouter model in this directory's models.yaml. The smoke
+# pins strategy to always_cheap via SHUNT_ROUTER_STRATEGY; escalation and
+# capture are inert here because no capture work_dir is ever resolved.
+router:
+  strategy: knn
+
+  policy:
+    k: 20
+    success_rate_threshold: 0.6
+    min_samples: 3
+
+  exploration:
+    enabled: true
+    prior_alpha: 1.0
+    prior_beta: 1.0
+    explore_budget_frac: 0.4
+    conservative_alpha: 0.1
+    propensity_mc_samples: 100
+    prior_strength_cap: 20.0
+
+  escalation:
+    enabled: true
+    escalate_after_n: 2
+    stale_window: 10
+    ladder: effort_then_rank
+    rank_shortlist: 3
+    exploration_epsilon: 0.0
+    exploration_seed: null
+
+  capture:
+    work_dir: null
+    verify_timeout_seconds: null
+    rerun_confirmations: 2
+    trust_launch_dir: true
+    full_content: false
+    trajectory_dir: null
+
+  refit:
+    every_n_outcomes: 50
+
+  # The single $0 model in this directory's models.yaml — the only model the
+  # free-tier smoke may ever route to.
+  models:
+    - gpt-oss-20b-free

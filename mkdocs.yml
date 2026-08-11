@@ -44,6 +44,8 @@ nav:
   - Benchmark: benchmark.md
   - Benchmark dataset: benchmark-data.md
   - Benchmark design: benchmark-design.md
+  - Live smoke: live-smoke-runbook.md
+  - Free-tier smoke: free-tier-smoke.md
 
 markdown_extensions:
   - admonition

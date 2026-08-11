@@ -31,20 +31,21 @@ _REDACTED_COMMITTABLE_FIELDS: Final[frozenset[str]] = frozenset({"failing_check_
 # READ THIS BEFORE TRUSTING THE NAME. The whitelist is not enforced anywhere on the write path.
 # `dump_jsonl` below serializes the whole `asdict(step)`; `committable_projection`, the only
 # function that applies this set, has no caller outside the tests. The shipped corpus is
-# therefore an unprojected one: all 799 trajectories under `benchmark/escalation/data/live/`
+# therefore an UNPROJECTED one: the trajectories under `benchmark/escalation/data/live/`
 # are git-tracked, declare `plane="committable"` in their header, and carry `metadata`,
-# `observation`, `action`, `args` and `result` on their steps — 29 422 steps, every one with a
-# non-empty `action` and `args`, 28 638 with a non-empty `result`, the longest of them 11 046
-# characters. Treat this set as the whitelist a projected export WOULD use, not as a description
-# of the bytes on disk.
+# `observation`, `action`, `args` and `result` on their steps. Every step's `action` and `args`
+# are non-empty by construction, and its length is bounded only by what the live agent actually
+# wrote. Treat this set as the whitelist a projected export WOULD use, not as a description of
+# the bytes on disk — the corpus's live size is `benchmark.escalation.corpus.census()`, never a
+# constant here.
 #
 # The defence that does run on that corpus is `_scrub_free_text` in `dump_jsonl`: every free-text
 # field passes the secret redactor before the bytes are written, and the header hash is
-# recomputed over the scrubbed payload. It fires — 654 `<redacted>` markers across 35 committed
-# files. A credential sweep of the corpus (OpenAI/Anthropic/AWS/GitHub/Slack/Google/Stripe key
-# shapes, PEM private-key blocks, JWTs, bearer headers, dotenv assignment lines, provider env-var
-# names) returned zero hits; the residual disclosure is upstream repository content — container
-# paths under `/root/`, and one provider-issued `tool_call_id` per step.
+# recomputed over the scrubbed payload. A credential sweep of the corpus (OpenAI/Anthropic/AWS/
+# GitHub/Slack/Google/Stripe key shapes, PEM private-key blocks, JWTs, bearer headers, dotenv
+# assignment lines, provider env-var names) returned zero hits; the residual disclosure is
+# upstream repository content — container paths under `/root/`, and one provider-issued
+# `tool_call_id` per step.
 COMMITTABLE_FIELDS: Final[frozenset[str]] = frozenset(
     {
         # verified-outcome core
@@ -87,6 +88,8 @@ class StepView:
     test_passed: int | None
     test_total: int | None
     failing_check_id: str | None
+    # The STEP'S OWN exit code: what the agent's action actually produced in the live
+    # environment. Never the replay harness's return code — that lives in `replay_rc`.
     exit_code: int | None
     blocking: bool
     is_infra_failure: bool
@@ -104,6 +107,13 @@ class StepView:
     rank_index: int | None
     effort_index: int | None
     real_cost: float | None
+    # The OFFLINE replay harness's process return code (the container run's rc), which lives
+    # ONLY on offline-restamped trajectories. Committed corpora written before this field
+    # existed carried the replay rc in `exit_code`; `replay_returncode()` reads both spellings.
+    # Deliberately NOT in COMMITTABLE_FIELDS and NOT covered by content_sha256 — the live plane
+    # never carries it, the offline telemetry is decision-inert, and excluding it keeps the
+    # Layer-1 hashes of committed corpora stable across the migration (see `content_sha256`).
+    replay_rc: int | None = None
 
 
 @dataclass(frozen=True)
@@ -158,6 +168,17 @@ def recompute_dedup_key(step: StepView) -> str | None:
     return normalize_dedup_key(step.failing_check_id)
 
 
+def replay_returncode(step: StepView) -> int | None:
+    """The offline replay harness's process return code, reading BOTH spellings."""
+    # `replay_rc` is the current spelling; committed corpora written before the split carried
+    # the replay rc in `exit_code`. A reader whose meaning is the replay rc MUST go through
+    # this helper so a legacy trajectory and a newly-restamped one behave identically, and
+    # must NOT read `exit_code` directly — that field now means the step's OWN exit code.
+    if step.replay_rc is not None:
+        return step.replay_rc
+    return step.exit_code
+
+
 def recompute_blocking(step: StepView) -> bool:
     """A confirmed, non-infra capability failure — the ONE derivation, shared with shunt."""
     return derive_blocking(step.success, step.is_infra_failure)
@@ -182,8 +203,15 @@ def committable_projection(step: StepView) -> dict[str, object]:
 
 def content_sha256(steps: list[StepView]) -> str:
     """SHA-256 of the ordered StepView payload (canonical JSON, sorted keys)."""
+    # `replay_rc` is excluded on purpose: committed corpora predate the field, so a hash that
+    # included it would break every committed header (computed without the key) the first time
+    # the trajectory is loaded. The field is decision-inert offline telemetry; excluding it
+    # costs nothing the eval reads.
     payload = json.dumps(
-        [asdict(s) for s in steps], sort_keys=True, ensure_ascii=True, separators=(",", ":")
+        [{k: v for k, v in asdict(s).items() if k != "replay_rc"} for s in steps],
+        sort_keys=True,
+        ensure_ascii=True,
+        separators=(",", ":"),
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -251,4 +279,5 @@ __all__ = [
     "normalize_dedup_key",
     "recompute_blocking",
     "recompute_dedup_key",
+    "replay_returncode",
 ]

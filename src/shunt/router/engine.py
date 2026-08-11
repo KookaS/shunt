@@ -824,7 +824,7 @@ class RouterEngine:
                 return (
                     m.name,
                     "escalation_floor",
-                    self._non_policy_provenance(provenance, held, m.name),
+                    self._non_policy_provenance(provenance, held, m.name, "escalation_floor"),
                 )
         # Every model at or above the floor is unhealthy — serve the base pick rather than fail.
         return (model_name, reason, provenance)
@@ -894,7 +894,7 @@ class RouterEngine:
             model_name,
             "auto_escalation",
             {
-                **self._non_policy_provenance(provenance, directive, model_name),
+                **self._non_policy_provenance(provenance, directive, model_name, "auto_escalation"),
                 "escalated_reasoning_arm": next_arm,
             },
         )
@@ -927,23 +927,30 @@ class RouterEngine:
         return (
             higher,
             "auto_escalation",
-            self._non_policy_provenance(provenance, directive, higher),
+            self._non_policy_provenance(provenance, directive, higher, "auto_escalation"),
         )
 
     @staticmethod
     def _non_policy_provenance(
-        provenance: dict[str, Any], directive: EscalationDirective, model_chosen: str
+        provenance: dict[str, Any],
+        directive: EscalationDirective,
+        model_chosen: str,
+        selection_rule_used: str,
     ) -> dict[str, Any]:
         """Mark an escalated turn non-policy: it is imposed by the failure signal, not sampled."""
-        # `model_chosen` is REQUIRED, not inherited: the base dict was built before escalation ran,
-        # so every field describing WHAT WAS SERVED must be restated here or the row asserts the
-        # model the router merely would have picked. Making it a parameter is what stops a fourth
-        # non-policy path from silently forgetting — the two that did are why this is a parameter.
+        # `model_chosen` and `selection_rule_used` are REQUIRED, not inherited: the base dict was
+        # built before escalation ran, so every field describing WHAT WAS SERVED must be restated
+        # here or the row asserts the model/rule the router merely would have picked. Making them
+        # parameters is what stops a fourth non-policy path from silently forgetting — the three
+        # that did are why they are parameters. The base `selection_rule_used` names the BASE pick
+        # (e.g. `exploration_untested`); the served rule is the escalation itself (`auto_escalation`
+        # / `escalation_floor`), which the docs' reason-token table already publishes.
         # Neutralize the base model's propensity + candidate scores and carry the new-label-window
         # flag so the learner never trains the escalated arm/model as a free policy choice.
         return {
             **provenance,
             "model_chosen": model_chosen,
+            "selection_rule_used": selection_rule_used,
             "rank_escalation_reason": directive.reason,
             "auto_escalated": True,
             "new_label_window": directive.new_label_window,

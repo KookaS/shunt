@@ -3,8 +3,11 @@ from __future__ import annotations
 import math
 import random
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from statistics import mean
+
+from benchmark.routing.cache_cost import CachePrice, cache_aware_total
 
 
 def mcnemar_exact_p(b: int, c: int) -> float:
@@ -175,6 +178,32 @@ class BootstrapCIs:
     cumreg: tuple[float, float]
     total_cost: tuple[float, float]
     avg_cost: tuple[float, float]
+    # Cache-aware cost is resampled the SAME way, because cache_cost is scoped per task: a
+    # whole-task resample keeps each task's own attempt sequence intact, so the within-task
+    # adjacency a discount needs survives and the resampled total is the statistic it is named
+    # after. Defaulting to zero keeps the old four-field contract for callers with no price map.
+    total_cost_cacheaware: tuple[float, float] = (0.0, 0.0)
+    avg_cost_cacheaware: tuple[float, float] = (0.0, 0.0)
+
+
+def _assert_cache_cost_scoping(
+    task_ids: Sequence[str],
+    attempts: Mapping[str, list[tuple[str, float]]],
+    prices: Mapping[str, CachePrice],
+) -> None:
+    """Refuse to bootstrap cache-aware cost unless each task's cost is its own.
+
+    Compute every task's cost forward and backward through the set; a cross-task cache
+    model leaks adjacency through hidden state, so the passes disagree and the refusal re-fires.
+    """
+    forward = [cache_aware_total(attempts.get(tid, []), prices) for tid in task_ids]
+    backward = [cache_aware_total(attempts.get(tid, []), prices) for tid in reversed(task_ids)]
+    if forward != list(reversed(backward)):
+        raise RuntimeError(
+            "refusing to bootstrap cache-aware cost: cache cost is not scoped per task "
+            "(a task's cost changed with the set/order of the other tasks, so a whole-task "
+            "resample does not preserve the statistic)"
+        )
 
 
 def bootstrap_ci(
@@ -182,31 +211,59 @@ def bootstrap_ci(
     oracle_decisions: list[tuple[str, str, bool, float]],
     n_bootstrap: int = 1000,
     gamma: float = 0.1,
+    seed: int = 42,
+    attempts: Mapping[str, list[tuple[str, float]]] | None = None,
+    prices: Mapping[str, CachePrice] | None = None,
 ) -> BootstrapCIs:
     """Task-resampled 95% percentile CIs on AvgPerf%, CumReg, TotalCost and AvgCost."""
-    # NAIVE cost only. Cache-aware cost is adjacency-dependent — the discount exists because one
-    # attempt immediately followed another on the same model — and resampling tasks with
-    # replacement shreds that ordering, so a resampled cache-aware total is not the statistic it
-    # is named after. The cache-aware column is a point estimate by construction.
+    # Cost gets a cache-aware CI for the same reason the naive total does — but only because
+    # `cache_cost.cache_aware_total` is SCOPED PER TASK (one task = one session, so a discount
+    # fires only on a within-task repeat). A whole-task resample keeps each task's own attempt
+    # sequence intact, so within-task adjacency survives and the resampled cache-aware total is
+    # the statistic it is named after. The old cross-run cache model made one task's cost depend
+    # on the tasks before it, which resampling genuinely shredded; that is why this is a guard,
+    # not a comment — `_assert_cache_cost_scoping` re-fires the refusal if scoping is ever broken.
+    if (attempts is None) != (prices is None):
+        raise ValueError(
+            "a cache-aware bootstrap CI requires BOTH the per-task attempts and the price map"
+        )
+
     task_groups: dict[str, list] = defaultdict(list)
     for d in strategy_decisions:
         task_groups[d[0]].append(d)
-    oracle_groups: dict[str, list] = defaultdict(list)
+    oracle_groups: dict[str, list] = {}
     for d in oracle_decisions:
-        oracle_groups[d[0]].append(d)
+        oracle_groups.setdefault(d[0], []).append(d)
 
     task_ids = list(task_groups.keys())
     zero = (0.0, 0.0)
     if not task_ids:
         return BootstrapCIs(avgperf=zero, cumreg=zero, total_cost=zero, avg_cost=zero)
 
+    missing = [tid for tid in task_ids if tid not in oracle_groups]
+    if missing:
+        raise ValueError(
+            "oracle coverage gap: no oracle row for strategy task(s) "
+            f"{sorted(missing)} — a missing oracle row is a coverage gap, not a zero"
+        )
+
+    cache_scope: tuple[Mapping[str, list[tuple[str, float]]], Mapping[str, CachePrice]] | None = (
+        None
+    )
+    if attempts is not None and prices is not None:
+        _assert_cache_cost_scoping(task_ids, attempts, prices)
+        cache_scope = (attempts, prices)
+
     boot_avgperf: list[float] = []
     boot_cumreg: list[float] = []
     boot_total_cost: list[float] = []
     boot_avg_cost: list[float] = []
+    boot_total_cache: list[float] = []
+    boot_avg_cache: list[float] = []
 
+    rng = random.Random(seed)
     for _ in range(n_bootstrap):
-        sample_ids = random.choices(task_ids, k=len(task_ids))
+        sample_ids = rng.choices(task_ids, k=len(task_ids))
         sample_decisions: list[tuple[str, str, bool, float]] = []
         sample_oracle: list[tuple[str, str, bool, float]] = []
         for tid in sample_ids:
@@ -220,6 +277,14 @@ def bootstrap_ci(
         boot_total_cost.append(metrics["TotalCost"])
         boot_avg_cost.append(metrics["AvgCost"])
 
+        if cache_scope is not None:
+            scope_attempts, scope_prices = cache_scope
+            sample_cache_total = sum(
+                cache_aware_total(scope_attempts.get(tid, []), scope_prices) for tid in sample_ids
+            )
+            boot_total_cache.append(sample_cache_total)
+            boot_avg_cache.append(sample_cache_total / len(sample_ids))
+
     alpha = int(0.025 * n_bootstrap)
 
     def _pct(draws: list[float], digits: int) -> tuple[float, float]:
@@ -231,7 +296,20 @@ def bootstrap_ci(
         cumreg=_pct(boot_cumreg, 4),
         total_cost=_pct(boot_total_cost, 4),
         avg_cost=_pct(boot_avg_cost, 6),
+        total_cost_cacheaware=_pct(boot_total_cache, 4) if cache_scope is not None else zero,
+        avg_cost_cacheaware=_pct(boot_avg_cache, 6) if cache_scope is not None else zero,
     )
+
+
+def _scorable_pair(
+    control: tuple[str, str, bool, float, int, int, int, bool],
+    test: tuple[str, str, bool, float, int, int, int, bool],
+) -> bool:
+    """A task pair enters the equal-quality comparison only when BOTH arms are measured."""
+    # ``scorable`` (index 7) is False when a cell was never measured, censored, or imputed —
+    # a coverage-gap fill, never a real observation. The decomposition and every pairing in
+    # the kill gate share this predicate, so one definition cannot drift from the other.
+    return bool(control[7]) and bool(test[7])
 
 
 def compute_cost_decomposition(
@@ -239,9 +317,10 @@ def compute_cost_decomposition(
     test_decisions: list[tuple[str, str, bool, float, int, int, int, bool]],
 ) -> dict:
     """Oaxaca-Blinder decomposition of cost savings into price, volume, and
-    interaction effects (summing to frontier_cost - shunt_cost). Only tasks
-    where both arms pass are included (equal-quality comparison).
+    interaction effects (summing to frontier_cost - shunt_cost).
     """
+    # Only tasks where BOTH arms land on a measured cell and both pass are included
+    # (equal-quality comparison on the scorable subset).
     total_price_saving = 0.0
     total_volume_saving = 0.0
     total_interaction = 0.0
@@ -249,6 +328,8 @@ def compute_cost_decomposition(
     n_eq_pass = 0
 
     for cd, td in zip(control_decisions, test_decisions, strict=True):
+        if not _scorable_pair(cd, td):
+            continue
         if not cd[2] or not td[2]:
             continue
 

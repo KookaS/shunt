@@ -122,6 +122,21 @@ repos:
       # jsdom+mermaid import until it actually finds a fence). Deps come from pre-commit's
       # own node env: no package.json, no node_modules, nothing added to the shipped tree.
       # Keep the pin in the same major as the mermaid the docs site loads. BLOCKING.
+      # SH012 makes the "no committed entrypoint reproduces this number" failure class
+      # structural. Every number-bearing site in the three result docs (strategy-variant
+      # rows, paired comparisons, task-count / scorable / usable claims, pp-delta-with-CI
+      # claims, task-set restatements) must carry a provenance marker: a generator marker
+      # naming the committed entrypoint that emits it, or a frozen-value marker naming
+      # n/date/run of the corpus it was computed on. A frozen marker without a corpus, or
+      # a signature match with no marker at all (a seventh site added silently), fails.
+      # Whole-tree scan (the SH004/SH009/SH011 shape): the failure is an addition/edit,
+      # and only a scan of the committed docs sees every number-bearing line. BLOCKING.
+      - id: sh012-number-provenance
+        name: SH012 number-bearing sites carry a provenance marker
+        entry: python tools/lint/check_number_provenance.py
+        language: system
+        pass_filenames: false
+        always_run: true
       # SH011 makes strategy deployability structural. The benchmark used to carry its own
       # idea of "deployable" — three literal sets in three files, none derived from
       # LIVE_STRATEGIES — so a strategy the router rejects at boot was drawn as a

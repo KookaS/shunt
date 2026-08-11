@@ -23,6 +23,7 @@ def make_step(  # noqa: PLR0913 (test builder — many optional knobs by design)
     args: str | None = "args",
     result: str = "res",
     exit_code: int | None = None,
+    replay_rc: int | None = None,
 ) -> StepView:
     """A StepView with sane defaults; derivable fields set consistently.
 
@@ -43,6 +44,7 @@ def make_step(  # noqa: PLR0913 (test builder — many optional knobs by design)
         test_total=test_total,
         failing_check_id=failing_check_id,
         exit_code=(0 if success else 1) if exit_code is None else exit_code,
+        replay_rc=replay_rc,
         blocking=not success and not is_infra_failure,
         is_infra_failure=is_infra_failure,
         confirmed=confirmed,

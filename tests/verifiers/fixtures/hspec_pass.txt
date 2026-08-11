@@ -1,0 +1,7 @@
+widget
+
+  does the thing [OK]
+  parses input [OK]
+
+Finished in 0.01 seconds
+2 examples, 0 failures

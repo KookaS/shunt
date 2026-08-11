@@ -135,7 +135,14 @@ def _scan_live_corpus() -> dict[str, _InstanceScan]:
             continue
         scan = scans.setdefault(instance_id, _InstanceScan())
         for step in records[1:-1]:
-            exit_code = step.get("exit_code")
+            # The replayed step's process return code lives in `replay_rc`; committed corpora
+            # predating the two-referent split carried it in `exit_code`. Read both spellings so
+            # the scan stays green over legacy AND newly-restamped data.
+            exit_code = (
+                step.get("replay_rc")
+                if step.get("replay_rc") is not None
+                else step.get("exit_code")
+            )
             if exit_code is None:
                 continue  # never replayed (or left unstamped by the admissibility gate)
             if exit_code == 0:

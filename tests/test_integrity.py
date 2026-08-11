@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 import yaml
 
 from benchmark import config
@@ -83,7 +84,8 @@ class TestResultsSchema:
         assert ",".join(integrity.RESULTS_FIELDS) == (
             "challenge_id,model,reasoning,pass,cost,in_tok,out_tok,calls,"
             "version_hash,model_version,arm_hash,real_cost,estimated_cost,timeout_flag,"
-            "image_digest,computed_at,stop_reason"
+            "image_digest,computed_at,stop_reason,step_limit,cost_limit,scaffold_version,"
+            "sampling_hash,prompt_hash"
         )
 
     def test_build_row_defaults_reasoning(self):
@@ -260,6 +262,106 @@ class TestStalenessAnchors:
             ["c1"], ["m1", "m2"], cache, {"c1": "h1"}, {"m1": "v1", "m2": "v1"}, digests
         )
         assert set(status.stale) == {("c1", "m1", "default"), ("c1", "m2", "default")}
+
+
+class TestCollectionParamAnchors:
+    """step_limit / prompt_hash / sampling_hash are staleness anchors."""
+
+    def _cell(self, step_limit="70", stop_reason="step_limit", **over):
+        cell = {
+            "version_hash": "h1",
+            "model_version": "v1",
+            "image_digest": "sha256:d1",
+            "stop_reason": stop_reason,
+            "step_limit": step_limit,
+            "cost_limit": "3.0",
+            "scaffold_version": "2.4.5",
+            "sampling_hash": "old-sh",
+            "prompt_hash": "old-ph",
+        }
+        cell.update(over)
+        return {"c1": {"m1": {"default": cell}}}
+
+    def _classify(self, cache, **kwargs):
+        return run_matrix.classify_cells(
+            ["c1"], ["m1"], cache, {"c1": "h1"}, {"m1": "v1"}, None, None, None, **kwargs
+        )
+
+    def test_step_limit_flip_stales_censored_cell(self):
+        # A cell censored at step_limit=70 goes stale once the cap
+        # rises to 150, so the bounded recollection recollects it.
+        status = self._classify(self._cell(step_limit="70"), step_limit=150)
+        assert status.stale == [("c1", "m1", "default")]
+        assert status.present == 0
+
+    def test_step_limit_unchanged_does_not_stale(self):
+        # A cell already collected at the current cap stays present.
+        status = self._classify(self._cell(step_limit="150"), step_limit=150)
+        assert status.present == 1
+        assert status.to_run == []
+
+    def test_step_limit_flip_does_not_stale_non_censored_cell(self):
+        # A solved/unsolved cell is regime-independent: raising the cap does not change its
+        # outcome, so the anchor must NOT stale it (only step-limit-censored cells).
+        for stop_reason in ("solved", "unsolved"):
+            status = self._classify(
+                self._cell(step_limit="70", stop_reason=stop_reason), step_limit=150
+            )
+            assert status.present == 1, stop_reason
+
+    def test_legacy_row_empty_step_limit_is_noop(self):
+        # Grandfather rule: a row written before the column existed (empty stored value)
+        # degrades to a no-op rather than recollecting the paid cell.
+        status = self._classify(self._cell(step_limit=""), step_limit=150)
+        assert status.present == 1
+        assert status.to_run == []
+
+    def test_no_anchor_kwargs_never_stales(self):
+        # Callers that do not supply the anchor (legacy paths / tests) keep old behaviour.
+        status = self._classify(self._cell(step_limit="70"))
+        assert status.present == 1
+
+    def test_prompt_hash_flip_stales(self):
+        status = self._classify(self._cell(prompt_hash="old-ph"), prompt_hash="new-ph")
+        assert status.stale == [("c1", "m1", "default")]
+
+    def test_empty_stored_prompt_hash_is_noop(self):
+        status = self._classify(self._cell(prompt_hash=""), prompt_hash="new-ph")
+        assert status.present == 1
+
+    def test_sampling_hash_flip_stales(self):
+        status = self._classify(
+            self._cell(sampling_hash="old-sh"),
+            sampling_hash_map={"m1": {"default": "new-sh"}},
+        )
+        assert status.stale == [("c1", "m1", "default")]
+
+    def test_empty_stored_sampling_hash_is_noop(self):
+        status = self._classify(
+            self._cell(sampling_hash=""), sampling_hash_map={"m1": {"default": "new-sh"}}
+        )
+        assert status.present == 1
+
+    def test_unavailable_sampling_hash_map_is_noop(self):
+        status = self._classify(self._cell(sampling_hash="old-sh"), sampling_hash_map={})
+        assert status.present == 1
+
+
+class TestParseCells:
+    """--cells targeted-run parsing (the censored-cell pilot entry point)."""
+
+    def test_parses_triples(self):
+        assert run_matrix._parse_cells(
+            "sympy__sympy-17630:kimi-k3:max, pydata__xarray-7229:zai-glm-5.2:think"
+        ) == [
+            ("sympy__sympy-17630", "kimi-k3", "max"),
+            ("pydata__xarray-7229", "zai-glm-5.2", "think"),
+        ]
+
+    @pytest.mark.parametrize("bad", ["sympy__sympy-17630:kimi-k3", "a:b:c:d", "::", "a:b:"])
+    def test_malformed_raises(self, bad: str) -> None:
+        with pytest.raises(ValueError):
+            run_matrix._parse_cells(bad)
 
 
 class TestCacheKeyIsolation:

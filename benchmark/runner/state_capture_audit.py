@@ -8,9 +8,9 @@
 # and a real `failing_check_id`. The result is indistinguishable from a measured capability
 # failure and is not one: it is the instrument's blindness recorded as the agent's failure.
 #
-# Measured on the collection host: 310 of 799 trajectories and 1 897 steps carry an empty capture
-# that follows a non-empty one. This module detects them and marks them UNMEASURED. It is a
-# post-processing pass over data ALREADY collected, and it never re-derives an outcome.
+# Measured on the collection host: 310 of the committed trajectories and 1 897 steps carry an
+# empty capture that follows a non-empty one. This module detects them and marks them UNMEASURED.
+# It is a post-processing pass over data ALREADY collected, and it never re-derives an outcome.
 #
 # THE FORWARD FIX IS SEPARATE AND HAS LANDED. `DIFF_COMMAND` is now `git diff HEAD`, which is
 # worktree-vs-HEAD and so captures staged edits too; runs collected after that change cannot
@@ -671,8 +671,9 @@ def apply_marks(
     """Mark every state-lost step in the corpus and write the committed audit record."""
     # Each rewrite goes through `offline_replay.commit_trajectory`, which re-binds the manifest in
     # the SAME locked transaction as the file — the pairing that a hand-rolled write would break.
-    # It re-hashes every trajectory each time (~0.7s over 799), so a full pass costs minutes. That
-    # is the right trade for a one-shot honesty pass; do not open-code the write to save it.
+    # It re-hashes every trajectory each time (~0.7s over the corpus), so a full pass costs
+    # minutes. That is the right trade for a one-shot honesty pass; do not open-code the write to
+    # save it.
     from benchmark.runner.offline_replay import commit_trajectory  # noqa: PLC0415
 
     records: dict[str, dict[str, object]] = {}

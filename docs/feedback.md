@@ -51,7 +51,8 @@ trusted, because coding agents reward-hack and misreport.
 ### 1. Automatic — off-wire test execution (the signal that matters)
 
 At session close Shunt re-runs **the resolved repo's test suite** off the wire —
-`pytest`, `jest`/`vitest`, `go test`, or `cargo test`, auto-detected — and records the
+`pytest`, `jest`/`vitest`, `go test`, `cargo test`, Maven/Gradle, `dotnet test`,
+RSpec, PHPUnit, GTest/CTest and more, auto-detected — and records the
 pass/fail as a verified Tier-2 outcome. No human step.
 
 Usually there is nothing to arm. Launch Shunt from the repo you are working in and it
@@ -103,7 +104,7 @@ ground truth:
   (`rerun_confirmations`, default 2); a failure that does not reproduce is treated as a
   flake and abstained from (does not feed the router or escalation). A confirmed failure
   is passed through.
-- A run slower than `verify_timeout_seconds` (default 120s) records **nothing**, so on a
+- A run slower than `verify_timeout_seconds` (default 1800s) records **nothing**, so on a
   large suite the loop is a silent no-op until you raise it. Every run logs its measured
   duration at debug level, and warns past 70% of the budget.
 - If there is no test framework, or no repo resolves, Shunt writes **nothing**. It never

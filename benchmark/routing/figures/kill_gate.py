@@ -92,8 +92,10 @@ SPEC = FigureSpec(
     ),
     limitations=(
         "The cost panel is naive per-task cost. The gate's real criterion is cache-aware "
-        "cost, which is adjacency-dependent and therefore not bootstrappable — see "
-        "cache_economics.png.",
+        "cost, which the gate bootstraps per task — cache cost is scoped per task (one "
+        "task is one session), so a whole-task resample preserves within-task adjacency — "
+        "and publishes as a 90% CI in the tracked verdict artifact. See cache_economics.png "
+        "for how far the assumed hit rate moves that ratio.",
     ),
 )
 

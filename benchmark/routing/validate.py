@@ -26,6 +26,7 @@ TIMEOUT_FLAG_MISMATCH: Final[str] = "TIMEOUT_FLAG_MISMATCH"
 MALFORMED_NUMERIC: Final[str] = "MALFORMED_NUMERIC"
 MALFORMED_TIMESTAMP: Final[str] = "MALFORMED_TIMESTAMP"
 SUSPICIOUS_ZERO: Final[str] = "SUSPICIOUS_ZERO"
+MISSING_COLLECTION_FIELD: Final[str] = "MISSING_COLLECTION_FIELD"
 
 # Registry price fields (both the load_pricing and the _pricing_dict spellings).
 _PRICE_KEYS: Final[tuple[str, ...]] = (
@@ -36,6 +37,18 @@ _PRICE_KEYS: Final[tuple[str, ...]] = (
 )
 # Numeric columns that must parse as a finite value >= 0.
 _NUMERIC_FIELDS: Final[tuple[str, ...]] = ("real_cost", "in_tok", "out_tok", "calls")
+# Collection-param provenance columns: every row MUST carry these keys so a
+# reader can tell the regime a cell was collected under (step_limit/cost_limit/scaffold
+# version / sampling kwargs / prompt). Absent key = schema error; EMPTY value is legal and
+# is exactly the grandfather rule for legacy rows (an empty anchor degrades to a staleness
+# no-op in run_matrix, mirroring _arm_stale/_image_stale).
+_REQUIRED_COLLECTION_FIELDS: Final[tuple[str, ...]] = (
+    "step_limit",
+    "cost_limit",
+    "scaffold_version",
+    "sampling_hash",
+    "prompt_hash",
+)
 # A stop_reason marking a row whose API was unusable (never a real run); exempt from
 # the SUSPICIOUS_ZERO warn like a censored row is (it neither ran nor is a clean fail).
 _API_UNUSABLE_REASON: Final[str] = "api_unusable"
@@ -162,6 +175,21 @@ def _check_wellformed(row: dict) -> list[Violation]:
     return out
 
 
+def _check_collection_fields(row: dict) -> list[Violation]:
+    """Every row carries the six collection-param keys (absent key is an ERROR; empty is legal)."""
+    out: list[Violation] = []
+    for field_name in _REQUIRED_COLLECTION_FIELDS:
+        if field_name not in row:
+            out.append(
+                Violation(
+                    Severity.ERROR,
+                    MISSING_COLLECTION_FIELD,
+                    f"row lacks required collection-param column {field_name!r}",
+                )
+            )
+    return out
+
+
 def _check_schema(row: dict, derived: str) -> list[Violation]:
     """stop_reason in-vocabulary, pass<=>solved, timeout_flag<=>wall/abandon stop."""
     out: list[Violation] = []
@@ -247,6 +275,7 @@ def validate_row(row: dict, pricing: dict) -> list[Violation]:
     )
     out: list[Violation] = []
     out.extend(_check_wellformed(row))
+    out.extend(_check_collection_fields(row))
     out.extend(_check_schema(row, derived))
     for maybe in (
         _check_accounting(row, derived, pricing),

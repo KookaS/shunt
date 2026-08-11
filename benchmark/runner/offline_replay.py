@@ -567,7 +567,7 @@ def _main() -> int:
     # readably in the single tee'd run log.
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     # ...but the dataset lookup's HTTP chatter is not signal, and it BURIES the signal: measured
-    # over 8 replays, 51 `httpx` INFO lines to 6 real ones. Across a full 799-trajectory rebuild
+    # over 8 replays, 51 `httpx` INFO lines to 6 real ones. Across a full-corpus rebuild
     # that is ~5 000 lines of HTTP between the gate verdicts a supervisor is reading the log for.
     for noisy in _QUIET_LOGGERS:
         logging.getLogger(noisy).setLevel(logging.WARNING)

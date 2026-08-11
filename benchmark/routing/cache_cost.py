@@ -143,7 +143,10 @@ def cache_aware_total(
     discount."""
     # Adjacency is the whole model: the discount applies when the PREVIOUS billed attempt served
     # the same model, because that is when the prefix is still warm. A caller that reorders the
-    # sequence changes the answer, which is why no bootstrap resamples this statistic.
+    # sequence changes the answer — which is why a bootstrap may resample this statistic only
+    # PER TASK (see ``cache_cost_is_scoped_to_tasks``): a whole-task resample keeps each task's
+    # own attempt sequence intact, so within-task adjacency survives and the resampled total is
+    # the statistic it is named after.
     savings = 0.0
     previous: str | None = None
     for model, cost in attempts:
@@ -152,3 +155,20 @@ def cache_aware_total(
             savings += cost * price.saving_fraction
         previous = model
     return sum(cost for _model, cost in attempts) - savings
+
+
+def cache_cost_is_scoped_to_tasks(
+    task_ids: Sequence[str],
+    attempts: Mapping[str, Sequence[tuple[str, float]]],
+    prices: Mapping[str, CachePrice],
+) -> bool:
+    """True iff each task's cache-aware cost is invariant to the other tasks."""
+    # A whole-task resample of cache-aware cost is legitimate only when a task's cost does not
+    # depend on the tasks around it in the sample. Detected by computing every task's cost
+    # forward and backward through the set: a cross-task cache model leaks adjacency through
+    # hidden state and the two passes disagree. This is the one predicate both the routing
+    # bootstrap and the kill-gate bootstrap resolve, so a future re-flattening makes both
+    # refuse loudly instead of emitting a stale-but-plausible interval.
+    forward = [cache_aware_total(attempts.get(tid, []), prices) for tid in task_ids]
+    backward = [cache_aware_total(attempts.get(tid, []), prices) for tid in reversed(task_ids)]
+    return forward == list(reversed(backward))

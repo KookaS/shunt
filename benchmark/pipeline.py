@@ -82,7 +82,8 @@ _SKIPPED = "skipped"
 
 
 class StageError(RuntimeError):
-    """A stage's underlying module exited non-zero — caught so downstream stages still run."""
+    """A stage's underlying module exited non-zero — caught so the loop finishes and halts the
+    downstream stages that consume this stage's outputs."""
 
 
 @dataclass
@@ -460,8 +461,14 @@ def stage_stamp(args: argparse.Namespace, _state: PipelineState) -> None:
         raise StageError(f"{len(failures)}/{len(pending)} replays did not complete: {failures}")
 
 
-def stage_evaluate(_args: argparse.Namespace, state: PipelineState) -> None:
+def stage_evaluate(
+    _args: argparse.Namespace,
+    state: PipelineState,
+    *,
+    manifest: Path | None = None,
+) -> None:
     """Score the escalation detector (metrics + plots); keep stdout for the summary status."""
+    manifest = manifest or FIGURE_MANIFEST
     argv = [
         "--plots-dir",
         str(_ESCALATION_FIGURES_DIR),
@@ -475,17 +482,28 @@ def stage_evaluate(_args: argparse.Namespace, state: PipelineState) -> None:
         print(result.stderr, end="", file=sys.stderr)  # noqa: T201
     state.evaluate_stdout = result.stdout or ""
     if result.returncode != 0:
+        # A stage that failed certifies nothing: the escalation figures may be partial or from
+        # earlier inputs, so their digest is RETRACTED — the gate reports them stale, never
+        # fresh. (The eval certifies them itself on success, inside its own draw path.)
+        write_figure_manifest(manifest, jobs=(), drop=tuple(job.name for job in ESCALATION_FIGURES))
         raise StageError(f"{ESCALATION_EVAL} exited {result.returncode}")
 
 
-def stage_report(_args: argparse.Namespace, _state: PipelineState) -> None:
+def stage_report(
+    _args: argparse.Namespace, _state: PipelineState, *, manifest: Path | None = None
+) -> None:
     """Regenerate the routing plots + capability_evidence.json + coverage/summary CSVs."""
+    manifest = manifest or FIGURE_MANIFEST
     result = run_module(
         ROUTING_REPORT,
         ["--out-dir", str(_ROUTING_REPORTS_DIR), "--figures-dir", str(_ROUTING_FIGURES_DIR)],
     )
     if result.returncode != 0:
+        write_figure_manifest(manifest, jobs=(), drop=tuple(job.name for job in REPORT_FIGURES))
         raise StageError(f"{ROUTING_REPORT} exited {result.returncode}")
+    # The report just redrew the routing figures — that is what certifies them current, and it
+    # certifies ONLY the report job, never the standalone/escalation jobs it did not draw.
+    write_figure_manifest(manifest, jobs=REPORT_FIGURES)
 
 
 # ---------------------------------------------------------------------------
@@ -622,9 +640,9 @@ def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
     if half == "escalation":
         return (
             # The corpus manifest, not the trajectory directory: `_digest` expands a
-            # directory to its *.py, so pointing it at 799 .jsonl files would hash nothing.
-            # manifest.json already carries a content_sha256 per trajectory, so it moves
-            # whenever the corpus does and costs one file read instead of 88MB.
+            # directory to its *.py, so pointing it at the corpus's .jsonl files would
+            # hash nothing. manifest.json already carries a content_sha256 per trajectory, so it
+            # moves whenever the corpus does and costs one file read instead of 88MB.
             _ESCALATION / "data" / "live" / "manifest.json",
             _REPO_ROOT / "benchmark" / "benchmark.yaml",
             # `_shipped_escalation()` reads the packaged router config, so a knob change
@@ -763,6 +781,14 @@ FIGURE_JOBS: Final[tuple[FigureJob, ...]] = (*_STANDALONE, _REPORT_JOB, _ESCALAT
 STANDALONE_FIGURES: Final[tuple[FigureJob, ...]] = tuple(
     job for job in FIGURE_JOBS if job.stage == FIGURES
 )
+# The report/escalation figures are drawn by their own stages (REPORT/EVALUATE); a stage
+# certifies only the jobs IT regenerated, so each stage names its own job set to the manifest.
+REPORT_FIGURES: Final[tuple[FigureJob, ...]] = tuple(
+    job for job in FIGURE_JOBS if job.stage == REPORT
+)
+ESCALATION_FIGURES: Final[tuple[FigureJob, ...]] = tuple(
+    job for job in FIGURE_JOBS if job.stage == EVALUATE
+)
 
 
 def _digest(paths: tuple[Path, ...]) -> str:
@@ -776,14 +802,35 @@ def _digest(paths: tuple[Path, ...]) -> str:
     return sha.hexdigest()
 
 
-def figure_digests() -> dict[str, str]:
+def figure_digests(jobs: tuple[FigureJob, ...] = FIGURE_JOBS) -> dict[str, str]:
     """Current input digest per figure job — every committed figure, not only standalone ones."""
-    return {job.name: _digest((*_data_inputs(job.half), *job.inputs)) for job in FIGURE_JOBS}
+    return {job.name: _digest((*_data_inputs(job.half), *job.inputs)) for job in jobs}
 
 
-def write_figure_manifest(path: Path = FIGURE_MANIFEST) -> Path:
-    """Record the digests the committed PNGs were last regenerated from."""
-    path.write_text(json.dumps(figure_digests(), indent=2, sort_keys=True) + "\n")
+def write_figure_manifest(
+    path: Path = FIGURE_MANIFEST,
+    *,
+    jobs: tuple[FigureJob, ...] | None = None,
+    drop: tuple[str, ...] = (),
+) -> Path:
+    """Upsert current digests for `jobs` (None = all) as freshly rendered; delete `drop`."""
+    # The manifest is the freshness gate's memory — an entry means "the committed figures were
+    # drawn from inputs with this digest". A render that FAILED must keep no entry (the gate
+    # reports it stale), never the digest from an earlier run; and a stage may only certify the
+    # jobs it actually regenerated. Entries named by neither set are preserved: this write only
+    # records what the calling stage produced. The old whole-file overwrite is what let a
+    # crashed stage's digest survive as fresh.
+    recorded: dict[str, str] = {}
+    if path.exists():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            payload = {}
+        recorded = {str(k): str(v) for k, v in payload.items()}
+    for name in drop:
+        recorded.pop(name, None)
+    recorded.update(figure_digests(jobs) if jobs is not None else figure_digests())
+    path.write_text(json.dumps(recorded, indent=2, sort_keys=True) + "\n")
     return path
 
 
@@ -808,20 +855,39 @@ def missing_figures(jobs: tuple[FigureJob, ...] = FIGURE_JOBS) -> list[str]:
     ]
 
 
-def stage_figures(_args: argparse.Namespace, _state: PipelineState) -> None:
+def stage_figures(
+    _args: argparse.Namespace, _state: PipelineState, *, manifest: Path = FIGURE_MANIFEST
+) -> None:
     """Regenerate every standalone figure, then re-record the input manifest."""
+    # The manifest records ONE entry per job that actually rendered this run, and DROPS the
+    # entry of any job whose render failed — a crashed render reports STALE (its old digest is
+    # never retained as fresh). A job that exits non-zero, or that "succeeds" writing none of
+    # its declared outputs, is a failure and is dropped from the manifest.
     failed: list[str] = []
+    regenerated: list[FigureJob] = []
     for job in STANDALONE_FIGURES:
         print(f"  figures: {job.name}", flush=True)  # noqa: T201
-        result = run_module(job.module, [])
+        try:
+            result = run_module(job.module, [])
+        except Exception as exc:  # noqa: BLE001 — one crashed producer fails only its job
+            failed.append(f"{job.module} crashed ({exc})")
+            continue
         if result.returncode != 0:
             failed.append(f"{job.module} exited {result.returncode}")
+            continue
+        regenerated.append(job)
     absent = missing_figures(STANDALONE_FIGURES)
+    absent_jobs = {entry.split(":", 1)[0] for entry in absent}
     if absent:
         failed.append(f"declared figures never written: {', '.join(absent)}")
+    refreshed = tuple(job for job in regenerated if job.name not in absent_jobs)
+    dropped = tuple(
+        job.name for job in STANDALONE_FIGURES if job.name in absent_jobs or job not in regenerated
+    )
+    write_figure_manifest(manifest, jobs=refreshed, drop=dropped)
     if failed:
         raise StageError("; ".join(failed))
-    print(f"  figures: manifest -> {write_figure_manifest()}")  # noqa: T201
+    print(f"  figures: manifest -> {manifest}")  # noqa: T201
 
 
 _StageFunc = Callable[[argparse.Namespace, "PipelineState"], None]
@@ -852,23 +918,36 @@ def _selected_stages(args: argparse.Namespace) -> list[str]:
 
 def run_pipeline(args: argparse.Namespace) -> PipelineResult:
     """Drive the selected stages with per-stage failure isolation, then the summary."""
+    # STAGE_ORDER is the dependency chain (collect -> stamp -> evaluate -> report -> figures):
+    # a failed stage halts every selected stage after it that consumes its outputs, so a
+    # downstream stage never runs on a corpus its producer failed to complete. They are
+    # recorded _SKIPPED, not run; the loop still finishes and the pipeline returns the failure
+    # code.
     outcomes = dict.fromkeys(STAGE_ORDER, _SKIPPED)
     state = PipelineState()
     selected = _selected_stages(args)
+    blocked = False
     for stage in selected:
+        if blocked:
+            outcomes[stage] = _SKIPPED
+            logger.warning("stage %s skipped: an upstream stage it depends on failed", stage)
+            continue
         _banner(stage)
         try:
             _STAGE_FUNCS[stage](args, state)
             outcomes[stage] = _RAN
         except StageError as exc:
             outcomes[stage] = _FAILED
+            blocked = True
             logger.error("stage %s failed: %s", stage, exc)
         except Exception as exc:  # noqa: BLE001 — isolation: one stage never aborts the rest
             outcomes[stage] = _FAILED
+            blocked = True
             logger.error("stage %s crashed: %s", stage, exc)
-    # A figures-only refresh does not re-derive the kill-gate/escalation numbers, so the
-    # consolidated summary would just re-run both evaluations to restate stale text.
-    if not args.no_report and REPORT in selected:
+    # The consolidated summary re-runs evaluation modules when their stage's stdout was never
+    # captured, so it only follows a REPORT that actually produced its artifacts — never one that
+    # was skipped because the corpus upstream of it failed.
+    if outcomes.get(REPORT) == _RAN:
         run_summary(args, state, outcomes)
     rc = 1 if any(v == _FAILED for v in outcomes.values()) else 0
     return PipelineResult(returncode=rc, outcomes=outcomes)

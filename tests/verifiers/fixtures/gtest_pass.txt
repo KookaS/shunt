@@ -1,0 +1,11 @@
+[==========] Running 3 tests from 1 test suite.
+[----------] Global test environment set-up.
+[ RUN      ] WidgetTest.DoesThing
+[       OK ] WidgetTest.DoesThing (1 ms)
+[ RUN      ] WidgetTest.ParsesInput
+[       OK ] WidgetTest.ParsesInput (1 ms)
+[ RUN      ] WidgetTest.Roundtrip
+[       OK ] WidgetTest.Roundtrip (1 ms)
+[----------] Global test environment tear-down
+[==========] 3 tests from 1 test suite ran. (3 ms total)
+[  PASSED  ] 3 tests.

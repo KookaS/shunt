@@ -86,6 +86,19 @@ class UpstreamError(Exception):
         super().__init__(message)
 
 
+class BudgetExceededError(UpstreamError):
+    """Raised when a session's cumulative reported spend is at its configured cap."""
+
+    # A HARD-STOP, not a transient condition: the cap binds for the session's lifetime, so the
+    # refusal must never look retryable. 402 (Payment Required) is the semantically-exact status
+    # for a spend cap reached, and neither the OpenAI nor Anthropic SDK retries it (their
+    # _should_retry covers 408/409/429/5xx only). The endpoint surfaces the message verbatim so
+    # the client sees the cap, and adds `x-should-retry: false` so a retry-happy SDK stops.
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, status_code=402)
+
+
 @functools.lru_cache(maxsize=32)
 def _client_for(base_url: str, api_key: str) -> AsyncOpenAI:
     """Cached OpenAI-compatible async client keyed by (base_url, api_key)."""
@@ -588,11 +601,14 @@ class ProxyRouter:
         session_manager: SessionManager,
         retry_count: int = 3,
         engine: RouterEngine | None = None,
+        max_spend_usd: float | None = None,
     ) -> None:
         self._pool = model_pool
         self._sessions = session_manager
         self.retry_count = retry_count
         self._engine = engine
+        # Per-session spend hard-cap from router.budget.max_spend_usd; None = unlimited.
+        self._max_spend_usd = max_spend_usd
         # Accumulates structured, non-model-authored wire signals (tool_result.is_error,
         # terminal stop_reason) onto session.metadata — the weak, quarantined Tier-1 prior.
         self._wire_collector = WireSignalCollector()
@@ -713,6 +729,7 @@ class ProxyRouter:
 
         Returns *(openai_response | async_generator, selected_model_name)*.
         """
+        self._enforce_budget(session)
         prompt_text = _routing_text_from_messages(openai_kwargs.get("messages", []))
         # Off the event loop: the decision runs ONNX inference and takes a blocking
         # lock, so doing it inline serialized concurrent first turns and stalled every
@@ -885,6 +902,24 @@ class ProxyRouter:
         return model_name
 
     # ── Cache-tax measurement ──────────────────────────────────────────────
+
+    def _enforce_budget(self, session: Session) -> None:
+        """Refuse routing once the session's cumulative reported cost reaches the cap."""
+        # A SOFT ceiling enforced at the NEXT request boundary: the check runs before the
+        # upstream call, so the request that crosses the cap completes and the following one is
+        # refused. `session.total_cost` is the REAL provider-reported charge accumulated by
+        # `_accumulate_cost` (usage.cost) — never a locally derived price, and never 0.0 when
+        # the provider reported no cost. The cap binds only on spend that was actually
+        # recorded; an unreported cost cannot trip it.
+        if self._max_spend_usd is None or session.total_cost < self._max_spend_usd:
+            return
+        message = (
+            f"session {session.session_id} cumulative spend ${session.total_cost:.6f} "
+            f"reached the router.budget.max_spend_usd cap "
+            f"${self._max_spend_usd:.6f}; refusing to route"
+        )
+        logger.warning("%s", message)
+        raise BudgetExceededError(message)
 
     @staticmethod
     def _reported_cost(usage: Any) -> float | None:

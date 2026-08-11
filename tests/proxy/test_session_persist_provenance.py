@@ -6,6 +6,7 @@ asserting the schema-v2 provenance columns are threaded through, not left at the
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,8 @@ from shunt.session import Session, SessionManager
 # A model that exists in the shipped registry, so the fingerprint resolves to a real tag.
 _REGISTRY_MODEL = "qwen3.7-plus"
 _EXPECTED_FINGERPRINT = "alibaba/qwen3.7-plus@qwen3.7-plus"
+# A second real registry model, used as the model that ACTUALLY served after a fallback.
+_FALLBACK_MODEL = "deepseek-v4-flash"
 
 
 @pytest.fixture
@@ -114,3 +117,60 @@ def test_fingerprint_is_none_for_unknown_model(
     row = store.get_session("sess-1")
     assert row is not None
     assert row["model_fingerprint"] is None
+
+
+# ── fallback honesty: provenance must name the SERVED model, never the locked one ──
+def test_fallback_corrects_provenance_to_served_model(
+    store: OutcomeStore, router: ProxyRouter, session: Session
+) -> None:
+    # The engine locked qwen3.7-plus, it failed upstream, and deepseek-v4-flash served.
+    # The decision-time provenance still names the LOCKED model — the persist must
+    # correct it to the served model and flag the fallback, or `shunt explain` would
+    # print "chose qwen3.7-plus, fallback: no" while serving deepseek-v4-flash.
+    session.decision_provenance = build_provenance(
+        model_chosen=_REGISTRY_MODEL, selection_rule_used="cold_start"
+    )
+    _store_session_with_provenance(store, router, session, _FALLBACK_MODEL, "cold_start")
+
+    row = store.get_session("sess-1")
+    assert row is not None
+    # The honest kNN-learning COLUMN still names the served model (unchanged semantics).
+    assert row["model_chosen"] == _FALLBACK_MODEL
+    # The provenance blob now agrees with the column AND flags the fallback.
+    prov = json.loads(row["decision_provenance"])
+    assert prov["model_chosen"] == _FALLBACK_MODEL
+    assert prov["model_chosen"] != _REGISTRY_MODEL
+    assert prov["fallback_chain_triggered"] is True
+
+
+def test_retry_same_model_does_not_flag_fallback(
+    store: OutcomeStore, router: ProxyRouter, session: Session
+) -> None:
+    # The locked model succeeded after retries — the SAME model served. A retry is not
+    # a fallback, so the provenance must not be corrected or flagged.
+    session.decision_provenance = build_provenance(
+        model_chosen=_REGISTRY_MODEL, selection_rule_used="cold_start"
+    )
+    _store_session_with_provenance(store, router, session, _REGISTRY_MODEL, "cold_start")
+
+    row = store.get_session("sess-1")
+    assert row is not None
+    prov = json.loads(row["decision_provenance"])
+    assert prov["model_chosen"] == _REGISTRY_MODEL
+    assert prov["fallback_chain_triggered"] is not True
+
+
+def test_synthesized_provenance_already_names_served_model(
+    store: OutcomeStore, router: ProxyRouter, session: Session
+) -> None:
+    # Engine-less path: decision_provenance is None, so one is synthesized with
+    # model_chosen = the served model. The correction must NOT fire (it would be a
+    # no-op anyway) and nothing may be flagged as a fallback.
+    session.decision_provenance = None
+    _store_session_with_provenance(store, router, session, _REGISTRY_MODEL, "always-cheap")
+
+    row = store.get_session("sess-1")
+    assert row is not None
+    prov = json.loads(row["decision_provenance"])
+    assert prov["model_chosen"] == _REGISTRY_MODEL
+    assert prov["fallback_chain_triggered"] is not True

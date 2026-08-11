@@ -1,0 +1,2 @@
+<testsuite name="pytest" errors="0" failures="0" skipped="0" tests="0" time="0.0" timestamp="2026-08-11T10:00:00.000000" hostname="host">
+</testsuite>

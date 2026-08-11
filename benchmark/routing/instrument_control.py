@@ -41,6 +41,9 @@ ASSEMBLED pipeline to recover it; then destroys the signal and asks it to collap
 # resolves to the real SWE-bench `problem_statement` on every committed task (median 1185 chars);
 # it resolved to the ~106-character `<repo>@<commit12> - resolve <test-node-id>` label until the
 # corpus was rebuilt, and the diagnostic numbers quoted below were measured on that older text.
+# The control's planted text is padded to the corpus median so a positive control
+# is exercised at the SAME input length as the real signal — a ~9x-shorter control would certify
+# the embedder only for a regime the corpus never uses.
 # Either way the repository name is present in the string the embedder is handed, and the real
 # front end demonstrably propagates it:
 # this module's own `repo_identity_positive_score` reads 0.7375 on the ANALYSIS leg against a
@@ -79,9 +82,11 @@ ASSEMBLED pipeline to recover it; then destroys the signal and asks it to collap
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from functools import lru_cache
+from pathlib import Path
 from typing import Final
 
 import numpy as np
@@ -153,6 +158,67 @@ _FAMILY_B: Final[tuple[tuple[str, str], ...]] = (
 
 EmbedTexts = Callable[[list[str]], np.ndarray]
 
+# The committed corpus's routing channel. `routing_text` resolves to `problem_statement` on every
+# committed task (median ~1180 chars) — NOT the ~106-char `<repo>@<commit12> - resolve <node-id>`
+# `description` label the control used to mirror. A positive control planted on ~9x shorter inputs
+# than the real signal exercises a different embedding regime, so the planted texts are padded to
+# the corpus median below.
+_DATA_PATH: Final[Path] = Path(__file__).resolve().parent / "data" / "challenges.json"
+
+
+@lru_cache(maxsize=1)
+def _corpus_problem_statements() -> tuple[str, ...]:
+    """The committed corpus's `problem_statement` channel — real task text, never a fake."""
+    with _DATA_PATH.open(encoding="utf-8") as handle:
+        data = json.load(handle)
+    return tuple(
+        str(t.get("problem_statement") or "").strip()
+        for t in data.get("tasks", {}).values()
+        if str(t.get("problem_statement") or "").strip()
+    )
+
+
+def corpus_median_chars() -> int:
+    """The committed problem_statement channel's median length — the control's length target."""
+    lengths = [len(s) for s in _corpus_problem_statements()]
+    if not lengths:
+        # An empty corpus is a loud, named error, not a silent NaN: `np.median([])` is NaN
+        # and `int(NaN)` raises a raw ValueError that names neither the corpus nor the fix.
+        raise ValueError(
+            f"no problem statements found in the routing corpus ({_DATA_PATH}) — the "
+            "control's length target needs task text to exist"
+        )
+    return int(np.median(lengths))
+
+
+@lru_cache(maxsize=1)
+def _control_filler() -> str:
+    """Deterministic shared natural-language filler drawn from the committed corpus."""
+    # SHARED across every control text on purpose: the planted family signal must stay the
+    # dominant distinguishing content. A per-task-unique filler dominates the bag-of-words and
+    # the kNN neighbourhoods collapse onto filler similarity — measured: the positive control
+    # drops from 0.80 to 0.52 and FAILS. A constant filler leaves the family vocabulary as the
+    # only discriminator, while keeping the corpus's LENGTH and REGISTER (the point of D12).
+    rng = np.random.default_rng(0x5EED)
+    statements = _corpus_problem_statements()
+    picked = [statements[i] for i in sorted(rng.choice(len(statements), 8, replace=False))]
+    return "\n\n".join(picked)
+
+
+def _pad_to_corpus_median(prefix: str) -> str:
+    """Scale a planted control text to the corpus's median problem-statement length."""
+    target = corpus_median_chars()
+    filler = _control_filler()
+    sep = "\n\n"
+    need = target - len(prefix) - len(sep)
+    if need <= 0:
+        return prefix
+    block = filler + sep
+    # `.rstrip()` keeps `routing_text`'s `.strip()` from seeing a trailing whitespace cut and
+    # returning a value that differs from what `_assert_planted_text_is_embedded` stored.
+    fill = ((block * (need // len(block) + 1))[:need]).rstrip()
+    return prefix + sep + fill
+
 
 def _default_embed_texts(texts: list[str]) -> np.ndarray:
     """The shipped embedder — the same callable the kNN figures embed the real corpus with."""
@@ -189,13 +255,21 @@ def build_control_matrix(
             for path, test_name in descriptors:
                 commit = f"{int(rng.integers(0, 16**12)):012x}"
                 task_id = f"{repo.replace('/', '__')}-{path}-{test_name}"
-                # Mirrors the committed corpus's own description shape, em dash included, so the
-                # control embeds text of the same length and register the real one does.
+                # The signal-bearing label, em dash included, padded with shared real
+                # problem-statement prose to the corpus median length — so the control embeds
+                # text of the same LENGTH AND REGISTER as the real corpus's routing channel.
+                # The `{repo}@{commit}` prefix stays first so the repository name remains
+                # extractable and the orthogonality construction is unchanged.
                 description = f"{repo}@{commit} — resolve {package}/{path}::{test_name}"
-                # ONLY `description` is set, because that is the field `routing_text` resolves
-                # through on every task of the committed corpus. `_assert_planted_text_is_embedded`
-                # turns a change in that resolution into a loud failure rather than a quiet one.
-                tasks[task_id] = {"description": description, "repo": repo}
+                # ONLY `problem_statement` is set, because that is the field `routing_text`
+                # resolves through on every task of the committed corpus (it was `description`
+                # before the corpus was rebuilt to carry problem statements).
+                # `_assert_planted_text_is_embedded` turns a change in that resolution into a
+                # loud failure rather than a quiet one.
+                tasks[task_id] = {
+                    "problem_statement": _pad_to_corpus_median(description),
+                    "repo": repo,
+                }
                 task_ids.append(task_id)
                 families.append(family)
                 repo_ranks.append(repo_rank)
@@ -252,7 +326,7 @@ def _assert_planted_text_is_embedded(matrix: dict, task_ids: Sequence[str]) -> N
     for tid in task_ids:
         meta = matrix["tasks"][tid]
         resolved = routing_text(tid, meta)
-        if resolved != meta["description"]:
+        if resolved != meta["problem_statement"]:
             raise RuntimeError(
                 "the routing instrument control is no longer planting into the field "
                 f"routing_text reads: it returned {resolved!r} for {tid}. Re-shape the control "

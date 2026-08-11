@@ -40,10 +40,13 @@ _WATCHDOG_MARGIN_S: Final[int] = 300
 
 # Default PRIMARY per-cell bound: the number of agent steps, independent of inference speed, so a
 # slow model gets the SAME number of attempts as a fast one (wall-clock timing unfairly penalises
-# slow-inference models). Default 70 is justified from the live trajectory corpus
-# (benchmark/escalation/data/live): passing runs' step counts have p90=58 and p95=68, so 70 admits
-# ~95% of observed passers with headroom while still bounding a runaway loop.
-_DEFAULT_STEP_LIMIT: Final[int] = 70
+# slow-inference models). Justified from the measured HAZARD, not passers' percentiles (the old
+# p90=58/p95=68 rationale was survivorship-biased — conditioning on cells that passed says nothing
+# about cells still alive at step 70). Of the 92 corpus cells still running at step 70 under the
+# old 250-step budget, 37 (40.2%) went on to pass; 35 of those 37 (95%) finished by step 150, so
+# 150 is where censoring drops from a ~40% loss to a ~2% tail. Raised together with
+# benchmark.yaml live.cost_limit so the budget increase cannot relabel cost censors as step censors.
+_DEFAULT_STEP_LIMIT: Final[int] = 150
 
 
 def _external_watchdog_s(wall_limit_s: int) -> int:
@@ -195,6 +198,7 @@ def generate_patch_live(
     arm: str = integrity.DEFAULT_REASONING,
     timeout: int = _AGENT_WALL_LIMIT_S,
     step_limit: int = _DEFAULT_STEP_LIMIT,
+    cost_limit: float | None = None,
 ) -> AgentPatch:
     """Run the fixed agent scaffold on one instance/model/arm to produce a patch.
 
@@ -205,7 +209,9 @@ def generate_patch_live(
         raise MissingApiKeysError(
             f"live inference for {spec.instance_id}/{model} needs one of {_KEY_ENV}"
         )
-    return _invoke_scaffold(spec, model, scaffold, arm, timeout=timeout, step_limit=step_limit)
+    return _invoke_scaffold(
+        spec, model, scaffold, arm, timeout=timeout, step_limit=step_limit, cost_limit=cost_limit
+    )
 
 
 def litellm_model_target(model: str) -> tuple[str, dict[str, Any]]:
@@ -467,14 +473,32 @@ def _run_agent_bounded(agent: Any, task: str, env: Any, timeout: int) -> dict[st
 
 
 def _scaffold_config_overlay(
-    model_string: str, model_kwargs: dict[str, Any], *, timeout: int, step_limit: int
+    model_string: str,
+    model_kwargs: dict[str, Any],
+    *,
+    timeout: int,
+    step_limit: int,
+    cost_limit: float,
+    trajectory_id: str,
 ) -> dict[str, Any]:
     """The mini-swe-agent config overlay for one live cell (merged over the swebench default)."""
     # step_limit is the PRIMARY model-speed-agnostic bound; wall_time_limit_seconds is a generous
-    # graceful secondary backstop set from the PASSED timeout. Both trip the scaffold's own
-    # InterruptAgentFlow, so agent.run returns with usage intact (the cost is captured, not lost).
+    # graceful secondary backstop set from the PASSED timeout; cost_limit is the declared per-cell
+    # USD cap (benchmark.yaml live.cost_limit — an undeclared key used to let the scaffold's own
+    # 3.0 default govern silently). All three trip the scaffold's own InterruptAgentFlow, so
+    # agent.run returns with usage intact (the cost is captured, not lost). output_path makes the
+    # scaffold persist the FULL message list (DefaultAgent.run() saves it in a finally block) to
+    # the gitignored scratch, keyed by trajectory id so it pairs with the escalation trajectory
+    # jsonl and the per-step snapshot dir.
+    from benchmark.runner.step_snapshots import message_list_path  # noqa: PLC0415
+
     return {
-        "agent": {"wall_time_limit_seconds": timeout, "step_limit": step_limit},
+        "agent": {
+            "wall_time_limit_seconds": timeout,
+            "step_limit": step_limit,
+            "cost_limit": cost_limit,
+            "output_path": str(message_list_path(trajectory_id)),
+        },
         "model": {
             "model_name": model_string,
             "model_kwargs": model_kwargs,
@@ -491,6 +515,7 @@ def _invoke_scaffold(
     arm: str = integrity.DEFAULT_REASONING,
     timeout: int = _AGENT_WALL_LIMIT_S,
     step_limit: int = _DEFAULT_STEP_LIMIT,
+    cost_limit: float | None = None,
 ) -> AgentPatch:
     """Invoke mini-swe-agent (v2) for one instance/model/arm (only reached when keys exist)."""
     from minisweagent.agents import get_agent  # noqa: PLC0415
@@ -499,21 +524,27 @@ def _invoke_scaffold(
     from minisweagent.run.benchmarks.swebench import get_sb_environment  # noqa: PLC0415
     from minisweagent.utils.serialize import recursive_merge  # noqa: PLC0415
 
+    from benchmark.escalation.live_capture import make_trajectory_id  # noqa: PLC0415
+
     instance = _load_instance(spec.instance_id)
     model_string, model_kwargs = litellm_model_target(model)
     default_config = get_config_from_spec(str(builtin_config_dir / "benchmarks" / "swebench.yaml"))
     base_kwargs = default_config.get("model", {}).get("model_kwargs", {})
+    trajectory_id = make_trajectory_id(spec.instance_id, model, arm)
     overlay = _scaffold_config_overlay(
         model_string,
         _scaffold_model_kwargs(model, arm, base_kwargs, model_kwargs),
         timeout=timeout,
         step_limit=step_limit,
+        cost_limit=config.live_cost_limit() if cost_limit is None else cost_limit,
+        trajectory_id=trajectory_id,
     )
     merged = recursive_merge(default_config, overlay)
     env = get_sb_environment(merged, instance)
     model_obj = get_model(config=merged.get("model", {}))
     _harden_model_retries(model_obj)
     agent = get_agent(model_obj, env, merged.get("agent", {}), default_type="default")
+    _harden_output_write(agent)
     recorder = _attach_snapshot_recorder(agent, env)
     try:
         info = _run_agent_bounded(
@@ -574,6 +605,30 @@ def _attach_snapshot_recorder(agent: Any, env: Any) -> Any:
     return recorder
 
 
+def _harden_output_write(agent: Any) -> None:
+    """Make a failed message-list dump never break the paid run (observe-only)."""
+    # DefaultAgent.run() writes the FULL message list via ``self.save(self.config.output_path)``
+    # in a finally block; a write failure there (disk full, permission) would otherwise propagate
+    # and poison the run's outcome/cost/exit-status. Same observe-only contract as the snapshot
+    # recorder and the escalation trajectory capture: capture must never alter a paid run. Any
+    # failure to attach is swallowed too.
+    original = getattr(agent, "save", None)
+    if not callable(original):
+        return
+
+    def safe_save(path: Any, *extra: Any) -> dict[str, Any]:
+        try:
+            return original(path, *extra)
+        except Exception:  # noqa: BLE001 (observe-only: a dump failure never breaks a paid run)
+            _LOG.exception("message-list dump failed for a cell; continuing without it")
+            return {}
+
+    try:
+        agent.save = safe_save
+    except Exception:  # noqa: BLE001 (observe-only: never break a paid run to attach capture)
+        _LOG.exception("could not harden the message-list output write; continuing")
+
+
 def _capture_escalation_trajectory(
     patch: AgentPatch, instance_id: str, model: str, arm: str, resolved: bool
 ) -> None:
@@ -606,12 +661,31 @@ def _capture_escalation_trajectory(
         _LOG.exception("escalation trajectory capture failed for %s/%s", instance_id, model)
 
 
+def _collection_provenance(
+    model: str, arm: str, *, step_limit: int, cost_limit: float
+) -> dict[str, str]:
+    """The collection-param provenance keys for a results row."""
+    # Records the regime this cell was collected under so a later change to the caps, the
+    # installed scaffold, the merged request kwargs, or the prompt templates is detected as
+    # staleness (run_matrix._is_stale). Derived from the same integrity helpers that compute
+    # the CURRENT expected anchors, so recorded and expected always agree at the same config.
+    return {
+        "step_limit": str(step_limit),
+        "cost_limit": str(cost_limit),
+        "scaffold_version": integrity.scaffold_version(),
+        "sampling_hash": integrity.sampling_hash(model, arm),
+        "prompt_hash": integrity.scaffold_prompt_hash(),
+    }
+
+
 def _errored_outcome(
     instance_id: str,
     model: str,
     *,
     stop_reason: str,
     usage: tuple[int, int, int, float] = (0, 0, 0, 0.0),
+    step_limit: int = _DEFAULT_STEP_LIMIT,
+    cost_limit: float = 0.0,
 ) -> dict[str, object]:
     """A failed-cell outcome (pass=False) for a permanent model error or abandoned timeout."""
     # Recorded (not left MISSING) so the ladder treats the cell as not-solved and escalates, and
@@ -630,6 +704,8 @@ def _errored_outcome(
         "timeout_flag": censoring.timeout_flag_for(stop_reason),
         "stop_reason": stop_reason,
         "image_digest": "",
+        "step_limit": str(step_limit),
+        "cost_limit": str(cost_limit),
     }
 
 
@@ -642,6 +718,7 @@ def run_live_cell(
     timeout: int = _AGENT_WALL_LIMIT_S,
     arm: str = integrity.DEFAULT_REASONING,
     step_limit: int = _DEFAULT_STEP_LIMIT,
+    cost_limit: float | None = None,
 ) -> dict[str, object]:
     """Full live cell: agent → patch → harness → outcome dict for results.csv.
 
@@ -651,8 +728,16 @@ def run_live_cell(
     spec = swebench_specs.load_spec(instance_id)
     if spec is None:
         raise KeyError(f"no SWE-bench spec for {instance_id!r}; materialise it first")
+    actual_cost_limit = cost_limit if cost_limit is not None else config.live_cost_limit()
     try:
-        patch = generate_patch_live(spec, model, arm=arm, timeout=timeout, step_limit=step_limit)
+        patch = generate_patch_live(
+            spec,
+            model,
+            arm=arm,
+            timeout=timeout,
+            step_limit=step_limit,
+            cost_limit=actual_cost_limit,
+        )
     except AgentRunTimeoutError as exc:
         _LOG.warning("%s/%s abandoned: %s", instance_id, model, redact_secrets(str(exc)))
         return _errored_outcome(
@@ -660,12 +745,20 @@ def run_live_cell(
             model,
             stop_reason=censoring.ABANDONED,
             usage=(exc.in_tok, exc.out_tok, exc.calls, exc.cost),
+            step_limit=step_limit,
+            cost_limit=actual_cost_limit,
         )
     except PermanentModelError as exc:
         _LOG.warning("%s/%s failed permanently: %s", instance_id, model, redact_secrets(str(exc)))
         # A permanent 4xx (content policy / bad request) is a genuine capability fail the agent
         # could not work around — an UNCENSORED unsolved, not a resource-limit stop.
-        return _errored_outcome(instance_id, model, stop_reason=censoring.UNSOLVED)
+        return _errored_outcome(
+            instance_id,
+            model,
+            stop_reason=censoring.UNSOLVED,
+            step_limit=step_limit,
+            cost_limit=actual_cost_limit,
+        )
     preds_path = write_predictions(
         [prediction_line(instance_id, model, patch.patch)],
         work_dir / f"predictions_{run_id}.jsonl",
@@ -703,4 +796,5 @@ def run_live_cell(
         "stop_reason": stop_reason,
         # Record the digest the harness ACTUALLY used so stored == produced.
         "image_digest": image_version.used_image_digest(spec.image_ref) or "",
+        **_collection_provenance(model, arm, step_limit=step_limit, cost_limit=actual_cost_limit),
     }

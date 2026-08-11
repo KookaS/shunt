@@ -140,6 +140,41 @@ def test_sh004_honours_the_wrapper_isolation_noqa_token() -> None:
         planted.unlink()
 
 
+def test_sh004_catches_the_missing_vocab_families(tmp_path: Path) -> None:
+    """The audit: SH004 saw 1 of 6 internal-vocab families. Plant each family the
+    OLD gate missed and require a hit (noqa kept OFF the planted file so the hit is
+    real; the literal here is suppressed for the whole-repo scan)."""
+    leaks = [
+        "# tracked in SG-1",  # noqa: SHUNT-ISO
+        "# tracked in PIV-3",  # noqa: SHUNT-ISO
+        "# tracked in AC-3",  # noqa: SHUNT-ISO
+        "# tracked in AC12",  # noqa: SHUNT-ISO
+        "# tracked in ADR-0003",  # noqa: SHUNT-ISO
+        "# tracked in (D3)",  # noqa: SHUNT-ISO
+        "# tracked in decision 0002",  # noqa: SHUNT-ISO
+        "# tracked in decisions/0002",  # noqa: SHUNT-ISO
+        "# tracked in project/shunt/backlog",  # noqa: SHUNT-ISO
+    ]
+    for i, line in enumerate(leaks):
+        f = tmp_path / f"leak_{i}.py"
+        f.write_text(line + "\nx = 1\n")
+        assert _run("check_internal_refs.py", str(f)) == 1, line
+
+
+def test_sh004_does_not_flag_public_english_uses(tmp_path: Path) -> None:
+    # Tight \b-anchored patterns must not flag ordinary English: a lowercase "story",
+    # "AC-" buried in "MAC-10" (no word boundary before it), "decision process"
+    # (no year digits), and "PACK-1" (no "AC-" at all).
+    f = tmp_path / "public.md"
+    f.write_text(
+        "# Roadmap\n\n"
+        "A short story about the shipping plan.\n"
+        "PACK-1 and MAC-10 cover the west.\n"
+        "Our decision process is documented in the README.\n"
+    )
+    assert _run("check_internal_refs.py", str(f)) == 0
+
+
 def test_sh006_catches_src_importing_benchmark(tmp_path: Path) -> None:
     f = _src_shunt_file(tmp_path, "router/leak.py", "import benchmark.config\n")
     assert _run("check_import_direction.py", str(f)) == 1
@@ -234,6 +269,162 @@ def test_sh008_default_tree_is_clean() -> None:
     assert _run("check_embedder_isolation.py") == 0
 
 
+def test_sh008_catches_hashlib_digest_converted_to_vector(tmp_path: Path) -> None:
+    # A sha256 digest fed to np.frombuffer IS an embedding build, not integrity hashing.
+    f = _bench_file(
+        tmp_path,
+        "routing/hash_emb.py",
+        "import hashlib\n"
+        "import numpy as np\n"
+        "def emb(t):\n"
+        "    return np.frombuffer(hashlib.sha256(t.encode()).digest(), dtype=np.float32)\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_catches_hashlib_digest_sliced_to_vector(tmp_path: Path) -> None:
+    f = _bench_file(
+        tmp_path,
+        "routing/hash_slice.py",
+        "import hashlib\ndef emb(t):\n    return hashlib.sha256(t.encode()).digest()[:384]\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_catches_hashlib_digest_listed(tmp_path: Path) -> None:
+    f = _bench_file(
+        tmp_path,
+        "routing/hash_list.py",
+        "import hashlib\ndef emb(t):\n    return list(hashlib.sha256(t.encode()).digest())\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_passes_legitimate_integrity_hashing(tmp_path: Path) -> None:
+    # A bare hexdigest/state-key slice (as src/shunt/router/engine.py does) is integrity
+    # hashing, not an embedding — must NOT trip the proxy-vector detector.
+    f = _src_shunt_file(
+        tmp_path,
+        "router/digest.py",
+        "import hashlib\n"
+        "def state_key(k):\n"
+        "    return hashlib.sha256(k.encode('utf-8')).hexdigest()[:16]\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 0
+
+
+def test_sh008_catches_np_random_draw_as_embedding(tmp_path: Path) -> None:
+    f = _bench_file(
+        tmp_path,
+        "routing/rand_emb.py",
+        "import numpy as np\ndef emb():\n    return np.random.rand(384)\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_catches_default_rng_inline_draw(tmp_path: Path) -> None:
+    f = _bench_file(
+        tmp_path,
+        "routing/rng_emb.py",
+        "import numpy as np\ndef emb():\n    return np.random.default_rng(0).random(384)\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_catches_default_rng_draw_on_bound_name(tmp_path: Path) -> None:
+    f = _bench_file(
+        tmp_path,
+        "routing/rng_bound.py",
+        "import numpy as np\n"
+        "def emb():\n"
+        "    rng = np.random.default_rng(0)\n"
+        "    return rng.normal(size=384)\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_catches_random_rand_constructed_in_vector_context(tmp_path: Path) -> None:
+    f = _bench_file(
+        tmp_path,
+        "routing/randobj_emb.py",
+        "import random\ndef emb():\n    return [random.Random(0).random() for _ in range(384)]\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_passes_legitimate_seeded_rng_sampler(tmp_path: Path) -> None:
+    # A random.Random instance seeded for EXPLORATION (as src/shunt/router/escalation.py
+    # does) is not an embedding; a scalar draw on a field receiver must not trip.
+    f = _src_shunt_file(
+        tmp_path,
+        "router/sampler.py",
+        "import random\n"
+        "class S:\n"
+        "    rng: random.Random\n"
+        "    def __init__(self, seed):\n"
+        "        self.rng = random.Random(seed)\n"
+        "    def explore(self, eps):\n"
+        "        return self.rng.random() < eps\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 0
+
+
+def test_sh008_catches_importlib_import_module_banned_module(tmp_path: Path) -> None:
+    f = _bench_file(
+        tmp_path,
+        "routing/dyn_sklearn.py",
+        "import importlib\n"
+        "def f():\n"
+        "    return importlib.import_module('sklearn.feature_extraction.text')\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_catches_importlib_import_module_fastembed(tmp_path: Path) -> None:
+    f = _bench_file(
+        tmp_path,
+        "routing/dyn_fastembed.py",
+        "import importlib\ndef f():\n    return importlib.import_module('fastembed')\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_catches_importlib_import_module_via_alias(tmp_path: Path) -> None:
+    f = _bench_file(
+        tmp_path,
+        "routing/dyn_alias.py",
+        "from importlib import import_module as load\n"
+        "def f():\n"
+        "    return load('sklearn.feature_extraction')\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+
+
+def test_sh008_passes_importlib_import_module_of_benign_module(tmp_path: Path) -> None:
+    f = _bench_file(
+        tmp_path,
+        "routing/dyn_ok.py",
+        "import importlib\ndef f():\n    return importlib.import_module('shunt.router.embedder')\n",
+    )
+    assert _run("check_embedder_isolation.py", str(f)) == 0
+
+
+def test_sh008_exemption_is_anchored_to_a_tests_segment(tmp_path: Path) -> None:
+    # A file under benchmark/latests/ is production code: the old `tests/` substring
+    # exemption let it ride. Segment anchoring keeps it scanned.
+    f = _bench_file(tmp_path, "latests/leak.py", "from fastembed import TextEmbedding\n")
+    assert _run("check_embedder_isolation.py", str(f)) == 1
+    g = _bench_file(tmp_path, "mytests/leak.py", "from fastembed import TextEmbedding\n")
+    assert _run("check_embedder_isolation.py", str(g)) == 1
+
+
+def test_sh008_still_exempts_a_tests_segment(tmp_path: Path) -> None:
+    f = tmp_path / "benchmark" / "tests" / "test_fake.py"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("from fastembed import TextEmbedding\n")
+    assert _run("check_embedder_isolation.py", str(f)) == 0
+
+
 # --- SH009: the figure <-> manifest <-> docs bijection ----------------------------------
 
 
@@ -244,6 +435,7 @@ def _figure_tree(
     manifest: tuple[str, ...] | None = None,
     section_slugs: tuple[str, ...] | None = None,
     title: str = "The gate is untested",
+    notes: tuple[str, ...] = ("x is cost.", "175 tasks"),
 ) -> Path:
     """A minimal repo shaped like shunt: one routing figure, its row, and its section."""
     # One PNG directory per half inside the docs tree, so a figure's home and its
@@ -262,6 +454,7 @@ def _figure_tree(
             "reading": "x is cost.",
             "goal": "Aim top-left.",
             "limitations": [],
+            "notes": list(notes),
         }
         for name in (manifest if manifest is not None else pngs)
     }
@@ -285,6 +478,8 @@ def _figure_tree(
 **Reading.** x is cost.
 
 **What to look for.** Aim top-left.
+
+**Notes.** {"\n".join(notes)}
 """
         for slug in slugs
     )
@@ -350,6 +545,31 @@ def test_sh009_catches_a_docs_link_that_skips_the_halfs_directory(tmp_path: Path
     root = _figure_tree(tmp_path)
     doc = root / "docs" / "routing.md"
     doc.write_text(doc.read_text().replace("assets/figures/routing/", "assets/figures/"))
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_catches_a_mutated_notes_string(tmp_path: Path) -> None:
+    """The notes byte-lock's positive control: a per-model note row rewritten in the docs
+    must redden the gate, because that is precisely the silent drift it exists to stop."""
+    root = _figure_tree(tmp_path, notes=("x is cost.", "175 tasks"))
+    doc = root / "docs" / "routing.md"
+    doc.write_text(
+        doc.read_text().replace("**Notes.** x is cost.\n175 tasks", "**Notes.** y is free.")
+    )
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_catches_a_notes_block_for_notes_the_figure_does_not_render(tmp_path: Path) -> None:
+    """A Notes block describing claims the manifest no longer carries is a hand-written
+    note row with nothing derived behind it — the gate must refuse to bless it."""
+    root = _figure_tree(tmp_path, notes=())
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_catches_a_figure_whose_notes_block_is_missing(tmp_path: Path) -> None:
+    root = _figure_tree(tmp_path, notes=("x is cost.", "175 tasks"))
+    doc = root / "docs" / "routing.md"
+    doc.write_text(doc.read_text().replace("**Notes.** x is cost.\n175 tasks", ""))
     assert _run("check_figure_docs.py", "--root", str(root)) == 1
 
 
@@ -425,3 +645,131 @@ def test_sh009_a_genuinely_empty_half_is_fine(tmp_path: Path) -> None:
     """A half with no figures, no manifest rows and no sections is consistent."""
     root = _figure_tree(tmp_path, pngs=(), manifest=(), section_slugs=())
     assert _run("check_figure_docs.py", "--root", str(root)) == 0
+
+
+# --- SH012: number-bearing sites carry a provenance marker ---------------------
+
+
+def _number_tree(
+    tmp_path: Path,
+    *,
+    results: str | None = None,
+    benchmark: str | None = None,
+    benchmark_data: str | None = None,
+) -> Path:
+    """A minimal repo shaped like shunt: the three result docs."""
+    docs = tmp_path / "docs"
+    docs.mkdir(parents=True)
+    if results is not None:
+        (docs / "results.md").write_text(results)
+    if benchmark is not None:
+        (docs / "benchmark.md").write_text(benchmark)
+    if benchmark_data is not None:
+        (docs / "benchmark-data.md").write_text(benchmark_data)
+    return tmp_path
+
+
+_MARKED_RANK0 = (
+    "| Session-Cascade, `rank_shortlist=0` (pre-shortlist) | 96.57% | "
+    "93.71–98.86 | $48.19 | [29.32, 69.57] | $35.79 | "
+    "<!-- frozen-value: n=180, date=2026-08-10, run=49b8362 -->"
+)
+_MARKED_PAIRED = (
+    "| `sl=2` vs `sl=3` | +$0.61 | [−0.42, +1.47] | not distinguishable | "
+    "<!-- frozen-value: n=175, date=2026-08-10, run=49b8362 -->"
+)
+_MARKED_PP = (
+    "matches fixed-frontier quality is `Price-Cascade` (**+1.6 pp, CI crosses "
+    "zero → statistically equal**, at roughly **72% lower cost** on the shared "
+    "measurable set) <!-- generated-by: benchmark.routing.report:paired_quality_contrast -->"
+)
+_MARKED_USABLE = (
+    "at matched quality — has a tighter coverage limit than the 177 usable tasks "
+    "suggest. It <!-- frozen-value: n=177, date=2026-07-28, run=cece0fd -->"
+)
+
+
+def test_sh012_clean_tree_passes(tmp_path: Path) -> None:
+    root = _number_tree(
+        tmp_path,
+        results=f"# Results\n\n{_MARKED_RANK0}\n\n{_MARKED_PAIRED}\n",
+        benchmark=f"# Benchmark\n\n{_MARKED_PP}\n",
+        benchmark_data=f"# Data\n\n{_MARKED_USABLE}\n",
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 0
+
+
+def test_sh012_negative_control_real_tree_is_clean() -> None:
+    # The committed docs carry a marker on every number-bearing line — the tree the
+    # hook scans must pass without a staged-file filter (pass_filenames: false).
+    assert _run("check_number_provenance.py") == 0
+
+
+def test_sh012_unmarked_rank_shortlist_row_fails(tmp_path: Path) -> None:
+    root = _number_tree(
+        tmp_path,
+        results=f"# Results\n\n{_MARKED_RANK0.replace(' <!-- frozen-value', '')}\n",
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 1
+
+
+def test_sh012_unmarked_paired_row_fails(tmp_path: Path) -> None:
+    root = _number_tree(
+        tmp_path,
+        results=f"# Results\n\n{_MARKED_PAIRED.replace(' <!-- frozen-value', '')}\n",
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 1
+
+
+def test_sh012_unmarked_pp_claim_fails(tmp_path: Path) -> None:
+    root = _number_tree(
+        tmp_path,
+        benchmark=f"# Benchmark\n\n{_MARKED_PP.replace(' <!-- generated-by', '')}\n",
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 1
+
+
+def test_sh012_frozen_marker_without_corpus_fails(tmp_path: Path) -> None:
+    # the marker is present but n/date/run are missing — a frozen value that
+    # is not allowed to be anonymous.
+    stripped = _MARKED_RANK0.replace(
+        "frozen-value: n=180, date=2026-08-10, run=49b8362", "frozen-value:"
+    )
+    root = _number_tree(tmp_path, results=f"# Results\n\n{stripped}\n")
+    assert _run("check_number_provenance.py", "--root", str(root)) == 1
+
+
+def test_sh012_frozen_marker_with_partial_corpus_fails(tmp_path: Path) -> None:
+    root = _number_tree(
+        tmp_path,
+        results=f"# Results\n\n{_MARKED_RANK0.replace('date=2026-08-10, ', '')}\n",
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 1
+
+
+def test_sh012_unmarked_task_count_claim_fails(tmp_path: Path) -> None:
+    root = _number_tree(
+        tmp_path,
+        results="# Results\n\nThe router sends **167 of 175 tasks** to `deepseek-v4-flash`.\n",
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 1
+
+
+def test_sh012_unmarked_scorable_claim_fails(tmp_path: Path) -> None:
+    root = _number_tree(
+        tmp_path,
+        results=(
+            "# Results\n\n**Set B — raw, un-imputed, fully-measured tasks only: 74 scorable.**\n"
+        ),
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 1
+
+
+def test_sh012_generator_marker_accepts_a_generated_number(tmp_path: Path) -> None:
+    # A generator marker needs no corpus — byte-for-byte regeneration
+    # regeneration; the lint only requires the marker to be present.
+    root = _number_tree(
+        tmp_path,
+        benchmark=f"# Benchmark\n\n{_MARKED_PP}\n",
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 0

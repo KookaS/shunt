@@ -274,6 +274,7 @@ last edited. Shunt prints it at startup, so you never have to guess:
 Shunt config | strategy=knn
 Shunt config | knn: k=20 success_rate_threshold=0.60 min_samples=3
 Shunt config | exploration: enabled=True budget_frac=0.15 conservative_alpha=0.10 ...
+Shunt config | budget: max_spend_usd=unlimited
 Shunt config | models: 0:qwen3.7-plus, 1:gpt-5-mini, 2:kimi-k3
 Shunt config | session: inactivity_timeout=900s grace_period=120s retry_count=3
 ```
@@ -322,7 +323,8 @@ verified outcomes accumulate.
 
 Exploration and the kNN neighbourhood only learn from *verified* outcomes. Shunt records
 them by re-running your repo's test suite off the request path when a session goes idle —
-pytest / jest / `go test` / `cargo test`, auto-detected — and labelling the session with
+pytest / jest / `go test` / `cargo test` / Maven / `dotnet test` / RSpec / PHPUnit /
+GTest, auto-detected — and labelling the session with
 the result.
 
 The common case needs no configuration:
@@ -369,7 +371,7 @@ router:
     # work_dirs:                        # layer 1 — several repos, keyed by tool identity:
     #   <tool_identity>: /path/to/repo-a
     trust_launch_dir: true              # layer 3 on (default)
-    verify_timeout_seconds: null        # null ⇒ 120s per verification run
+    verify_timeout_seconds: null        # null ⇒ 1800s per verification run
     rerun_confirmations: 2              # re-runs before a failing suite is believed
     # full_content: false               # opt-in encrypted full-content trajectory capture
     # trajectory_dir: null              # null ⇒ a local dir OUTSIDE the repo
@@ -380,7 +382,7 @@ router:
 | `work_dir` | `null` | One repo to verify against. `SHUNT_WORK_DIR` and `shunt start --work-dir` override it. |
 | `work_dirs` | `{}` | Per-`tool_identity` repo map, checked before `work_dir`. |
 | `trust_launch_dir` | `true` | Allow the launch-directory layer. `false` refuses it whatever the directory is — the way to keep a shared host manual-only. |
-| `verify_timeout_seconds` | `null` (⇒ `120`) | Wall-clock budget for **one** verification run. A suite that exceeds it is recorded as nothing at all, so on a large repo the whole loop is a silent no-op until you raise this. Each run logs its duration at debug level and warns past 70% of the budget. |
+| `verify_timeout_seconds` | `null` (⇒ `1800`) | Wall-clock budget for **one** verification run. A suite that exceeds it is recorded as nothing at all, so on a large repo the whole loop is a silent no-op until you raise this. Each run logs its duration at debug level and warns past 70% of the budget. |
 | `rerun_confirmations` | `2` | How many times a *failing* suite is re-run before the failure is believed (most pass→fail transitions are flakes). Worst case `1 + N` runs, each up to the timeout. **Minimum 1**: an unconfirmed failure is discarded by the escalation gate, so `0` would silently disable auto-escalation — the schema rejects it. To stop re-running, set `escalation.enabled: false`. |
 | `full_content` | `false` | Opt-in redacted+encrypted per-step trajectories — see [Capturing your own trajectories](escalation.md#capturing-your-own-trajectories-opt-in-encrypted-local-only). |
 | `trajectory_dir` | `null` | Where that encrypted plane is written; `null` ⇒ outside the repo. |
@@ -421,6 +423,29 @@ shunt start --no-explore
 ```
 
 or `exploration.enabled: false` in your `router.yaml` for a permanent setting.
+
+### Cap per-session spend (hard-stop)
+
+A ceiling on what ONE session may spend, enforced in the proxy on **recorded**
+cost — the upstream's reported `usage.cost`, never a locally derived price. It is a
+soft ceiling at the next request boundary: the request that crosses the cap completes,
+and once a session's cumulative spend reaches `router.budget.max_spend_usd` the router
+refuses further routing for that session: a clean `402` error naming the cap, never a
+fabricated success, carrying an `x-should-retry: false` header so clients treat it as a
+permanent condition rather than a transient rate limit. `null` (the default) is unlimited.
+
+```yaml
+router:
+  budget:
+    max_spend_usd: 1.00      # null = unlimited; 0.0 refuses every request
+```
+
+This is the knob the live integration tier's spend cap wires to
+(`SHUNT_LIVE_MAX_SPEND_USD`, `examples/integrations/curl/compose.live.yaml`). It is a
+per-session stop enforced at the next request boundary — distinct from the exploration
+budget above (a softer ratio cap on exploratory spend) and not a total-bill ceiling
+across sessions. An unreported cost contributes nothing to the session total, so the
+cap binds only on providers that report `usage.cost`.
 
 ### Auto-escalate on repeated verified failure
 

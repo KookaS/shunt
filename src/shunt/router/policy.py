@@ -122,8 +122,9 @@ class CapturePolicy(BaseModel):
     # OUTSIDE the repo ($SHUNT_HOME/trajectories); never inside the tree, never committed.
     trajectory_dir: str | None = None
     # Wall-clock budget for ONE off-wire verification run. null ⇒ the verifier's built-in
-    # 120s. A suite slower than the budget times out, returns `unknown` + infra-failure and
-    # writes nothing — so on a big repo the whole loop is a silent no-op until this is raised.
+    # 1800s (30 min — the floor for a real repo suite). A suite slower than the budget times
+    # out, returns `unknown` + infra-failure and writes nothing — so on a big repo the whole
+    # loop is a silent no-op until this is raised.
     verify_timeout_seconds: float | None = Field(default=None, gt=0.0)
     # How many times a FAILING suite is re-run before the red is trusted (flake guard).
     # Total worst-case runs = 1 + rerun_confirmations, each up to verify_timeout_seconds.
@@ -152,6 +153,25 @@ class RefitPolicy(BaseModel):
     every_n_outcomes: int = Field(default=50, ge=0)
 
 
+class BudgetPolicy(BaseModel):
+    """Refuse routing once a session's cumulative reported spend reaches the cap."""
+
+    # A SOFT ceiling enforced at the NEXT request boundary: the check runs before the
+    # upstream call, so the request that crosses ``max_spend_usd`` completes and the
+    # following one is refused. The bound is one session's cumulative PROVIDER-REPORTED
+    # charge (``usage.cost`` from the upstream, never a locally derived price); at the cap
+    # the router refuses further routing for that session with a clean error instead of a
+    # fabricated success. null = unlimited (the default). This is the knob the live tier's
+    # spend cap (compose.live.yaml) documents; the exploration budget is a separate, softer knob.
+
+    model_config = ConfigDict(extra="forbid")
+
+    # null = unlimited. A number >= 0 is a ceiling on one session's cumulative spend,
+    # enforced at the next request boundary; 0.0 refuses every request for a session
+    # (explicit "no spend allowed").
+    max_spend_usd: float | None = Field(default=None, ge=0.0)
+
+
 class RouterPolicy(BaseModel):
     """Top-level ``router.yaml`` schema: one active strategy + its knobs + exploration."""
 
@@ -163,6 +183,9 @@ class RouterPolicy(BaseModel):
     escalation: EscalationPolicy = Field(default_factory=EscalationPolicy)
     capture: CapturePolicy = Field(default_factory=CapturePolicy)
     refit: RefitPolicy = Field(default_factory=RefitPolicy)
+    # Per-session spend cap; absent ⇒ no cap (unlimited). The live tier's
+    # documented cap key (compose.live.yaml `router.budget.max_spend_usd`) is this.
+    budget: BudgetPolicy = Field(default_factory=BudgetPolicy)
     # Which registry models are live-routable. Empty = every model in models.yaml
     # (backward compatible). Each name must exist in the registry; that cross-check
     # happens at ModelPool wiring (this schema has no registry access). Benchmark
@@ -195,6 +218,14 @@ def parse_router_policy(data: dict[str, object] | None) -> RouterPolicy:
     router_section = data.get("router", data)
     if router_section is None:  # a present-but-null `router:` key → defaults, not a crash
         return RouterPolicy()
+    # ESCAPE HATCH — an `escalation:` block that is ABSENT is an OLD config, not an opt-in.
+    # A user policy file replaces the packaged one wholesale (no key-by-key merge), so a
+    # config that predates the escalation block never had a chance to write
+    # `escalation.enabled` — yet the schema's default_factory would silently flip it ON.
+    # An absent key therefore means OFF (the operator never opted in); only an explicit
+    # `enabled: true`, the packaged file, or the bare code default ships escalation ON.
+    if isinstance(router_section, dict) and "escalation" not in router_section:
+        router_section = {**router_section, "escalation": {"enabled": False}}
     return RouterPolicy.model_validate(router_section)
 
 

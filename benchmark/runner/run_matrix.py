@@ -99,6 +99,10 @@ def classify_cells(
     digests: dict[str, str | None] | None = None,
     selected_arms: dict[tuple[str, str], list[str]] | None = None,
     arm_hash_map: dict[str, dict[str, str]] | None = None,
+    *,
+    step_limit: int | None = None,
+    prompt_hash: str | None = None,
+    sampling_hash_map: dict[str, dict[str, str]] | None = None,
 ) -> CellStatus:
     """Split (challenge, model, reasoning-arm) cells into missing / stale / present."""
     # `cache` is 3-level: challenge_id -> model -> arm_id -> row.
@@ -106,7 +110,8 @@ def classify_cells(
     # absent, every cell is checked only at its declared default arm
     # (config.default_arm_ids), reproducing the single-cell-per-model
     # behaviour from before arm sampling existed. Stale iff spec hash, image digest,
-    # model version, or the arm's own api-param hash drifted; missing iff no row for that arm.
+    # model version, the arm's own api-param hash, or a collection-param anchor
+    # (step_limit / prompt_hash / sampling_hash) drifted; missing iff no row for that arm.
     arms_by_cell = selected_arms or _default_selected_arms(tasks, models)
     status = CellStatus()
     for cid in tasks:
@@ -115,11 +120,62 @@ def classify_cells(
                 cell = cache.get(cid, {}).get(model, {}).get(arm)
                 if cell is None:
                     status.missing.append((cid, model, arm))
-                elif _is_stale(cell, cid, model, arm, hashes, versions, digests, arm_hash_map):
+                elif _is_stale(
+                    cell,
+                    cid,
+                    model,
+                    arm,
+                    hashes,
+                    versions,
+                    digests,
+                    arm_hash_map,
+                    step_limit=step_limit,
+                    prompt_hash=prompt_hash,
+                    sampling_hash_map=sampling_hash_map,
+                ):
                     status.stale.append((cid, model, arm))
                 else:
                     status.present += 1
     return status
+
+
+def _anchor_stale(cell: dict, key: str, expected: object | None) -> bool:
+    """Stale iff a NON-EMPTY stored anchor resolves AND differs — else never stales."""
+    # The grandfather guard shared by every collection-param anchor (mirrors _arm_stale /
+    # _image_stale): no expected value (None or uncomputable "") or an empty stored value
+    # (a legacy row written before the column existed) degrades to a no-op instead of
+    # recollecting a PAID cell. Only a stored-vs-expected mismatch on a real anchor stales.
+    if expected is None:
+        return False
+    expected_str = str(expected)
+    if not expected_str:
+        return False
+    stored = str(cell.get(key, ""))
+    return bool(stored) and stored != expected_str
+
+
+def _limit_anchor_stale(cell: dict, expected: object | None) -> bool:
+    """step_limit staleness: fires ONLY for step-limit-CENSORED cells."""
+    # Raising the cap changes the outcome of a cell that hit the OLD cap (it gets more
+    # attempts); a cell that solved or finished naturally is regime-independent and stays
+    # valid. This is the recollection-focused read of the anchor — it targets exactly the
+    # censored cells the cap-raise wants recollected, not the whole paid corpus.
+    if str(cell.get("stop_reason") or "") != censoring.STEP_LIMIT:
+        return False
+    return _anchor_stale(cell, "step_limit", expected)
+
+
+def _sampling_anchor_stale(
+    cell: dict, model: str, arm: str, sampling_hash_map: dict[str, dict[str, str]] | None
+) -> bool:
+    """sampling_hash staleness, mirroring _arm_stale's non-empty-stored guard."""
+    if sampling_hash_map is None:
+        return False
+    expected = sampling_hash_map.get(model, {}).get(arm)
+    if not expected:
+        return False
+    stored = str(cell.get("sampling_hash", ""))
+    return bool(stored) and stored != expected
 
 
 def _is_stale(
@@ -131,8 +187,12 @@ def _is_stale(
     versions: dict[str, str],
     digests: dict[str, str | None] | None,
     arm_hash_map: dict[str, dict[str, str]] | None = None,
+    *,
+    step_limit: int | None = None,
+    prompt_hash: str | None = None,
+    sampling_hash_map: dict[str, dict[str, str]] | None = None,
 ) -> bool:
-    """Stale iff the row records no executed work, or spec/model/arm/image drifted."""
+    """Stale iff the row records no executed work, or spec/model/arm/image/params drifted."""
     # ZERO-WORK ROWS ARE STALE. A row with zero priced calls and $0 spend never executed —
     # it is an aborted collection's residue, not a measurement — yet every other check here
     # passes on it, so it was cached forever as though the cell had been observed. That
@@ -149,6 +209,12 @@ def _is_stale(
     if cell.get("model_version") != versions.get(model):
         return True
     if _arm_stale(cell, model, arm, arm_hash_map):
+        return True
+    if _limit_anchor_stale(cell, step_limit):
+        return True
+    if _anchor_stale(cell, "prompt_hash", prompt_hash):
+        return True
+    if _sampling_anchor_stale(cell, model, arm, sampling_hash_map):
         return True
     return _image_stale(cell, cid, digests)
 
@@ -237,6 +303,15 @@ def _build_row(
             timeout_flag=bool(outcome.get("timeout_flag", False)),
             stop_reason=str(outcome.get("stop_reason") or ""),
         ),
+        # Collection-param provenance: the regime this cell ran under. Live
+        # outcomes carry the actual caps the scaffold was given plus the scaffold-derived
+        # hashes; any absent field (simulated/legacy/synthetic outcome) falls back to the
+        # configured values or "" (grandfathered to a staleness no-op).
+        "step_limit": str(outcome.get("step_limit") or config.live_step_limit()),
+        "cost_limit": str(outcome.get("cost_limit") or config.live_cost_limit()),
+        "scaffold_version": str(outcome.get("scaffold_version") or ""),
+        "sampling_hash": str(outcome.get("sampling_hash") or ""),
+        "prompt_hash": str(outcome.get("prompt_hash") or ""),
     }
     # Write-time data-integrity wall: never silently persist a poison row. An ERROR
     # invariant (e.g. the $35 fingerprint: paid model ran but real_cost==0) aborts the
@@ -1029,6 +1104,14 @@ def _add_args(ap: argparse.ArgumentParser, config_path: str) -> None:
         "Completed cells are kept; recommended for any paid run.",
     )
     ap.add_argument(
+        "--cells",
+        default=None,
+        help="full only: comma-separated CID:MODEL:ARM triples to run exactly (e.g. "
+        "sympy__sympy-17630:kimi-k3:max). Bypasses cache classification — an EXPLICIT "
+        "re-collection of named cells (e.g. a censored-cell pilot at a new cap). Requires "
+        "--live and is still bounded by --max-cost.",
+    )
+    ap.add_argument(
         "--max-cost-overshoot",
         type=float,
         default=0.0,
@@ -1152,6 +1235,20 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> int:
     return _dispatch(args)
 
 
+def _parse_cells(raw: str) -> list[tuple[str, str, str]]:
+    """Parse a ``--cells`` value ('cid:model:arm[,cid:model:arm...]') into cell triples."""
+    cells: list[tuple[str, str, str]] = []
+    for chunk in raw.split(","):
+        parts = chunk.strip().split(":", 2)
+        if len(parts) != 3 or not all(parts) or ":" in parts[2]:
+            raise ValueError(
+                f"malformed --cells entry {chunk!r} (expected cid:model:arm, e.g. "
+                "sympy__sympy-17630:kimi-k3:max)"
+            )
+        cells.append((parts[0], parts[1], parts[2]))
+    return cells
+
+
 def _run_full(args: argparse.Namespace) -> int:
     """Exhaustive matrix: classify every enabled model x sampled challenge, run+merge when live."""
     matrix = config.load_matrix(config.challenges_path())
@@ -1173,10 +1270,25 @@ def _run_full(args: argparse.Namespace) -> int:
         if args.check_images
         else None
     )
+    step_limit = args.step_limit if args.step_limit is not None else config.live_step_limit()
 
     selected_arms, arm_hash_map = _arm_context(tasks, models)
     status = classify_cells(
-        tasks, models, cache, hashes, versions, digests, selected_arms, arm_hash_map
+        tasks,
+        models,
+        cache,
+        hashes,
+        versions,
+        digests,
+        selected_arms,
+        arm_hash_map,
+        # Collection-param anchors: the CURRENT expected values, so a changed
+        # step_limit / prompt / merged-request-kwargs recomputes rather than serves a stale
+        # outcome. The scaffold-derived hashes degrade to "" (no-op) if the scaffold is
+        # unimportable; step_limit fires only for step-limit-censored cells.
+        step_limit=step_limit,
+        prompt_hash=integrity.scaffold_prompt_hash(),
+        sampling_hash_map=integrity.sampling_hash_map(models),
     )
     _print_status(status, len(tasks), len(models))
 
@@ -1201,7 +1313,30 @@ def _run_full(args: argparse.Namespace) -> int:
     if preflight_refuses(live):
         return 2
 
-    if status.to_run and live:
+    # --cells: an explicit targeted re-collection (bypasses classify's missing/stale set).
+    target_cells = _parse_cells(args.cells) if getattr(args, "cells", None) else None
+    if target_cells is not None:
+        if not live:
+            print("  --cells requires --live (an explicit re-collection of named cells).")
+            return 2
+        n = _run_and_merge(
+            target_cells,
+            hashes,
+            versions,
+            digests,
+            arm_hash_map,
+            timeout=args.timeout,
+            workers=args.workers,
+            max_cost=args.max_cost,
+            results_path=config.results_csv_path(),
+            max_cost_overshoot=args.max_cost_overshoot,
+            max_start_failures=args.max_start_failures,
+            max_consecutive_failures=args.max_consecutive_failures,
+            step_limit=step_limit,
+        )
+        print(f"  live: wrote {n} cell(s) to {config.results_csv_path()}")
+        matrix = config.load_matrix(config.challenges_path())
+    elif status.to_run and live:
         # Cells are checkpointed as they complete; _run_and_merge returns the final
         # idempotent merge count for the summary line below.
         n = _run_and_merge(
@@ -1217,9 +1352,7 @@ def _run_full(args: argparse.Namespace) -> int:
             max_cost_overshoot=args.max_cost_overshoot,
             max_start_failures=args.max_start_failures,
             max_consecutive_failures=args.max_consecutive_failures,
-            step_limit=(
-                args.step_limit if args.step_limit is not None else config.live_step_limit()
-            ),
+            step_limit=step_limit,
         )
         print(f"  live: wrote {n} cell(s) to {config.results_csv_path()}")
         matrix = config.load_matrix(config.challenges_path())

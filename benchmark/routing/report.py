@@ -1049,6 +1049,49 @@ def _render_oracle_gap(
     )
 
 
+def paired_quality_contrast() -> str:
+    """The Price-Cascade vs fixed-frontier paired quality headline (docs/benchmark.md)."""
+    # Emits the exact sentence fragment for the "cheapest strategy that matches fixed-frontier
+    # quality" claim from the committed corpus, regenerable byte-for-byte. Uses ONLY fixed
+    # strategies (Price-Cascade, Always-Frontier) — no embeddings — so it runs offline and
+    # deterministically: paired pass-rate delta + paired bootstrap CI (seed 42, 1000 draws,
+    # the convention run_eval._paired_bootstrap_ci uses).
+    import random
+
+    from benchmark.routing.strategies.fixed import AlwaysFrontier
+    from benchmark.routing.strategies.price_cascade import PriceCascade
+
+    matrix = config.load_matrix()
+    completed, _ = summary.complete_scored_matrix(matrix)
+    tasks = sorted(completed["results"].keys())
+    pc = PriceCascade(max_tries=3)
+    af = AlwaysFrontier()
+    pc_dec, pc_un = summary.evaluate(pc, completed, tasks)
+    af_dec, af_un = summary.evaluate(af, completed, tasks)
+    pc_pass = {d[0]: bool(d[2]) for d in pc_dec}
+    af_pass = {d[0]: bool(d[2]) for d in af_dec}
+    shared = [t for t in tasks if t not in pc_un and t not in af_un]
+    diffs = [int(pc_pass[t]) - int(af_pass[t]) for t in shared]
+    n = len(shared)
+    delta = 100.0 * sum(diffs) / n
+    rng = random.Random(42)
+    n_boot = 1000
+    means = sorted(
+        100.0 * sum(diffs[rng.randrange(n)] for _ in range(n)) / n for _ in range(n_boot)
+    )
+    a = int(0.025 * n_boot)
+    lo, hi = means[a], means[n_boot - 1 - a]
+    crosses_zero = lo <= 0 <= hi
+    pc_cost = sum(r[3] for r in pc_dec if r[0] in shared)
+    af_cost = sum(r[3] for r in af_dec if r[0] in shared)
+    cheaper_pct = round((1 - pc_cost / af_cost) * 100) if af_cost else 0
+    reading = "statistically equal" if crosses_zero else "not statistically equal"
+    return (
+        f"{delta:+.1f} pp, CI crosses zero → {reading}, at roughly "
+        f"{cheaper_pct}% lower cost on the shared measurable set"
+    )
+
+
 def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     # Line-buffered: a piped stdout otherwise buffers 8 KB, and an OOM SIGKILL
     # discards it — the first observed failure of this report printed NOTHING.
