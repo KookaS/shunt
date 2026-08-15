@@ -118,6 +118,10 @@ SPEC = FigureSpec(
         "is a cost comparison at genuinely equal quality on those tasks.",
     ),
     limitations=(
+        "The price decomposition treats a cheaper model as a cheaper way to get the SAME "
+        "outcome. Measured per-rung, the cheap intermediate targets do not deliver the base "
+        "model's outcome on this corpus, so the price term is an upper bound on what cheapness "
+        "buys — see ladder_rungs.png.",
         "The bandit is an illustrative inline learner drawn for this figure only, not a "
         "shipped routing strategy. It shows that a naive learner loses here; it does not "
         "show that every learner would.",

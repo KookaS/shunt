@@ -232,6 +232,10 @@ on today — pytest, jest/vitest, go test, cargo test, Maven/Gradle, dotnet, RSp
 PHPUnit, GTest/CTest, XCTest, bats, shunit2, prove, testthat, ExUnit and
 hspec/tasty; it is designed to be extended to any runner whose output reports
 pass/fail (see [which runners are supported](docs/escalation.md#which-runners-are-supported)).
+`shunt escalate` prints that counter's live state — the effective config and where each
+value came from, the current rung, every key in the window and why it does or does not
+count, and what the next decision would do
+([reference](docs/configuration.md#inspect-it-shunt-escalate)).
 Depth: [docs/escalation.md](docs/escalation.md).
 
 **One verified outcome per session, not per step.** The verifier runs at session
@@ -359,7 +363,9 @@ has no per-step action stream to gate on.
 
 ## Results
 
-Full numbers, method, and caveats: **[docs/results.md](docs/results.md)**. The
+Full numbers, method, and caveats: **[docs/results.md](docs/results.md)**. The one
+scoped claim we make about escalation, with its pre-registered falsifiers and their
+verdicts: **[docs/escalation-claim.md](docs/escalation-claim.md)**. The routing
 headline, stated plainly:
 
 > **The escalation ladder at session cadence — one decision per session,
@@ -574,7 +580,73 @@ small.
 
 ## Future
 
-Where the work goes next, in priority order.
+### What would take escalation past pre-alpha
+
+**We do not claim the escalation trigger, or the arm it escalates to, beats
+always-frontier.** On our offline escalation corpus the shipped trigger is a null
+detector (it fires on 723 of 723 replayed trajectories, AUROC 0.500), the escalate
+arm loses to always-frontier on quality (−0.108, 95% [−0.165, −0.056]) and is
+indistinguishable from firing at random at the same rate (−0.039, [−0.152,
++0.084]) — and the cost comparison that would have been the fallback is not
+computed on a common task set, so we withdraw it rather than quote it. Escalation
+ships enabled as a design choice (one decision per session, cache-safe, bounded
+spend), not as a measured win.
+
+Two things the measurements *do* support: failure is learnable offline from a
+trajectory counter the product does not run (AUROC 0.710 against a run-length
+baseline of 0.568, clearing a family-wise and a length-stratified null at
+p = 0.0005), and escalating beats never escalating (+0.185, 95% [+0.006, +0.375]).
+Neither rescues the comparison above.
+
+This is a different measurement from the `Session-Cascade` row in
+[Results](#results): that row models the escalation *layer* over the **routing**
+corpus and compares total spend at a matched pass rate. This section is about the
+escalation *trigger* and the arm it escalates to, on the escalation corpus's
+48-instance overlap set. Neither transfers to the other.
+
+The full scoping, and the seven pre-registered falsifiers with their verdicts —
+three fired, two of them worded badly enough that a literal reading would have
+said otherwise — are in
+[docs/escalation-claim.md](docs/escalation-claim.md).
+
+Seven things would move it, in the order they block each other:
+
+1. **Cadence.** Every session-cadence number reads *parallel effort arms* as
+   sequential sessions. A real escalation's second session runs *because* the
+   first failed and can see that failure; ours did not. This is not a volume
+   problem — the committed corpus already holds well over the 60 multi-cheap-session
+   instances the probe needs, at zero new spend. It holds no causally sequential
+   pair.
+2. **Deployability.** Three machine-stated reasons stamp every result
+   `OFFLINE-ONLY UPPER BOUND`. Cadence closes one. The other two — `infra_rate`
+   and `max_action_repeat_rate` — read fields the shipped failure record never
+   retains, so they are product-side and no amount of collection reaches them. A
+   `fail_rate`-only feature set at session cadence already returns
+   `DEPLOYABLE ESTIMATE` on existing data.
+3. **Identification.** `escalation.exploration_epsilon` is built, defaults to
+   `0.0`, and has never been enabled. Under a deterministic policy
+   P(escalate) = 0, so the off-policy estimator can only return
+   `NOT_IDENTIFIED`. ε in 0.1–0.3 with logged propensities buys an interval.
+4. **Power.** The prefix instrument's minimum detectable effect is ≈ 0.59 AUROC;
+   closing it needs roughly 640 distinct challenges against the 152 we have. And
+   every outcome is pass@1 from a single sample — escalation-boundary decisions
+   need ≥ 2.
+5. **Prediction economics.** The break-even discrimination for a predictive
+   trigger sits above the best AUROC we have measured from the text channel. The
+   published analogue on the routing side is the same shape: ~90% of the headroom
+   is mechanical, bounding a *perfect* predictor's whole prize at ~$7 on a $96
+   base.
+6. **A cost estimator that can answer the question.** Score both arms on one
+   task set (a full-policy read over all 48 instances, not each arm's own
+   coverage) and emit a paired difference between their cost figures. Until both
+   exist, no cost claim about escalation is inferable from this repository.
+7. **Ladder composition.** The ladder ranks by price, and price order is not
+   capability order: it buys `gpt-5-mini` (measured **net-harmful**, −0.168,
+   n=190) and jumps over `zai-glm-5.2` (measured **net-helpful**, +0.155, n=84).
+   A capability-ordered ladder is the obvious next step; the resolver exists but
+   is not wired to the escalation path.
+
+Where the rest of the work goes next, in priority order.
 
 - **The escalation model.** The genuinely unsolved one. We will work through
   rule-based detectors, regex over verified check ids, ML approaches (calibrated

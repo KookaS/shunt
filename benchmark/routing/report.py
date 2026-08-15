@@ -34,6 +34,7 @@ from benchmark.routing.figures import cost_quality_frontier as fig_frontier
 from benchmark.routing.figures import decision_audit as fig_audit
 from benchmark.routing.figures import evidence_basis as fig_evidence
 from benchmark.routing.figures import kill_gate as fig_kill_gate
+from benchmark.routing.figures import ladder_rungs as fig_ladder
 from benchmark.routing.figures import live_gap as fig_live_gap
 from benchmark.routing.figures import oracle_gap as fig_oracle
 from benchmark.routing.figures import task_difficulty as fig_difficulty
@@ -1224,6 +1225,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     )
 
     _step("Kill gate", fig_kill_gate.render(ctx) or "skipped (no paired arm)")
+    _step("Ladder rungs", fig_ladder.render(ctx) or "skipped (no priced target)")
     _step("Cost/quality", fig_frontier.render(ctx) or "skipped (no cost)")
     _step("Live gap", fig_live_gap.render(ctx) or "skipped (no bound row)")
     _step("Cache econ", fig_cache.render(ctx) or "skipped (no priced row)")

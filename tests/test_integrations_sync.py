@@ -123,6 +123,23 @@ def test_escalation_is_required_for_the_stable_subset() -> None:
         )
 
 
+def test_the_harness_policy_actually_enables_escalation() -> None:
+    # The defect this guards, measured: fake_router.yaml declared only `models: []`, and
+    # `parse_router_policy` reads an ABSENT `escalation:` block as an old config and forces
+    # enabled=false. The escalation leg then drove its prompts, banked its verified failures,
+    # and could not escalate — the scenario's own subject was switched off by the config it
+    # booted from, and the only symptom was the verdict sidecar timing out. Asserted through
+    # the real parser, not by grepping the YAML, because the parser is what disabled it.
+    from shunt.router.policy import parse_router_policy
+
+    policy_path = _ROOT / "tests" / "integrations" / "fake_router.yaml"
+    policy = parse_router_policy(yaml.safe_load(policy_path.read_text()))
+    assert policy.escalation.enabled is True, (
+        "the handshake router policy must declare `escalation.enabled: true` EXPLICITLY — an "
+        "absent block parses as OFF, which makes the escalation leg unable to ever pass"
+    )
+
+
 @pytest.mark.parametrize("tool_dir", _docs_only_dirs(), ids=lambda p: p.name)
 def test_docs_only_dir_documents(tool_dir: Path) -> None:
     # A dir with no handshake.yaml is docs-only — it must carry a README and must NOT

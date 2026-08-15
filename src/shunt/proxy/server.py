@@ -20,7 +20,6 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from shunt.capture import CaptureCoordinator, CaptureWorker, RefitScheduler, WorkDirResolver
 from shunt.capture.trajectory import TrajectoryRecorder
 from shunt.capture.trajectory_store import LiveTrajectorySink, load_key, resolve_live_dir
-from shunt.db.loop_health import LoopHealth
 from shunt.db.outcome_index import OutcomeIndexAdapter
 from shunt.db.store import OutcomeStore, SessionProvenance
 from shunt.log_config import configure_logging
@@ -30,6 +29,7 @@ from shunt.proxy.router import BudgetExceededError, ProxyRouter, UpstreamError
 from shunt.router.cold_start import ColdStartStrategy
 from shunt.router.embedder import Embedder, embedding_cache_dir
 from shunt.router.engine import RouterEngine
+from shunt.router.inspection import loop_health_for
 from shunt.router.policy import (
     CapturePolicy,
     ExplorationPolicy,
@@ -232,7 +232,7 @@ def _build_collapse_alarm(outcome_store: OutcomeStore, model_pool: ModelPool) ->
     """A live routing-collapse alarm probe: True when the choice distribution has collapsed."""
 
     def _alarm() -> bool:
-        return _loop_health(outcome_store, model_pool).routing_collapse.alarm
+        return loop_health_for(outcome_store, model_pool).routing_collapse.alarm
 
     return _alarm
 
@@ -618,38 +618,11 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-def _top_capability_cluster(model_pool: ModelPool) -> set[str]:
-    """The expensive-tail ('frontier') set: models above the pool's median capability rank."""
-    # Replaces the hand-assigned ``tier == 'frontier'`` set with the rank's top cluster. Strictly
-    # above the median (the top half of the price-ranked live pool) is the expensive tail the
-    # loop-health collapse alarm keys on.
-    ranked = model_pool.ranked_models()
-    n = len(ranked)
-    start = (n + 1) // 2
-    return {m.name for m in ranked[start:]}
-
-
-def _loop_health(outcome_store: OutcomeStore, model_pool: ModelPool) -> LoopHealth:
-    """Compute the full loop-health object from the store — shared by the endpoint + the alarm."""
-    from shunt.db.loop_health import LoopHealthThresholds, compute_loop_health
-
-    thresholds = LoopHealthThresholds()
-    snapshot = outcome_store.loop_health_snapshot(recent_window=thresholds.recent_window)
-    names = set(model_pool.model_names())
-    frontier = _top_capability_cluster(model_pool)
-    return compute_loop_health(
-        snapshot,
-        frontier_models=frontier,
-        candidate_models=names,
-        thresholds=thresholds,
-    )
-
-
 def _loop_health_payload(outcome_store: OutcomeStore, model_pool: ModelPool) -> dict[str, Any]:
     """Aggregate loop-health metrics as a JSON-able dict — no prompt_text, no PII."""
     from dataclasses import asdict
 
-    return asdict(_loop_health(outcome_store, model_pool))
+    return asdict(loop_health_for(outcome_store, model_pool))
 
 
 @app.get("/admin/loop-health")

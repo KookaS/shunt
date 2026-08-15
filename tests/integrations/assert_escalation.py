@@ -30,8 +30,11 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from shunt.router.escalation import next_rung_rank
 
 # Two-or-more segment POSIX paths — `/repo/project`, `/work/src`. Two precision rules,
 # both learned from real captures rather than guessed:
@@ -148,6 +151,65 @@ def _escalated(db_path: Path, marker: str) -> dict[str, Any] | None:
     return None
 
 
+# ── the ladder the DEPLOYMENT's own config declares ───────────────────────────
+#
+# "Escalation fired" and "escalation fired the rung the config says" are different claims, and
+# only the second is a conformance check. The rung is therefore not hardcoded here: it is
+# recomputed from the running deployment's registry + router policy through the SAME pure
+# function the router uses (`shunt.router.escalation.next_rung_rank`), so this file cannot hold
+# a second, drifting copy of the ladder arithmetic. That is also what makes the check portable
+# across deployments — the hermetic fake registry and a real $0 free-tier registry declare
+# different pools, and each is asserted against its own.
+
+
+@dataclass(frozen=True)
+class LadderSpec:
+    """Rank order + the two escalation knobs, as the deployment's config declares them."""
+
+    ranks: dict[str, int]
+    max_rank_index: int
+    escalate_after_n: int
+    rank_shortlist: int
+
+    def expected_rung(self, from_model: str) -> int | None:
+        """The rank the ladder aims at from *from_model*; None when the model is off-registry."""
+        base = self.ranks.get(from_model)
+        if base is None:
+            return None
+        # CLAMPED to the top rank. `next_rung_rank` is pure arithmetic over the shortlist and
+        # happily names a rank above the pool when the shortlist is wider than the pool — a
+        # 2-model pool with rank_shortlist=3 aims at rank 2 from rank 1. The router resolves
+        # that by `models_from_rank(target)` simply returning nothing above the top, so the
+        # highest rung it can actually SERVE is max_rank_index. Measured on the $0 rig, where
+        # the unclamped form reported a ladder violation against a rank that cannot exist.
+        aim = next_rung_rank(base, self.max_rank_index, self.rank_shortlist)
+        return min(aim, self.max_rank_index)
+
+
+def load_ladder_spec() -> LadderSpec:
+    """Read the ladder off the deployment's real config. Raises — never guesses a default.
+
+    A guessed ladder would make the conformance check assert the shipped defaults rather than
+    what this deployment runs, which is how a gate goes quietly green on a changed policy.
+    """
+    from shunt.models import ModelPool
+    from shunt.router.policy import load_router_policy
+
+    policy = load_router_policy()
+    pool = ModelPool(config_path=os.environ.get("SHUNT_MODEL_CONFIG_PATH"))
+    if policy.models:
+        pool.restrict_to_live(policy.models)
+    ranked = [m.name for m in pool.ranked_models()]
+    if not ranked:
+        raise RuntimeError("the resolved model pool is empty — no ladder to conform to")
+    return LadderSpec(
+        ranks={name: i for i, name in enumerate(ranked)},
+        max_rank_index=len(ranked) - 1,
+        escalate_after_n=policy.escalation.escalate_after_n,
+        rank_shortlist=policy.escalation.rank_shortlist,
+    )
+
+
 # ── the verdict ───────────────────────────────────────────────────────────────
 #
 # Finding `auto_escalated: true` is where the check STARTS, not where it ends. That flag is
@@ -166,6 +228,26 @@ def _escalated(db_path: Path, marker: str) -> dict[str, Any] | None:
 #
 # Each is a fact a forger would have to fabricate consistently across two tables; together they
 # are what make the exit code mean "Shunt escalated" rather than "a boolean was true".
+#
+# (a)-(d) prove an escalation HAPPENED. Four more prove it happened AS SPECIFIED — which is the
+# only claim the evidence supports, and the only one this gate is allowed to make (the escalate
+# arm does NOT beat always-frontier on quality, so a live gate must never be built around a
+# performance win):
+#
+#   (e) it fired on the CONFIGURED recurrence threshold — the reason's x<n> equals this
+#       deployment's `escalate_after_n`, not merely some integer;
+#   (f) it walked the rung the CONFIGURED ladder aims at, recomputed from the deployment's own
+#       registry + policy through the router's own `next_rung_rank`;
+#   (g) at most one step per recurrence — no two adjacent escalated sessions, which is what the
+#       retirement of the consumed failure window guarantees;
+#   (h) `shunt explain` names the ESCALATED model, not the base pick.
+#
+# NOT asserted, and deliberately not faked: "never mid-cached-turn". The store holds ONE row per
+# session with ONE model, so a mid-session switch is not representable in it — there is no
+# evidence here either way, and an assertion over a field that cannot disagree would be a gate
+# that always passes. The property is enforced structurally (one decision per session, taken at
+# the boundary) and the observable this harness DOES carry is (c)+(f): the change of served model
+# coincides with a new session id.
 
 
 def _baseline_models(sessions: list[dict[str, Any]], escalated_session_id: str) -> set[str]:
@@ -179,6 +261,131 @@ def _baseline_models(sessions: list[dict[str, Any]], escalated_session_id: str) 
     return models
 
 
+def _preceding_model(sessions: list[dict[str, Any]], escalated_session_id: str) -> str | None:
+    """Model served on the LAST non-escalated marker session before the escalated one."""
+    previous: str | None = None
+    for session in sessions:
+        if session["session_id"] == escalated_session_id:
+            return previous
+        if session["provenance"].get("auto_escalated") is not True:
+            previous = str(session["model_chosen"])
+    return previous
+
+
+def _ladder_problems(
+    session: dict[str, Any], sessions: list[dict[str, Any]], ladder: LadderSpec
+) -> list[str]:
+    """(e) the threshold and (f) the rung must be the ones this deployment's config declares."""
+    prov = session["provenance"]
+    problems: list[str] = []
+
+    reason = prov.get("rank_escalation_reason")
+    match = _ESC_REASON.fullmatch(str(reason)) if isinstance(reason, str) else None
+    if match is not None and int(match.group(1)) != ladder.escalate_after_n:
+        problems.append(
+            f"the escalation fired at x{match.group(1)} verified failures, but this "
+            f"deployment's policy declares escalate_after_n={ladder.escalate_after_n} — the "
+            "mechanism did not trigger on the condition the config specifies"
+        )
+
+    # An EFFORT rung keeps the model on purpose (cache-safe), so rank conformance does not
+    # apply to it; assertion (c) below is the one that speaks to that case.
+    if prov.get("escalated_reasoning_arm"):
+        return problems
+
+    base = _preceding_model(sessions, str(session["session_id"]))
+    if base is None:  # (c) already reports the absent pre-escalation decision
+        return problems
+    served = str(session["model_chosen"])
+    served_rank = ladder.ranks.get(served)
+    expected = ladder.expected_rung(base)
+    base_rank = ladder.ranks.get(base)
+    if expected is not None and expected == base_rank:
+        # Names the CAUSE. "(c) served model unchanged — nothing was escalated" is true here but
+        # misattributes it: the ladder did fire, it simply had no rung left. Measured on the $0
+        # free-tier rig, where OpenRouter 429s the cheapest :free model until it is marked
+        # unhealthy and the pool collapses to one reachable model at the top rank.
+        return [
+            *problems,
+            f"the pre-escalation model {base!r} is already at the pool's TOP rank "
+            f"({base_rank} of {ladder.max_rank_index}), so no rank rung exists above it — this "
+            "deployment cannot demonstrate a rank step at all, whatever the ladder does",
+        ]
+    if served_rank is None or expected is None:
+        unknown = base if expected is None else served
+        problems.append(
+            f"the escalation stepped {base!r} -> {served!r}, but {unknown!r} is not in the "
+            "deployment's live model pool — the served decision is not on the ladder the "
+            "config declares"
+        )
+    elif served_rank != expected:
+        problems.append(
+            f"the escalation stepped {base!r} (rank {ladder.ranks[base]}) -> {served!r} "
+            f"(rank {served_rank}), but the configured ladder "
+            f"(rank_shortlist={ladder.rank_shortlist}, top rank {ladder.max_rank_index}) aims "
+            f"at rank {expected} — the ladder did not walk the rung the config specifies. The "
+            "one legitimate cause is a model-health gap forcing a different pick, which must "
+            "be confirmed deliberately rather than assumed"
+        )
+    return problems
+
+
+def _is_ladder_step(session: dict[str, Any]) -> bool:
+    """A decision that STEPPED the ladder, as opposed to one merely held at the rung it owns."""
+    # `escalation_floor` is also stamped `auto_escalated: true` — it is the router refusing to
+    # walk BACK below a rank the task already climbed, on every later session. Counting those as
+    # steps made the cadence check fail a perfectly healthy live run (measured on the $0 rig:
+    # one real step followed by seven floor holds). Only the verified-failure reason is a step.
+    reason = session["provenance"].get("rank_escalation_reason")
+    return isinstance(reason, str) and _ESC_REASON.fullmatch(reason) is not None
+
+
+def _cadence_problems(sessions: list[dict[str, Any]], ladder: LadderSpec) -> list[str]:
+    """(g) at most one escalation per recurrence: the acted-on failure window is retired."""
+    # `RouterEngine._retire_after_escalation` drops the failures an escalation consumed, so the
+    # NEXT session starts the counter at zero and cannot reach escalate_after_n (>= 2) from the
+    # single verified failure one session close produces. Two adjacent ladder STEPS therefore
+    # mean the window was not retired — the ladder ran away from its own condition.
+    if ladder.escalate_after_n < 2:
+        return []
+    flags = [_is_ladder_step(s) for s in sessions]
+    adjacent = [
+        f"{sessions[i - 1]['session_id'][:8]}->{sessions[i]['session_id'][:8]}"
+        for i in range(1, len(flags))
+        if flags[i] and flags[i - 1]
+    ]
+    if not adjacent:
+        return []
+    return [
+        f"consecutive escalated sessions ({', '.join(adjacent)}) — with "
+        f"escalate_after_n={ladder.escalate_after_n} the window an escalation consumed is "
+        "retired, so a back-to-back second step fired without the recurrence it requires"
+    ]
+
+
+def explain_problems(explain_text: str, served_model: str) -> list[str]:
+    """(h) the shipped read-out must name the ESCALATED model, not the base pick."""
+    # A regression this exact check exists for: `shunt explain` once reported the base model
+    # for an escalated decision, so the one surface an operator reads to confirm an escalation
+    # denied it had happened. Asserted here because the sidecar is the only place that holds
+    # both the store's truth and the CLI's rendering of it at the same time.
+    for line in explain_text.splitlines():
+        if not line.startswith("Model chosen:"):
+            continue
+        named = line.split(":", 1)[1].strip()
+        if named != served_model:
+            return [
+                f"`shunt explain` reports 'Model chosen: {named}' for the escalated decision, "
+                f"but the store says {served_model!r} was served — the read-out is naming a "
+                "model other than the escalated one"
+            ]
+        return []
+    return [
+        "`shunt explain` printed no 'Model chosen:' line for the escalated decision, so the "
+        f"served model cannot be confirmed from the shipped read-out: {explain_text!r}"
+    ]
+
+
 def _verdict_problems(
     db_path: Path,
     marker: str,
@@ -186,10 +393,13 @@ def _verdict_problems(
     sessions: list[dict[str, Any]],
     *,
     min_sessions: int,
+    ladder: LadderSpec,
 ) -> list[str]:
     """Every way the claimed escalation can fail to be backed by the store. Empty == pass."""
     prov = session["provenance"]
     problems: list[str] = []
+    problems.extend(_ladder_problems(session, sessions, ladder))
+    problems.extend(_cadence_problems(sessions, ladder))
 
     # (d) the reason
     reason = prov.get("rank_escalation_reason")
@@ -394,7 +604,15 @@ def main() -> int:
         warn(str(exc))
         return _fail(db_path, marker)
 
+    try:
+        ladder = load_ladder_spec()
+    except Exception as exc:  # noqa: BLE001 - an unreadable policy must FAIL, never skip (f)/(g)
+        warn("FAIL: cannot read this deployment's ladder config, so conformance to it is")
+        warn(f"      unverifiable — refusing to pass on the remaining checks: {exc}")
+        return 1
+
     sessions = _marker_sessions(db_path, marker)
+    explain_text = _explain(session["session_id"])
     problems = _verdict_problems(
         db_path,
         marker,
@@ -403,7 +621,9 @@ def main() -> int:
         # The driver's prompt count, passed through by run_scenario.sh so the two cannot
         # drift. Absent, the declared default of every escalation compose file (4).
         min_sessions=_env_int("SHUNT_ESC_MIN_SESSIONS", 4),
+        ladder=ladder,
     )
+    problems.extend(explain_problems(explain_text, str(session["model_chosen"])))
     if problems:
         return _fail_unsupported(db_path, marker, problems)
 
@@ -413,9 +633,11 @@ def main() -> int:
     say(f"  session:   {session['session_id']}")
     say(f"  model:     {session['model_chosen']} (escalated from {', '.join(baseline)})")
     say(f"  reason:    auto_escalation ({prov.get('rank_escalation_reason')})")
+    say(f"  threshold: escalate_after_n={ladder.escalate_after_n} (from the deployment policy)")
+    say(f"  ladder:    rank_shortlist={ladder.rank_shortlist}, top rank {ladder.max_rank_index}")
     say(f"  marker sessions observed: {len(sessions)}")
     say(f"  verified failures behind it: {_verified_failures(db_path, marker)}")
-    say(_explain(session["session_id"]))
+    say(explain_text)
     return 0
 
 

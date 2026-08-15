@@ -29,9 +29,28 @@ router:
 
   # Auto-escalation on repeated verified failure. Ships ON (owner choice, 2026-08-08) with the
   # honest caveats: the recurrence trigger is a NULL DETECTOR at the live cadence (the as-shipped
-  # counter fires on 727/727 offline runs at the base rate; its only real edge is the eval-only
+  # counter fires on 723/723 offline runs at the base rate; its only real edge is the eval-only
   # edit-gated family production cannot run), so no measurement yet shows it to separate outcomes —
-  # the value is the LADDER's, measured observationally (session-cadence 2.51x). It is INERT without
+  # the value is the LADDER's, and it is OBSERVATIONAL, not causal (the arms ran in parallel under
+  # adaptive coverage): at session cadence, escalating resolves +0.416 [+0.239, +0.581] more tasks
+  # per instance than a same-cost retry (n=48 paired; a 3.02x ratio, which carries no interval).
+  # READ THAT DIRECTIONALLY, NOT AS A SIZE: the retry arm covers 27 instances to escalate's 30, a
+  # coverage mismatch no statistic in the report removes.
+  # THAT CONTRAST IS THE WEAKEST OF THE FOUR BASELINES AND MUST NEVER BE QUOTED ALONE. On the same
+  # 48 instances the escalate arm LOSES to always-frontier on quality (-0.108 [-0.165, -0.056],
+  # interval excludes zero) and is INDISTINGUISHABLE from firing at random at the same rate
+  # (-0.039 [-0.152, +0.084]). NOR is there a cost result to fall back on: the per-arm USD figures
+  # are computed on different task sets against different floors, so they are not comparable. The
+  # common-task-set (full-policy) read now exists and is sound on money — escalating costs
+  # -0.2168 [-0.3292, -0.1215] per instance less than always-frontier over all 48 — but its
+  # QUALITY axis is empty (the two arms differ in outcome on 0 of 48 instances, because wherever
+  # escalation fires they are the same sessions), so it is context, not a claim. And the measured
+  # arm is the
+  # corpus's two most expensive models (zai-glm-5.2, kimi-k3), which is NOT the ladder
+  # rank_shortlist below walks. Escalation ships ON as a DESIGN choice — one decision per session,
+  # cache-safe, bounded spend — not as a measured win.
+  # See docs/escalation-claim.md (the scoped claim), docs/escalation.md and
+  # benchmark/escalation/reports/metrics.json. It is INERT without
   # a capture.work_dir (its only verified-failure signal); a boot warning says so. When enabled, a
   # SAME verified failure (same normalized failing-check id) seen escalate_after_n times within
   # stale_window decisions raises one rung at the NEXT session boundary — effort first (cache-safe),
@@ -42,7 +61,7 @@ router:
     enabled: true
     # 2, not 1: a single red is normal fail-then-fix, so 1 is failure-biased. 2 is a
     # PRIOR: in the as-shipped policy sweep (the counter this product runs) every low
-    # threshold is at chance — n=2 fires 727/727 at AUROC 0.500, n=3 726/727 at 0.501 —
+    # threshold is at chance — n=2 fires 723/723 at AUROC 0.500, n=3 722/723 at 0.501 —
     # so no shipped-counter measurement prefers one over the other. See the comment on
     # EscalationConfig.escalate_after_n in src/shunt/router/escalation.py.
     escalate_after_n: 2           # same-key verified failures before a step

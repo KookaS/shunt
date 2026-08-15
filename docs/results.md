@@ -267,6 +267,13 @@ value can name a different layer. **The name is blocked; the mechanism is not.**
 Do not read that row as something you cannot run — unlike `Price-Cascade`, you
 are running it.
 
+**What the row does not say is whether its rungs are worth buying.** It prices
+the ladder; it does not score the models the ladder steps to. Those are measured
+one rung at a time, against the cheap base model, in
+[the ladder-rungs figure](routing.md#fig-ladder-rungs) — and on this corpus the
+shipped shortlist buys a rung measured *worse* than the base model and steps over
+the cheapest rung measured better than it. Read the two together.
+
 One modelling assumption, stated up front. The live counter escalates on
 *recurrence of the same normalized failing-check id*, and `results.csv` records a
 per-cell pass/fail with no failure identity. The replay therefore gives each task
@@ -580,6 +587,10 @@ production decides once per session, so this is a per-step signal the live
 router does not run. "There is a signal" and "you can ship it" are different
 sentences, and only the first is being asserted.
 
+This section reports every escalation measurement. The single claim we are willing
+to make *from* them, scoped exactly and with its pre-registered falsifiers and
+their verdicts, is on its own page: [the escalation claim](escalation-claim.md).
+
 ### The old evaluation could not have detected success
 
 We rebuilt the escalation evaluation this cycle. The old label was *positional*,
@@ -798,7 +809,7 @@ outcome signal. See [`embedding_signal.png`](routing.md#fig-embedding-signal).
 Each figure is documented individually — how to read its axes, what to look for, and
 what it cannot support — beside the mechanism it illustrates:
 
-- **Routing** (14 figures): [routing.md → Figures](routing.md#figures)
+- **Routing** (15 figures): [routing.md → Figures](routing.md#figures)
 - **Escalation** (6 figures): [escalation.md → Figures](escalation.md#figures)
 
 The figures live under `docs/assets/figures/`, one subdirectory per half
@@ -834,7 +845,16 @@ threshold n=2 it reads AUROC 0.710 at P(fail|fired)=0.589 (fires 431/723), and
 the family's best cell, n=3, reaches AUROC 0.722 at P=0.638 (354/723), both clearing
 the family-wise and the length-stratified nulls. At the session cadence the
 ladder's value is large: escalating to a frontier model after a cheap session
-failed resolves 3.02× more tasks than a same-cost retry (observational). The prefix
+failed resolves 3.02× more tasks than a same-cost retry (observational). It does
+not, however, beat an always-frontier arm on quality at that cadence, nor firing
+at random at the same rate — read the session-value figure's third panel before
+quoting the ratio. Nor does a cost result survive as a fallback: the per-arm
+USD-per-resolve figures are computed on different task sets, and the
+common-task-set read that does exist prices two arms that differ in outcome on
+none of the 48 instances, so its money answer comes with no quality axis at all.
+What we do and do not assert, with the
+pre-registered falsifiers and their verdicts, is stated once:
+[the escalation claim](escalation-claim.md). The prefix
 risk model remains `NO_SKILL` (the corpus cannot resolve a shallow prefix detector
 below AUROC ≈ 0.59), and the edit-gated variant is eval-only — production has no
 per-step action stream to gate on. The remaining work is making the post-edit

@@ -39,6 +39,9 @@ nav:
   - Feedback: feedback.md
   - The routing model: routing.md
   - Error detection & auto-escalation: escalation.md
+  - The escalation claim: escalation-claim.md
+  - Escalation dataset: escalation-data-card.md
+  - Reproducing the escalation eval: escalation-reproduction.md
   - Results: results.md
   - Research log: research-log.md
   - Benchmark: benchmark.md

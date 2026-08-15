@@ -353,6 +353,7 @@ class TestNoReadingOrGoalStringReachesTheCanvas:
             decision_audit,
             evidence_basis,
             kill_gate,
+            ladder_rungs,
             oracle_gap,
             task_difficulty,
         )
@@ -367,6 +368,7 @@ class TestNoReadingOrGoalStringReachesTheCanvas:
                 decision_audit,
                 evidence_basis,
                 kill_gate,
+                ladder_rungs,
                 oracle_gap,
                 task_difficulty,
             )

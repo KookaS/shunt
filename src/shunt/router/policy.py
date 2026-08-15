@@ -271,14 +271,22 @@ def packaged_policy_path() -> Path:
         return Path(path)
 
 
-def load_router_policy(path: str | Path | None = None) -> RouterPolicy:
-    """Explicit path → $SHUNT_CONFIG_DIR/router.yaml → packaged router.yaml → defaults."""
-    # Env-var / CLI-flag overlays are applied by the server layer, not here.
+def resolved_policy_path(path: str | Path | None = None) -> Path | None:
+    """The router.yaml `load_router_policy` reads, or None when it falls back to code defaults."""
+    # Public so an inspection surface can name the file a value came from. Same resolution as the
+    # loader below, once — a second copy would let the CLI cite a file the server never read.
     resolved = Path(path) if path is not None else _user_config_path()
     if not resolved.exists():
         logger.debug("router policy: %s absent, falling back to packaged", resolved)
         resolved = packaged_policy_path()
-    if resolved.exists():
+    return resolved if resolved.exists() else None
+
+
+def load_router_policy(path: str | Path | None = None) -> RouterPolicy:
+    """Explicit path → $SHUNT_CONFIG_DIR/router.yaml → packaged router.yaml → defaults."""
+    # Env-var / CLI-flag overlays are applied by the server layer, not here.
+    resolved = resolved_policy_path(path)
+    if resolved is not None:
         # Which FILE won matters: a rig can serve a config that differs from the one
         # you last edited, and nothing else in the logs distinguishes them.
         logger.debug("router policy: loaded from %s", resolved)

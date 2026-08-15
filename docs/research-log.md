@@ -132,12 +132,12 @@ doesn't work" as a measured claim would require running it. We have not.
 Shunt's escalation trigger counts how many times the same normalised
 failing-check id recurs, and escalates once that count reaches
 `escalate_after_n`. The first honest thing to say about it is that the shipped
-configuration is a null detector. At the shipped threshold it fires on all 727
-scored runs, and among those the failure rate is 0.421 against a corpus base
-rate of 0.421. A trigger that fires on everything reproduces the base rate by
+configuration is a null detector. At the shipped threshold it fires on all 723
+scored runs, and among those the failure rate is 0.4177 against a corpus base
+rate of 0.4177. A trigger that fires on everything reproduces the base rate by
 construction. This is not specific to the shipped value: across the as-shipped
 family at the shipped `stale_window`, every threshold up to n=10 reads AUROC
-0.500-0.598, so no low `escalate_after_n` is measurably better than any other.
+0.500-0.597, so no low `escalate_after_n` is measurably better than any other.
 
 What is wrong is not the recurrence framing. It is what the counter counted.
 The per-step verdict is a whole-spec gate — is the target test set green at this
@@ -149,11 +149,11 @@ counter was measuring the reproduction phase.
 
 Not counting failures that precede the agent's first edit-like action separates
 at the threshold the product already ships. At the shipped `escalate_after_n=2`,
-edit-gated counting fires on 435 of 727 runs; the failure rate among them is
-**0.593** [0.513, 0.659] against **0.164** among the quiet runs, an AUROC of
-**0.711** against a run-length-only baseline of 0.570. One step up, at n=3, it
-fires on 356 of 727 at **0.640** [0.558, 0.706] against **0.210**
-[0.151, 0.270], an AUROC of **0.721** against 0.579, and clears both a
+edit-gated counting fires on 431 of 723 runs; the failure rate among them is
+**0.589** [0.508, 0.655] against **0.164** among the quiet runs, an AUROC of
+**0.710** against a run-length-only baseline of 0.568. One step up, at n=3, it
+fires on 354 of 723 at **0.638** [0.554, 0.703] against **0.210**
+[0.151, 0.270], an AUROC of **0.722** against 0.576, and clears both a
 family-wise null of [0.500, 0.549] and a length-stratified null of
 [0.498, 0.565] at p = 0.0005 over 2000 challenge-block shuffles. Read as a
 continuous score rather than a threshold, the same contrast is AUROC 0.601
@@ -173,11 +173,15 @@ only**: no trajectory we have logged ever escalated, so nothing here shows that
 escalating would have helped.
 
 At session cadence there is a separate, observational number that does bear on
-that. On the instances where both were attempted, a frontier session resolved
-56.8% (21 of 37) of the tasks a cheap session had failed, against 22.6% (7 of
-31) for a same-cost cheap retry — a paired difference of +0.34 [0.13, 0.55] over
-the 45 shared instances. That is what escalation is worth *if* you can tell when
-to do it. It is not evidence that the trigger tells you.
+that. On the instances where both were attempted, a session at one of the two
+most expensive models resolved 62.2% (28 of 45) of the tasks a cheap session had
+failed, against 20.6% (7 of 34) for a same-cost cheap retry — a paired difference
+of +0.416 [+0.239, +0.581] over the 48 shared instances. That is what escalating
+to *those* models is worth if you can tell when to do it. It is not evidence that
+the trigger tells you, and it is not the shipped ladder's result: the same
+comparison run against the trivial arms shows the escalate arm losing to
+always-frontier (−0.108 [−0.165, −0.056]) and tied with firing at random at the
+same rate (−0.039 [−0.152, +0.084]).
 
 The other half of the eval is a risk model over the run's opening steps, and it
 reads nothing. At the shallowest depth this corpus can score full-rank, prefix

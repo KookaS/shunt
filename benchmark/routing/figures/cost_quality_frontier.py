@@ -134,6 +134,9 @@ SPEC = FigureSpec(
         "or a headline. It does NOT follow that the underlying capability is unavailable — a "
         "blocked row may measure a mechanism that ships in a different layer — and the "
         "per-strategy blocker in benchmark/routing/strategy_class.py says which case it is.",
+        "A cascade point prices the LADDER's cost, not its per-rung quality. The shipped "
+        "ladder's cheap intermediate rungs are measured separately against the base model on "
+        "this same corpus, and are null or net-harmful there — see ladder_rungs.png.",
         "The cache-aware x position rests on an ASSUMED cache hit rate; only the per-model "
         "discount and input share are measured — see cache_economics.png for the range that "
         "assumption spans.",

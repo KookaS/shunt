@@ -10,6 +10,8 @@ usable, and how it is produced. For what the benchmark *measures* and how routin
 strategies are scored, see [Benchmark](benchmark.md) and
 [Benchmark design](benchmark-design.md) — this page does not repeat them.
 
+The escalation detector is scored on a *separate* trajectory corpus with its own provenance, defects and access mechanics: see [Escalation corpus data card](escalation-data-card.md).
+
 ## What the dataset is
 
 The challenge source is **SWE-bench Verified**, 500 real GitHub bug-fix tasks with

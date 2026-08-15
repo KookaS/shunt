@@ -9,3 +9,18 @@
 # in-process fixture in test_handshake.py.
 router:
   models: []
+
+  # DECLARED EXPLICITLY, and it must stay that way. `parse_router_policy` treats an ABSENT
+  # `escalation:` block as a config predating the feature and forces `enabled: false` — a
+  # user policy replaces the packaged one wholesale, so an old file must not be flipped ON
+  # by a schema default. This file is such a file. Without the block below the escalation
+  # scenario ran its four prompts, recorded its verified failures, and could never escalate:
+  # the leg's own subject was switched off by the config it booted from, and the only symptom
+  # was the sidecar timing out. The values restate the shipped defaults so the sidecar's
+  # ladder-conformance check has something explicit to conform to.
+  escalation:
+    enabled: true
+    escalate_after_n: 2
+    stale_window: 10
+    ladder: effort_then_rank
+    rank_shortlist: 3

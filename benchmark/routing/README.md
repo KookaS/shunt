@@ -34,6 +34,7 @@ routing/
   scripts/                    # Analysis + figure producers (read results.csv, write docs/assets/figures/routing/)
     compute_costs.py          # Per-model cost/pass rollup from the outcome cache
     knn_nulls.py              # Permutation nulls + the shared kNN selection rule (no plotting)
+    ladder_evidence.py        # Per-rung escalation evidence: price multiple, helps/hurts, null
     plot_exploration.py       # Exploration cost/quality and where the budget went
     plot_knn_nulls.py         # embedding_signal: transfer curve, positive control, cross-repo
     threshold_sweep.py        # kNN sweep with real outer-loop CV -> the regime map

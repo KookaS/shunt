@@ -712,6 +712,7 @@ _REPORT_JOB: Final[FigureJob] = FigureJob(
         "cost_quality_frontier.png",
         "evidence_basis.png",
         "kill_gate.png",
+        "ladder_rungs.png",
         "live_gap.png",
         "oracle_gap.png",
         # Drawn here, not by viz_knn, because it audits the SHIPPED strategies' picks.
@@ -725,6 +726,9 @@ _REPORT_JOB: Final[FigureJob] = FigureJob(
         # The per-figure draw modules. A directory, so `_digest` expands it to its sorted
         # *.py — a new figure module joins the digest without anyone remembering to list it.
         _ROUTING / "figures",
+        # ladder_rungs.png recomputes its rows through this module, so a change to the pairing
+        # rule or the null must age the figure exactly as a change to its own draw code does.
+        _SCRIPTS / "ladder_evidence.py",
         _REPO_ROOT / "benchmark" / "runner" / "kill_gate.py",
         _STRATEGIES,
         analysis=_TIMING_ANALYSIS,

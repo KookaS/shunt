@@ -718,6 +718,58 @@ def test_permutations_below_the_floor_is_a_parser_error_not_a_traceback(capsys) 
     assert f">= {metrics.MIN_PERMUTATIONS}" in capsys.readouterr().err
 
 
+def test_the_cli_policy_flag_defaults_to_the_shipped_escalate_decision() -> None:
+    # The default --policy is the shipped escalate decision, so a plain run reproduces the
+    # committed numbers bit for bit — the CLI must not silently select any other arm.
+    assert run_eval._build_parser().parse_args([]).policy == "escalate"
+
+
+def test_the_cli_policy_flag_selects_a_registered_policy() -> None:
+    assert run_eval._build_parser().parse_args(["--policy", "always_cheap"]).policy == (
+        "always_cheap"
+    )
+
+
+def test_an_unknown_policy_is_a_parser_error_not_a_traceback(capsys) -> None:
+    # The registry's ValueError is converted to a usage error at parse time, exactly like an
+    # out-of-range --permutations — never a traceback from deep inside the eval.
+    with pytest.raises(SystemExit) as exc:
+        run_eval.main(["--policy", "nope"])
+    assert exc.value.code == 2  # argparse usage error
+    assert "allowed" in capsys.readouterr().err
+
+
+def test_evaluate_headlines_the_selected_policy() -> None:
+    from dataclasses import replace
+
+    from benchmark.escalation import schema
+
+    def _session(instance: str, model: str, *, resolved: bool, n_steps: int = 5):
+        steps = [make_step(step_index=i, decision_index=i) for i in range(n_steps)]
+        traj = make_trajectory(
+            steps,
+            trajectory_id=f"{instance}__{model}__default",
+            terminal_resolved=resolved,
+        )
+        header = replace(traj.header, instance_id=instance)
+        return schema.Trajectory(header=header, steps=steps)
+
+    trajs = []
+    for inst in ("c1", "c2", "c3"):
+        trajs.append(_session(inst, "deepseek-v4-flash", resolved=False))
+        trajs.append(_session(inst, "deepseek-v4-flash", resolved=False))
+        trajs.append(_session(inst, "kimi-k3", resolved=True))
+    report = run_eval.evaluate(
+        trajs, depths=(), n_permutations=_PERMUTATIONS, policy="always_cheap"
+    )
+    sc = report.session_cadence
+    assert sc is not None
+    assert sc.policy == "always_cheap"
+    # The never-escalate hold arm is the first cheap session's outcome — all cheap sessions fail
+    # here, so the headline reads the failed-first-cheap rate, not the escalate-to-frontier one.
+    assert sc.escalate_rate == 0.0
+
+
 def test_non_positive_depths_are_a_parser_error_not_a_traceback(capsys) -> None:
     # `--depths 0` / `--depths -3` are not valid absolute step counts; they used to fail deep
     # inside the prefix admission/refit path. Rejected at parse time, like `--permutations`.

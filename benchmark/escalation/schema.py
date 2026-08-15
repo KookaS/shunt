@@ -15,9 +15,16 @@ from shunt.proxy.redaction import redact_secrets
 from shunt.router.escalation import derive_blocking
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
 SCHEMA_VERSION: Final[str] = "1"
+
+# The corpus JSONL is git-LFS-tracked (`.gitattributes`). A clone without LFS leaves a small
+# text stub with this header in place of the trajectory, and every downstream reader then dies
+# on an opaque JSON error naming nothing. Detect the stub and say what to run instead.
+_LFS_POINTER_HEADER: Final[str] = "version https://git-lfs.github.com/spec/v1"
+_LFS_REMEDY: Final[str] = "git lfs install && git lfs pull"
 
 # Free-text committable fields are scrubbed before they can enter a committed projection.
 # `failing_check_id` is the ONE committable string that can carry arbitrary text (a parametrized
@@ -255,9 +262,43 @@ def dump_jsonl(traj: Trajectory, path: Path) -> None:
     corpus_lock.atomic_write_text(path, "\n".join(lines) + "\n")
 
 
+class LfsPointerError(RuntimeError):
+    """A git-LFS pointer stub was found where real trajectory bytes were expected."""
+
+
+def _lfs_error(paths: list[Path]) -> LfsPointerError:
+    """The one actionable message for un-fetched LFS corpus files."""
+    head = ", ".join(str(p) for p in paths[:3])
+    more = f" (and {len(paths) - 3} more)" if len(paths) > 3 else ""
+    return LfsPointerError(
+        f"git-LFS pointer file, not trajectory data: {head}{more}. The escalation corpus is "
+        f"stored in git LFS, and this clone has the pointers only. Run `{_LFS_REMEDY}` from the "
+        f"repository root, then re-run. Do not delete or skip these files — a partial corpus "
+        f"silently changes every number the eval reports."
+    )
+
+
+def is_lfs_pointer(path: Path) -> bool:
+    """True when *path* holds a git-LFS pointer stub instead of its real content."""
+    with path.open("rb") as handle:
+        return handle.read(len(_LFS_POINTER_HEADER)) == _LFS_POINTER_HEADER.encode("ascii")
+
+
+def preflight_lfs(paths: Iterable[Path]) -> None:
+    """Raise before any work when *paths* contain un-fetched LFS pointer stubs."""
+    stubs = [p for p in paths if is_lfs_pointer(p)]
+    if stubs:
+        raise _lfs_error(stubs)
+
+
 def load_jsonl(path: Path) -> Trajectory:
     """Read a header + StepView JSONL back into a Trajectory (inverse of dump_jsonl)."""
-    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    text = path.read_text(encoding="utf-8")
+    if text.startswith(_LFS_POINTER_HEADER):
+        # Checked here, not only in the CLI preflight, so every entry path — tests, notebooks,
+        # the manifest builders — gets the remedy instead of a JSON parse error.
+        raise _lfs_error([path])
+    records = [json.loads(line) for line in text.splitlines() if line]
     header = TrajectoryHeader(**records[0])
     steps = [StepView(**record) for record in records[1:]]
     return Trajectory(header=header, steps=steps)
@@ -269,14 +310,17 @@ _STEP_FIELD_NAMES: Final[tuple[str, ...]] = tuple(f.name for f in fields(StepVie
 __all__ = [
     "COMMITTABLE_FIELDS",
     "SCHEMA_VERSION",
+    "LfsPointerError",
     "StepView",
     "Trajectory",
     "TrajectoryHeader",
     "committable_projection",
     "content_sha256",
     "dump_jsonl",
+    "is_lfs_pointer",
     "load_jsonl",
     "normalize_dedup_key",
+    "preflight_lfs",
     "recompute_blocking",
     "recompute_dedup_key",
     "replay_returncode",

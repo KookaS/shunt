@@ -162,6 +162,11 @@ feedback endpoint yet — feedback is the `shunt` CLI, which is why a container 
 ## Watching the loop
 
 - `shunt explain <session_id>` — the context and action for one session.
+- `shunt escalate` — the auto-escalation state for a repo: effective config and where
+  each value came from, the current rung, the live failure window (and why an event does
+  not count), whether the collapse guard is suppressing escalation, and what the next
+  decision would do. Read-only — see
+  [Inspect it](configuration.md#inspect-it-shunt-escalate).
 - `GET /admin/loop-health` — label coverage, propensity support, and a
   **reward-independent** routing-collapse alarm. The alarm keys on the model-choice
   distribution alone, so a degenerate loop that keeps reward looking fine while the

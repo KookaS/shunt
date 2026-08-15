@@ -1,0 +1,126 @@
+{
+  "admissibility": {
+    "admissible": true,
+    "chance_band": 0.11171415649027583,
+    "chance_level": 0.5,
+    "chance_upper": 0.6117141564902758,
+    "null_at_chance": true,
+    "positive_passed": true,
+    "positive_score": 0.7914970601537765,
+    "reason": "ADMISSIBLE: positive control +0.7915 clears chance band (>+0.6117) AND destroyed-signal null +0.4964 is at chance (+0.5000\u00b10.1117) \u2014 the instrument recovers a real signal and does not manufacture one from noise.",
+    "shuffled_score": 0.4963817277250113
+  },
+  "decision_rule_outcome": "STOPPED_STAGE1",
+  "pivot": "STAGE1_NULL",
+  "stage0": {
+    "n_instances": 59,
+    "n_positives": 18,
+    "piv3_clear": false,
+    "scores": [
+      {
+        "auroc": 0.5163,
+        "boot_ci": [
+          0.3421,
+          0.6884
+        ],
+        "clears_validates_bar": false,
+        "feature": "statement_length",
+        "n": 59,
+        "n_positives": 18,
+        "outcome": "learning_to_defer"
+      },
+      {
+        "auroc": 0.5325,
+        "boot_ci": [
+          0.3768,
+          0.6828
+        ],
+        "clears_validates_bar": false,
+        "feature": "code_block_count",
+        "n": 59,
+        "n_positives": 18,
+        "outcome": "learning_to_defer"
+      },
+      {
+        "auroc": 0.5413,
+        "boot_ci": [
+          0.4246,
+          0.6695
+        ],
+        "clears_validates_bar": false,
+        "feature": "traceback_presence",
+        "n": 59,
+        "n_positives": 18,
+        "outcome": "learning_to_defer"
+      },
+      {
+        "auroc": 0.4031,
+        "boot_ci": [
+          0.2514,
+          0.5673
+        ],
+        "clears_validates_bar": false,
+        "feature": "files_mentioned",
+        "n": 59,
+        "n_positives": 18,
+        "outcome": "learning_to_defer"
+      },
+      {
+        "auroc": 0.6113,
+        "boot_ci": [
+          0.5183,
+          0.6969
+        ],
+        "clears_validates_bar": false,
+        "feature": "statement_length",
+        "n": 500,
+        "n_positives": 45,
+        "outcome": "annotated_difficulty"
+      },
+      {
+        "auroc": 0.5121,
+        "boot_ci": [
+          0.423,
+          0.5987
+        ],
+        "clears_validates_bar": false,
+        "feature": "code_block_count",
+        "n": 500,
+        "n_positives": 45,
+        "outcome": "annotated_difficulty"
+      },
+      {
+        "auroc": 0.4852,
+        "boot_ci": [
+          0.4422,
+          0.5391
+        ],
+        "clears_validates_bar": false,
+        "feature": "traceback_presence",
+        "n": 500,
+        "n_positives": 45,
+        "outcome": "annotated_difficulty"
+      },
+      {
+        "auroc": 0.5014,
+        "boot_ci": [
+          0.4194,
+          0.5812
+        ],
+        "clears_validates_bar": false,
+        "feature": "files_mentioned",
+        "n": 500,
+        "n_positives": 45,
+        "outcome": "annotated_difficulty"
+      }
+    ]
+  },
+  "stage1": {
+    "beats_null": false,
+    "n_challenges": 500,
+    "n_predictions": 500,
+    "recovery_perm_p": 0.1489,
+    "recovery_rho": 0.0466
+  },
+  "stage2": null
+}

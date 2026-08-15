@@ -16,13 +16,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import numpy as np
 from matplotlib.patches import Rectangle
 from matplotlib.transforms import Bbox
 
 from benchmark.escalation import metrics, policy_eval
+from benchmark.escalation.policies import ARM_ESCALATE
 from benchmark.plot_frame import MUTED, Annotations, FigureSpec, panel_label
 
 if TYPE_CHECKING:
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
     from benchmark.escalation.features import ModelCoverage
     from benchmark.escalation.metrics import NullResult
     from benchmark.escalation.policy_eval import PolicyCell
-    from benchmark.escalation.session_eval import SessionCadenceReport
+    from benchmark.escalation.session_eval import ArmContrast, SessionCadenceReport
 
 _NULL_BAND = "#BDBDBD"
 _OBSERVED = "#B71C1C"
@@ -56,14 +57,38 @@ _LEGEND_PT = 8.0
 # --------------------------------------------------------------------- the scope strip
 
 
-_SCOPE_BOXES: tuple[tuple[str, str], ...] = (
-    ("DETECTS (per-step, eval-only)", "OK"),
-    ("VALUE (session cadence, observational)", "OK"),
-    ("CAUSAL VALUE AT THE TRIGGER", "not identified: P(escalate)=0"),
+# The two verdicts that are structurally true rather than measured: the edit-gated family IS
+# what the detection half establishes, and the causal claim is unidentified for as long as
+# P(escalate)=0 in the logs. The VALUE box is NOT here — it is decided by data every run, so it
+# is `session_value_verdict(report.session_cadence)` and reaches `scope_strip` as an argument.
+_DETECTS_BOX: Final[tuple[str, str]] = ("DETECTS (per-step, eval-only)", "OK")
+_VALUE_CLAIM: Final[str] = "VALUE (session cadence, observational)"
+_CAUSAL_BOX: Final[tuple[str, str]] = (
+    "CAUSAL VALUE AT THE TRIGGER",
+    "not identified: P(escalate)=0",
 )
+# What the VALUE box says when the corpus carries no session-cadence contrast at all. Not "OK":
+# an unmeasured claim and a supported one must never render the same.
+UNMEASURED_VALUE: Final[str] = "not measured on this corpus"
+# Characters a scope box holds at 7.5pt across a third of the widest canvas; longer shrinks.
+_SCOPE_LABEL_FIT: Final[int] = 52
 
 
-def scope_strip(ax: Axes) -> None:
+def session_value_verdict(sc: SessionCadenceReport | None) -> str:
+    """The VALUE box's verdict, DERIVED from the session-cadence report — never a literal."""
+    # It was a hardcoded "OK" on three canvases. The arms that can falsify it now exist, so a
+    # literal here would print a green box on three figures the moment a trivial competitor wins.
+    if sc is None:
+        return UNMEASURED_VALUE
+    if not sc.diff_excludes_zero:
+        return "interval spans zero"
+    unbeaten = _unbeaten_baselines(sc)
+    if unbeaten:
+        return "not beaten: " + ", ".join(c.name.replace("_", "-") for c in unbeaten)
+    return "OK"
+
+
+def scope_strip(ax: Axes, value_verdict: str) -> None:
     """Three boxes saying which of the three escalation claims this figure can support."""
     # The third box is the one that matters. No logged trajectory ever escalated, so the
     # propensity of the escalate action is 0 everywhere and `ope.estimate_policy_value` returns
@@ -72,7 +97,8 @@ def scope_strip(ax: Axes) -> None:
     ax.axis("off")
     ax.set_xlim(0, 3)
     ax.set_ylim(0, 1)
-    for index, (claim, verdict) in enumerate(_SCOPE_BOXES):
+    boxes = (_DETECTS_BOX, (_VALUE_CLAIM, value_verdict), _CAUSAL_BOX)
+    for index, (claim, verdict) in enumerate(boxes):
         supported = verdict == "OK"
         ax.add_patch(
             Rectangle(
@@ -84,13 +110,19 @@ def scope_strip(ax: Axes) -> None:
                 linewidth=0.8 if supported else 1.6,
             )
         )
+        # A derived verdict is longer than the literal "OK" it replaced, and a box a third of a
+        # wide canvas across cannot hold it on one line at the default size — it overran its own
+        # frame and ran into its neighbour. Long labels wrap onto the box's second line instead.
+        wide = len(f"{claim} — {verdict}") > _SCOPE_LABEL_FIT
+        label = f"{claim}\n{verdict}" if wide else f"{claim} — {verdict}"
         ax.text(
             index + 0.5,
             0.5,
-            f"{claim} — {verdict}",
+            label,
             ha="center",
             va="center",
-            fontsize=7.5,
+            linespacing=1.4,
+            fontsize=6.6 if wide else 7.5,
             color="#1a1a1a" if supported else _OBSERVED,
             fontweight="bold" if not supported else "normal",
         )
@@ -146,6 +178,7 @@ def escalation_decision(
     null: NullResult | None = None,
     band: tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]] | None = None,
     shipped_n: int,
+    value_verdict: str,
 ) -> Annotations:
     """ROC + null band, precision-vs-threshold and fire rate — the detection claim, in one."""
     ax_roc, ax_precision, ax_rate, ax_scope = axes
@@ -156,7 +189,7 @@ def escalation_decision(
         base, linestyle="--", color=_NULL_CENTRE, linewidth=1.0, label=f"base rate {base:.3f}"
     )
     ax_precision.legend(fontsize=_LEGEND_PT, loc="lower right")
-    scope_strip(ax_scope)
+    scope_strip(ax_scope, value_verdict)
     auroc_plain = metrics.auroc(scores_plain, labels)
     auroc_edit = metrics.auroc(scores_edit, labels)
     return Annotations(
@@ -312,7 +345,10 @@ OPERATING_POINT_SPEC = FigureSpec(
 
 
 def operating_point(
-    as_shipped: PolicyCell | None, canonical: PolicyCell, axes: Sequence[Axes]
+    as_shipped: PolicyCell | None,
+    canonical: PolicyCell,
+    axes: Sequence[Axes],
+    value_verdict: str,
 ) -> Annotations:
     """Both counting modes' outcome arms at the shipped knobs, and the canonical cell's nulls."""
     # The as-shipped pair is drawn even though — BECAUSE — it is the null result. Collapsing the
@@ -322,7 +358,7 @@ def operating_point(
     ax_bars, ax_null, ax_scope = axes
     _draw_arms(ax_bars, as_shipped, canonical)
     _draw_nulls(ax_null, canonical)
-    scope_strip(ax_scope)
+    scope_strip(ax_scope, value_verdict)
     return Annotations(
         subtitle_facts=(
             f"both at escalate_after_n={canonical.escalate_after_n}, "
@@ -738,28 +774,38 @@ def _sweep_limits(
 
 
 SESSION_VALUE_SPEC = FigureSpec(
-    title="At production cadence, escalating after a cheap failure beats retrying cheap",
+    title="Escalating to the top-two models beats a cheap retry, but not always-frontier or random",
     reading=(
         "Read on EVERY trajectory in the corpus, not the per-step-stamped subset the other "
         "escalation figures score: a session outcome comes off the run header, so a run without "
         "per-step stamps still counts here. "
         "Measured on the overlap subset — tasks carrying BOTH a second cheap session and a "
-        "frontier session, so the two arms are read on the same tasks. Left: after a cheap "
+        "frontier session, so every arm is read on the same tasks. Left: after a cheap "
         "session failed a task, the share of FRONTIER sessions on that task that resolved it "
         "(escalate) against the share of a SECOND cheap session that resolved it (retry). Both "
         "intervals resample whole INSTANCES, because several frontier sessions on one task are "
-        "not independent draws. Right: the PAIRED difference, escalate minus retry, on those same "
-        "instance resamples, with its 95% interval and zero marked."
+        "not independent draws. Middle: the PAIRED difference, escalate minus retry, on those same "
+        "instance resamples, with its 95% interval and zero marked. Right: the same paired "
+        "difference against the three trivial competitors — never being cheap (always frontier), "
+        "never escalating (always cheap), and firing at random at the escalate arm's own rate."
     ),
     goal=(
-        "The right panel is the answer. Two marginal intervals that fail to overlap is a "
-        "conservative test of a difference; the paired distribution IS the difference, and the "
-        "claim holds only if its interval excludes zero."
+        "The middle panel decides escalate-vs-retry; the right panel decides whether the ladder "
+        "is worth having at all. A point left of zero there is a competitor the escalate arm "
+        "does not beat. Neither panel is about the shipped ladder's rungs — the arm drawn here "
+        "is the corpus's most expensive models, which the ladder reaches last, if at all."
     ),
     definitions=(
-        ("frontier", "the two most expensive models present in the corpus"),
         ("cheap", "the cheapest model present — the base pick and the retry counterfactual"),
         ("overlap subset", "tasks with >=2 cheap sessions AND a frontier session"),
+        ("always frontier", "the frontier session's outcome, whatever the cheap sessions did"),
+        ("always cheap", "the first cheap session's outcome, unconditionally"),
+        ("random escalate", "escalation fired on a seeded subset sized to the real fire rate"),
+        (
+            "rung",
+            "a model the ladder can step to; the shipped shortlist walks the cheapest ranks one "
+            "at a time and then jumps to the top rank",
+        ),
     ),
     notes=(
         "At session cadence the detector is trivially satisfied — the failed cheap session carries "
@@ -771,23 +817,38 @@ SESSION_VALUE_SPEC = FigureSpec(
     limitations=(
         "Observational: the arms ran in parallel and which tasks got frontier coverage was "
         "adaptive. Small n — read the interval, not the point estimate.",
-        "Production's ladder steps one price rank at a time; this collapses it to its endpoint.",
+        "THE ESCALATE ARM IS NOT THE SHIPPED LADDER. It is the most expensive models in the "
+        "corpus, and the shipped ladder does not step straight to them: it buys the cheapest "
+        "ranks first and only then jumps, and those intermediate rungs are measured separately "
+        "on the routing corpus as null or net-harmful. Read this as the value of escalating TO "
+        "THIS ARM, never as what the shipped default achieves.",
+        "The escalate arm conditions on a cheap failure; the always-frontier and always-cheap "
+        "arms do not, so they also cover tasks the cheap model already resolved.",
     ),
 )
 
 
 def session_value(sc: SessionCadenceReport, axes: Sequence[Axes]) -> Annotations:
-    """The escalate-vs-retry contrast and, beside it, the paired difference that decides it."""
-    ax_bars, ax_diff = axes
+    """The arms, the escalate-vs-retry difference, and the differences against the baselines."""
+    ax_bars, ax_diff, ax_baselines = axes
     _draw_session_bars(ax_bars, sc)
     _draw_paired_difference(ax_diff, sc)
+    _draw_baseline_differences(ax_baselines, sc)
     lift = "n/a" if sc.lift is None else f"{sc.lift:.2f}x"
     return Annotations(
         subtitle_facts=(
-            f"{sc.n_overlap_instances} overlap tasks · escalate {sc.n_escalated_resolved}/"
-            f"{sc.n_escalated} vs retry {sc.n_retried_resolved}/{sc.n_retried}",
+            *_arm_fact(sc),
+            f"{sc.n_overlap_instances} overlap tasks · {_headline_noun(sc)} "
+            f"{sc.n_escalated_resolved}/{sc.n_escalated} vs retry {sc.n_retried_resolved}/"
+            f"{sc.n_retried}",
             f"lift {lift} · paired difference {sc.diff_estimate:+.3f} "
             f"[{sc.diff_ci[0]:+.3f}, {sc.diff_ci[1]:+.3f}]",
+            *(
+                ("baselines not beaten: " + ", ".join(c.name for c in _unbeaten_baselines(sc)),)
+                if _unbeaten_baselines(sc)
+                else ()
+            ),
+            *_cost_facts(sc),
         ),
         # ALWAYS non-None, and that is load-bearing: `_merge` keeps the first caveat, so a
         # figure that leaves it None inherits the run-level one — and the run-level line is about
@@ -796,14 +857,13 @@ def session_value(sc: SessionCadenceReport, axes: Sequence[Axes]) -> Annotations
         # defect this redesign removes. The same reasoning applies to the subtitle and the
         # limitations, which is why the caller hands this figure `_session_run_annotations`
         # rather than the stamped-corpus `_run_annotations`.
-        caveat=(
-            "Observational: the arms ran in parallel and frontier coverage was adaptive."
-            if sc.diff_excludes_zero
-            else "The paired difference's 95% interval spans zero — no measured advantage here."
-        ),
+        caveat=_session_caveat(sc),
+        definitions=_arm_terms(sc),
         notes=(
             f"instance-level bootstrap over {sc.n_instances_resampled} overlap tasks, not Wilson "
             "over sessions: several frontier sessions on one task are one draw, not several",
+            *_ladder_notes(sc),
+            *_cost_notes(sc),
         ),
         counts=(
             ("overlap_instances", sc.n_overlap_instances),
@@ -813,25 +873,147 @@ def session_value(sc: SessionCadenceReport, axes: Sequence[Axes]) -> Annotations
     )
 
 
+def _headline_noun(sc: SessionCadenceReport) -> str:
+    """What the report's headline arm is called on the canvas, per the policy under test."""
+    if sc.policy == ARM_ESCALATE:
+        return "escalate"
+    return _SHORT_ARM.get(sc.policy, sc.policy)
+
+
+def _arm_fact(sc: SessionCadenceReport) -> tuple[str, ...]:
+    """Name the headline arm on the canvas: a reader must not read it as the shipped ladder."""
+    if sc.policy != ARM_ESCALATE:
+        return (f"policy under test: {sc.policy}",)
+    if not sc.frontier_models:
+        return ()
+    named = ", ".join(sc.frontier_models)
+    return (f"escalate arm = the top-{len(sc.frontier_models)} models by price ({named})",)
+
+
+def _arm_terms(sc: SessionCadenceReport) -> tuple[tuple[str, str], ...]:
+    """The `frontier` term, with the arm's size and members read off the report, not retyped."""
+    # Only the shipped escalate arm is "the frontier models"; a non-escalate policy under test
+    # names itself in the bar, so the vocabulary definition does not apply.
+    if sc.policy != ARM_ESCALATE or not sc.frontier_models:
+        return ()
+    named = ", ".join(sc.frontier_models)
+    return (
+        (
+            "frontier",
+            f"the {len(sc.frontier_models)} most expensive models present in the corpus: {named}",
+        ),
+    )
+
+
+def _ladder_notes(sc: SessionCadenceReport) -> tuple[str, ...]:
+    """What the SHIPPED ladder would step to, so the arm cannot borrow production's authority."""
+    if not sc.ladder_visits:
+        return ()
+    reached = [m for m in sc.ladder_visits if m in sc.frontier_models]
+    before = [m for m in sc.ladder_visits if m not in sc.frontier_models]
+    return (
+        f"the shipped ladder (rank_shortlist={sc.rank_shortlist}) walks "
+        f"{' -> '.join(sc.ladder_visits)} over this corpus's price order: of the escalate arm it "
+        f"reaches {', '.join(reached) or 'nothing'}, and only after billing "
+        f"{', '.join(before) or 'no other rung'} first",
+    )
+
+
+_SHORT_ARM: Final[dict[str, str]] = {
+    "escalate": "escalate",
+    "cheap_retry": "retry",
+    "always_frontier": "frontier",
+    "always_cheap": "cheap",
+    "random_escalate": "random",
+}
+
+
+def _cost_facts(sc: SessionCadenceReport) -> tuple[str, ...]:
+    """One subtitle line per currency, and the currency is NAMED in it — never a bare dollar."""
+    # A cache-blind total and a cache-aware one are different quantities, and the cheap arms are
+    # exactly where they diverge, so a figure that prints a price without saying which is a defect.
+    # No "$" anywhere in the string: matplotlib reads a pair of them as mathtext delimiters and
+    # renders the money between them as an equation, silently eating both signs (observed).
+    lines: list[str] = []
+    for currency in dict.fromkeys(c.currency for c in sc.costs):
+        priced = [
+            f"{_SHORT_ARM.get(c.name, c.name)} {c.cost_per_instance:.3f}"
+            + (
+                ""
+                if c.marginal_cost_per_resolve is None
+                else f" ({c.marginal_cost_per_resolve:.2f}/marginal)"
+            )
+            for c in sc.costs
+            if c.currency == currency
+        ]
+        lines.append(f"USD per task acted on ({currency.replace('_', '-')}): " + " · ".join(priced))
+    return tuple(lines)
+
+
+def _cost_notes(sc: SessionCadenceReport) -> tuple[str, ...]:
+    """The one sentence a reader needs before quoting any of those dollars."""
+    if not sc.costs:
+        return ()
+    return (
+        "cost is the provider's billed real_cost joined per (task, model, reasoning); an arm pays "
+        "for the sessions it had to run first, so the escalate arm carries its failed cheap "
+        "session. 'naive' is CACHE-BLIND — it charges a repeated model as if its prefix were cold; "
+        "'cache-aware' applies the shared cache model, whose hit rate is assumed, not measured. "
+        "USD per marginal resolve is against the always-cheap floor, on that arm's own tasks — and "
+        "the escalate arm's tasks are the fired subset, not the whole overlap set.",
+    )
+
+
+def _unbeaten_baselines(sc: SessionCadenceReport) -> tuple[ArmContrast, ...]:
+    """The baseline arms the escalate arm does not beat: ahead of it, or tied within the CI."""
+    return tuple(c for c in sc.comparisons if c.diff_estimate <= 0.0 or not c.diff_excludes_zero)
+
+
+def _session_caveat(sc: SessionCadenceReport) -> str:
+    """One line, and it must not read as a win when a trivial competitor was not beaten."""
+    if not sc.diff_excludes_zero:
+        return "The paired difference's 95% interval spans zero — no measured advantage here."
+    unbeaten = _unbeaten_baselines(sc)
+    if unbeaten:
+        named = ", ".join(c.name.replace("_", "-") for c in unbeaten)
+        return (
+            f"Observational, and the {_headline_noun(sc)} arm does not beat {named} — read panel C."
+        )
+    return "Observational: the arms ran in parallel and frontier coverage was adaptive."
+
+
 def _draw_session_bars(ax: Axes, sc: SessionCadenceReport) -> None:
-    heights = [sc.escalate_rate, sc.retry_rate]
+    # The tick says top-N, not "frontier": the routing half calls the single most expensive model
+    # "Always-Frontier", and one bare word standing for two different quantities across the two
+    # halves is exactly how a reader carries the wrong arm from one page to the other.
+    bars = [
+        (
+            f"escalate\nto top-{len(sc.frontier_models)}"
+            if sc.policy == ARM_ESCALATE
+            else _SHORT_ARM.get(sc.policy, sc.policy),
+            sc.escalate_rate,
+            sc.escalate_ci,
+            sc.n_escalated,
+            _OBSERVED,
+        ),
+        ("cheap\nretry", sc.retry_rate, sc.retry_ci, sc.n_retried, _SHIPPED),
+        *((c.name.replace("_", "\n"), c.rate, c.ci, c.n, _NULL_CENTRE) for c in sc.comparisons),
+    ]
+    heights = [b[1] for b in bars]
     errors = [
-        [sc.escalate_rate - sc.escalate_ci[0], sc.retry_rate - sc.retry_ci[0]],
-        [sc.escalate_ci[1] - sc.escalate_rate, sc.retry_ci[1] - sc.retry_rate],
+        [rate - ci[0] for _label, rate, ci, _n, _colour in bars],
+        [ci[1] - rate for _label, rate, ci, _n, _colour in bars],
     ]
     ax.bar(
-        ["escalate\nto frontier", "cheap\nretry"],
+        [b[0] for b in bars],
         heights,
         yerr=np.clip(np.array(errors), 0.0, None),
         capsize=6,
         width=0.55,
-        color=[_OBSERVED, _SHIPPED],
+        color=[b[4] for b in bars],
     )
     for position, (rate, n, top) in enumerate(
-        (
-            (sc.escalate_rate, sc.n_escalated, sc.escalate_ci[1]),
-            (sc.retry_rate, sc.n_retried, sc.retry_ci[1]),
-        )
+        (rate, n, ci[1]) for _label, rate, ci, n, _colour in bars
     ):
         ax.text(position, 0.03, f"n={n}", ha="center", color="white", fontsize=9)
         # Above the interval, not above the bar — see `_draw_arms`.
@@ -870,7 +1052,9 @@ def _draw_paired_difference(ax: Axes, sc: SessionCadenceReport) -> None:
     )
     for bound in sc.diff_ci:
         ax.axvline(bound, color=_OBSERVED, linestyle=":", linewidth=1.2)
-    ax.set_xlabel("paired difference: P(resolve | escalate) - P(resolve | retry)", labelpad=30)
+    ax.set_xlabel(
+        f"paired difference: P(resolve | {_headline_noun(sc)}) - P(resolve | retry)", labelpad=30
+    )
     ax.set_ylabel("instance resamples")
     ax.tick_params(labelsize=_TICK_PT)
     # Below the axes: every vertical rule this legend names spans the FULL height, so an
@@ -883,6 +1067,44 @@ def _draw_paired_difference(ax: Axes, sc: SessionCadenceReport) -> None:
         frameon=False,
     )
     panel_label(ax, "B · paired difference, 95% interval dotted")
+
+
+def _draw_baseline_differences(ax: Axes, sc: SessionCadenceReport) -> None:
+    if not sc.comparisons:
+        ax.axis("off")
+        ax.text(0.5, 0.5, "no baseline arms on this corpus", ha="center", va="center", color=MUTED)
+        return
+    # Escalate MINUS the arm, so a point left of zero is a competitor the ladder loses to. The
+    # arms are trivial by construction; the panel exists to let one of them kill the claim.
+    rows = list(reversed(sc.comparisons))
+    positions = range(len(rows))
+    ax.errorbar(
+        [c.diff_estimate for c in rows],
+        list(positions),
+        xerr=[
+            [c.diff_estimate - c.diff_ci[0] for c in rows],
+            [c.diff_ci[1] - c.diff_estimate for c in rows],
+        ],
+        fmt="o",
+        color=_OBSERVED,
+        capsize=5,
+    )
+    ax.axvline(0.0, color=_NULL_CENTRE, linestyle="--", linewidth=1.2)
+    ax.set_yticks(list(positions))
+    ax.set_yticklabels([f"{c.name.replace('_', ' ')}\nn={c.n}" for c in rows], fontsize=_TICK_PT)
+    for position, contrast in enumerate(rows):
+        ax.text(
+            contrast.diff_estimate,
+            position + 0.22,
+            f"{contrast.diff_estimate:+.3f} "
+            f"[{contrast.diff_ci[0]:+.3f}, {contrast.diff_ci[1]:+.3f}]",
+            ha="center",
+            fontsize=8.5,
+        )
+    ax.set_ylim(-0.6, len(rows) - 0.2)
+    ax.set_xlabel(f"{_headline_noun(sc)} minus the arm (paired, same instances)", labelpad=10)
+    ax.tick_params(labelsize=_TICK_PT)
+    panel_label(ax, "C · vs the trivial competitors")
 
 
 # ------------------------------------------------------------- 5. corpus_and_coverage
@@ -1179,13 +1401,13 @@ ESCALATION_BUDGET_SPEC = FigureSpec(
 )
 
 
-def escalation_budget(cell: PolicyCell, axes: Sequence[Axes]) -> Annotations:
+def escalation_budget(cell: PolicyCell, axes: Sequence[Axes], value_verdict: str) -> Annotations:
     """Where the trigger lands and what the steps after it are worth, split by outcome."""
     ax_ecdf, ax_ledger, ax_scope = axes
     budget = cell.budget
     _draw_fire_ecdf(ax_ecdf, budget)
     _draw_step_ledger(ax_ledger, budget)
-    scope_strip(ax_scope)
+    scope_strip(ax_scope, value_verdict)
     if not budget.n_fired_positioned:
         return Annotations(
             subtitle_facts=("no fired run carries a trigger position on this report",),
@@ -1282,4 +1504,5 @@ __all__ = [
     "policy_sweep",
     "scope_strip",
     "session_value",
+    "session_value_verdict",
 ]

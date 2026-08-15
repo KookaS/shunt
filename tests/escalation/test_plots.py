@@ -14,7 +14,11 @@ import pytest  # noqa: E402
 from matplotlib.container import BarContainer  # noqa: E402
 
 from benchmark.escalation import features, metrics, plots, policy_eval, replay  # noqa: E402
-from benchmark.escalation.session_eval import SessionCadenceReport  # noqa: E402
+from benchmark.escalation.session_eval import (  # noqa: E402
+    ArmContrast,
+    ArmCost,
+    SessionCadenceReport,
+)
 from tests.escalation.factories import make_step, make_trajectory  # noqa: E402
 
 _PERMUTATIONS = 200
@@ -102,6 +106,7 @@ def test_the_decision_figure_reports_both_families_and_its_detection_floor() -> 
         null=null,
         band=((0.0, 0.5, 1.0), (0.0, 0.2, 0.8), (0.0, 0.5, 1.0)),
         shipped_n=3,
+        value_verdict="OK",
     )
     assert any("AUROC as-shipped" in fact for fact in ann.subtitle_facts)
     assert any("score null 95%" in note for note in ann.notes)
@@ -117,9 +122,47 @@ def test_the_decision_figure_stays_quiet_without_a_null() -> None:
     # handed a fabricated detection floor.
     fig, axes = _axes(4)
     ann = plots.escalation_decision(
-        [0.0, 1.0, 2.0, 3.0], [0.0, 2.0, 3.0, 4.0], [False, True, False, True], axes, shipped_n=3
+        [0.0, 1.0, 2.0, 3.0],
+        [0.0, 2.0, 3.0, 4.0],
+        [False, True, False, True],
+        axes,
+        shipped_n=3,
+        value_verdict="OK",
     )
     assert not any("null 95%" in note for note in ann.notes)
+    plt.close(fig)
+
+
+def test_the_value_box_is_derived_from_the_report_and_moves_with_it() -> None:
+    # THE DEFECT THIS PINS. The VALUE verdict was a module-level literal "OK" drawn on three
+    # canvases, so a trivial competitor beating the escalate arm would have left three green
+    # boxes claiming a value the data no longer supported. It is now read off the report.
+    beaten = _contrast("always_frontier", rate=0.73, diff=-0.108, ci=(-0.165, -0.056))
+    won = _contrast("always_cheap", rate=0.44, diff=0.185, ci=(0.006, 0.375))
+    assert plots.session_value_verdict(_session(low=0.24, high=0.58, comparisons=(won,))) == "OK"
+    assert (
+        plots.session_value_verdict(_session(low=0.24, high=0.58, comparisons=(beaten, won)))
+        == "not beaten: always-frontier"
+    )
+    # An interval spanning zero is not a value claim either, whatever the trivial arms did.
+    assert plots.session_value_verdict(_session(low=-0.1, high=0.58, comparisons=(won,))) == (
+        "interval spans zero"
+    )
+    # No session-cadence contrast at all must never render the same as a supported one.
+    assert plots.session_value_verdict(None) == plots.UNMEASURED_VALUE
+
+
+def test_the_scope_strip_paints_a_derived_non_ok_value_verdict_red() -> None:
+    fig, ax = plt.subplots()
+    plots.scope_strip(ax, "not beaten: always-frontier")
+    texts = [t.get_text() for t in ax.texts]
+    # The claim and its verdict may wrap onto two lines when the box cannot hold one.
+    wanted = [t for t in texts if "VALUE (session cadence" in t]
+    assert wanted and "not beaten: always-frontier" in wanted[0]
+    # Red, bold and heavy-edged is what the function already does for an unsupported claim; the
+    # point of the test is that the VALUE box now reaches that branch at all.
+    value_box = [t for t in ax.texts if "VALUE" in t.get_text()][0]
+    assert value_box.get_fontweight() == "bold"
     plt.close(fig)
 
 
@@ -127,7 +170,7 @@ def test_every_figure_carries_the_scope_strip_including_the_unidentified_claim()
     # The causal claim is NOT identified — no logged trajectory escalated — so it is rendered as a
     # labelled box rather than quietly omitted or, worse, estimated.
     fig, ax = plt.subplots()
-    plots.scope_strip(ax)
+    plots.scope_strip(ax, "OK")
     texts = [t.get_text() for t in ax.texts]
     assert any("not identified: P(escalate)=0" in t for t in texts)
     assert any("DETECTS" in t for t in texts)
@@ -143,7 +186,7 @@ def test_the_operating_point_calls_out_an_inverted_policy() -> None:
     # The headline the old figure set could not show: escalation firing on the runs that SUCCEED.
     # _cell(resolved_fire=True) separates perfectly, so the intervals do not overlap.
     fig, axes = _axes(3)
-    ann = plots.operating_point(None, _cell(resolved_fire=True), axes)
+    ann = plots.operating_point(None, _cell(resolved_fire=True), axes, "OK")
     assert any("INVERTED" in lim for lim in ann.limitations)
     assert any("P(fail|fired)" in note for note in ann.notes)
     plt.close(fig)
@@ -151,7 +194,7 @@ def test_the_operating_point_calls_out_an_inverted_policy() -> None:
 
 def test_the_operating_point_is_quiet_when_the_policy_points_the_right_way() -> None:
     fig, axes = _axes(3)
-    ann = plots.operating_point(None, _cell(resolved_fire=False), axes)
+    ann = plots.operating_point(None, _cell(resolved_fire=False), axes, "OK")
     assert ann.limitations == ()
     plt.close(fig)
 
@@ -180,7 +223,7 @@ def test_the_operating_point_refuses_a_direction_off_overlapping_intervals() -> 
     ]
     cell = policy_eval.evaluate_cell(corpus, replay.GridPoint(2, 5), n_permutations=_PERMUTATIONS)
     fig, axes = _axes(3)
-    ann = plots.operating_point(None, cell, axes)
+    ann = plots.operating_point(None, cell, axes, "OK")
     assert any("NO SEPARATION" in lim for lim in ann.limitations)
     assert not any("INVERTED" in lim for lim in ann.limitations)
     plt.close(fig)
@@ -195,7 +238,7 @@ def test_an_arm_below_the_reporting_floor_renders_as_undefined_not_as_a_rate() -
     thin = _counts_cell(40, 20, precision_ci=(0.55, 0.78), quiet=(0, 1), quiet_ci=(0.0, 0.0))
     assert thin.p_fail_given_quiet == 0.0  # the statistic is NOT corrupted to fix the figure
     fig, axes = _axes(3)
-    ann = plots.operating_point(None, thin, axes)
+    ann = plots.operating_point(None, thin, axes, "OK")
     assert ann.caveat is not None
     assert f"n={policy_eval.MIN_ARM}" in ann.caveat
     assert any("undefined" in t.get_text() for t in axes[0].texts)
@@ -210,7 +253,7 @@ def test_an_arm_below_the_reporting_floor_renders_as_undefined_not_as_a_rate() -
 def test_a_readable_pair_of_arms_draws_two_real_bars() -> None:
     fine = _counts_cell(40, 20, precision_ci=(0.55, 0.78), quiet=(10, 30), quiet_ci=(0.15, 0.40))
     fig, axes = _axes(3)
-    ann = plots.operating_point(None, fine, axes)
+    ann = plots.operating_point(None, fine, axes, "OK")
     assert ann.caveat is None
     assert len([c for c in axes[0].containers if isinstance(c, BarContainer)]) == 2
     plt.close(fig)
@@ -228,7 +271,7 @@ def test_the_shipped_configuration_is_drawn_beside_the_canonical_one() -> None:
         258, 177, precision_ci=(0.56, 0.71), quiet=(48, 244), quiet_ci=(0.16, 0.27)
     )
     fig, axes = _axes(3)
-    ann = plots.operating_point(as_shipped, canonical, axes)
+    ann = plots.operating_point(as_shipped, canonical, axes, "OK")
     # Three real bars and one hatched placeholder: the as-shipped quiet arm holds no runs.
     assert len([c for c in axes[0].containers if isinstance(c, BarContainer)]) == 3
     assert any(p.get_hatch() == "///" for p in axes[0].patches)
@@ -252,7 +295,7 @@ def test_the_operating_point_draws_the_length_stratified_null_beside_the_family_
     cell = _cell(resolved_fire=False)
     assert cell.null_auroc_length is not None
     fig, axes = _axes(3)
-    plots.operating_point(None, cell, axes)
+    plots.operating_point(None, cell, axes, "OK")
     labels = [artist.get_label() for artist in axes[1].get_children() if artist.get_label()]
     assert any("length-stratified null" in str(lab) for lab in labels)
     assert any("family-wise null" in str(lab) for lab in labels)
@@ -346,7 +389,26 @@ def test_the_shipped_row_is_located_but_never_colour_coded_by_result() -> None:
 # --------------------------------------------------------------- 4. the session value
 
 
-def _session(*, low: float, high: float) -> SessionCadenceReport:
+def _contrast(name: str, *, rate: float, diff: float, ci: tuple[float, float]) -> ArmContrast:
+    return ArmContrast(
+        name=name,
+        n=45,
+        resolved=round(rate * 45),
+        rate=rate,
+        ci=(max(0.0, rate - 0.1), min(1.0, rate + 0.1)),
+        diff_estimate=diff,
+        diff_ci=ci,
+        n_instances=45,
+    )
+
+
+def _session(
+    *,
+    low: float,
+    high: float,
+    comparisons: tuple[ArmContrast, ...] = (),
+    costs: tuple[ArmCost, ...] = (),
+) -> SessionCadenceReport:
     draws = tuple(low + (high - low) * i / 99.0 for i in range(100))
     return SessionCadenceReport(
         n_overlap_instances=45,
@@ -366,13 +428,16 @@ def _session(*, low: float, high: float) -> SessionCadenceReport:
         diff_ci=(low, high),
         diff_draws=draws,
         n_instances_resampled=45,
+        comparisons=comparisons,
+        random_fire_rate=0.62,
+        costs=costs,
     )
 
 
 def test_the_session_figure_draws_the_paired_difference_not_two_marginals_alone() -> None:
     # Two marginal intervals failing to overlap is a conservative test OF a difference, not a test
     # of the difference. The paired panel is the one the claim rests on.
-    fig, axes = _axes(2)
+    fig, axes = _axes(3)
     ann = plots.session_value(_session(low=0.13, high=0.55), axes)
     assert any("paired difference" in fact for fact in ann.subtitle_facts)
     assert any(line.get_label() == "no difference" for line in axes[1].lines)
@@ -381,10 +446,75 @@ def test_the_session_figure_draws_the_paired_difference_not_two_marginals_alone(
 
 
 def test_a_session_difference_spanning_zero_says_so_in_red() -> None:
-    fig, axes = _axes(2)
+    fig, axes = _axes(3)
     ann = plots.session_value(_session(low=-0.10, high=0.40), axes)
     assert ann.caveat is not None
     assert "spans zero" in ann.caveat
+    plt.close(fig)
+
+
+def test_a_baseline_the_escalate_arm_loses_to_is_stated_not_buried_in_panel_c() -> None:
+    # THE ARM THAT CAN KILL THE CLAIM. An always-frontier arm ahead of the escalate arm must reach
+    # the reader through the caveat and the subtitle, not only as a dot below zero in panel C.
+    losing = _contrast("always_frontier", rate=0.73, diff=-0.108, ci=(-0.165, -0.056))
+    fig, axes = _axes(3)
+    ann = plots.session_value(_session(low=0.24, high=0.58, comparisons=(losing,)), axes)
+    assert ann.caveat is not None and "does not beat always-frontier" in ann.caveat
+    assert any("always_frontier" in fact for fact in ann.subtitle_facts)
+    # Panel C draws one point per baseline arm, with zero marked so the sign is readable.
+    assert axes[2].containers
+    assert any(line.get_xdata()[0] == 0.0 for line in axes[2].lines)
+    plt.close(fig)
+
+
+def test_a_baseline_tied_within_its_interval_also_counts_as_not_beaten() -> None:
+    # A positive point estimate whose paired interval spans zero is not a win over that arm, and
+    # the figure must not let a reader infer one.
+    tied = _contrast("random_escalate", rate=0.66, diff=0.04, ci=(-0.147, 0.078))
+    beaten = _contrast("always_cheap", rate=0.44, diff=0.185, ci=(0.006, 0.375))
+    fig, axes = _axes(3)
+    ann = plots.session_value(_session(low=0.24, high=0.58, comparisons=(tied, beaten)), axes)
+    assert ann.caveat is not None and "does not beat random-escalate" in ann.caveat
+    assert any("random_escalate" in fact for fact in ann.subtitle_facts)
+    assert not any("always_cheap" in fact for fact in ann.subtitle_facts)
+    plt.close(fig)
+
+
+def test_the_session_costs_name_their_currency_and_carry_no_mathtext_dollar() -> None:
+    # A price with no currency beside it is unciteable: naive and cache-aware are different
+    # quantities. And no "$" may appear — matplotlib reads a PAIR of them as mathtext delimiters
+    # and renders the money between them as an equation, eating both signs (observed on canvas).
+    costs = tuple(
+        ArmCost(
+            name=name,
+            currency=currency,
+            n_sessions=10,
+            n_instances_covered=8,
+            total_cost=1.0,
+            cost_per_instance=0.5,
+            cost_ci=(0.4, 0.6),
+            marginal_cost_per_resolve=1.25,
+            marginal_ci=(1.0, 1.5),
+            marginal_undefined_share=0.0,
+        )
+        for currency in ("naive", "cache_aware")
+        for name in ("escalate", "always_frontier")
+    )
+    fig, axes = _axes(3)
+    ann = plots.session_value(_session(low=0.24, high=0.58, costs=costs), axes)
+    facts = "\n".join(ann.subtitle_facts)
+    assert "naive" in facts and "cache-aware" in facts
+    assert "USD" in facts
+    assert "$" not in facts
+    assert "$" not in "\n".join(ann.notes)
+    plt.close(fig)
+
+
+def test_the_session_figure_draws_no_baseline_panel_when_there_are_no_baseline_arms() -> None:
+    # A corpus with no baseline arms gets a labelled empty panel, never fabricated dots.
+    fig, axes = _axes(3)
+    plots.session_value(_session(low=0.24, high=0.58), axes)
+    assert any("no baseline arms" in t.get_text() for t in axes[2].texts)
     plt.close(fig)
 
 
@@ -392,7 +522,7 @@ def test_the_session_figure_never_inherits_the_per_step_stamping_caveat() -> Non
     # It reads EVERY trajectory, stamped or not, so the run-level "72 runs excluded" line is false
     # here. A non-None caveat of its own is what stops `_merge` handing it the run-level one.
     for interval in ((0.13, 0.55), (-0.10, 0.40)):
-        fig, axes = _axes(2)
+        fig, axes = _axes(3)
         ann = plots.session_value(_session(low=interval[0], high=interval[1]), axes)
         assert ann.caveat is not None
         plt.close(fig)
@@ -471,7 +601,12 @@ def test_the_feature_mismatch_caveat_names_the_panels_it_is_about() -> None:
     assert "edit-gated" in ann.caveat
     fig2, axes2 = _axes(4)
     decision = plots.escalation_decision(
-        [0.0, 1.0, 2.0, 3.0], [0.0, 2.0, 3.0, 4.0], [False, True, False, True], axes2, shipped_n=3
+        [0.0, 1.0, 2.0, 3.0],
+        [0.0, 2.0, 3.0, 4.0],
+        [False, True, False, True],
+        axes2,
+        shipped_n=3,
+        value_verdict="OK",
     )
     assert decision.caveat is None
     plt.close(fig)
@@ -513,7 +648,7 @@ def _budget() -> policy_eval.BudgetAggregates:
 
 def test_the_budget_figure_reports_the_ledger_and_the_fire_position() -> None:
     fig, axes = _axes(3)
-    ann = plots.escalation_budget(_counts_cell(40, 20, budget=_budget()), axes)
+    ann = plots.escalation_budget(_counts_cell(40, 20, budget=_budget()), axes, "OK")
     assert any(
         "5623 steps pre-empted vs 3047 interrupted (1.85:1)" in f for f in ann.subtitle_facts
     )
@@ -523,7 +658,7 @@ def test_the_budget_figure_reports_the_ledger_and_the_fire_position() -> None:
 
 def test_the_budget_figure_refuses_to_draw_a_cell_with_no_measured_positions() -> None:
     fig, axes = _axes(3)
-    ann = plots.escalation_budget(_counts_cell(40, 20), axes)
+    ann = plots.escalation_budget(_counts_cell(40, 20), axes, "OK")
     assert any("not computed" in lim for lim in ann.limitations)
     assert any("no positioned fire" in t.get_text() for t in axes[0].texts)
     plt.close(fig)

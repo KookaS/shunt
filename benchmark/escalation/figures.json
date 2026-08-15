@@ -247,18 +247,19 @@
       "title": "Every swept configuration, in both counting modes, against one base rate"
     },
     "session_value.png": {
-      "caveat": "Observational: the arms ran in parallel and frontier coverage was adaptive.",
+      "caveat": "Observational, and the escalate arm does not beat always-frontier, random-escalate \u2014 read panel C.",
       "data_digest": "370b4f954df89cdf",
       "dpi": 150,
       "figsize": [
         13.0,
-        6.0
+        8.0
       ],
       "generator": "benchmark.escalation.run_eval",
-      "goal": "The right panel is the answer. Two marginal intervals that fail to overlap is a conservative test of a difference; the paired distribution IS the difference, and the claim holds only if its interval excludes zero.",
+      "goal": "The middle panel decides escalate-vs-retry; the right panel decides whether the ladder is worth having at all. A point left of zero there is a competitor the escalate arm does not beat. Neither panel is about the shipped ladder's rungs \u2014 the arm drawn here is the corpus's most expensive models, which the ladder reaches last, if at all.",
       "limitations": [
         "Observational: the arms ran in parallel and which tasks got frontier coverage was adaptive. Small n \u2014 read the interval, not the point estimate.",
-        "Production's ladder steps one price rank at a time; this collapses it to its endpoint.",
+        "THE ESCALATE ARM IS NOT THE SHIPPED LADDER. It is the most expensive models in the corpus, and the shipped ladder does not step straight to them: it buys the cheapest ranks first and only then jumps, and those intermediate rungs are measured separately on the routing corpus as null or net-harmful. Read this as the value of escalating TO THIS ARM, never as what the shipped default achieves.",
+        "The escalate arm conditions on a cheap failure; the always-frontier and always-cheap arms do not, so they also cover tasks the cheap model already resolved.",
         "Scored on ALL 822 trajectories, not the 723-run per-step-stamped subset the other escalation figures use: a session outcome is read from the run header, so an unstamped run is still scorable here."
       ],
       "n": {
@@ -270,16 +271,14 @@
         "At session cadence the detector is trivially satisfied \u2014 the failed cheap session carries the task's target failing-check id \u2014 so this measures the LADDER's value, not the trigger's detection quality.",
         "The dashed line is the cheap model's UNCONDITIONAL base rate. The bars condition on a cheap failure on the same task, so the line is not a ceiling for them.",
         "instance-level bootstrap over 48 overlap tasks, not Wilson over sessions: several frontier sessions on one task are one draw, not several",
+        "the shipped ladder (rank_shortlist=3) walks qwen3.7-plus -> gpt-5-mini -> kimi-k3 over this corpus's price order: of the escalate arm it reaches kimi-k3, and only after billing qwen3.7-plus, gpt-5-mini first",
+        "cost is the provider's billed real_cost joined per (task, model, reasoning); an arm pays for the sessions it had to run first, so the escalate arm carries its failed cheap session. 'naive' is CACHE-BLIND \u2014 it charges a repeated model as if its prefix were cold; 'cache-aware' applies the shared cache model, whose hit rate is assumed, not measured. USD per marginal resolve is against the always-cheap floor, on that arm's own tasks \u2014 and the escalate arm's tasks are the fired subset, not the whole overlap set.",
         "822 trajectories read at session cadence (per-step stamping not required), status=OK_OFFLINE_ONLY"
       ],
-      "reading": "Read on EVERY trajectory in the corpus, not the per-step-stamped subset the other escalation figures score: a session outcome comes off the run header, so a run without per-step stamps still counts here. Measured on the overlap subset \u2014 tasks carrying BOTH a second cheap session and a frontier session, so the two arms are read on the same tasks. Left: after a cheap session failed a task, the share of FRONTIER sessions on that task that resolved it (escalate) against the share of a SECOND cheap session that resolved it (retry). Both intervals resample whole INSTANCES, because several frontier sessions on one task are not independent draws. Right: the PAIRED difference, escalate minus retry, on those same instance resamples, with its 95% interval and zero marked.",
-      "size": "wide",
-      "subtitle": "48 overlap tasks \u00b7 escalate 28/45 vs retry 7/34 \u00b7 lift 3.02x \u00b7 paired difference +0.416 [+0.239, +0.581] \u00b7 822/822 runs read",
+      "reading": "Read on EVERY trajectory in the corpus, not the per-step-stamped subset the other escalation figures score: a session outcome comes off the run header, so a run without per-step stamps still counts here. Measured on the overlap subset \u2014 tasks carrying BOTH a second cheap session and a frontier session, so every arm is read on the same tasks. Left: after a cheap session failed a task, the share of FRONTIER sessions on that task that resolved it (escalate) against the share of a SECOND cheap session that resolved it (retry). Both intervals resample whole INSTANCES, because several frontier sessions on one task are not independent draws. Middle: the PAIRED difference, escalate minus retry, on those same instance resamples, with its 95% interval and zero marked. Right: the same paired difference against the three trivial competitors \u2014 never being cheap (always frontier), never escalating (always cheap), and firing at random at the escalate arm's own rate.",
+      "size": "wide_tall",
+      "subtitle": "escalate arm = the top-2 models by price (zai-glm-5.2, kimi-k3) \u00b7 48 overlap tasks \u00b7 escalate 28/45 vs retry 7/34 \u00b7 lift 3.02x \u00b7 paired difference +0.416 [+0.239, +0.581] \u00b7 baselines not beaten: always_frontier, random_escalate \u00b7 USD per task acted on (naive): escalate 0.554 (0.91/marginal) \u00b7 retry 0.022 (0.05/marginal) \u00b7 frontier 0.566 (1.49/marginal) \u00b7 cheap 0.009 \u00b7 random 0.367 (1.37/marginal) \u00b7 USD per task acted on (cache-aware): escalate 0.554 (0.91/marginal) \u00b7 retry 0.011 (0.01/marginal) \u00b7 frontier 0.566 (1.49/marginal) \u00b7 cheap 0.009 \u00b7 random 0.363 (1.36/marginal) \u00b7 822/822 runs read",
       "terms": [
-        [
-          "frontier",
-          "the two most expensive models present in the corpus"
-        ],
         [
           "cheap",
           "the cheapest model present \u2014 the base pick and the retry counterfactual"
@@ -287,9 +286,29 @@
         [
           "overlap subset",
           "tasks with >=2 cheap sessions AND a frontier session"
+        ],
+        [
+          "always frontier",
+          "the frontier session's outcome, whatever the cheap sessions did"
+        ],
+        [
+          "always cheap",
+          "the first cheap session's outcome, unconditionally"
+        ],
+        [
+          "random escalate",
+          "escalation fired on a seeded subset sized to the real fire rate"
+        ],
+        [
+          "rung",
+          "a model the ladder can step to; the shipped shortlist walks the cheapest ranks one at a time and then jumps to the top rank"
+        ],
+        [
+          "frontier",
+          "the 2 most expensive models present in the corpus: zai-glm-5.2, kimi-k3"
         ]
       ],
-      "title": "At production cadence, escalating after a cheap failure beats retrying cheap"
+      "title": "Escalating to the top-two models beats a cheap retry, but not always-frontier or random"
     }
   },
   "half": "escalation",

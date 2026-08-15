@@ -510,6 +510,36 @@ default), which is loaded whole — so copy the packaged file before editing it.
 > codes (pytest/jest=1, cargo=101) are normalized correctly. The gate works with your test
 > suite as-is, regardless of its exit-code vocabulary.
 
+#### Inspect it: `shunt escalate`
+
+Escalation is a counter over verified failures, so "why did it not escalate?" is a
+question about *state*, not about logs. `shunt escalate` prints that state:
+
+```bash
+shunt escalate                       # the repo the router itself resolves
+shunt escalate --work-dir /path/to/repo
+shunt escalate --json                # the same report, machine-readable
+```
+
+It reports the effective config **and where each value came from** (your `router.yaml`
+or the built-in default), the task's current rung (rank floor, served model, reasoning
+arm), the live failure window — every `dedup_key`, its count, and for a non-counting
+event *why* it does not count (verified success, unconfirmed flake, non-blocking
+lint/infra) — whether the routing-collapse guard is currently suppressing escalation,
+and what the **next** decision would do. That last line is not a re-implementation: the
+CLI runs the router's own decision function against the persisted state, so it cannot
+drift from what the server will do.
+
+It is **read-only**, deliberately. A running server holds this state in memory and
+re-serializes the whole snapshot on its own cadence, so a CLI write would be silently
+clobbered or would restore a half-consistent ladder. Escalation is also boundary-only by
+construction (that is the cache-safety guarantee); a command that pushed a rung mid-flight
+would be the one path able to change a model outside a decision boundary. Change the knobs
+in `router.yaml` and restart instead.
+
+If it prints `INERT`, no repo resolved — escalation has no verified-failure signal at
+all. Set `capture.work_dir` / `SHUNT_WORK_DIR`, or launch shunt from inside the repo.
+
 ### Prior seeding from offline model estimates
 
 The exploration layer initializes Thompson priors from offline per-model success-rate

@@ -15,7 +15,11 @@ does nothing.
 [Limitations](#limitations-read-before-relying-on-it): the recurrence *trigger* is a null detector at
 the live cadence, so no measurement yet shows it to separate outcomes; the value is the *ladder's*,
 measured observationally at session cadence (3.02× — see the
-[session-value figure](#fig-session-value), the authoritative committed measurement). **It is armed when a repo is resolved** — escalation's only verified-failure signal is the repo's tests re-run off the wire.
+[session-value figure](#fig-session-value), the authoritative committed measurement), and that
+same figure shows the escalate arm losing to an always-frontier arm and tied with firing at
+random at the same rate. The one claim we do make, scoped exactly, with its assumptions, its
+limits and the pre-registered falsifiers that would have retracted it — two of which fired —
+is [the escalation claim](escalation-claim.md). **It is armed when a repo is resolved** — escalation's only verified-failure signal is the repo's tests re-run off the wire.
 The repo is resolved in order: explicit `capture.work_dir` / `capture.work_dirs` map, `SHUNT_WORK_DIR` env var, or the validated launch
 directory (when `trust_launch_dir: true`, the default). With a `git` repo at launch, `cd myrepo && shunt start` captures with zero configuration.
 Without any repo, a boot warning names which layer arm and says escalation is enabled but not armed; it is never silently inert.
@@ -335,8 +339,11 @@ The jump is bounded on both sides:
 registry, and the registry is ordered by price — which is not a capability ordering. On
 Shunt's own benchmark that ordering inverts: the cheapest enabled model out-scores several
 models priced well above it, so stepping one rank up can *lower* the pass rate on your
-workload. The measured per-model table is in
-[Results → How to read this page](results.md#how-to-read-this-page); check it against your
+workload. The per-rung evidence is drawn in
+[the ladder-rungs figure](routing.md#fig-ladder-rungs) — measured against the cheap base
+model, rung by rung, with the shipped shortlist's own visit path beside it — and the
+measured per-model table is in
+[Results → How to read this page](results.md#how-to-read-this-page); check both against your
 own registry before you trust the ladder. The effort rung has no such problem — it is the
 same model at a higher reasoning arm — which is why `effort_then_rank` is the default and
 why `rank_only` deserves the more careful look.
@@ -437,9 +444,17 @@ Be honest with yourself about where this does nothing:
   shipped recurrence counter to separate outcomes (as-shipped it fires on 723/723 offline runs
   at the base rate; its only real edge is the eval-only edit-gated family production cannot
   run). The value is the ladder's, measured observationally at session cadence (3.02×, as
-  committed in the [session-value figure](#fig-session-value)). Treat
+  committed in the [session-value figure](#fig-session-value)) — against a *cheap retry*.
+  Against the trivial arms in that figure's third panel the escalate arm does not win: it loses
+  to always-frontier on quality and is indistinguishable from firing at random at the same rate,
+  and the arm it measures is the corpus's two most expensive models, which the shipped shortlist
+  reaches only after buying its cheaper rungs. Treat
   it as a mechanism with positive but not-yet-identified value; the ε-greedy + logged-propensity
-  path is how it becomes measurable.
+  path is how it becomes measurable. The full-policy cost read over all 48 overlap tasks is
+  computed and is sound on money, but its two arms differ in outcome on none of those tasks, so
+  it cannot carry a cost-at-equal-quality claim. What we are and are not willing to assert, and
+  why the cost fallback does not hold either, is [the escalation claim](escalation-claim.md) — which also
+  lists what it would take to move any of this past pre-alpha.
 - **No repo resolved, no automatic signal.** Auto-escalation is inert until Shunt can resolve
   and test a repo. Without one, auto-escalation has *no* signal at all: `shunt flag`
   feeds the routing learner, not the in-process escalation log, so a task with no resolved `work_dir`
@@ -598,6 +613,21 @@ make escalation-eval
 
 The `--extra benchmark` flag (baked into the Make target) is required — it pulls the
 eval deps (`matplotlib`, `swebench`, …); a bare `uv run` strips them.
+
+The `session_value` figure and the session-cadence block of the report headline whichever
+registered escalation decision is under test. `--policy escalate` (the default, and the
+only one that reproduces the committed `metrics.json` bit for bit) is the shipped decision
+— escalate the next session to a frontier model once a cheap session failed. Pass
+`--policy always_cheap` to headline the never-escalate hold policy, `--policy
+always_frontier` to headline never-be-cheap, or `--policy cheap_retry` to headline the
+same-cost retry incumbent; the selected policy is dropped from the comparisons, and a
+non-default selection is recorded in the session-value payload so its numbers cannot be
+misattributed to the shipped escalate arm. Read a non-default run's `escalate`-keyed
+fields (`escalate.rate`, `paired_difference`, `lift`) as the *headline* policy's numbers —
+the JSON shape keeps those keys for backward compatibility and only the `policy` field
+says which policy they belong to; with `--policy cheap_retry` the escalate/retry contrast
+is 0 by construction (headline and incumbent are the same arm). An unknown policy name is
+a usage error naming the allowed set.
 
 It prints a JSON report and two metric tables to stdout, and renders the figures. The eval
 has **two independent blocks**, because they answer different questions:
@@ -918,26 +948,28 @@ OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production
 
 <!-- n: configurations=30 -->
 
-### At production cadence, escalating after a cheap failure beats retrying cheap {#fig-session-value}
+### Escalating to the top-two models beats a cheap retry, but not always-frontier or random {#fig-session-value}
 
-![At production cadence, escalating after a cheap failure beats retrying cheap](assets/figures/escalation/session_value.png)
+![Escalating to the top-two models beats a cheap retry, but not always-frontier or random](assets/figures/escalation/session_value.png)
 
-*48 overlap tasks · escalate 28/45 vs retry 7/34 · lift 3.02x · paired difference +0.416 [+0.239, +0.581] · 822/822 runs read*
+*escalate arm = the top-2 models by price (zai-glm-5.2, kimi-k3) · 48 overlap tasks · escalate 28/45 vs retry 7/34 · lift 3.02x · paired difference +0.416 [+0.239, +0.581] · baselines not beaten: always_frontier, random_escalate · USD per task acted on (naive): escalate 0.554 (0.91/marginal) · retry 0.022 (0.05/marginal) · frontier 0.566 (1.49/marginal) · cheap 0.009 · random 0.367 (1.37/marginal) · USD per task acted on (cache-aware): escalate 0.554 (0.91/marginal) · retry 0.011 (0.01/marginal) · frontier 0.566 (1.49/marginal) · cheap 0.009 · random 0.363 (1.36/marginal) · 822/822 runs read*
 *Produced by `benchmark/escalation/session_eval.py` (`session_cadence`) and
 `benchmark/escalation/plots.py` (`session_value`) over the committed corpus — the caption is
 generated from the data, so its counts and lift are re-derivable, not editorial.*
 
-> **Caveat.** Observational: the arms ran in parallel and frontier coverage was adaptive.
-**Reading.** Read on EVERY trajectory in the corpus, not the per-step-stamped subset the other escalation figures score: a session outcome comes off the run header, so a run without per-step stamps still counts here. Measured on the overlap subset — tasks carrying BOTH a second cheap session and a frontier session, so the two arms are read on the same tasks. Left: after a cheap session failed a task, the share of FRONTIER sessions on that task that resolved it (escalate) against the share of a SECOND cheap session that resolved it (retry). Both intervals resample whole INSTANCES, because several frontier sessions on one task are not independent draws. Right: the PAIRED difference, escalate minus retry, on those same instance resamples, with its 95% interval and zero marked.
+> **Caveat.** Observational, and the escalate arm does not beat always-frontier, random-escalate — read panel C.
+**Reading.** Read on EVERY trajectory in the corpus, not the per-step-stamped subset the other escalation figures score: a session outcome comes off the run header, so a run without per-step stamps still counts here. Measured on the overlap subset — tasks carrying BOTH a second cheap session and a frontier session, so every arm is read on the same tasks. Left: after a cheap session failed a task, the share of FRONTIER sessions on that task that resolved it (escalate) against the share of a SECOND cheap session that resolved it (retry). Both intervals resample whole INSTANCES, because several frontier sessions on one task are not independent draws. Middle: the PAIRED difference, escalate minus retry, on those same instance resamples, with its 95% interval and zero marked. Right: the same paired difference against the three trivial competitors — never being cheap (always frontier), never escalating (always cheap), and firing at random at the escalate arm's own rate.
 
-**What to look for.** The right panel is the answer. Two marginal intervals that fail to overlap is a conservative test of a difference; the paired distribution IS the difference, and the claim holds only if its interval excludes zero.
+**What to look for.** The middle panel decides escalate-vs-retry; the right panel decides whether the ladder is worth having at all. A point left of zero there is a competitor the escalate arm does not beat. Neither panel is about the shipped ladder's rungs — the arm drawn here is the corpus's most expensive models, which the ladder reaches last, if at all.
 
-**Terms.** *frontier* — the two most expensive models present in the corpus. *cheap* — the cheapest model present — the base pick and the retry counterfactual. *overlap subset* — tasks with >=2 cheap sessions AND a frontier session.
+**Terms.** *cheap* — the cheapest model present — the base pick and the retry counterfactual *overlap subset* — tasks with >=2 cheap sessions AND a frontier session *always frontier* — the frontier session's outcome, whatever the cheap sessions did *always cheap* — the first cheap session's outcome, unconditionally *random escalate* — escalation fired on a seeded subset sized to the real fire rate *rung* — a model the ladder can step to; the shipped shortlist walks the cheapest ranks one at a time and then jumps to the top rank *frontier* — the 2 most expensive models present in the corpus: zai-glm-5.2, kimi-k3
 
 **Notes.** At session cadence the detector is trivially satisfied — the failed cheap session carries the task's target failing-check id — so this measures the LADDER's value, not the trigger's detection quality.
 The dashed line is the cheap model's UNCONDITIONAL base rate. The bars condition on a cheap failure on the same task, so the line is not a ceiling for them.
 instance-level bootstrap over 48 overlap tasks, not Wilson over sessions: several frontier sessions on one task are one draw, not several
+the shipped ladder (rank_shortlist=3) walks qwen3.7-plus -> gpt-5-mini -> kimi-k3 over this corpus's price order: of the escalate arm it reaches kimi-k3, and only after billing qwen3.7-plus, gpt-5-mini first
+cost is the provider's billed real_cost joined per (task, model, reasoning); an arm pays for the sessions it had to run first, so the escalate arm carries its failed cheap session. 'naive' is CACHE-BLIND — it charges a repeated model as if its prefix were cold; 'cache-aware' applies the shared cache model, whose hit rate is assumed, not measured. USD per marginal resolve is against the always-cheap floor, on that arm's own tasks — and the escalate arm's tasks are the fired subset, not the whole overlap set.
 822 trajectories read at session cadence (per-step stamping not required), status=OK_OFFLINE_ONLY
-**Limits.** Observational: the arms ran in parallel and which tasks got frontier coverage was adaptive. Small n — read the interval, not the point estimate. Production's ladder steps one price rank at a time; this collapses it to its endpoint. Scored on ALL 822 trajectories, not the 723-run per-step-stamped subset the other escalation figures use: a session outcome is read from the run header, so an unstamped run is still scorable here.
+**Limits.** Observational: the arms ran in parallel and which tasks got frontier coverage was adaptive. Small n — read the interval, not the point estimate. THE ESCALATE ARM IS NOT THE SHIPPED LADDER. It is the most expensive models in the corpus, and the shipped ladder does not step straight to them: it buys the cheapest ranks first and only then jumps, and those intermediate rungs are measured separately on the routing corpus as null or net-harmful. Read this as the value of escalating TO THIS ARM, never as what the shipped default achieves. The escalate arm conditions on a cheap failure; the always-frontier and always-cheap arms do not, so they also cover tasks the cheap model already resolved. Scored on ALL 822 trajectories, not the 723-run per-step-stamped subset the other escalation figures use: a session outcome is read from the run header, so an unstamped run is still scorable here.
 
 <!-- n: escalate_sessions=45, overlap_instances=48, retry_sessions=34 -->

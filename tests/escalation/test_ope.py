@@ -1,12 +1,20 @@
-"""The identification guard: an OPE estimator that refuses logs without randomization."""
+"""The identification guard: an OPE estimator that refuses logs without randomization.
+
+The last section is the instrument-validity gate (R0), adjudicated by the SHARED gate
+(`benchmark.admissibility`, the pinned copy of `admissibility_gate.py`).
+"""
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 import random
+import statistics
+from typing import TYPE_CHECKING, Final
 
 import pytest
 
+from benchmark.admissibility import admissibility_verdict
 from benchmark.escalation.ope import (
     IDENTIFIED,
     NOT_IDENTIFIED,
@@ -15,6 +23,9 @@ from benchmark.escalation.ope import (
     estimate_policy_value,
     rows_from_records,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _COUNTER = itertools.count()
 
@@ -446,3 +457,153 @@ def test_clipping_is_reported_when_it_actually_binds() -> None:
     result = estimate_policy_value(rows, lambda row: 0.0, weight_clip=5.0)
     assert result.max_weight == 5.0
     assert result.n_clipped > 0
+
+
+# ── the instrument-validity gate (R0) — the module's VERDICTS, not its plumbing ──
+#
+# A refusal guard is only a good instrument if it can also ANSWER. This module exists to
+# refuse NOT_IDENTIFIED on deterministic logs; those tests prove the refusal fires, but a
+# module that only ever refused would still pass them. The two controls below prove the
+# assembled estimator actually RECOVERS a planted policy value (positive control) and
+# COLLAPSES to chance when the reward link is destroyed (shuffled-reward null), adjudicated
+# by the shared gate — the same two-sided discipline `test_instrument_validity.py` applies
+# to the policy sweep. Without these, any `identified` verdict the module ever emits would
+# be the report of an instrument that has never been shown to detect anything.
+
+_PLANTED_ESCALATE_VALUE = 0.7  # the ground-truth reward rate of the escalate arm, planted
+_PLANTED_HOLD_VALUE = 0.3  # the ground-truth reward rate of the hold arm, planted
+_PLANTED_EPSILON = 0.3
+
+
+def _planted_log(
+    n: int = 400, *, epsilon: float = _PLANTED_EPSILON, seed: int = 7
+) -> list[ExplorationLogRow]:
+    """A planted epsilon-greedy log with one DECISION per SESSION, per the module contract."""
+    # The reward is a SESSION-level verified grade — production makes ONE escalation decision
+    # per session — so each session's grade is drawn once from its arm's rate. That makes the
+    # destroyed-signal null below faithful: grades are permuted across sessions, never within.
+    rng = random.Random(seed)
+    rows: list[ExplorationLogRow] = []
+    for i in range(n):
+        held = rng.random() < epsilon
+        escalated = not held
+        propensity = epsilon if held else 1.0 - epsilon
+        reward = (
+            1.0
+            if rng.random() < (_PLANTED_ESCALATE_VALUE if escalated else _PLANTED_HOLD_VALUE)
+            else 0.0
+        )
+        rows.append(
+            ExplorationLogRow(
+                checkpoint_id=f"c{i}",
+                escalated=escalated,
+                propensity=propensity,
+                reward=reward,
+                randomized=True,
+                features={},
+                session_id=f"s{i}",
+            )
+        )
+    return rows
+
+
+def _shuffled_rewards(rows: Sequence[ExplorationLogRow], seed: int = 0) -> list[ExplorationLogRow]:
+    """The SAME rows with SESSION GRADES permuted ACROSS sessions — the signal destroyed."""
+    # Grades move across sessions (not within), because a session's verified grade is one value
+    # shared by its decisions — a within-session shuffle is a no-op on real data.
+    rng = random.Random(seed)
+    by_session: dict[str, list[ExplorationLogRow]] = {}
+    for row in rows:
+        by_session.setdefault(row.session_id, []).append(row)
+    sessions = list(by_session.values())
+    grades = [session[0].reward for session in sessions]
+    rng.shuffle(grades)
+    out: list[ExplorationLogRow] = []
+    for session, grade in zip(sessions, grades, strict=True):
+        for row in session:
+            out.append(dataclasses.replace(row, reward=grade))
+    return out
+
+
+def test_the_estimator_recovers_a_planted_policy_value_within_its_interval() -> None:
+    """Positive control: the DR estimate must CONTAIN the known ground-truth value.
+
+    Recovery to a fixed tolerance is a weaker contract — the planted value must sit INSIDE
+    the reported interval, the number the module itself certifies.
+    """
+    result = estimate_policy_value(_planted_log(), always_escalate)
+    assert result.status == IDENTIFIED
+    assert result.dr_estimate is not None
+    assert result.ci_low is not None and result.ci_high is not None
+    assert result.ci_low <= _PLANTED_ESCALATE_VALUE <= result.ci_high
+
+
+def test_the_estimator_recovers_a_planted_contrast_with_an_interval_excluding_zero() -> None:
+    """The contrast — the actual decision quantity — must recover the planted +0.4 with CI>0."""
+    result = estimate_policy_value(_planted_log(), always_escalate)
+    assert result.contrast_estimate is not None
+    assert result.contrast_ci_low is not None and result.contrast_ci_high is not None
+    planted_contrast = _PLANTED_ESCALATE_VALUE - _PLANTED_HOLD_VALUE
+    # At n=400 sessions the point estimate carries ~0.09 of sampling noise, so the planted
+    # value must sit INSIDE the reported interval (the load-bearing contract) rather than a
+    # fixed 0.06 tolerance. The interval-excluding-zero clause is what proves the signal is
+    # real and the estimator sees it.
+    assert result.contrast_ci_low <= planted_contrast <= result.contrast_ci_high
+    assert result.contrast_ci_low > 0.0  # the planted signal is real and the interval sees it
+
+
+# The destroyed-signal null is estimated over this many independent reward shuffles; the
+# median is the representative destroyed-signal score and the 97.5th percentile of |null|
+# is the empirical chance band. A single draw's own CI must NOT serve as the band — that is
+# self-referential (the null would pass by having a wide interval) and the band must come
+# from the null DISTRIBUTION, not from the one draw being judged.
+_NULL_DRAWS: Final[int] = 100
+
+
+def _null_contrasts(rows: Sequence[ExplorationLogRow]) -> tuple[list[float], float]:
+    """Destroyed-signal contrast across `_NULL_DRAWS` independent reward shuffles.
+
+    Returns (all draws, median). A leakage-free instrument centres the median on chance.
+    """
+    draws = [
+        estimate_policy_value(_shuffled_rewards(rows, seed=seed), always_escalate).contrast_estimate
+        for seed in range(_NULL_DRAWS)
+    ]
+    filtered = [d for d in draws if d is not None]
+    if not filtered:
+        raise AssertionError(
+            f"all {_NULL_DRAWS} destroyed-signal shuffles returned NOT_IDENTIFIED — the null "
+            "has no score to judge, which is itself a gate failure, not a pass"
+        )
+    return filtered, statistics.median(filtered)
+
+
+def test_the_instrument_clears_the_shared_admissibility_gate() -> None:
+    """R0 two-sided control through the SHARED gate, not a local re-derivation."""
+    # The band is the null's spread AROUND ITS OWN CENTRE, never around the chance level: a band
+    # measured around chance absorbs a uniformly-shifted null (an instrument manufacturing a
+    # constant +0.4 sits "at chance" against a band grown from that same shift), while a band
+    # measured around the null's median judges the null's CENTRE against the true chance level.
+    base = _planted_log()
+    positive = estimate_policy_value(base, always_escalate)
+    null_draws, null_median = _null_contrasts(base)
+    band = sorted(abs(d - null_median) for d in null_draws)[int(0.975 * (len(null_draws) - 1))]
+    verdict = admissibility_verdict(
+        positive.contrast_estimate,
+        null_median,
+        chance_level=0.0,
+        chance_band=band,
+    )
+    assert verdict.positive_passed
+    assert verdict.null_at_chance
+    assert verdict.admissible
+
+
+def test_the_instrument_refuses_where_it_cannot_answer() -> None:
+    """Null: a deterministic log (no randomization) must still refuse with NOT_IDENTIFIED."""
+    rows = [_row(escalated=True, propensity=1.0, reward=1.0, randomized=False) for _ in range(500)]
+    result = estimate_policy_value(rows, always_escalate)
+    assert result.status == NOT_IDENTIFIED
+    assert result.dr_estimate is None
+    assert result.contrast_estimate is None
+    assert not result.contrast_excludes_zero

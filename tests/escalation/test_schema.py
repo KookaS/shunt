@@ -4,6 +4,8 @@ fields recomputable.
 
 from __future__ import annotations
 
+import pytest
+
 from benchmark.escalation import schema
 from benchmark.escalation.authenticity import errors, verify_trajectory
 from tests.escalation.factories import make_step, make_trajectory
@@ -110,6 +112,38 @@ def test_dump_jsonl_scrubs_a_secret_from_free_text(tmp_path) -> None:
     reloaded = schema.load_jsonl(path)
     assert errors(verify_trajectory(reloaded)) == []
     assert reloaded.header.redacted is True
+
+
+_POINTER = (
+    "version https://git-lfs.github.com/spec/v1\n"
+    "oid sha256:1a2b3c4d5e6f70819293a4b5c6d7e8f90112233445566778899aabbccddeeff0\n"
+    "size 12345\n"
+)
+
+
+def test_load_jsonl_on_an_lfs_pointer_names_the_remedy(tmp_path) -> None:
+    # A clone without `git lfs pull` gets pointer stubs, not trajectories. The old failure was an
+    # opaque JSON parse error naming nothing; the fix must name the command that fixes it.
+    path = tmp_path / "astropy__astropy-12907__model__high.jsonl"
+    path.write_text(_POINTER, encoding="utf-8")
+    with pytest.raises(schema.LfsPointerError) as excinfo:
+        schema.load_jsonl(path)
+    assert "git lfs pull" in str(excinfo.value)
+    assert str(path) in str(excinfo.value)
+
+
+def test_preflight_lfs_raises_on_a_pointer_and_passes_on_real_data(tmp_path) -> None:
+    # The CLI preflight must fail the whole run, never skip the stub — a smaller corpus would
+    # report different numbers, which is worse than a crash.
+    real = tmp_path / "real.jsonl"
+    schema.dump_jsonl(make_trajectory([make_step(success=True)]), real)
+    schema.preflight_lfs([real])  # clean corpus: no raise
+    pointer = tmp_path / "pointer.jsonl"
+    pointer.write_text(_POINTER, encoding="utf-8")
+    with pytest.raises(schema.LfsPointerError, match="git lfs pull"):
+        schema.preflight_lfs([real, pointer])
+    assert schema.is_lfs_pointer(pointer) is True
+    assert schema.is_lfs_pointer(real) is False
 
 
 def test_content_hash_changes_when_a_label_is_mutated(tmp_path) -> None:

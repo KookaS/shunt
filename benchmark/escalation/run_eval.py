@@ -28,6 +28,8 @@ import matplotlib
 
 from benchmark import plot_frame
 from benchmark.escalation import (
+    cost_join,
+    coverage_sensitivity,
     datasets,
     deployability,
     features,
@@ -36,8 +38,10 @@ from benchmark.escalation import (
     policy_eval,
     prefix_eval,
     replay,
+    session_eval,
 )
 from benchmark.escalation.authenticity import errors, verify_trajectory
+from benchmark.escalation.coverage_sensitivity import CoverageSensitivity
 
 # The class is imported directly because `EvalReport.deployability` is the field name a reader
 # looks for in the JSON, and a field cannot be annotated with the module it shadows.
@@ -47,9 +51,11 @@ from benchmark.escalation.ope import (
     estimate_policy_value,
     rows_from_records,
 )
-from benchmark.escalation.schema import Trajectory, load_jsonl
+from benchmark.escalation.policies import ARM_ESCALATE, build_policy
+from benchmark.escalation.schema import Trajectory, load_jsonl, preflight_lfs
 from benchmark.escalation.session_eval import SessionCadenceReport, session_cadence
 from benchmark.plot_frame import Annotations
+from benchmark.routing import cache_cost
 from shunt.router.escalation import EscalationConfig
 from shunt.router.policy import load_router_policy, packaged_policy_path
 
@@ -184,6 +190,10 @@ class EvalReport:
     # Observational (parallel arms, adaptive coverage), and small-n; reported as context for the
     # per-step sweep, never as a gate. None when the corpus cannot support it.
     session_cadence: SessionCadenceReport | None = None
+    # How the session arms were priced: the join's own coverage, and where each model's cache
+    # numbers came from. None when the corpus could not be priced at all — which is a LOUD
+    # absence (the cost block is missing entirely), never a cost computed on a subset.
+    cost_provenance: dict[str, object] | None = None
     # The per-run continuous recurrence scores behind `escalation_decision.png`, aligned
     # index-for-index over the STAMPED trajectories. Not serialized — it is figure input, not a
     # reported statistic (the AUROCs computed off it are the reportable numbers, and those DO
@@ -209,6 +219,11 @@ class EvalReport:
     policy_value: PolicyValueEstimate | None = None
     # The prefix half's scope, published beside its verdict rather than buried in a depth row.
     prefix_admission: PrefixAdmission | None = None
+    # The canonical cell re-scored on nested stamping-coverage strata. Per-step stamping on this
+    # corpus is model-correlated, so the canonical AUROC is measured on a population whose model
+    # mix is not the corpus's; this is the robustness read that says whether the separation is
+    # that artifact. None when the corpus supports no stratum (one outcome class, or no models).
+    coverage_sensitivity: CoverageSensitivity | None = None
     # How many label shuffles every null on this report was estimated from.
     n_permutations: int = metrics.MIN_PERMUTATIONS
 
@@ -278,6 +293,10 @@ class EvalReport:
             ),
             "prefix_admission": (
                 None if self.prefix_admission is None else self.prefix_admission.to_dict()
+            ),
+            # The canonical cell's robustness to the corpus's model-correlated stamping coverage.
+            "coverage_sensitivity": (
+                None if self.coverage_sensitivity is None else self.coverage_sensitivity.to_dict()
             ),
             "window_sensitivity": {k: round(v, 4) for k, v in self.window_sensitivity.items()},
             "policy_cells": [c.to_dict() for c in self.policy_cells],
@@ -596,8 +615,13 @@ def evaluate(
     depths: Sequence[int] = features.DEFAULT_DEPTHS,
     n_permutations: int = metrics.DEFAULT_PERMUTATIONS,
     exploration_rows: Sequence[Mapping[str, object]] | None = None,
+    policy: str = ARM_ESCALATE,
 ) -> EvalReport:
-    """Score the shipped policy and the prefix risk model, then gate on the permutation null."""
+    """Score the shipped policy and the prefix risk model, then gate on the permutation null.
+
+    ``policy`` names the registered session-cadence escalation decision to headline (see
+    `session_eval.session_cadence`); the default is the shipped escalate decision, bit for bit.
+    """
     # `stamped` is still computed here for the census (`n_stamped`), the policy half and the
     # coverage note. `prefix_eval` re-applies the same filter inside `corpus_census` — that is not
     # redundancy to be tidied away: the gate must live where a direct `evaluate_depth` caller
@@ -625,6 +649,7 @@ def evaluate(
         edit_gated,
         _deployability(stamped, CountingMode.EDIT_GATED),
     )
+    costs, cost_provenance = _session_costs(trajectories)
     recurrence = _recurrence_scores(stamped)
     recurrence_null, recurrence_null_band = (
         _recurrence_null(recurrence, n_permutations=n_permutations)
@@ -647,13 +672,22 @@ def evaluate(
         notes=_corpus_notes(trajectories, stamped, policy_cells),
         # The session-cadence escalation value, computed whenever the corpus carries enough
         # multi-arm instances to estimate it. Observational context, never a gate.
-        session_cadence=session_cadence(trajectories),
+        session_cadence=session_cadence(trajectories, costs, policy=policy),
+        cost_provenance=cost_provenance,
         recurrence_scores=recurrence,
         recurrence_null=recurrence_null,
         recurrence_null_band=recurrence_null_band,
         window_sensitivity=_window_sensitivity(stamped),
         canonical_model_arms=_canonical_model_arms(stamped),
         prefix_admission=_prefix_admission(stamped, depth_reports),
+        # Re-scored on the WHOLE corpus, not `stamped`: the strata are defined by what stamping
+        # dropped, so the shares have to be read where the dropped rows are still visible.
+        coverage_sensitivity=coverage_sensitivity.evaluate(
+            trajectories,
+            _with_shipped(grid),
+            shipped_grid_point(),
+            n_permutations=n_permutations,
+        ),
         n_permutations=n_permutations,
         # Only ever computed from a REAL exploration log. Trajectories carry no propensity
         # (the committable whitelist has no `action`/`propensity`), so deriving rows from them
@@ -800,6 +834,38 @@ def _canonical_annotations(report: EvalReport) -> Annotations:
     )
 
 
+def _session_costs(
+    trajectories: Sequence[Trajectory],
+) -> tuple[session_eval.SessionCosts | None, dict[str, object] | None]:
+    """Price every session off the routing benchmark, or price NONE of them and say why."""
+    # The join is total or it raises (`cost_join`), and this is the only place that raise is
+    # caught: a corpus the routing benchmark never ran — a synthetic fixture, a fresh dataset —
+    # must not fail the whole eval, but it must not get a cost block computed on the subset it
+    # happens to overlap either. So the cost axis disappears entirely and the reason is logged.
+    try:
+        costs, summary = cost_join.session_costs(trajectories)
+    except cost_join.CostJoinError as exc:
+        logger.error("escalation cost axis unavailable: %s", exc)  # noqa: TRY400
+        return (None, None)
+    return (
+        costs,
+        {
+            "join": summary.to_dict(),
+            "source": "benchmark/routing/results.csv real_cost (provider-billed)",
+            # Both currencies are published because they are different quantities: a naive total
+            # charges a repeated model as if its prefix were cold.
+            "currencies": {
+                cost_join.NAIVE: "sum of billed real_cost per attempt, cache-blind",
+                cost_join.CACHE_AWARE: (
+                    "a repeat of the same model banks its registry cache discount at an ASSUMED "
+                    f"{cache_cost.ASSUMED_CACHE_HIT_RATE} hit rate"
+                ),
+            },
+            "cache_prices": cost_join.cache_price_provenance(trajectories),
+        },
+    )
+
+
 def _session_run_annotations(report: EvalReport) -> Annotations:
     """Run-level facts for the ONE figure scored on the whole corpus, not the stamped subset."""
     # `session_cadence()` is handed every trajectory and reads only `header.terminal_resolved`
@@ -922,12 +988,15 @@ def _save_plots(report: EvalReport, out_dir: Path, metrics_dir: Path | None = No
     canonical_scope = _merge(run, _canonical_annotations(report))
     provenance = _provenance(report, out_dir)
     cell = canonical_cell(report)
+    # ONE verdict, derived from the session-cadence report, drawn on all three scope strips: a
+    # literal here would print a green VALUE box on three canvases the moment a trivial arm wins.
+    verdict = plots.session_value_verdict(report.session_cadence)
     try:
-        _draw_decision(report, out_dir, run, provenance)
+        _draw_decision(report, out_dir, run, provenance, verdict)
         _draw_corpus(report, out_dir, canonical_scope, provenance)
         if cell is not None:
-            _draw_operating_point(report, cell, out_dir, canonical_scope, provenance)
-            _draw_budget(cell, out_dir, canonical_scope, provenance)
+            _draw_operating_point(report, cell, out_dir, canonical_scope, provenance, verdict)
+            _draw_budget(cell, out_dir, canonical_scope, provenance, verdict)
         else:
             # Only reachable on a hand-built report: `evaluate` guarantees the shipped point is in
             # both grids. The per-cell figures are skipped rather than drawn off some other cell — a
@@ -986,7 +1055,11 @@ def _retract_figure_manifest(out_dir: Path) -> None:
 
 
 def _draw_decision(
-    report: EvalReport, out_dir: Path, run: Annotations, provenance: plot_frame.Provenance
+    report: EvalReport,
+    out_dir: Path,
+    run: Annotations,
+    provenance: plot_frame.Provenance,
+    value_verdict: str,
 ) -> None:
     """Figure 1 — does the trigger detect, and does the counting mode decide the answer."""
     scores = report.recurrence_scores
@@ -1006,6 +1079,7 @@ def _draw_decision(
         null=report.recurrence_null,
         band=report.recurrence_null_band,
         shipped_n=SHIPPED_ESCALATE_AFTER_N,
+        value_verdict=value_verdict,
     )
     plot_frame.save(
         fig,
@@ -1023,13 +1097,14 @@ def _draw_operating_point(
     out_dir: Path,
     run: Annotations,
     provenance: plot_frame.Provenance,
+    value_verdict: str,
 ) -> None:
     """Figure 2 — BOTH counting modes at the shipped knobs, plus the canonical cell's nulls."""
     size = plot_frame.WIDE_TALL
     fig = plot_frame.new_figure(size)
     grid = fig.add_gridspec(2, 2, height_ratios=[16, 1])
     axes = [fig.add_subplot(grid[0, 0]), fig.add_subplot(grid[0, 1]), fig.add_subplot(grid[1, :])]
-    extra = plots.operating_point(report.headline_cell, cell, axes)
+    extra = plots.operating_point(report.headline_cell, cell, axes, value_verdict)
     plot_frame.save(
         fig,
         out_dir / "operating_point.png",
@@ -1073,9 +1148,11 @@ def _draw_session(
     run: Annotations,
     provenance: plot_frame.Provenance,
 ) -> None:
-    """Figure 4 — escalate vs retry at the cadence production actually runs."""
-    size = plot_frame.WIDE
-    fig, axes = plot_frame.subplots(size, 1, 2)
+    """Figure 4 — escalate vs retry vs the trivial arms, at production's cadence."""
+    # Three panels, so WIDE_TALL: the third panel is the baseline forest, and squeezing it into
+    # the two-panel canvas overlaps its interval labels with the histogram's legend.
+    size = plot_frame.WIDE_TALL
+    fig, axes = plot_frame.subplots(size, 1, 3)
     extra = plots.session_value(sc, axes)
     plot_frame.save(
         fig,
@@ -1111,14 +1188,18 @@ def _draw_corpus(
 
 
 def _draw_budget(
-    cell: PolicyCell, out_dir: Path, run: Annotations, provenance: plot_frame.Provenance
+    cell: PolicyCell,
+    out_dir: Path,
+    run: Annotations,
+    provenance: plot_frame.Provenance,
+    value_verdict: str,
 ) -> None:
     """Figure 6 — what firing costs, and what it pre-empts."""
     size = plot_frame.WIDE_TALL
     fig = plot_frame.new_figure(size)
     grid = fig.add_gridspec(2, 2, height_ratios=[16, 1])
     axes = [fig.add_subplot(grid[0, 0]), fig.add_subplot(grid[0, 1]), fig.add_subplot(grid[1, :])]
-    extra = plots.escalation_budget(cell, axes)
+    extra = plots.escalation_budget(cell, axes, value_verdict)
     plot_frame.save(
         fig,
         out_dir / "escalation_budget.png",
@@ -1184,6 +1265,13 @@ def _metrics_payload(report: EvalReport) -> dict[str, object]:
             },
             "corpus_digest": _corpus_digest(report),
         },
+        # NOT a figure slug: a robustness read, published beside the figures because a falsifier
+        # is adjudicated on it. The canonical cell re-scored on nested stamping-coverage strata —
+        # each rung against its OWN nulls, so a rung is judged inside its null rather than by a
+        # point estimate compared to the unrestricted one.
+        "coverage_sensitivity": (
+            None if report.coverage_sensitivity is None else report.coverage_sensitivity.to_dict()
+        ),
         "escalation_decision.png": {
             "auroc_as_shipped": (
                 None if scores is None else round(metrics.auroc(scores.plain, scores.labels), 4)
@@ -1210,7 +1298,11 @@ def _metrics_payload(report: EvalReport) -> dict[str, object]:
             "as_shipped": [_sweep_scalars(c) for c in report.policy_cells],
             "edit_gated": [_sweep_scalars(c) for c in report.policy_cells_edit_gated],
         },
-        "session_value.png": (None if sc is None else sc.to_dict()),
+        # The cost provenance rides INSIDE the figure's block, not beside it: a `usd_per_marginal
+        # _resolve` read without knowing the currency it is quoted in is worse than no number.
+        "session_value.png": (
+            None if sc is None else {**sc.to_dict(), "cost_provenance": report.cost_provenance}
+        ),
         "corpus_and_coverage.png": {
             # Panels B and C only: the coverage census and the prefix waterfall are counter-free.
             "counting_panels_b_c": CANONICAL_COUNTING,
@@ -1442,6 +1534,63 @@ def canonical_cell(report: EvalReport) -> PolicyCell | None:
     return next((c for c in report.policy_cells_edit_gated if _is_shipped(c)), None)
 
 
+def _headline_word(sc: SessionCadenceReport) -> str:
+    """What the session-cadence report's headline arm is called in stdout prose."""
+    # The default is the shipped escalate decision, so the default summary text is unchanged; a
+    # non-default --policy selection must name itself or its paired reads read as escalate's.
+    if sc.policy == ARM_ESCALATE:
+        return "escalate"
+    return sc.policy
+
+
+def _print_full_policy_costs(sc: SessionCadenceReport) -> None:
+    """The arms as full policies on ONE denominator, with the paired difference vs frontier."""
+    if not sc.full_policy_costs:
+        return
+    print(  # noqa: T201
+        f"\n  FULL-POLICY cost over all {sc.n_overlap_instances} overlap instances "
+        "(one denominator; a quiet arm still pays cheap):"
+    )
+    for cost in sc.full_policy_costs:
+        marginal = (
+            "no marginal resolve"
+            if cost.marginal_cost_per_resolve is None
+            else f"${cost.marginal_cost_per_resolve:.2f}/marginal resolve"
+        )
+        spans = "" if cost.diff_excludes_zero else " — spans 0"
+        print(  # noqa: T201
+            f"  [{cost.currency}] {cost.name}: ${cost.cost_per_instance:.4f}/instance "
+            f"[{cost.cost_ci[0]:.4f}, {cost.cost_ci[1]:.4f}], resolve {cost.resolve_rate:.3f}"
+            f" — {marginal}; minus always_frontier cost "
+            f"{cost.cost_diff_vs_always_frontier:+.4f} "
+            f"[{cost.cost_diff_ci[0]:+.4f}, {cost.cost_diff_ci[1]:+.4f}]{spans}"
+            f", resolve {cost.resolve_diff_vs_always_frontier:+.4f} "
+            f"[{cost.resolve_diff_ci[0]:+.4f}, {cost.resolve_diff_ci[1]:+.4f}] "
+            f"({cost.n_outcome_differs} instances differ)"
+        )
+
+
+def _print_coverage_sensitivity(report: EvalReport) -> None:
+    """The canonical cell along the stamping-coverage ladder — strictest rung last."""
+    sensitivity = report.coverage_sensitivity
+    if sensitivity is None or not sensitivity.strata:
+        return
+    print(  # noqa: T201
+        "\nCOVERAGE SENSITIVITY (canonical cell re-scored on nested stamped-share strata):"
+    )
+    print(  # noqa: T201
+        f"{'>=share':>8} {'models':>7} {'n':>5} {'kept':>6} {'auroc':>7} {'delta':>7} "
+        f"{'len-only':>9} {'clears':>7}"
+    )
+    for s in sensitivity.strata:
+        length = "n/a" if s.length_baseline_auroc is None else f"{s.length_baseline_auroc:.3f}"
+        print(  # noqa: T201
+            f"{s.min_stamped_share:>8.3f} {len(s.models):>7} {s.n_stamped:>5} "
+            f"{s.retained_share:>6.3f} {s.auroc:>7.3f} {s.delta_auroc:>+7.3f} "
+            f"{length:>9} {str(s.clears_null):>7}"
+        )
+
+
 def _print_summary(report: EvalReport) -> None:
     """Print the policy sweep and the prefix-model table to stdout."""
     print(f"\nstatus: {report.status} — {report.reason}")  # noqa: T201
@@ -1477,6 +1626,7 @@ def _print_summary(report: EvalReport) -> None:
                 f"{f'[{c.precision_ci[0]:.3f}, {c.precision_ci[1]:.3f}]':>18} "
                 f"{c.base_failure_rate:>6.3f} {lift:>6}  len-only {length}"
             )
+    _print_coverage_sensitivity(report)
     # Both p-values, side by side: `raw p` is this depth's own null and gates nothing, `fw p` is
     # the family-wise adjusted p the verdict is read off. Printing only the first is how a max over
     # depths came to be quoted as if it were one test.
@@ -1508,8 +1658,13 @@ def _print_summary(report: EvalReport) -> None:
         sc = report.session_cadence
         lift = "n/a" if sc.lift is None else f"{sc.lift:.2f}x"
         print("\nsession-cadence escalation value (observational, same-instance subset):")  # noqa: T201
+        if sc.policy != ARM_ESCALATE:
+            # The headline is not the shipped escalate decision — say which policy the paired
+            # reads below are about, or a non-default --policy run reads as an escalate result.
+            print(f"  policy under test: {sc.policy}")  # noqa: T201
+        headline = "frontier" if sc.policy == ARM_ESCALATE else sc.policy
         print(  # noqa: T201
-            f"  P(frontier resolves | cheap failed) = {sc.escalate_rate:.3f} "
+            f"  P({headline} resolves | cheap failed) = {sc.escalate_rate:.3f} "
             f"[{sc.escalate_ci[0]:.3f}, {sc.escalate_ci[1]:.3f}] "
             f"({sc.n_escalated_resolved}/{sc.n_escalated})"
         )
@@ -1519,6 +1674,27 @@ def _print_summary(report: EvalReport) -> None:
             f"({sc.n_retried_resolved}/{sc.n_retried})"
         )
         print(f"  lift {lift} over {sc.n_overlap_instances} overlap instances")  # noqa: T201
+        for contrast in sc.comparisons:
+            # The arms that can kill the claim, printed at the same prominence as the lift: a
+            # baseline that beats the escalate arm must not be reachable only through the JSON.
+            print(  # noqa: T201
+                f"  vs {contrast.name}: {contrast.rate:.3f} "
+                f"({contrast.resolved}/{contrast.n}) — {_headline_word(sc)} minus it "
+                f"{contrast.diff_estimate:+.4f} "
+                f"[{contrast.diff_ci[0]:+.4f}, {contrast.diff_ci[1]:+.4f}]"
+                f"{'' if contrast.diff_excludes_zero else ' — spans 0'}"
+            )
+        for cost in sc.costs:
+            marginal = (
+                "no marginal resolve"
+                if cost.marginal_cost_per_resolve is None
+                else f"${cost.marginal_cost_per_resolve:.2f}/marginal resolve"
+            )
+            print(  # noqa: T201
+                f"  [{cost.currency}] {cost.name}: ${cost.total_cost:.4f} total, "
+                f"${cost.cost_per_instance:.4f}/instance — {marginal}"
+            )
+        _print_full_policy_costs(sc)
     for note in report.notes:
         print(f"\nNOTE: {note}", file=sys.stderr)  # noqa: T201
 
@@ -1547,6 +1723,18 @@ def _depth(raw: str) -> int:
             f"must be > 0 (a decision depth is an absolute step count); got {value}"
         )
     return value
+
+
+def _session_policy(raw: str) -> str:
+    """argparse type: a registered session-cadence escalation policy, checked at parse time."""
+    # The registry's own ValueError (KeyError-style, naming the allowed policies) is converted to
+    # a usage error here so an unknown --policy prints argparse's usage line rather than a
+    # traceback — the same CLI-contract-enforced-at-parse philosophy as `_permutations`.
+    try:
+        build_policy(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    return raw
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1597,6 +1785,17 @@ def _build_parser() -> argparse.ArgumentParser:
             "value — or, on a deterministic log, its honest refusal."
         ),
     )
+    parser.add_argument(
+        "--policy",
+        type=_session_policy,
+        default=ARM_ESCALATE,
+        help=(
+            f"Which registered session-cadence escalation policy to headline. Default "
+            f"'{ARM_ESCALATE}' (the shipped escalate decision), which reproduces the committed "
+            "numbers bit for bit. 'always_cheap' headlines the never-escalate hold policy, "
+            "'always_frontier' the never-be-cheap arm, 'cheap_retry' the same-cost retry incumbent."
+        ),
+    )
     return parser
 
 
@@ -1606,7 +1805,11 @@ def main(argv: list[str] | None = None) -> int:
     if not args.live_dir.exists():
         logger.error("live trajectory directory not found: %s", args.live_dir)
         return 1
-    trajectories = [load_jsonl(p) for p in sorted(args.live_dir.glob("*.jsonl"))]
+    corpus = sorted(args.live_dir.glob("*.jsonl"))
+    # Before any work: a clone without `git lfs pull` holds pointer stubs, and the user should
+    # learn that in under a second rather than partway through a multi-minute run.
+    preflight_lfs(corpus)
+    trajectories = [load_jsonl(p) for p in corpus]
     if not trajectories:
         logger.error("no trajectories found under %s", args.live_dir)
         return 1
@@ -1624,6 +1827,7 @@ def main(argv: list[str] | None = None) -> int:
         depths=args.depths,
         n_permutations=args.permutations,
         exploration_rows=exploration_rows,
+        policy=args.policy,
     )
     if args.plots_dir is not None:
         _save_plots(report, args.plots_dir, args.metrics_dir)

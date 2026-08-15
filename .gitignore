@@ -97,9 +97,12 @@ reports/
 # under `docs_dir` and `mkdocs build --strict` fails a link it cannot resolve. Both reports
 # dirs now hold only derived intermediates, which stay ignored by the `reports/` rule above.
 
-# metrics.json is the one exception and is TRACKED: it holds the exact scalars each
+# metrics.json is one exception and is TRACKED: it holds the exact scalars each
 # escalation figure renders, so a committed PNG can be checked against its numbers after
 # the fact. Without it the images are the only artifact and nothing can diff them.
+# difficulty_go_no_go.json is the same class of artifact: the claim page quotes its scalars
+# (the predicted-difficulty go/no-go outcome), so it is tracked for the same reason.
 !benchmark/escalation/reports/
 benchmark/escalation/reports/*
 !benchmark/escalation/reports/metrics.json
+!benchmark/escalation/reports/difficulty_go_no_go.json

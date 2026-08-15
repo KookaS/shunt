@@ -138,11 +138,13 @@ def _failure_event_from_payload(raw: object) -> FailureEvent:
     )
 
 
-def _restore_failure_log(raw_log: dict[str, Any]) -> dict[str, list[FailureEvent]]:
+def restore_failure_log(raw_log: dict[str, Any]) -> dict[str, list[FailureEvent]]:
     """Decode a persisted failure log; any malformed entry degrades the WHOLE log to empty."""
     # All-or-nothing on purpose: a half-decoded window yields a wrong recurrence count, whereas an
     # empty one only delays an escalation and self-heals within `stale_window` decisions. This
     # path runs at router boot (proxy/server.py), so it must never raise.
+    # Public because `router/inspection.py` (the `shunt escalate` surface) decodes the SAME
+    # snapshot: a second decoder there could disagree with the engine about what is countable.
     try:
         return {
             str(key): [_failure_event_from_payload(e) for e in _as_list(events)]
@@ -644,7 +646,7 @@ class RouterEngine:
         raw_floor = state.get("rank_floor")
         with self._lock:
             if isinstance(raw_log, dict):
-                self._failure_log = _restore_failure_log(_state_keyed(raw_log, "failure_log"))
+                self._failure_log = restore_failure_log(_state_keyed(raw_log, "failure_log"))
             if isinstance(raw_index, dict):
                 self._task_decision_index = _restore_int_map(
                     _state_keyed(raw_index, "decision_index")

@@ -48,10 +48,26 @@ class EscalationConfig:
     enabled: bool = True
     # Ships ON by owner choice (2026-08-08), with the honest caveats carried in docs/escalation.md
     # and configuration.md: the recurrence trigger is a NULL DETECTOR at the live cadence (the
-    # as-shipped counter fires on 727/727 offline runs at the base rate; its only real edge is the
+    # as-shipped counter fires on 723/723 offline runs at the base rate; its only real edge is the
     # eval-only edit-gated family production cannot run), so no measurement yet shows the shipped
-    # counter to separate outcomes; the ladder's VALUE is real but observational (session-cadence
-    # 2.51x lift). The ε-greedy + logged-propensity path is how the value becomes identified. And
+    # counter to separate outcomes; the ladder's VALUE is real but OBSERVATIONAL, not causal (the
+    # arms ran in parallel under adaptive coverage): at session cadence, escalating resolves
+    # +0.416 [+0.239, +0.581] more tasks per instance than a same-cost retry (n=48 paired;
+    # a 3.02x ratio, which carries no interval). Read it DIRECTIONALLY, not as a size — the retry
+    # arm covers 27 instances to escalate's 30. THAT CONTRAST IS THE WEAKEST OF THE FOUR BASELINES
+    # AND MUST NEVER BE QUOTED ALONE: on the same 48 instances the escalate arm LOSES to
+    # always-frontier on quality (-0.108 [-0.165, -0.056], interval excludes zero) and is
+    # INDISTINGUISHABLE from firing at random at the same rate (-0.039 [-0.152, +0.084]). There is
+    # no cost result to fall back on either — the per-arm USD-per-resolve figures are computed on
+    # different task sets against different floors, so they are not comparable. The common-task-set
+    # (full-policy) read now exists and is sound on money (-0.2168 [-0.3292, -0.1215] per instance
+    # against always-frontier over all 48), but its QUALITY axis is empty: the two arms differ in
+    # outcome on 0 of 48 instances, so it is context, not a claim. The measured arm is the corpus's
+    # two most expensive models, not the ladder `rank_shortlist` walks. Shipping ON is a DESIGN
+    # choice (one decision per session, cache-safe, bounded spend), not a measured win. The scoped
+    # claim, its falsifiers and its verdicts are
+    # in docs/escalation-claim.md. The ε-greedy + logged-propensity path is how value
+    # becomes identified — see benchmark/escalation/reports/metrics.json. And
     # escalation is INERT without a capture.work_dir (no verified-failure signal) — a boot warning
     # says so; it never fires silently into an unconfigured state.
     #

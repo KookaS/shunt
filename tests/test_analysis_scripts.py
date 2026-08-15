@@ -14,6 +14,7 @@ import pytest
 from benchmark import config
 from benchmark.routing.scripts import (
     compute_costs,
+    ladder_evidence,
     plot_exploration,
     plot_knn_nulls,
     threshold_sweep,
@@ -26,6 +27,7 @@ CONFIG_PATH = str(Path(config.__file__).resolve().parent / "benchmark.yaml")
 # The analysis scripts that must exit cleanly on a header-only results.csv.
 _GUARDED_SCRIPTS: Final = [
     compute_costs.main,
+    ladder_evidence.main,
     plot_exploration.main,
     plot_knn_nulls.main,
     threshold_sweep.main,

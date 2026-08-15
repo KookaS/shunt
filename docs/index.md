@@ -106,7 +106,7 @@ uv run shunt                  # pinned deps from uv.lock
 `uv run shunt`, `python -m shunt`, and the installed `shunt` command are equivalent —
 each starts the proxy on `127.0.0.1:8080`. No uv? `pip install -e . && shunt` works
 too. (Run from the repo root; the same `shunt <subcommand>` verbs — `flag`, `reindex`,
-`explain` — apply.)
+`explain`, `escalate` — apply.)
 
 Point your tool at localhost:8080 (today, every request forwards to the cheap
 default):
@@ -149,6 +149,9 @@ trust rules: [Feedback](feedback.md).
 - [Feedback](feedback.md) — how outcomes are captured (auto + manual) and learned from
 - [The routing model](routing.md) — what the session's model choice reads, how it decides, and where it stops
 - [Error detection & auto-escalation](escalation.md) — how a verified failure is detected and, on repeat, escalates a rung (ships enabled; armed when a repo is resolved)
+- [The escalation claim](escalation-claim.md) — what we do and do not assert about escalation, with its pre-registered falsifiers and their verdicts
+- [Escalation dataset](escalation-data-card.md) — what the escalation corpus is: provenance, census, known defects, access mechanics
+- [Reproducing the escalation eval](escalation-reproduction.md) — run the offline escalation eval from a fresh clone, and the numbers a correct run reproduces
 - [Results](results.md) — every measured routing and escalation number, with its caveats
 - [Research log](research-log.md) — published ideas we tested, and what held
 - [Benchmark](benchmark.md) — run the offline model-capability and routing evals

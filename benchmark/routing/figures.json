@@ -155,6 +155,7 @@
       "goal": "A router earns its existence only by sitting ABOVE the shaded mixture region \u2014 below or on it, the same cost-quality point is reachable by flipping a weighted coin between two fixed policies.",
       "limitations": [
         "A non-live point's number is still a real measurement \u2014 it is the CONCLUSION that is limited: no router.strategy setting reproduces it, so it may not anchor the frontier or a headline. It does NOT follow that the underlying capability is unavailable \u2014 a blocked row may measure a mechanism that ships in a different layer \u2014 and the per-strategy blocker in benchmark/routing/strategy_class.py says which case it is.",
+        "A cascade point prices the LADDER's cost, not its per-rung quality. The shipped ladder's cheap intermediate rungs are measured separately against the base model on this same corpus, and are null or net-harmful there \u2014 see ladder_rungs.png.",
         "The cache-aware x position rests on an ASSUMED cache hit rate; only the per-model discount and input share are measured \u2014 see cache_economics.png for the range that assumption spans.",
         "The horizontal interval belongs to the NAIVE total and is not transplanted onto the cache-aware marker. The cache-aware ratio's own 90% bootstrap CI is published by the kill gate (cache cost is scoped per task, so a whole-task resample preserves it) \u2014 not transplanted onto this plot.",
         "Pass rates are scored on the coverage-completed matrix, whose imputed cells are all pass=True \u2014 see evidence_basis.png for how much of each strategy's number that is.",
@@ -459,6 +460,63 @@
       ],
       "title": "The router's one input does not predict outcomes; a 3-level human tag does"
     },
+    "ladder_rungs.png": {
+      "caveat": "Observational overlap per pair, not a ladder replay: no logged session walked these rungs in sequence.",
+      "data_digest": "cc040e8f6d6021db",
+      "dpi": 150,
+      "figsize": [
+        13.0,
+        6.0
+      ],
+      "generator": "benchmark.routing.figures.ladder_rungs",
+      "goal": "Read panel A first and ignore the ladder: only two targets' intervals clear zero on the helpful side, and both sit far above the base price \u2014 while one visited rung's interval clears zero on the HARMFUL side. Then read panel B on the same rows \u2014 every filled marker below the jump is a rung the shipped default pays for, and the arrow passes over the cheapest target that measurably helps. A row whose dark interval overlaps its own pale null band is unmeasured at this n, not shown to be neutral.",
+      "limitations": [
+        "Overlap only: each row is scored on the challenges both models were run on, and those sets differ by row, so the rows are not scored on one common set and their deltas are not directly comparable to each other.",
+        "Coverage is opportunistic, not assigned: which challenges each model was run on was not randomized, so a target measured on an easier overlap looks better for free.",
+        "Default reasoning arm only. A rung the ladder reaches at a raised effort arm is not this row.",
+        "This measures TARGETS, not the ladder: a real ladder pays for a rung only after a verified recurrence, so the cost of a harmful rung is not the whole of its price.",
+        "One base, one corpus. A rung that is net-harmful here is net-harmful on this corpus's task mix, which is SWE-bench-derived and not your workload."
+      ],
+      "n": {
+        "paired_challenges": 592,
+        "targets": 5,
+        "visited_rungs": 3
+      },
+      "notes": [
+        "qwen3.7-plus at 3.8x base: n=87, helps 6, hurts 3, delta +0.0345 [-0.0345, +0.1034], exact null [-0.0575, +0.0575], p 0.51, INDISTINGUISHABLE",
+        "gpt-5-mini at 5.4x base: n=190, helps 4, hurts 36, delta -0.1684 [-0.2263, -0.1105], exact null [-0.0632, +0.0632], p < 1e-06, NET-HARMFUL",
+        "kimi-k2.5 at 8.6x base: n=121, helps 8, hurts 10, delta -0.0165 [-0.0826, +0.0496], exact null [-0.0661, +0.0661], p 0.81, INDISTINGUISHABLE",
+        "zai-glm-5.2 at 13.8x base: n=84, helps 14, hurts 1, delta +0.1548 [+0.0714, +0.2381], exact null [-0.0833, +0.0833], p 0.00098, NET-HELPFUL",
+        "kimi-k3 at 42.9x base: n=110, helps 29, hurts 3, delta +0.2364 [+0.1455, +0.3273], exact null [-0.1091, +0.1091], p 2.6e-06, NET-HELPFUL",
+        "the shortlist jumps over zai-glm-5.2, the cheapest target whose interval clears zero on this corpus"
+      ],
+      "reading": "Left: for each candidate escalation target, the paired difference in resolve rate against the cheap base model, computed only on challenges where BOTH models have a scored default-arm outcome. The dot is the point estimate, the dark whisker the paired percentile bootstrap over challenges, and the pale whisker behind it the exact paired-exchangeability null band, so a dot inside the pale band is indistinguishable from chance. Rows are ordered by list price, cheapest at the bottom, which is the same order the ladder ranks by. Right: the same rows, showing which of them the shipped rank_shortlist actually visits \u2014 a filled marker is a rung the ladder buys, a hollow one is a rung the jump skips \u2014 with the visit sequence drawn as a stepped path and the shortlist's jump drawn as a single long arrow.",
+      "size": "wide",
+      "subtitle": "paired on the overlap of scored default-arm runs \u00b7 exact paired-exchangeability null \u00b7 base deepseek-v4-flash \u00b7 rank_shortlist=3 visits 3 of 5 targets \u00b7 visited: qwen3.7-plus (+0.035), gpt-5-mini (-0.168), kimi-k3 (+0.236) \u00b7 skipped: kimi-k2.5 (-0.017), zai-glm-5.2 (+0.155)",
+      "terms": [
+        [
+          "helps",
+          "base failed the challenge, target resolved it"
+        ],
+        [
+          "hurts",
+          "base resolved the challenge, target failed it"
+        ],
+        [
+          "delta",
+          "target resolve rate minus base resolve rate on the shared challenges == (helps - hurts) / n"
+        ],
+        [
+          "exact null",
+          "the two-sided paired randomization test, in closed form \u2014 no Monte Carlo, no seed"
+        ],
+        [
+          "rung",
+          "a model the ladder can step to; the shortlist walks the cheapest ranks one at a time and then jumps to the top rank"
+        ]
+      ],
+      "title": "The ladder buys the rungs that do not help and jumps over the one that does"
+    },
     "live_gap.png": {
       "caveat": "no live strategy reaches this band \u2014 none of the headroom is buyable today",
       "data_digest": "cc040e8f6d6021db",
@@ -519,6 +577,7 @@
       "generator": "benchmark.routing.figures.oracle_gap",
       "goal": "Read the left panel for what routing is actually doing \u2014 if price dominates, the value is in the price list, and a fixed cheap policy captures most of it without any prediction. Then read the right panel: a flat set of lines means the middle panel's ordering does not depend on the exchange rate nobody can defend.",
       "limitations": [
+        "The price decomposition treats a cheaper model as a cheaper way to get the SAME outcome. Measured per-rung, the cheap intermediate targets do not deliver the base model's outcome on this corpus, so the price term is an upper bound on what cheapness buys \u2014 see ladder_rungs.png.",
         "The bandit is an illustrative inline learner drawn for this figure only, not a shipped routing strategy. It shows that a naive learner loses here; it does not show that every learner would.",
         "The arm series exist only where more than one arm per model was sampled; the coverage is sparse by design."
       ],
