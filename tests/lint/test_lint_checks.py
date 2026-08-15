@@ -773,3 +773,42 @@ def test_sh012_generator_marker_accepts_a_generated_number(tmp_path: Path) -> No
         benchmark=f"# Benchmark\n\n{_MARKED_PP}\n",
     )
     assert _run("check_number_provenance.py", "--root", str(root)) == 0
+
+
+# ── SH013 — every workflow job is time-bounded ────────────────────────────────
+#
+# The gate exists because a job with no `timeout-minutes` inherits GitHub's 360-minute
+# default, and three integration-handshake legs rode that default for 2h16m.
+
+_BOUNDED_JOB = "jobs:\n  build:\n    runs-on: ubuntu-latest\n    timeout-minutes: 10\n"
+
+
+def test_sh013_catches_a_job_with_no_timeout(tmp_path: Path) -> None:
+    f = tmp_path / "wf.yml"
+    f.write_text("on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n")
+    assert _run("check_workflow_timeouts.py", str(f)) == 1
+
+
+def test_sh013_accepts_a_bounded_job(tmp_path: Path) -> None:
+    f = tmp_path / "wf.yml"
+    f.write_text(f"on: push\n{_BOUNDED_JOB}")
+    assert _run("check_workflow_timeouts.py", str(f)) == 0
+
+
+def test_sh013_rejects_a_bound_over_the_ceiling(tmp_path: Path) -> None:
+    f = tmp_path / "wf.yml"
+    f.write_text(
+        "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    timeout-minutes: 360\n"
+    )
+    assert _run("check_workflow_timeouts.py", str(f)) == 1
+
+
+def test_sh013_exempts_a_reusable_workflow_call(tmp_path: Path) -> None:
+    # `timeout-minutes` is not a valid key on a `uses:` job — the callee carries its own.
+    f = tmp_path / "wf.yml"
+    f.write_text("on: push\njobs:\n  call:\n    uses: ./.github/workflows/other.yml\n")
+    assert _run("check_workflow_timeouts.py", str(f)) == 0
+
+
+def test_sh013_default_scan_of_this_repo_is_clean() -> None:
+    assert _run("check_workflow_timeouts.py") == 0

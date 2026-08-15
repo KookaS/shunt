@@ -152,6 +152,19 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      # SH013 makes "a CI job cannot run forever" structural. GitHub's default when
+      # `timeout-minutes` is omitted is 360 — and on 2026-08-15 three integration-handshake
+      # legs looped against a stateless fake upstream until a human cancelled them at
+      # 2h16m. Prose in AGENTS.md would not stop the NEXT unbounded job; this does, at
+      # commit time rather than at six hours. Whole-tree scan (the SH004/SH011/SH012
+      # shape): the failure is an ADDED job, which no staged-file list would flag if the
+      # workflow it lands in is otherwise untouched. BLOCKING.
+      - id: sh013-workflow-timeouts
+        name: SH013 every workflow job declares timeout-minutes
+        entry: python tools/lint/check_workflow_timeouts.py
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: sh010-mermaid-parse
         name: SH010 mermaid diagrams parse
         entry: node tools/lint/check_mermaid.mjs

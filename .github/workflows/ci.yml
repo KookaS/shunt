@@ -6,12 +6,19 @@ on:
   pull_request:
     branches: [main, master]
 
+# A superseded PR run is wasted runner time, and a stacked queue hides which run is
+# authoritative. `main` pushes are never cancelled — those runs gate the release.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   PYTHON_VERSION: "3.12"
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,6 +72,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -113,6 +121,7 @@ jobs:
   # live model calls, no embedding downloads (deterministic strategies only).
   benchmark-integrity:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -142,6 +151,7 @@ jobs:
   hygiene:
     name: hygiene (advisory)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4

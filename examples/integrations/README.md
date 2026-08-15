@@ -111,7 +111,16 @@ make e2e TOOL=curl SCENARIO=escalation
 
 # The same runner CI uses, directly:
 tests/integrations/run_scenario.sh curl escalation
+
+# Every leg is bounded (default 900s). A leg that outlives its bound is a defect,
+# not a slow test — it exits 124 and the containers come down.
+SHUNT_E2E_TIMEOUT=300 tests/integrations/run_scenario.sh opencode wiring
 ```
+
+The fake upstream answers **plain text** here, never a tool call. It is stateless, so a
+tool call it repeats on every turn would hold an agentic CLI in a loop that no prompt
+ends. Set `FAKE_UPSTREAM_TOOL_CALLS=1` to enable them for a tool-translation experiment;
+`FAKE_UPSTREAM_MAX_TOOL_CALLS` (default 4) bounds them even then.
 
 ### Add a tool
 

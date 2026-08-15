@@ -28,6 +28,23 @@ print(node if node is not None else "")
 PY
 }
 
+# ── the wall ──────────────────────────────────────────────────────────────────
+#
+# `make e2e` and a hand-run leg have no CI timeout behind them, and a hang here is not
+# hypothetical: three agentic-CLI legs looped against a stateless fake upstream for
+# 2h16m before a human noticed. Every compose step that can block is wrapped.
+#
+# SIGINT, not SIGTERM: compose treats an interrupt as "stop the project", so containers
+# come down cleanly and the EXIT trap's `down -v` finds little to do. `timeout` exits
+# 124 on expiry, which is a failed verdict — exactly right.
+#
+# The bound is PER compose call, not per scenario, so the escalation branch's three calls
+# can each take it. `ensure_image`'s `docker build` is deliberately NOT wrapped: a cold
+# dependency compile legitimately runs long, and a bound short enough to catch a hung
+# build would fail honest ones. CI bounds that separately, in its own `build-image` job.
+SHUNT_E2E_TIMEOUT="${SHUNT_E2E_TIMEOUT:-900}"
+bounded() { timeout --signal=INT "$SHUNT_E2E_TIMEOUT" "$@"; }
+
 require_scenario() {
   local declared
   declared="$(spec scenarios)"
@@ -141,7 +158,7 @@ case "$SCENARIO" in
     # Report the cwd measurement before teardown (the volume dies with `down -v`), and
     # never let it change the leg's verdict — it is an observation, not a check.
     trap 'docker compose -f "$COMPOSE" run --build --rm assert-escalation --cwd-only 2>/dev/null || true; docker compose -f "$COMPOSE" down -v --remove-orphans >/dev/null 2>&1 || true' EXIT
-    docker compose -f "$COMPOSE" up --build --abort-on-container-exit --exit-code-from "$SERVICE"
+    bounded docker compose -f "$COMPOSE" up --build --abort-on-container-exit --exit-code-from "$SERVICE"
     ;;
 
   escalation)
@@ -160,12 +177,12 @@ case "$SCENARIO" in
     # an escalation a previous run left behind in the store.
     docker compose -f "$COMPOSE" down -v --remove-orphans >/dev/null 2>&1 || true
     trap 'docker compose -f "$COMPOSE" logs shunt --tail 40 || true; docker compose -f "$COMPOSE" down -v --remove-orphans >/dev/null 2>&1 || true' EXIT
-    docker compose -f "$COMPOSE" up --build -d shunt fake-upstream
+    bounded docker compose -f "$COMPOSE" up --build -d shunt fake-upstream
     # `--build` on the sidecar too: it is built from the same Dockerfile but under its
     # OWN image name, so `up --build shunt` leaves it stale and an edit to the verdict
     # script would silently not run.
-    docker compose -f "$COMPOSE" run --build --rm "$DRIVER"
-    docker compose -f "$COMPOSE" run --build --rm \
+    bounded docker compose -f "$COMPOSE" run --build --rm "$DRIVER"
+    bounded docker compose -f "$COMPOSE" run --build --rm \
       -e SHUNT_ESC_MIN_SESSIONS="$SHUNT_ESC_PROMPTS" assert-escalation
     ;;
 
@@ -183,9 +200,9 @@ case "$SCENARIO" in
     DRIVER="$(spec live.service)"
     export SHUNT_ESC_PROMPTS="${SHUNT_ESC_PROMPTS:-4}"
     trap 'docker compose -f "$COMPOSE" down -v --remove-orphans >/dev/null 2>&1 || true' EXIT
-    docker compose -f "$COMPOSE" up --build -d shunt
-    docker compose -f "$COMPOSE" run --build --rm "$DRIVER"
-    docker compose -f "$COMPOSE" run --build --rm \
+    bounded docker compose -f "$COMPOSE" up --build -d shunt
+    bounded docker compose -f "$COMPOSE" run --build --rm "$DRIVER"
+    bounded docker compose -f "$COMPOSE" run --build --rm \
       -e SHUNT_ESC_MIN_SESSIONS="$SHUNT_ESC_PROMPTS" assert-escalation
     ;;
 
