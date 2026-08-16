@@ -159,6 +159,20 @@ repos:
       # commit time rather than at six hours. Whole-tree scan (the SH004/SH011/SH012
       # shape): the failure is an ADDED job, which no staged-file list would flag if the
       # workflow it lands in is otherwise untouched. BLOCKING.
+      # SH014 catches a broken relative docs link at commit time. It is DELIBERATELY a
+      # subset of `mkdocs build --strict` — target resolution only, no nav or anchors —
+      # bought for sub-second offline feedback with no mkdocs install. The complete check
+      # is the strict build in `.github/workflows/docs.yml`, which now runs on
+      # pull_request; do not delete that believing this replaces it. It was push-only
+      # when a link to `examples/integrations/README.md` (repo content, not site content)
+      # sailed through a green PR and failed on the merge commit. Whole-tree scan (the
+      # SH004/SH011/SH012 shape): a link breaks when its TARGET moves. BLOCKING.
+      - id: sh014-docs-links
+        name: SH014 relative docs links resolve inside the docs tree
+        entry: python tools/lint/check_docs_links.py
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: sh013-workflow-timeouts
         name: SH013 every workflow job declares timeout-minutes
         entry: python tools/lint/check_workflow_timeouts.py

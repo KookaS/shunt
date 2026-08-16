@@ -14,6 +14,16 @@ on:
       - "docs/**"
       - "mkdocs.yml"
       - ".github/workflows/docs.yml"
+  # Build (never deploy) on PRs too. Do not remove this as redundant with the push
+  # trigger: while this workflow was push-only it could not run on a PR at all, so the
+  # strict build first executed on the MERGE commit — and a broken relative link in
+  # docs/free-tier-smoke.md reached `main` past a fully green PR. A gate that cannot run
+  # where the defect is introduced provides no coverage.
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 # Least privilege: read the source, write only to Pages, mint a short-lived OIDC
@@ -24,9 +34,11 @@ permissions:
   id-token: write
 
 # One deploy at a time; don't cancel an in-flight publish (the recommended Pages
-# pattern — a cancelled deploy can leave the site half-updated).
+# pattern — a cancelled deploy can leave the site half-updated). Scoped per ref so a PR's
+# build-only run cannot queue behind an in-flight publish: only `main` reaches the deploy
+# job, so the single-deploy guarantee is unaffected.
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -50,12 +62,17 @@ jobs:
         run: pip install -r docs/requirements.txt
       - name: Build (strict — broken links / nav fail the build)
         run: mkdocs build --strict
+      # Push-only: a PR proves the site BUILDS, it never produces a publishable
+      # artifact. `deploy` is push-only too, so it still receives this.
       - uses: actions/upload-pages-artifact@v3
+        if: github.event_name == 'push'
         with:
           path: site
 
   deploy:
     needs: build
+    # Never from a pull_request — a PR must not be able to publish the public site.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:

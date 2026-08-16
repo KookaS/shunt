@@ -812,3 +812,67 @@ def test_sh013_exempts_a_reusable_workflow_call(tmp_path: Path) -> None:
 
 def test_sh013_default_scan_of_this_repo_is_clean() -> None:
     assert _run("check_workflow_timeouts.py") == 0
+
+
+# ── SH014 — relative docs links resolve inside the docs tree ──────────────────
+#
+# The gate exists because `docs/free-tier-smoke.md` linked `examples/integrations/README.md`
+# — repo content, not site content — and `mkdocs build --strict` only ran on push to main,
+# so it failed on the merge commit rather than on the PR.
+
+
+def _docs_tree(tmp_path: Path, body: str, *, extra: str | None = None) -> Path:
+    """A minimal repo root: mkdocs.yml naming docs_dir, plus one page."""
+    (tmp_path / "mkdocs.yml").write_text("site_name: t\ndocs_dir: docs\n")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "page.md").write_text(body)
+    if extra is not None:
+        (docs / extra).write_text("# other\n")
+    return tmp_path
+
+
+def test_sh014_catches_a_link_escaping_the_docs_tree(tmp_path: Path) -> None:
+    root = _docs_tree(tmp_path, "See [it](../examples/integrations/README.md).\n")
+    assert _run("check_docs_links.py", "--root", str(root)) == 1
+
+
+def test_sh014_catches_a_missing_in_tree_target(tmp_path: Path) -> None:
+    # The shape of the real bug: resolves inside docs/, but nothing is there.
+    root = _docs_tree(tmp_path, "See [it](examples/integrations/README.md).\n")
+    assert _run("check_docs_links.py", "--root", str(root)) == 1
+
+
+def test_sh014_accepts_an_in_tree_link(tmp_path: Path) -> None:
+    root = _docs_tree(tmp_path, "See [it](other.md).\n", extra="other.md")
+    assert _run("check_docs_links.py", "--root", str(root)) == 0
+
+
+def test_sh014_resolves_a_link_carrying_a_fragment(tmp_path: Path) -> None:
+    root = _docs_tree(tmp_path, "See [it](other.md#what-a-pass-means).\n", extra="other.md")
+    assert _run("check_docs_links.py", "--root", str(root)) == 0
+
+
+def test_sh014_ignores_absolute_and_anchor_targets(tmp_path: Path) -> None:
+    # The prescribed fix must itself pass, as must mailto/anchor-only links.
+    root = _docs_tree(
+        tmp_path,
+        "[a](https://github.com/KookaS/shunt/blob/main/examples/integrations/README.md)\n"
+        "[b](#a-heading) [c](mailto:x@y.z)\n",
+    )
+    assert _run("check_docs_links.py", "--root", str(root)) == 0
+
+
+def test_sh014_checks_image_targets_too(tmp_path: Path) -> None:
+    # A moved asset is the same failure with a worse symptom: green build, broken image.
+    root = _docs_tree(tmp_path, "![chart](assets/gone.webp)\n")
+    assert _run("check_docs_links.py", "--root", str(root)) == 1
+
+
+def test_sh014_honours_the_same_line_noqa(tmp_path: Path) -> None:
+    root = _docs_tree(tmp_path, "See [it](nope.md). <!-- noqa: SH014 -->\n")
+    assert _run("check_docs_links.py", "--root", str(root)) == 0
+
+
+def test_sh014_default_scan_of_this_repo_is_clean() -> None:
+    assert _run("check_docs_links.py") == 0

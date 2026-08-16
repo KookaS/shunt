@@ -16,7 +16,7 @@ It is a smoke, not a benchmark: one tiny completion, one model, no suite.
 
 ## What it proves
 
-The [integration handshake](examples/integrations/README.md) proves *wiring*
+The [integration handshake](https://github.com/KookaS/shunt/blob/main/examples/integrations/README.md) proves *wiring*
 against a fake upstream. The free-tier smoke proves the **real wire end to end
 at zero cost**: a request reaches Shunt, Shunt routes it through a real provider,
 the decision header rides back, and the session is captured in the outcome
