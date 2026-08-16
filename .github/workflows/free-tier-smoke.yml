@@ -50,6 +50,8 @@ jobs:
   free-tier-smoke:
     name: one real $0 completion
     runs-on: ubuntu-latest
+    # ESTIMATE, not measured — this workflow has never run, so there is no history to
+    # derive from. Revisit after the first green run.
     timeout-minutes: 15
     continue-on-error: true # advisory: a provider outage is news, not a PR blocker
     steps:
@@ -62,6 +64,11 @@ jobs:
           pip install uv
           uv sync --extra dev --extra benchmark --extra capture
       - name: Run the free-tier smoke
+        # Bounded at the STEP, because this job is advisory: a job killed by
+        # `timeout-minutes` is *cancelled*, and continue-on-error tolerates only
+        # *failure*, so a job-level bound would cancel the whole run over a slow
+        # provider — exactly what it is marked continue-on-error to avoid.
+        timeout-minutes: 10
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |

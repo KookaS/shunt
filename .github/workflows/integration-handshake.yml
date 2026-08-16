@@ -41,6 +41,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The `timeout-minutes` below are DERIVED from measured runtimes, not guessed — see the
+# note at the top of ci.yml for the command and for what guessing cost. Observed maxima
+# over the last successful runs (minutes): discover 0.1 · build-image 1.7 · slowest
+# matrix leg (flowise) 2.3. The `live` job has never run; its 30 is an estimate.
 jobs:
   # Discover legs from the filesystem: a tool is CI-eligible iff it ships a
   # handshake.yaml, and each such file declares which scenarios it runs. No central
@@ -135,9 +139,12 @@ jobs:
       - name: Load Shunt image
         run: gunzip -c /tmp/shunt-image.tar.gz | docker load
       - name: Handshake
-        # Inner wall, ahead of the job's. A STEP timeout leaves the job alive, so the
-        # `if: always()` measurement and artifact steps below still run and the hang
-        # is diagnosable rather than merely cancelled.
+        # Inner wall, and it must fire BEFORE the job's 20. Two reasons, both load-bearing:
+        # the `if: always()` measurement and artifact steps below still run after a step
+        # timeout, so the hang stays diagnosable; and a step timeout is a step FAILURE,
+        # which `continue-on-error: ${{ matrix.best_effort }}` above tolerates — whereas the
+        # JOB bound would *cancel*, and a cancelled job cancels the whole run no matter how
+        # best-effort the leg is. Keep this strictly below the job's number.
         timeout-minutes: 15
         run: tests/integrations/run_scenario.sh "${{ matrix.tool }}" "${{ matrix.scenario }}"
       # Which tools announce their working directory to the model? Measured from what

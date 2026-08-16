@@ -15,6 +15,17 @@ concurrency:
 env:
   PYTHON_VERSION: "3.12"
 
+# Every `timeout-minutes` below is DERIVED from what the job actually takes, not guessed.
+# Guessing cost a green run: `hygiene` was given 15 when it had been finishing in 18, and
+# a job killed by its bound is *cancelled*, which cancels the whole run. Re-measure before
+# changing one — the observed maxima over the last successful runs (minutes) were
+# lint 3.1 · test 10.2 · benchmark-integrity 1.1 · hygiene 18.1:
+#
+#   gh run list --repo KookaS/shunt --workflow ci.yml --status success --limit 6 \
+#     --json databaseId -q '.[].databaseId' | while read id; do
+#       gh run view "$id" --repo KookaS/shunt --json jobs \
+#         -q '.jobs[] | "\(.name)\t\(((.completedAt|fromdate)-(.startedAt|fromdate))/60)"'
+#     done
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -151,7 +162,14 @@ jobs:
   hygiene:
     name: hygiene (advisory)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 30 against a measured 18.1 max. The real bounds are on the STEPS below, because
+    # `continue-on-error` does not make a JOB's bound harmless: a job killed by
+    # `timeout-minutes` is *cancelled*, not *failed*, and continue-on-error tolerates
+    # only failure — so a 15 here cancelled an otherwise-green run (31880593239) over an
+    # advisory tool merely being slow. A step bound IS tolerated by the step's own
+    # continue-on-error, which is the only construction that keeps "advisory" advisory
+    # when it runs long. This job-level number is the backstop behind those.
+    timeout-minutes: 30
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -164,11 +182,16 @@ jobs:
           uv sync --extra dev --extra benchmark
       - name: vulture (dead code)
         continue-on-error: true
+        timeout-minutes: 5
         run: uv run vulture
       - name: deptry (dependency hygiene)
         continue-on-error: true
+        timeout-minutes: 5
         run: uv run deptry .
       - name: coverage (floor advisory)
         continue-on-error: true
+        # The slow one: it re-runs the whole suite under coverage (~15 of the job's 18
+        # minutes). Bounded here rather than at the job, so overrunning stays advisory.
+        timeout-minutes: 25
         # Path-less for the same reason as the Test step: `testpaths` decides.
         run: uv run pytest --cov=src/shunt --cov-report=term-missing
