@@ -10,7 +10,6 @@ providers:
 models:
   codestral:
     model_id: codestral-latest
-    tier: cheap
     provider: mistral
     supports_streaming: true
     supports_cache_control: false

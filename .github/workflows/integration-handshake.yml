@@ -6,8 +6,24 @@ name: Integration handshake
 # X-Shunt-Decision header rides back) — not model quality. The always-on, no-Docker
 # proof lives in the normal test job (tests/integrations/test_handshake.py); this
 # workflow adds the real-tool legs over Docker.
+#
+# The matrix is tool × SCENARIO:
+#   wiring     — one request reaches Shunt and a decision rides back.
+#   escalation — N prompts across real session boundaries against a deterministically
+#                red repo; the verdict comes from Shunt's own outcome store (the
+#                assert-escalation sidecar), never from grepping a CLI's stdout.
+#   live       — a separate, workflow_dispatch-only job below. Never on pull_request.
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Also run the LIVE tier (real provider, real spend)"
+        type: boolean
+        default: false
+      live_max_spend_usd:
+        description: "Hard spend cap for the live tier, in USD"
+        type: string
+        default: "1.00"
   schedule:
     - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
   pull_request:
@@ -19,11 +35,23 @@ on:
       - "src/shunt/config/models.yaml"
       - ".github/workflows/integration-handshake.yml"
 
+# A pushed fix must not queue behind the run it fixes. `main` and the scheduled run
+# are never cancelled; a superseded PR run is.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# The `timeout-minutes` below are DERIVED from measured runtimes, not guessed — see the
+# note at the top of ci.yml for the command and for what guessing cost. Observed maxima
+# over the last successful runs (minutes): discover 0.1 · build-image 1.7 · slowest
+# matrix leg (flowise) 2.3. The `live` job has never run; its 30 is an estimate.
 jobs:
   # Discover legs from the filesystem: a tool is CI-eligible iff it ships a
-  # handshake.yaml. No central list to keep in sync.
+  # handshake.yaml, and each such file declares which scenarios it runs. No central
+  # list to keep in sync. `live` is filtered out here — it has its own gated job.
   discover:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
     steps:
@@ -36,11 +64,16 @@ jobs:
           items = []
           for path in sorted(glob.glob("examples/integrations/*/handshake.yaml")):
               spec = yaml.safe_load(open(path))
-              items.append({
-                  "tool": os.path.basename(os.path.dirname(path)),
-                  "service": spec["service"],
-                  "best_effort": bool(spec.get("best_effort", False)),
-              })
+              tool = os.path.basename(os.path.dirname(path))
+              for scenario in spec.get("scenarios") or ["wiring"]:
+                  if scenario == "live":
+                      continue  # gated job below — never from pull_request
+                  block = spec if scenario == "wiring" else (spec.get(scenario) or {})
+                  items.append({
+                      "tool": tool,
+                      "scenario": scenario,
+                      "best_effort": bool(block.get("best_effort", False)),
+                  })
           print("matrix=" + json.dumps({"include": items}))
           PY
 
@@ -48,6 +81,7 @@ jobs:
   # don't each recompile the (heavy) dependency stack.
   build-image:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Build Shunt image
@@ -83,13 +117,19 @@ jobs:
   handshake:
     needs: [discover, build-image]
     runs-on: ubuntu-latest
+    # The outer wall. A leg that hangs is a defect, not a slow test: every green leg
+    # in the 2026-08-15 run finished inside two minutes. `continue-on-error` below
+    # does NOT bound a hang — it only keeps one from turning the run red.
+    timeout-minutes: 20
     # Best-effort legs (real CLI/service onboarding is brittle) never fail the run;
-    # the verified legs (best_effort: false) are required and turn the run red.
+    # the verified legs (best_effort: false) are required and turn the run red. The
+    # flag is per SCENARIO: a tool may be best-effort on wiring and required on
+    # escalation, or the other way round.
     continue-on-error: ${{ matrix.best_effort }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
-    name: ${{ matrix.tool }}
+    name: ${{ matrix.tool }} / ${{ matrix.scenario }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -99,10 +139,76 @@ jobs:
       - name: Load Shunt image
         run: gunzip -c /tmp/shunt-image.tar.gz | docker load
       - name: Handshake
+        # Inner wall, and it must fire BEFORE the job's 20. Two reasons, both load-bearing:
+        # the `if: always()` measurement and artifact steps below still run after a step
+        # timeout, so the hang stays diagnosable; and a step timeout is a step FAILURE,
+        # which `continue-on-error: ${{ matrix.best_effort }}` above tolerates — whereas the
+        # JOB bound would *cancel*, and a cancelled job cancels the whole run no matter how
+        # best-effort the leg is. Keep this strictly below the job's number.
+        timeout-minutes: 15
+        run: tests/integrations/run_scenario.sh "${{ matrix.tool }}" "${{ matrix.scenario }}"
+      # Which tools announce their working directory to the model? Measured from what
+      # the upstream actually received, and published per leg rather than argued about.
+      - name: Collect the cwd-announcement measurement
+        if: always() && matrix.scenario == 'escalation'
         run: |
-          docker compose -f "examples/integrations/${{ matrix.tool }}/compose.yaml" \
-            up --build --abort-on-container-exit --exit-code-from "${{ matrix.service }}"
-      - name: Teardown
-        if: always()
+          docker compose -f "examples/integrations/${{ matrix.tool }}/compose.escalation.yaml" \
+            run --rm --entrypoint sh assert-escalation \
+            -c 'cat /record/cwd-report.json 2>/dev/null || echo "{}"' \
+            | tee "cwd-${{ matrix.tool }}.json" || true
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.scenario == 'escalation'
+        with:
+          name: cwd-report-${{ matrix.tool }}
+          path: cwd-${{ matrix.tool }}.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ── The LIVE tier — authored, gated, and deliberately hard to fire ──────────────
+  #
+  # Real provider, real money. Four independent gates stand between a push and a
+  # charge, and every one of them must open:
+  #   1. workflow_dispatch only. `pull_request` and `schedule` cannot reach this job,
+  #      so no fork PR and no cron can ever spend.
+  #   2. The dispatcher must tick `live: true` by hand.
+  #   3. The secret must exist. `secrets.SHUNT_LIVE_API_KEY` is unset by default, and
+  #      an unset secret skips the job rather than failing it open.
+  #   4. The runner script refuses without SHUNT_LIVE_I_ACCEPT_SPEND=yes.
+  # The cap itself is enforced in-run by SHUNT_LIVE_MAX_SPEND_USD, which the live
+  # compose passes to the router's budget: the run aborts at the cap rather than
+  # discovering the overspend on the bill.
+  live:
+    needs: build-image
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.live &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: live-integration # a protected environment => a human approval step
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true # spend stops at the first failure
+      matrix:
+        tool: [curl]
+    name: ${{ matrix.tool }} / live
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: shunt-image
+          path: /tmp
+      - name: Load Shunt image
+        run: gunzip -c /tmp/shunt-image.tar.gz | docker load
+      - name: Guard — refuse to spend without a key
+        env:
+          KEY: ${{ secrets.SHUNT_LIVE_API_KEY }}
         run: |
-          docker compose -f "examples/integrations/${{ matrix.tool }}/compose.yaml" down -v || true
+          test -n "$KEY" || { echo "SHUNT_LIVE_API_KEY is unset — not spending"; exit 1; }
+      - name: Live scenario
+        env:
+          SHUNT_LIVE_I_ACCEPT_SPEND: "yes"
+          SHUNT_LIVE_API_KEY: ${{ secrets.SHUNT_LIVE_API_KEY }}
+          SHUNT_LIVE_BASE_URL: ${{ vars.SHUNT_LIVE_BASE_URL }}
+          SHUNT_LIVE_MODEL_ID: ${{ vars.SHUNT_LIVE_MODEL_ID }}
+          SHUNT_LIVE_MAX_SPEND_USD: ${{ inputs.live_max_spend_usd }}
+        run: tests/integrations/run_scenario.sh "${{ matrix.tool }}" live

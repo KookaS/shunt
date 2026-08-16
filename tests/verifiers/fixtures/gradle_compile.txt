@@ -1,0 +1,9 @@
+> Task :compileJava FAILED
+/x/src/main/java/com/x/Widget.java:5: error: cannot find symbol
+    return parse(input);
+           ^
+  symbol:   method parse(String)
+
+FAILURE: Build failed with an exception.
+* What went wrong:
+Execution failed for task ':compileJava'.

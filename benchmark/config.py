@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
 import yaml
 
 from shunt.models.config import (
-    TIER_ORDER,
     ModelConfig,
     Pricing,
     ReasoningConfig,
@@ -57,7 +57,6 @@ def _pricing_path() -> Path:
 def _flatten(model: ModelConfig, pricing: Pricing) -> dict:
     """Flatten one priced registry row into the flat dict benchmark consumers read."""
     return {
-        "tier": model.tier,
         "provider": model.provider,
         "route": model.route,
         "base_url": model.base_url,
@@ -116,10 +115,14 @@ def default_arm_ids(models: list[str] | None = None) -> dict[str, str]:
 
 
 def arm_sampling_weights() -> list[float]:
-    """Cost-weighted p(arm|model) fractions, indexed by within-model rank."""
+    """Per-arm inclusion probabilities by within-model rank — each an independent
+    p in [0, 1] (Bernoulli threshold), not a distribution that must sum to 1."""
     cfg = get()
-    weights = cfg.get("arm_sampling", {}).get("weights")
-    return [float(w) for w in weights] if weights else list(DEFAULT_ARM_SAMPLING_WEIGHTS)
+    raw = cfg.get("arm_sampling", {}).get("weights")
+    weights = [float(w) for w in raw] if raw else list(DEFAULT_ARM_SAMPLING_WEIGHTS)
+    if any(not 0.0 <= w <= 1.0 for w in weights):
+        raise ValueError(f"arm_sampling.weights must each be in [0, 1]; got {weights}")
+    return weights
 
 
 def arm_sampling_default_only_models() -> set[str]:
@@ -158,14 +161,41 @@ def collect_enabled() -> bool:
     return bool(collect_config().get("enabled", False))
 
 
-def _tier_order(tier: str) -> int:
-    """Canonical tier rank, derived from the registry's ``TIER_ORDER`` (single source
-    of truth). Raises on an unregistered tier so a drift can't silently sort last.
-    """
-    ranks = {t: i for i, t in enumerate(TIER_ORDER)}
-    if tier not in ranks:
-        raise ValueError(f"unknown tier {tier!r}; registered tiers: {list(TIER_ORDER)}")
-    return ranks[tier]
+def ladder_config() -> dict:
+    """The `ladder` collector block (cold-start budget-reservation knob)."""
+    cfg = get()
+    return dict(cfg.get("ladder", {}))
+
+
+def cold_start_tier_cost() -> float:
+    """Per-unmeasured-tier reservation (USD); MUST be > 0 or the overspend guard is defeated."""
+    # A non-positive value would reserve $0 per unmeasured tier, so a fresh run could admit an
+    # unbounded concurrent first wave — reject it loudly rather than silently disarm the guard.
+    value = float(ladder_config().get("cold_start_tier_cost", 1.0))
+    if value <= 0:
+        raise ValueError(f"ladder.cold_start_tier_cost must be > 0, got {value}")
+    return value
+
+
+def live_config() -> dict:
+    """The `live` agent-scaffold block (step_limit / wall bounds for a paid run)."""
+    cfg = get()
+    return dict(cfg.get("live", {}))
+
+
+def live_step_limit() -> int:
+    """PRIMARY model-speed-agnostic per-cell agent-step ceiling (default 150)."""
+    return int(live_config().get("step_limit", 150))
+
+
+def live_cost_limit() -> float:
+    """Per-cell USD cost ceiling passed to the agent scaffold (default 4.0; see benchmark.yaml)."""
+    # mini-swe-agent's own AgentConfig default is 3.0 — a scaffold default that would
+    # otherwise govern paid runs silently (the "undeclared default" this accessor exists to
+    # end). A declared key means the cap a run obeys is recorded where the run is configured.
+    # The value MOVES WITH ``step_limit``: the two are raised together, so a budget increase
+    # cannot relabel step censors as cost censors under a lying label.
+    return float(live_config().get("cost_limit", 4.0))
 
 
 def _pricing_dict() -> dict:
@@ -183,8 +213,7 @@ def _pricing_dict() -> dict:
 
 
 def enabled_models() -> list[str]:
-    """Return enabled model names sorted by tier (cheap → mid → frontier),
-    then by cost ascending within each tier."""
+    """Return enabled model names sorted by total list price ascending (name tie-break)."""
     # `models:` is a LIST of enabled names. In-list = enabled; a registry model
     # absent from the list is disabled; a listed name absent from the registry is
     # an unrecoverable config error (a listed model must exist to be routable).
@@ -205,14 +234,25 @@ def enabled_models() -> list[str]:
 
     pricing_dict = _pricing_dict()
 
-    def _sort_key(m: str) -> tuple:
-        info = pricing.get(m, {})
-        tier = _tier_order(info.get("tier", "cheap")) if isinstance(info, dict) else 99
+    def _sort_key(m: str) -> tuple[float, str]:
         cost = pricing_dict.get(m, {}).get("input", 0) + pricing_dict.get(m, {}).get("output", 0)
-        return (tier, cost)
+        return (cost, m)
 
     enabled.sort(key=_sort_key)
     return enabled
+
+
+def price_bands() -> tuple[list[str], list[str], list[str]]:
+    """Enabled models split into (cheap, mid, escalation) thirds by ascending price.
+
+    Replaces the hand-assigned tiers with equal price terciles; each list is price-ordered.
+    """
+    ordered = enabled_models()  # price ascending
+    third = max(len(ordered) // 3, 1)
+    cheap = ordered[:third]
+    escalation = ordered[-third:]
+    mid = [m for m in ordered if m not in cheap and m not in escalation]
+    return cheap, mid, escalation
 
 
 def enabled_pricing() -> dict:
@@ -255,6 +295,223 @@ def frontier_model() -> str | None:
         enabled,
         key=lambda m: pricing.get(m, {}).get("input", 0) + pricing.get(m, {}).get("output", 0),
     )
+
+
+@dataclass(frozen=True)
+class RankedModel:
+    """One model's slot in the derived capability order (0 = weakest)."""
+
+    model: str
+    default_arm: str
+    rank: int
+    source: str  # "measured" | "price-prior"
+
+
+@dataclass(frozen=True)
+class ModelEvidence:
+    """The measured stat behind a model's rank (reported + audited, never routed)."""
+
+    model: str
+    n: int  # real default-arm cells
+    pass_rate: float  # marginal p̂
+    ci_lo: float
+    ci_hi: float
+    rank: int
+    source: str  # "measured" | "price-prior"
+    price: float
+
+
+@dataclass(frozen=True)
+class CapabilityRank:
+    """A strict total order over enabled models + the per-model evidence behind it."""
+
+    ordered: list[RankedModel]  # weakest -> strongest
+    evidence: dict[str, ModelEvidence]  # by model
+
+    def rank_of(self, model: str) -> int | None:
+        for r in self.ordered:
+            if r.model == model:
+                return r.rank
+        return None
+
+    def strongest(self) -> str:
+        return self.ordered[-1].model
+
+
+def capability_rank_config() -> dict:
+    """Confidence-gate knobs for the derived rank (pinned in benchmark.yaml)."""
+    cfg = get().get("capability_rank", {}) or {}
+    return {
+        "K": int(cfg.get("K", 20)),
+        "W": float(cfg.get("W", 0.35)),
+        "min_pairs": int(cfg.get("min_pairs", 8)),
+        "baseline": list(cfg["baseline"]) if cfg.get("baseline") else None,
+    }
+
+
+def _wilson_ci(k: int, n: int, z: float = 1.96) -> tuple[float, float, float]:
+    """Marginal pass-rate ``k/n`` with a Wilson score CI (point, lo, hi).
+
+    Same math as ``impute.violation_ci`` — duplicated (not imported) because impute
+    depends on this module, not the reverse.
+    """
+    if n <= 0:
+        return (0.0, 0.0, 0.0)
+    phat = k / n
+    z2 = z * z
+    denom = 1.0 + z2 / n
+    center = phat + z2 / (2 * n)
+    margin = z * ((phat * (1 - phat) / n + z2 / (4 * n * n)) ** 0.5)
+    lo = (center - margin) / denom
+    hi = (center + margin) / denom
+    return (phat, max(0.0, lo), min(1.0, hi))
+
+
+def _copeland_scores(
+    matrix: dict, models: list[str], min_pairs: int
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Copeland score + qualifying-peer count per model from co-measured disagreements.
+
+    ``wins[(a, b)]`` = tasks where a passes and b fails; a pair contributes to the score
+    only when its disagreement count (both directions) reaches ``min_pairs``.
+    """
+    wins: dict[tuple[str, str], int] = {}
+    for cells in matrix.values():
+        present = [(m, bool(cells[m].get("pass"))) for m in models if m in cells]
+        for a, pa in present:
+            for b, pb in present:
+                if a != b and pa and not pb:
+                    wins[(a, b)] = wins.get((a, b), 0) + 1
+    scores: dict[str, int] = {}
+    peers: dict[str, int] = {}
+    for m in models:
+        s = p = 0
+        for b in models:
+            if b == m:
+                continue
+            ab, ba = wins.get((m, b), 0), wins.get((b, m), 0)
+            disagree = ab + ba
+            if disagree < min_pairs:
+                continue
+            p += 1
+            wr = ab / disagree
+            s += 1 if wr > 0.5 else (-1 if wr < 0.5 else 0)
+        scores[m] = s
+        peers[m] = p
+    return scores, peers
+
+
+def _reversal_supported(weaker: str, stronger: str, ev: dict[str, ModelEvidence]) -> bool:
+    """Is ranking ``weaker`` below ``stronger`` statistically supported vs a baseline?
+
+    Supported when their pass-rate Wilson CIs are disjoint in that direction, or a
+    source transition (price-prior <-> measured) occurs. Overlap keeps the baseline.
+    """
+    a, b = ev[weaker], ev[stronger]
+    return a.ci_hi < b.ci_lo or a.source != b.source
+
+
+def _apply_hysteresis(
+    data_order: list[str], baseline: list[str], ev: dict[str, ModelEvidence]
+) -> list[str]:
+    """Retain the committed baseline order except where the data supports a reversal."""
+    present = set(data_order)
+    order = [m for m in baseline if m in present] + [m for m in data_order if m not in baseline]
+    di = {m: i for i, m in enumerate(data_order)}
+    changed = True
+    while changed:
+        changed = False
+        for i in range(len(order) - 1):
+            weaker, stronger = order[i], order[i + 1]
+            if di[stronger] < di[weaker] and _reversal_supported(stronger, weaker, ev):
+                order[i], order[i + 1] = stronger, weaker
+                changed = True
+    return order
+
+
+def _assemble_order(
+    measured: list[str],
+    price_only: list[str],
+    ev: dict[str, ModelEvidence],
+    prices: dict[str, float],
+) -> list[str]:
+    """Interleave price-implied models into the measured order at their price slot."""
+    order = list(measured)
+    for x in sorted(price_only, key=lambda m: (prices.get(m, 0.0), m)):
+        px = prices.get(x, 0.0)
+        # Measured models win a price tie (placed before x); price-only models break by name.
+        idx = sum(1 for m in order if ev[m].source == "measured" and prices.get(m, 0.0) <= px)
+        idx += sum(
+            1 for m in order if ev[m].source == "price-prior" and (prices.get(m, 0.0), m) < (px, x)
+        )
+        order.insert(idx, x)
+    return order
+
+
+def derive_capability_rank(  # noqa: PLR0913 (pure core; all inputs are explicit for testability)
+    matrix: dict,
+    models: list[str],
+    prices: dict[str, float],
+    default_arms: dict[str, str],
+    knobs: dict,
+    baseline: list[str] | None = None,
+) -> CapabilityRank:
+    """Pure derivation: Copeland over co-measured tasks, Wilson-gated measured>price prior.
+
+    Sort key over measured models is ``(copeland, p̂, price, name)`` ascending (0 = weakest);
+    a model failing the confidence gate takes its price-implied slot instead.
+    """
+    k_min, w_max, min_pairs = knobs["K"], knobs["W"], knobs["min_pairs"]
+    scores, peers = _copeland_scores(matrix, models, min_pairs)
+    ev: dict[str, ModelEvidence] = {}
+    measured: list[str] = []
+    price_only: list[str] = []
+    for m in models:
+        cells = [c[m] for c in matrix.values() if m in c]
+        n = len(cells)
+        passes = sum(1 for c in cells if bool(c.get("pass")))
+        phat, lo, hi = _wilson_ci(passes, n)
+        is_measured = n >= k_min and (hi - lo) <= w_max and peers[m] >= 2
+        source = "measured" if is_measured else "price-prior"
+        ev[m] = ModelEvidence(m, n, phat, lo, hi, -1, source, prices.get(m, 0.0))
+        (measured if is_measured else price_only).append(m)
+    measured.sort(key=lambda m: (scores[m], ev[m].pass_rate, prices.get(m, 0.0), m))
+    if measured:
+        order = _assemble_order(measured, price_only, ev, prices)
+    else:
+        order = sorted(models, key=lambda m: (prices.get(m, 0.0), m))
+    if baseline:
+        order = _apply_hysteresis(order, baseline, ev)
+    pos = {m: i for i, m in enumerate(order)}
+    ranked = [
+        RankedModel(m, default_arms.get(m, _LEGACY_DEFAULT_REASONING), pos[m], ev[m].source)
+        for m in order
+    ]
+    evidence = {
+        m: ModelEvidence(m, e.n, e.pass_rate, e.ci_lo, e.ci_hi, pos[m], e.source, e.price)
+        for m, e in ev.items()
+    }
+    return CapabilityRank(ordered=ranked, evidence=evidence)
+
+
+def capability_rank(matrix: dict | None = None) -> CapabilityRank:
+    """Derived per-model capability order over enabled models (weakest->strongest).
+
+    Reads the default-arm-flattened real cache by default; pass ``matrix`` to derive
+    over a supplied slice. Pure over (results, registry price, pinned knobs, baseline).
+    """
+    if matrix is None:
+        matrix = flatten_default_arm(load_results())
+    enabled = enabled_models()
+    prices = {m: cost_per_1m(m) for m in enabled}
+    arms = default_arm_ids(enabled)
+    knobs = capability_rank_config()
+    return derive_capability_rank(matrix, enabled, prices, arms, knobs, knobs["baseline"])
+
+
+def impute_config() -> dict:
+    """The ``impute:`` block (scoring reads ``enabled`` / ``drop_unsolvable``)."""
+    return dict(get().get("impute", {}))
 
 
 def cost_per_1m(model: str, pricing: dict | None = None) -> float:
@@ -347,24 +604,55 @@ def _arm_key(model: str, stored: str, defaults: dict[str, str]) -> str:
     return defaults.get(model, _LEGACY_DEFAULT_REASONING)
 
 
+def row_precedence(row: dict[str, str]) -> tuple[int, str, str]:
+    """Rank two committed rows that resolve to the SAME cache cell. Higher wins.
+
+    Total and independent of file order, so the winner cannot change with row position.
+    """
+    # Two rows CAN legitimately name one cell: seven cells in the committed results.csv were
+    # measured twice, once as a legacy `reasoning="default"` placeholder (written before the
+    # arm-aware runner existed, so no `arm_hash`) and once afterwards under the explicit arm id.
+    # Both are real measurements and neither may be deleted — results.csv is real measured data —
+    # but they carry DIFFERENT costs, so something has to choose, explicitly and reproducibly.
+    #   1. A stamped `arm_hash` wins. That row's arm identity is PROVEN by the hash; the legacy
+    #      row's arm is only inferred by aliasing "default" through today's registry, which may
+    #      have moved since the row was written. Prefer the measurement that names its own arm.
+    #   2. Then the later `computed_at` — the more recent measurement of the same cell.
+    #   3. Then the row's own contents, so the order is TOTAL: two rows indistinguishable on
+    #      provenance still resolve identically whatever order the reader walks the file in.
+    return (
+        1 if (row.get("arm_hash") or "") else 0,
+        str(row.get("computed_at") or ""),
+        repr(sorted(row.items())),
+    )
+
+
 def load_results(path: str | Path | None = None) -> dict:
     """Reconstruct the outcome cache from results.csv, keyed challenge x model x arm."""
     # A legacy reasoning="default" row aliases to its model's declared default_arm
     # (falling back to the literal "default" key for a model with no declared
-    # reasoning block, or one absent from the current registry).
+    # reasoning block, or one absent from the current registry). Where that aliasing makes
+    # two rows collide on one cell, `row_precedence` — not the file's row order — decides.
     import csv
+
+    from benchmark.routing import censoring
 
     p = Path(path) if path else results_csv_path()
     results: dict[str, dict[str, dict[str, dict]]] = {}
     if not p.exists():
         return results
     defaults = default_arm_ids()
+    kept: dict[tuple[str, str, str], tuple[int, str, str]] = {}
     with open(p, newline="") as f:
         for row in csv.DictReader(f):
             cid = row["challenge_id"]
             model = row["model"]
             stored = str(row.get("reasoning") or _LEGACY_DEFAULT_REASONING)
             arm = _arm_key(model, stored, defaults)
+            rank = row_precedence(row)
+            if rank < kept.get((cid, model, arm), rank):
+                continue  # a row already read for this cell has stronger provenance
+            kept[(cid, model, arm)] = rank
             results.setdefault(cid, {}).setdefault(model, {})[arm] = {
                 "reasoning": arm,
                 "pass": _bool_field(row.get("pass", "")),
@@ -380,6 +668,22 @@ def load_results(path: str | Path | None = None) -> dict:
                 "timeout_flag": _bool_field(row.get("timeout_flag", "")),
                 "image_digest": str(row.get("image_digest") or ""),
                 "computed_at": str(row.get("computed_at") or ""),
+                # Always carry a resolved stop_reason: an explicit stored value, or a
+                # derivation for legacy rows written before the column existed.
+                "stop_reason": censoring.derive_stop_reason(
+                    passed=_bool_field(row.get("pass", "")),
+                    timeout_flag=_bool_field(row.get("timeout_flag", "")),
+                    stop_reason=str(row.get("stop_reason") or ""),
+                ),
+                # Collection-param provenance: the regime the cell was
+                # collected under. Carried through so ``_is_stale`` can anchor on
+                # step_limit/sampling_hash/prompt_hash; legacy rows backfilled before
+                # the columns existed carry "" (grandfathered to a staleness no-op).
+                "step_limit": str(row.get("step_limit") or ""),
+                "cost_limit": str(row.get("cost_limit") or ""),
+                "scaffold_version": str(row.get("scaffold_version") or ""),
+                "sampling_hash": str(row.get("sampling_hash") or ""),
+                "prompt_hash": str(row.get("prompt_hash") or ""),
             }
     return results
 
@@ -506,8 +810,8 @@ def sample_tasks(tasks: list[str], seed: int = 42) -> list[str]:
 def validate(config_path: str | Path | None = None) -> list[str]:
     """Validate benchmark.yaml against the registry. Returns list of errors (empty = valid).
 
-    Registry *schema* (required fields, tier vocabulary, provider FK) is enforced
-    by pydantic at load; this checks only benchmark.yaml's references into it.
+    Registry *schema* (required fields, provider FK) is enforced by pydantic at
+    load; this checks only benchmark.yaml's references into it.
     """
     errors: list[str] = []
     cfg = load(config_path)
@@ -535,8 +839,9 @@ def validate(config_path: str | Path | None = None) -> list[str]:
         "random",
         "knn",
         "knn_cascade",
-        "external_prior",
-        "knn_blended",
+        "price_cascade",
+        "session_cascade",
+        "tier_classifier",
     }
     for name in strat_cfg.get("enabled", []):
         if name not in known:

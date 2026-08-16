@@ -68,5 +68,6 @@
     "test_url_params_from_lookup_dict_callable (admin_widgets.tests.AdminForeignKeyRawIdWidget)"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-12713:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "Allow overridding widget in formfield_for_manytomany().\nDescription\n\t \n\t\t(last modified by Mariusz Felisiak)\n\t \nIt does not work when I set widget param to function formfield_for_manytomany().\nThis is different from the formfield_for_foreignkey() function.\n"
 }

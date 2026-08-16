@@ -123,5 +123,6 @@
     "A field may be migrated from SmallAutoField to BigAutoField."
   ],
   "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-14999:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "RenameModel with db_table should be a noop.\nDescription\n\t\nA RenameModel operation that already has db_table defined must be a noop.\nIn Postgres, it drops and recreates foreign key constraints. In sqlite it recreates the table (as expected for a table renaming).\n"
 }

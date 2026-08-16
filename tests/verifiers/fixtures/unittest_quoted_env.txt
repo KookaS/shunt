@@ -1,0 +1,14 @@
+test_parse (test_widget.py) ... FAIL
+
+======================================================================
+FAIL: test_parse (test_widget.py)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/x/test_widget.py", line 8, in test_parse
+    self.assertIn("cannot find module", out)
+AssertionError: 'cannot find module' not found in 'parsed ok'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+FAILED (failures=1)

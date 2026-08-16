@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import hnswlib
 import numpy as np
 
+from benchmark import config
 from shunt.models.config import ModelPool, default_registry_path
 from shunt.router.cold_start import ColdStartStrategy
 from shunt.router.embedder import Embedder
 from shunt.router.engine import RouterEngine
 from shunt.router.selection import NeighborResult, SelectionRule
 
-from . import Strategy
+from . import Strategy, routing_text
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -36,8 +38,74 @@ def _get_embedder() -> Embedder:
     return _EMBEDDER
 
 
+# A SWE-bench `problem_statement` runs to a few thousand characters, ~11x the old
+# identifier label it replaced. Transformer attention is O(batch x seq^2), so one
+# `embed_batch` over all 500 asks onnxruntime for a buffer tens of GB wide and the
+# process is SIGKILLed. The fix is a batch budget in `batch x chars^2`, not a fixed
+# batch count: a fixed count is either slow on short texts or fatal on long ones.
+# Embeddings are per-text, so regrouping and reordering is bit-identical to the single
+# call that used to fit.
+_EMBED_BUDGET: int = 32_000_000
+
+
+def _length_batches(texts: list[str]) -> list[list[int]]:
+    """Indices grouped so `len(batch) * max_chars^2` stays under the budget."""
+    order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
+    batches: list[list[int]] = []
+    current: list[int] = []
+    for i in order:
+        width = max(len(texts[i]), 1)
+        if current and (len(current) + 1) * width * width > _EMBED_BUDGET:
+            batches.append(current)
+            current = []
+        current.append(i)
+    if current:
+        batches.append(current)
+    return batches
+
+
+# The report builds several kNN-family strategies over ONE corpus, and each used to embed
+# the same texts again. That was ~free on a 106-char label and is minutes per strategy on a
+# real problem statement. Keyed by the exact text, so a corpus change misses by construction.
+# Lazily created behind an accessor for the same reason `_EMBEDDER` above is: a module-level
+# mutable literal is denied (SH001), and this mirrors the one opt-out already in this file
+# rather than inventing a second convention for the same problem.
+_EMBED_CACHE: dict[str, np.ndarray] | None = None
+
+
+def _embed_cache() -> dict[str, np.ndarray]:
+    global _EMBED_CACHE  # noqa: PLW0603, SH001 (lazy per-process embedding cache)
+    if _EMBED_CACHE is None:
+        _EMBED_CACHE = {}
+    return _EMBED_CACHE
+
+
 def _embed_texts(texts: list[str]) -> np.ndarray:
-    return np.array(_get_embedder().embed_batch(texts), dtype=np.float32)
+    if not texts:
+        return np.zeros((0, 0), dtype=np.float32)
+    cache = _embed_cache()
+    pending = [t for t in dict.fromkeys(texts) if t not in cache]
+    if pending:
+        embedder = _get_embedder()
+        for batch in _length_batches(pending):
+            vectors = embedder.embed_batch([pending[i] for i in batch])
+            for i, vector in zip(batch, vectors, strict=True):
+                cache[pending[i]] = np.asarray(vector, dtype=np.float32)
+    return np.stack([cache[t] for t in texts])
+
+
+def _build_index(embeddings: np.ndarray) -> hnswlib.Index:
+    """A cosine HNSW index over ``embeddings`` (ef_construction=100, M=16, ef=50).
+
+    ``num_threads=1`` pins the neighbour graph so regenerated metrics/plots are
+    bit-reproducible (multi-threaded add_items wobbles at ~1e-4).
+    """
+    n = len(embeddings)
+    index = hnswlib.Index(space="cosine", dim=int(embeddings.shape[1]))
+    index.init_index(max_elements=n, ef_construction=100, M=16)
+    index.add_items(embeddings, np.arange(n), num_threads=1)
+    index.set_ef(50)
+    return index
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +115,22 @@ def _model_pricing(matrix: dict) -> dict[str, float]:
     """Return {model: total_cost_per_1M} from the matrix pricing section."""
     models = matrix.get("models", {})
     return {m: models[m].get("input_price", 0) + models[m].get("output_price", 0) for m in models}
+
+
+def _benchmark_model_pool() -> ModelPool:
+    """The shipped registry, restricted to the models the benchmark has enabled."""
+    # Tiering still comes from the packaged models.yaml (production behaviour), but the
+    # CANDIDATE set is the measured one. The unrestricted pool let the engine select a
+    # registry model the benchmark never ran (disabled, research-estimated price); the
+    # matrix has no such cell, so the task went to `unscorable` and vanished from scoring.
+    enabled = config.enabled_models()
+    if not enabled:
+        # restrict_to_live([]) is a documented no-op — silently reinstating the whole
+        # registry is the exact failure this function exists to prevent.
+        raise ValueError("benchmark.yaml enables no models; kNN has no candidate set.")
+    pool = ModelPool(_BUNDLED_MODEL_CONFIG)
+    pool.restrict_to_live(enabled)
+    return pool
 
 
 def _fallback_model(matrix: dict) -> str:
@@ -143,13 +227,22 @@ class _DummySessionManager:
 class _LookupEmbedder:
     """Precomputed embeddings keyed by prompt text, computed on demand for uncached texts."""
 
-    def __init__(self, lookup: dict[str, np.ndarray]) -> None:
+    def __init__(
+        self,
+        lookup: dict[str, np.ndarray],
+        embed_texts: Callable[[list[str]], np.ndarray] | None = None,
+    ) -> None:
         self._lookup = lookup
+        self._embed_texts = embed_texts
 
     def embed(self, text: str) -> np.ndarray:
         cached = self._lookup.get(text)
         if cached is None:
-            cached = _embed_texts([text])[0]
+            # Resolved at CALL time, never bound at construction: the module-level `_embed_texts`
+            # is what tests monkeypatch, and a default captured in the signature would silently
+            # ignore that and reach for the real 600MB ONNX load.
+            embed = _embed_texts if self._embed_texts is None else self._embed_texts
+            cached = np.asarray(embed([text]), dtype=np.float32)[0]
             self._lookup[text] = cached
         return cached
 
@@ -168,10 +261,17 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
         k: int = 20,
         success_rate_threshold: float = 0.7,
         min_samples: int = 3,
+        embed_texts: Callable[[list[str]], np.ndarray] | None = None,
     ):
         self._k = k
         self._success_rate_threshold = success_rate_threshold
         self._min_samples = min_samples
+        # None means the shipped embedder, resolved at CALL time so a monkeypatched module-level
+        # `_embed_texts` still wins. The seam exists for `instrument_control`, which builds one
+        # strategy per permutation draw over a corpus whose TEXT never changes — without it the
+        # validity control would run hundreds of real ONNX passes over the same strings. Nothing
+        # downstream of the vectors differs.
+        self._embed_texts = embed_texts
 
         # Lazy-initialized state
         self._task_ids: list[str] | None = None
@@ -197,7 +297,7 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
         assert self._engine is not None
         model_name, _reason, _provenance = self._engine.decide(
             session_id=task_id,
-            prompt_text=task_meta.get("description", task_id),
+            prompt_text=routing_text(task_id, task_meta),
         )
         return model_name
 
@@ -209,20 +309,14 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
         self._task_ids = task_ids
         self._pricing = _model_pricing(matrix)
 
-        # Embed all task descriptions
-        descriptions = [matrix["tasks"].get(tid, {}).get("description", tid) for tid in task_ids]
-        self._embeddings = _embed_texts(descriptions)
+        # Embed each task's routing text (problem statement, else the short description)
+        texts = [routing_text(tid, matrix["tasks"].get(tid, {})) for tid in task_ids]
+        embed = _embed_texts if self._embed_texts is None else self._embed_texts
+        self._embeddings = np.asarray(embed(texts), dtype=np.float32)
 
         # Build HNSW index over ALL embeddings (index holds everything;
         # self-exclusion is handled at query time)
-        dim = self._embeddings.shape[1]
-        index = hnswlib.Index(space="cosine", dim=dim)
-        index.init_index(max_elements=len(task_ids), ef_construction=100, M=16)
-        # num_threads=1: pin the neighbour graph so regenerated metrics/plots are
-        # bit-reproducible (multi-threaded add_items wobbles at ~1e-4), matching
-        # knn_blended._build_hnsw.
-        index.add_items(self._embeddings, np.arange(len(task_ids)), num_threads=1)
-        index.set_ef(50)
+        index = _build_index(self._embeddings)
         self._index = index
 
         # Build the live-router abstractions
@@ -236,8 +330,9 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
         # The SHIPPED model pool — tiers come from src/shunt config, not a
         # benchmark-local price heuristic, so the benchmark measures production tiering.
         # Pinned to the packaged shunt/config/models.yaml so an ambient SHUNT_CONFIG_DIR /
-        # ~/.config/shunt override can't silently change the benchmark's tiering.
-        model_pool = ModelPool(_BUNDLED_MODEL_CONFIG)
+        # ~/.config/shunt override can't silently change the benchmark's tiering, then
+        # narrowed to the enabled (measured) models so no pick can be unscorable.
+        model_pool = _benchmark_model_pool()
 
         selection_rule = SelectionRule(
             min_success_rate=self._success_rate_threshold,
@@ -245,8 +340,8 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
         )
 
         # Precomputed embedding lookup so the engine never re-embeds
-        lookup = dict(zip(descriptions, list(self._embeddings), strict=True))
-        embedder = _LookupEmbedder(lookup)
+        lookup = dict(zip(texts, list(self._embeddings), strict=True))
+        embedder = _LookupEmbedder(lookup, self._embed_texts)
 
         self._engine = RouterEngine(
             model_pool=model_pool,
@@ -256,6 +351,10 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
             selection_rule=selection_rule,
             cold_start_strategy=ColdStartStrategy(threshold_tier2=0, threshold_tier1=0),
             cold_start_threshold=0,
+            # The engine's neighbourhood size was left at its default 20 while `self._k` (also
+            # 20 by default, but a real knob) was stored and never wired through — a benchmark
+            # run with `strategies.knn.k != 20` silently measured k=20. Pass the knob through.
+            neighbor_k=self._k,
         )
 
         self._ready = True

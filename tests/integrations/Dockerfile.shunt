@@ -14,3 +14,22 @@ COPY fake_registry.yaml /shunt-harness/fake_registry.yaml
 COPY fake_router.yaml /shunt-harness/router.yaml
 ENV SHUNT_MODEL_CONFIG_PATH=/shunt-harness/fake_registry.yaml
 ENV SHUNT_CONFIG_DIR=/shunt-harness
+
+# The escalation scenario's deterministically-red repo, BAKED IN for the same reason the
+# registry is. A bind mount here is not merely inelegant: when the docker daemon does not
+# share the client's filesystem (a devcontainer, a remote daemon, rootless CI), the source
+# path silently resolves to an empty directory on the daemon host, /repo has no test suite,
+# every capture returns "no tests ran", and the scenario reports a false negative — the very
+# class of lie this harness exists to remove.
+COPY demo_repo /repo
+
+# The off-wire verifier shells out to `sys.executable -m pytest` in the work dir, and
+# the product image ships no test runner (correctly — it is not the router's job). The
+# escalation scenario is the one place Shunt must run someone else's suite, so pytest is
+# a HARNESS-layer dep here, never in the shipped image.
+RUN pip install --no-cache-dir "pytest>=8,<9"
+
+# The scenario's verdict sidecar. Baked in, not bind-mounted, for the same reason the
+# registry is: one self-contained image works on any daemon. It runs with the entrypoint
+# overridden (see the `assert-escalation` service in examples/integrations/compose.base.yaml).
+COPY assert_escalation.py /shunt-harness/assert_escalation.py

@@ -31,12 +31,11 @@ def test_it_states_the_exploration_settings(disclosure: str) -> None:
     assert "conservative_alpha=0.10" in disclosure
 
 
-def test_it_lists_the_routable_models_with_their_tiers(disclosure: str) -> None:
+def test_it_lists_the_routable_models_by_rank(disclosure: str) -> None:
     pool = ModelPool()
     assert pool.model_names(), "fixture pool must expose models for this to mean anything"
-    for name in pool.model_names():
-        tier = pool.get_tier(name)
-        assert f"{tier}:{name}" in disclosure
+    for rank, model in enumerate(pool.ranked_models()):
+        assert f"{rank}:{model.name}" in disclosure
 
 
 def test_it_never_prints_a_credential(

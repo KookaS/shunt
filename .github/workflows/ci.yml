@@ -6,14 +6,57 @@ on:
   pull_request:
     branches: [main, master]
 
+# A superseded PR run is wasted runner time, and a stacked queue hides which run is
+# authoritative. `main` pushes are never cancelled — those runs gate the release.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   PYTHON_VERSION: "3.12"
 
+# Every `timeout-minutes` below is DERIVED from what the job actually takes, not guessed.
+# Guessing cost a green run: `hygiene` was given 15 when it had been finishing in 18, and
+# a job killed by its bound is *cancelled*, which cancels the whole run. Re-measure before
+# changing one — the observed maxima over the last successful runs (minutes) were
+# lint 3.1 · test 10.2 · benchmark-integrity 1.1 · hygiene 18.1:
+#
+#   gh run list --repo KookaS/shunt --workflow ci.yml --status success --limit 6 \
+#     --json databaseId -q '.[].databaseId' | while read id; do
+#       gh run view "$id" --repo KookaS/shunt --json jobs \
+#         -q '.jobs[] | "\(.name)\t\(((.completedAt|fromdate)-(.startedAt|fromdate))/60)"'
+#     done
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+      - name: Secret scan (LFS corpus)
+        # The pre-commit gitleaks hook only sees the staged diff's Git-LFS POINTERS, so a real
+        # secret inside a committed benchmark trajectory would sail through it. Scan the actual
+        # LFS content instead. Scoped to benchmark/escalation/data/ with the config passed
+        # explicitly: `gitleaks dir` only auto-discovers <target>/.gitleaks.toml, and it
+        # IGNORES .gitignore, so pointing it at the repo root would also read the dev's
+        # root-level .env.
+        run: |
+          gitleaks dir --no-banner --config .gitleaks.toml benchmark/escalation/data/
+      - name: Secret scan (full checked-out tree)
+        # The pre-commit gitleaks hook is `--staged`, which is VACUOUS in CI: on a clean
+        # checkout nothing is staged, so 0 bytes get scanned. The LFS step above only covers
+        # benchmark/escalation/data/. This step scans the WHOLE working tree (tracked content,
+        # LFS content included) with the allowlist config passed explicitly. `detect` rather
+        # than `dir` because detect respects .gitignore: the repo's root-level `.env` and
+        # caches are gitignored, so they are never read even if this is ever run on a dev
+        # machine where one exists.
+        run: |
+          gitleaks detect --no-banner --config .gitleaks.toml --redact .
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -40,15 +83,23 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          # tests/escalation reads the committed trajectory corpus, which is Git-LFS-tracked;
+          # without lfs:true the reads hit 130-byte pointers and the escalation tests fail.
+          lfs: true
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install dependencies
         run: |
           pip install uv
-          uv sync --extra dev --extra benchmark
+          # `--extra capture` installs cryptography, which the encryption-at-rest tests
+          # (tests/capture/test_trajectory_capture.py) need to RUN rather than skip —
+          # see the `capture` extra's comment in pyproject.toml.
+          uv sync --extra dev --extra benchmark --extra capture
       - name: Embedding pipeline (faithful fake — no ONNX download)
         # Proves the real embedding SETUP (embed -> store -> HNSW index -> kNN query) works
         # end-to-end via a fidelity-checked FakeEmbedder that mirrors the real Embedder's
@@ -70,7 +121,10 @@ jobs:
           SHUNT_DISALLOW_REAL_EMBEDDER: "1"
         run: uv run pytest -v tests/config/test_packaged_config_bundling.py
       - name: Test
-        run: uv run pytest tests/ -v --tb=short
+        # No path argument on purpose: an explicit `tests/` OVERRIDES pyproject's
+        # `testpaths`, which is what silently kept benchmark/tests (227 tests) out of
+        # CI. Let testpaths be the single source of truth for what gets collected.
+        run: uv run pytest -v --tb=short
 
   # Benchmark integrity: challenge content hashes match the stored version_hash,
   # no removed challenges, model versions current, AND the per-strategy summary
@@ -78,8 +132,11 @@ jobs:
   # live model calls, no embedding downloads (deterministic strategies only).
   benchmark-integrity:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -93,12 +150,26 @@ jobs:
         # package (see pyproject.toml packages.find), so a by-path invocation
         # would fail with ModuleNotFoundError.
         run: uv run python -m benchmark.runner.check_integrity --check-derived
+      - name: Committed figures are not stale
+        # `--check-figures` proves the committed PNGs / metrics.json / figures.json were drawn
+        # from the CURRENT code+config, without regenerating anything (seconds, no spend). A code
+        # change to a strategy, the escalation policy, or the registry leaves the committed figures
+        # stale — this is the gate that makes it unquotable rather than silently wrong.
+        run: uv run python -m benchmark.pipeline --check-figures
 
   # Advisory whole-program hygiene — runs separately so its slower/noisier
   # tools never block the fast pre-commit path. Reports, does not fail the build.
   hygiene:
     name: hygiene (advisory)
     runs-on: ubuntu-latest
+    # 30 against a measured 18.1 max. The real bounds are on the STEPS below, because
+    # `continue-on-error` does not make a JOB's bound harmless: a job killed by
+    # `timeout-minutes` is *cancelled*, not *failed*, and continue-on-error tolerates
+    # only failure — so a 15 here cancelled an otherwise-green run (31880593239) over an
+    # advisory tool merely being slow. A step bound IS tolerated by the step's own
+    # continue-on-error, which is the only construction that keeps "advisory" advisory
+    # when it runs long. This job-level number is the backstop behind those.
+    timeout-minutes: 30
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -111,10 +182,16 @@ jobs:
           uv sync --extra dev --extra benchmark
       - name: vulture (dead code)
         continue-on-error: true
+        timeout-minutes: 5
         run: uv run vulture
       - name: deptry (dependency hygiene)
         continue-on-error: true
+        timeout-minutes: 5
         run: uv run deptry .
       - name: coverage (floor advisory)
         continue-on-error: true
-        run: uv run pytest tests/ --cov=src/shunt --cov-report=term-missing
+        # The slow one: it re-runs the whole suite under coverage (~15 of the job's 18
+        # minutes). Bounded here rather than at the job, so overrunning stays advisory.
+        timeout-minutes: 25
+        # Path-less for the same reason as the Test step: `testpaths` decides.
+        run: uv run pytest --cov=src/shunt --cov-report=term-missing

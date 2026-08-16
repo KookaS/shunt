@@ -12,6 +12,8 @@ from typing import Any, Final, Protocol
 
 import numpy as np
 
+from shunt.proxy.redaction import redact_secrets
+
 from .index import HNSWIndex
 from .loop_health import LoopHealthSnapshot
 from .schema import run_migrations
@@ -61,6 +63,22 @@ class OutcomeEvent:
     run_signature: str
     model_fingerprint: str | None = None
     tombstoned: bool = False
+
+
+def _exploration_row(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Flatten one session row into an exploration record + its verified outcome, or None."""
+    try:
+        provenance = json.loads(row["decision_provenance"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return None
+    record = provenance.get("escalation_exploration")
+    if not isinstance(record, dict):  # the LIKE filter can match a prompt, not just the key
+        return None
+    return {
+        **record,
+        "session_id": row["session_id"],
+        "outcome": row["tier2_outcome"] or row["tier1_outcome"],
+    }
 
 
 def _latest_tier(events: list[sqlite3.Row], tier: int) -> sqlite3.Row | None:
@@ -223,7 +241,12 @@ class OutcomeStore:
                 """,
                 (
                     session_id,
-                    prompt_text,
+                    # Redacted at rest: this is the only free-text sink that reached the DB
+                    # raw, and a user prompt routinely pastes a key or token. The embedding
+                    # blob is computed upstream from the live text, so redaction changes what
+                    # a REINDEX re-embeds (a secret is noise to the router), never the
+                    # decision this session already made.
+                    redact_secrets(prompt_text),
                     embedding_blob,
                     model_chosen,
                     cost,
@@ -489,6 +512,24 @@ class OutcomeStore:
                 "WHERE s.embedding_blob IS NOT NULL" + clause
             )
             return [dict(row) for row in cursor.fetchall()]
+
+    def escalation_exploration_rows(self) -> list[dict[str, Any]]:
+        """Flagged-checkpoint escalation records joined to their verified outcome (OPE input)."""
+        # The propensity rides the session's decision_provenance, exactly as the routing
+        # selection propensity does; the verified outcome is joined here so the estimator gets
+        # (state, action, propensity, reward) in one row. Tier-2 (verified) wins over Tier-1;
+        # an unlabelled decision keeps outcome=None so the estimator can EXCLUDE it rather than
+        # invent a reward.
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT s.session_id, s.decision_provenance, s.timestamp, "
+                "o.tier1_outcome, o.tier2_outcome FROM sessions s "
+                "LEFT JOIN outcomes o ON o.session_id = s.session_id "
+                "WHERE s.decision_provenance LIKE '%escalation_exploration%' "
+                "ORDER BY s.timestamp"
+            )
+            rows = [dict(row) for row in cursor.fetchall()]
+        return [row for row in (_exploration_row(r) for r in rows) if row is not None]
 
     def query_index(self, embedding: np.ndarray, k: int = 20) -> list[tuple[str, float]]:
         """Return ``(session_id, distance)`` for the *k* nearest embedded sessions."""

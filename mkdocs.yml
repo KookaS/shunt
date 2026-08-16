@@ -5,7 +5,7 @@ site_description: >-
 site_url: https://kookas.github.io/shunt/
 repo_url: https://github.com/KookaS/shunt
 repo_name: KookaS/shunt
-edit_uri: edit/master/docs/
+edit_uri: edit/main/docs/
 copyright: Apache-2.0
 
 docs_dir: docs
@@ -37,13 +37,25 @@ nav:
   - Architecture: architecture.md
   - Configuration: configuration.md
   - Feedback: feedback.md
+  - The routing model: routing.md
   - Error detection & auto-escalation: escalation.md
+  - The escalation claim: escalation-claim.md
+  - Escalation dataset: escalation-data-card.md
+  - Reproducing the escalation eval: escalation-reproduction.md
+  - Results: results.md
+  - Research log: research-log.md
   - Benchmark: benchmark.md
+  - Benchmark dataset: benchmark-data.md
   - Benchmark design: benchmark-design.md
-  - Decision records: decisions/index.md
+  - Live smoke: live-smoke-runbook.md
+  - Free-tier smoke: free-tier-smoke.md
 
 markdown_extensions:
   - admonition
+  # `{#fig-<slug>}` on a figure heading: the stable deep-link target the README and
+  # docs/results.md point at, and the key SH009 parses to hold each figure's section in
+  # bijection with benchmark/<half>/figures.json.
+  - attr_list
   - tables
   - toc:
       permalink: true

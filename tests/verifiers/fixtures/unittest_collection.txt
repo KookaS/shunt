@@ -1,0 +1,15 @@
+ERROR: test_widget (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_widget
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/unittest/loader.py", line 420, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.12/unittest/loader.py", line 356, in _get_module_from_name
+    __import__(name)
+  File "/x/test_widget.py", line 1, in <module>
+    from widgets import parse
+ModuleNotFoundError: No module named 'widgets'
+
+Ran 0 tests in 0.000s
+
+FAILED (errors=1)

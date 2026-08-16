@@ -21,5 +21,6 @@
     "test_rewrite_as_Abs"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.sympy_1776_sympy-15809:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "Zero-argument Min() and Max()\nRight now `Min()` and `Max()` with no arguments raise `ValueError: The Max/Min functions must have arguments.`. It might be mathematically more convenient to have them return `oo` and `-oo`, respectively. See https://en.wikipedia.org/wiki/Empty_set#Extended_real_numbers for why these are valid answers mathematically. \n"
 }

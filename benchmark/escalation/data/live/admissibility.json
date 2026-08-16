@@ -1,0 +1,3362 @@
+{
+  "astropy__astropy-12907": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 13/13 (rc=1, 15 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "f57a82241a450f2a715d1ee4716abb4ba78738671faaf9cd193ae605373bcc37",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 13/13 (rc=0, 15 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-12907",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-13033": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 20/20 (rc=1, 24 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "7ddc1f4124e989e36e4273502ce15b7bb94c81c6822774bf073c8f7e8f710884",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 20/20 (rc=1, 24 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-13033",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-13236": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 644/644 (rc=1, 653 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "32f520f57a80657da456562aa4e610669cdff1c8f69bb4f09a64da804feebe47",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 644/644 (rc=1, 653 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-13236",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-13398": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/4, P2P 68/68 (rc=1, 74 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "869277d4f8f6337cf85dcd7a32ba1207e858c418aa07b50e03a2feb8ed1c14c3",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 4/4, P2P 68/68 (rc=1, 74 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-13398",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-13977": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/20, P2P 322/322 (rc=1, 344 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "4613e96bd24eb6cb9b7eafd39e0170127344ae42b057505745563b4700e95e7f",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 20/20, P2P 322/322 (rc=0, 344 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-13977",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-14096": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 426/426 (rc=1, 430 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "73b278589d1e141e5cc24cf1ec0f0d8250c5326e9d839ec806f2be4119786625",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 426/426 (rc=1, 430 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-14096",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-14182": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 9/9 (rc=1, 10 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "68b88abe478951d2249e8ffdcd56b3d26a9123d96ef221bb440a6323296dd444",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 9/9 (rc=0, 10 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-14182",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-14309": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 141/141 (rc=1, 148 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "f449a6526c27ddbd84b5712727231c04564111aa8a6fd150a2cdff21bb11a60e",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 141/141 (rc=0, 148 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-14309",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-14365": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 8/8 (rc=1, 9 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "3c66f0dbe5f7a82ee1cbbc1b4b27d8cec46df56e787a4a96ebe6008f20e16eed",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 8/8 (rc=0, 9 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-14365",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-14369": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/3, P2P 732/732 (rc=1, 735 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "904d72d41f0876378dfe9d3c35eceecdad9bbffb09041e2c3c182d3290719872",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 3/3, P2P 732/732 (rc=0, 735 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-14369",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-14508": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 174/174 (rc=1, 175 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "539692f7f5efc13b571dbc03324f98fc9f574d4266f5d9c5a258dd7419523761",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 174/174 (rc=0, 175 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-14508",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-14539": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 46/46 (rc=1, 48 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "c28409cbecfc2ef136a60462fd73b395f1aca35c2f9a25c9bb74a080b64b5a51",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 46/46 (rc=0, 48 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-14539",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-14598": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 175/175 (rc=1, 176 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "795de6fe0aa0dab3535f7d9cc92acbca1929aa06a3b44108a59088bc9ad25346",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 175/175 (rc=0, 176 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-14598",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-7336": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 339/339 (rc=1, 340 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "a28e171d6a37243cc3097f722ae8c5c4f0b4ba3ba589942302a0f91cc4bfe58b",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 339/339 (rc=0, 340 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-7336",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-7606": {
+    "admissible": false,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 240/241 (rc=1, 242 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "1a705bdba1d07c19d07bb3d72b3ca19959ed3edc49d1b67df725dc82f28e1841",
+    "gold": {
+      "detail": "grader: NOT resolved \u2014 F2P 1/1, P2P 240/241 (rc=0, 242 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "failure"
+    },
+    "instance_id": "astropy__astropy-7606",
+    "known_artifact": "",
+    "reason": "INADMISSIBLE: gold leg is 'failure', not success \u2014 a known-correct fix does not register as a pass (grader: NOT resolved \u2014 F2P 1/1, P2P 240/241 (rc=0, 242 statuses parsed)), so every red this instance emits is uninformative. A negative here is a coverage-gap, not a falsification."
+  },
+  "astropy__astropy-7671": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 3/3 (rc=1, 4 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "d6abd9a321413cc663474c1b7deb80c292a3ee57ff42d2f861d5c5acf3382d91",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 3/3 (rc=0, 4 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "astropy__astropy-7671",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "astropy__astropy-8707": {
+    "admissible": false,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 4/11 (rc=1, 152 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "2ade18a8922cb825f63ce495a08bec1aa553546b51403b00643a645094efb8da",
+    "gold": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 4/11 (rc=1, 152 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "failure"
+    },
+    "instance_id": "astropy__astropy-8707",
+    "known_artifact": "",
+    "reason": "INADMISSIBLE: gold leg is 'failure', not success \u2014 a known-correct fix does not register as a pass (grader: NOT resolved \u2014 F2P 0/1, P2P 4/11 (rc=1, 152 statuses parsed)), so every red this instance emits is uninformative. A negative here is a coverage-gap, not a falsification."
+  },
+  "astropy__astropy-8872": {
+    "admissible": false,
+    "base": {
+      "detail": "environment/collection error (rc=2)",
+      "exit_code": 2,
+      "is_infra_failure": true,
+      "leg": "base",
+      "outcome": "unknown"
+    },
+    "gate_key": "09163850d4ec65c0ec67c1db6025df9ab624b86af8f401375bf0e14a45463709",
+    "gold": {
+      "detail": "environment/collection error (rc=2)",
+      "exit_code": 2,
+      "is_infra_failure": true,
+      "leg": "gold",
+      "outcome": "unknown"
+    },
+    "instance_id": "astropy__astropy-8872",
+    "known_artifact": "",
+    "reason": "INADMISSIBLE: gold leg is 'unknown' (not success) AND base leg is 'unknown' (not failure) \u2014 the replay cannot resolve this instance in either direction; its per-step outcomes carry no information about the agent."
+  },
+  "django__django-11099": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 1/3, P2P 19/19 (rc=1, 22 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "adeb4a85aa490900bf44d060fc31eefdf3358635cf6d51f2e9382390ed8a9083",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 3/3, P2P 19/19 (rc=0, 22 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-11099",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-11119": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 7/7 (rc=1, 9 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "1460a414aa85b1c9f7dfd71bc9a3fdcba9888d1ec395ca330f51c9b4eb8f120d",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 7/7 (rc=0, 8 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-11119",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-11885": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 43/43 (rc=1, 46 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "5231b93a232f339d58f6aba603dd31032a57c55d3ecc4ed449e2f533971abacf",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 43/43 (rc=0, 45 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-11885",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-12325": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 201/201 (rc=1, 207 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "d9ddd92db3a7168b9ffca11f2672be1ac0a8b46f136397531c1aaa159f5142d2",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 201/201 (rc=0, 205 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-12325",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-13128": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/7, P2P 134/134 (rc=1, 150 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "b0b80db94857e607fec7e6ea611cb31f36739d5c88a827b938b3686cd4385573",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 7/7, P2P 134/134 (rc=0, 143 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-13128",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-13158": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 29/29 (rc=1, 33 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "73b3aaa3f6ca89b48d4e2f98986f01edd34d16c278328faf1eeaaf144b7bda4f",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 29/29 (rc=0, 32 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-13158",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-13449": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 46/46 (rc=1, 51 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "4100a17520a8b5d5145da25f5ee609c3a80586b2073004a8f8094e835bad82a6",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 46/46 (rc=0, 50 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-13449",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-13837": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 57/57 (rc=1, 79 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "26aa4791d5e1fdfd8bbaa0bd8bb1d07c1251c9e77c63afffb9e076c5c9f70f11",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 57/57 (rc=0, 78 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-13837",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-13964": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 36/36 (rc=1, 38 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "17a36b59c8cf4b961c011583027659028d435276b7e35c7bf35b1d1b0b9fee88",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 36/36 (rc=0, 37 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-13964",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-14404": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 323/323 (rc=1, 342 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "c8a6cf1a2272ad15860455d59725d93471d79f674c65d2848a96d1bb81314e51",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 323/323 (rc=0, 340 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-14404",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-14559": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/3, P2P 23/23 (rc=1, 29 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "f753d42580801f7ebe24a617b7167d479c1048d0f3dd9291d77a181a10817e0b",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 3/3, P2P 23/23 (rc=0, 26 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-14559",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-14771": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 60/60 (rc=1, 82 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "d5428b5ebb50574e5b71bb1cbeed97ab7a7f30b19e23454a071f05fb3960816b",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 60/60 (rc=0, 81 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-14771",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-14915": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 23/23 (rc=1, 25 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "b17f952408abce4bea2774be3e0be16cfe5b494f7884f183d325a74c8d071bfe",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 23/23 (rc=0, 24 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-14915",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-14999": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 113/113 (rc=1, 116 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "7ed5ccdfa5fe66fcdc2f65008d92e9e8e9363c6957c3681c11d5420d7e446e5f",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 113/113 (rc=0, 115 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-14999",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-15098": {
+    "admissible": false,
+    "base": {
+      "detail": "grader parity: 2/2 FAIL_TO_PASS tests were never measured (skipped, or no F2P test decided at all among 92 parsed statuses) \u2014 test_get_language_from_path_real (i18n.tests.MiscTests), test_get_supported_language_variant_null (i18n.tests.MiscTests)",
+      "exit_code": 1,
+      "is_infra_failure": true,
+      "leg": "base",
+      "outcome": "unknown"
+    },
+    "gate_key": "f9bac162bf378eb119641fe01543cf35bdbf2856237370f153267e4a21ee79d8",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 88/88 (rc=1, 92 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-15098",
+    "known_artifact": "KNOWN INSTRUMENT ARTIFACT, deliberately NOT fixed. Cost: 251 steps across 5 trajectories. The base leg demotes to `unknown` because NEITHER FAIL_TO_PASS id appears in the parsed status map, for two INDEPENDENT reasons that only together produce zero decided F2P. (1) `test_get_language_from_path_real (i18n.tests.MiscTests)` fails only through `subTest`, so no terminating `... FAIL` is written for the parent test and its sole record is the summary line `FAIL: test_get_language_from_path_real (i18n.tests.MiscTests) (path='/en-latn-us/')`, which `parse_log_django` keys as `line.split()[1]` \u2014 the BARE name, dropping both the `(module.Class)` qualifier and the subTest parameter. (2) Because that parent's status line was left unterminated, the NEXT test's header was appended to it, and the merged line `test_get_language_from_path_real (i18n.tests.MiscTests) ... test_get_supported_language_variant_null (i18n.tests.MiscTests) ... ok` was keyed WHOLE by the `... ok` branch \u2014 so the second F2P id is absent for an entirely different reason. A fix that only strips the subTest suffix recovers (1) and does nothing about (2); a genuine fix must handle BOTH, and must not turn either into a prefix or substring match that could credit one django test with another's status. SWE-bench's own grader reaches the CORRECT base verdict on this same map (`grade()` returns resolved=False, F2P 0/2, P2P 88/88) via its missing-implies-failed rule; the demotion is OUR `unobserved_signal` guard being deliberately stricter, because trusting an absent test is what fabricated ~30% of this corpus. The gold leg is RESOLVED (F2P 2/2, P2P 88/88) and the real grading harness resolved 2/5 of this instance's cells, so the 251 cleared steps are the honest price of that conservatism, not a bug.",
+    "reason": "INADMISSIBLE: base leg is 'unknown', not failure \u2014 the pipeline reports a non-failure with the fix REMOVED (grader parity: 2/2 FAIL_TO_PASS tests were never measured (skipped, or no F2P test decided at all among 92 parsed statuses) \u2014 test_get_language_from_path_real (i18n.tests.MiscTests), test_get_supported_language_variant_null (i18n.tests.MiscTests)), so its passes are unearned."
+  },
+  "django__django-15268": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/3, P2P 130/130 (rc=1, 136 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "b1add71e6e2abff1f79dd48ec3c9a4423c55b43474d3fea117ccc46ea4fadb32",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 3/3, P2P 130/130 (rc=0, 133 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-15268",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-15525": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 53/53 (rc=1, 56 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "6cfab491a71e10bb0028b1f804a57b8b0e5fdfc5b89e246cebebbc03e699f5dd",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 53/53 (rc=0, 55 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-15525",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-15629": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 115/115 (rc=1, 120 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "2db66bb14d95a8062fac43f7b5950ccff733ef1cbcb9a0d00fc5810947d52135",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 115/115 (rc=0, 118 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-15629",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-16145": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 174/174 (rc=1, 176 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "9a4dfbd914f98c3aa02647f275726c5b56bc928faaae7addbedba3f1cb3a9da0",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 174/174 (rc=0, 175 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-16145",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-16612": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 335/335 (rc=1, 362 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "e491fb0f874a2d1b4c75faae122e684389069fc4aae3fb72f179566429fc1e0a",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 335/335 (rc=0, 360 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-16612",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "django__django-16631": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 12/12 (rc=1, 14 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "c1de2affbb03c7fdf55dfdeefb2bc72fd60c2ef8d37054f41ab092b016b7a14b",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 12/12 (rc=0, 13 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "django__django-16631",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-20676": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 32/32 (rc=1, 36 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "9b8efd7a76b59eb3ea4c1caed89309e51b1da5899631ddd51a39fd818b380da4",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 32/32 (rc=1, 36 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-20676",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-20859": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 88/88 (rc=1, 91 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "a4988ab00dc85892e890849bd4162ba7e69ab4fdce9511f59789573ec239e007",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 88/88 (rc=0, 91 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-20859",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-22719": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 68/68 (rc=1, 73 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "09977d8b2dee2c32223959d2257194a1d1b974941b0bc697a1dc8c139c6eea90",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 68/68 (rc=0, 73 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-22719",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-22865": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/3, P2P 57/57 (rc=1, 61 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "2b464f658559836f0809aa271b023e957fc3ac2b7ff5695b31a1b21c10b5b6e0",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 3/3, P2P 57/57 (rc=0, 61 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-22865",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-23299": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 192/192 (rc=1, 196 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "a1cd3c4250a3f94701862e83c40fa7a9ae64a0bcd875434edbf1efe4c9346dec",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 192/192 (rc=1, 196 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-23299",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-24026": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 764/764 (rc=1, 769 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "40c70a4338bc617bb85983ae8059cb6df358294ec921759d81c809fdcb77f7ec",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 764/764 (rc=0, 769 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-24026",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-24177": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 768/768 (rc=1, 771 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "b4838b564cafbd58906c1f34c08a45eb38bfdaa98293eec8ce5f1026f33b705a",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 768/768 (rc=0, 771 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-24177",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-24570": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 267/267 (rc=1, 270 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "37672a679945300064a7e8e9768d823e6d3a171239766befde195b9b898d4399",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 267/267 (rc=0, 270 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-24570",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-24627": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 776/776 (rc=1, 779 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "0ad4bad9311f070920c5810ff841aa96537df37fe94978ade69b8af0bcef9645",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 776/776 (rc=0, 779 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-24627",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-24637": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 29/29 (rc=1, 34 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "94e15ac501d09e6f70d42916c086f14b9f2ada9e2f95f0a4b33d2b842b5258b6",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 29/29 (rc=0, 34 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-24637",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-24870": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 65/65 (rc=1, 67 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "ab4e42cecb00aacc63435b25c5d45cc457af5796717b421db27536d7e1cfc3d7",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 65/65 (rc=0, 67 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-24870",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-25287": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 786/786 (rc=1, 790 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "91ed2b8acf12578c3daf8d04760de67229c42ac8ddf7cca3c8eaac3393095fa7",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 786/786 (rc=0, 790 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-25287",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-25311": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 181/181 (rc=1, 183 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "c9899f0ed2f1b1489cd4e738e8045837055975cd85a32f9c037d39d68503a606",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 181/181 (rc=1, 183 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-25311",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-25479": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 263/263 (rc=1, 267 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "936a99f5a92666411db16e61f7e8217e1e2bd9f5177040b599acd34dc296871c",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 263/263 (rc=1, 267 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-25479",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-25775": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/7, P2P 89/89 (rc=1, 102 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "e117fac1e7c64bbdd1bd7df4bd405bd39d615c084b9dfcd9f665deb25f5524ce",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 7/7, P2P 89/89 (rc=0, 101 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-25775",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-26113": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 812/812 (rc=1, 815 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "086bd108d1278183bf985ff14b6f65b1b92b1f8cfec4cb01898e6ce2d45957ee",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 812/812 (rc=0, 815 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-26113",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-26208": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 813/813 (rc=1, 817 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "a81f994b287d5197ab0004def12ef9513c1a673cbf76b679e32e1bf153709e4a",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 813/813 (rc=0, 817 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-26208",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-26342": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 81/81 (rc=1, 84 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "5f21837976f315dd6f513ebad66ecd737c2f1612cbc0424f86ca8fd381c41bc7",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 81/81 (rc=1, 84 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-26342",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "matplotlib__matplotlib-26466": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 100/100 (rc=1, 106 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "ce4746b64f8daf74588c0a1700b18214779e79c1255b2835e155695e6b62d81e",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 100/100 (rc=0, 106 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "matplotlib__matplotlib-26466",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "psf__requests-1724": {
+    "admissible": false,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/6, P2P 55/79 (rc=1, 88 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "639a691aa6fc3c7ac7b339e70a1622016e560deef996bc28caa337f3d006dfce",
+    "gold": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/6, P2P 55/79 (rc=1, 88 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "failure"
+    },
+    "instance_id": "psf__requests-1724",
+    "known_artifact": "",
+    "reason": "INADMISSIBLE: gold leg is 'failure', not success \u2014 a known-correct fix does not register as a pass (grader: NOT resolved \u2014 F2P 0/6, P2P 55/79 (rc=1, 88 statuses parsed)), so every red this instance emits is uninformative. A negative here is a coverage-gap, not a falsification."
+  },
+  "psf__requests-1766": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 5/6, P2P 79/79 (rc=1, 91 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "f3482e746028d1ce954596bc80bb29c4efb7af8f50f4b270bc3b6b5cf604914e",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 6/6, P2P 79/79 (rc=1, 91 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "psf__requests-1766",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "psf__requests-1921": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 5/6, P2P 107/107 (rc=1, 119 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "536797929049b0e8db976bce9ea6991bc7dd27f648ece965862b367d9ce38863",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 6/6, P2P 107/107 (rc=1, 119 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "psf__requests-1921",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "psf__requests-2317": {
+    "admissible": false,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/8, P2P 102/133 (rc=1, 143 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "1b5e1962ce452d3db26f6824909ec57eeda523ba2e68411c90452bc063f8d389",
+    "gold": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/8, P2P 101/133 (rc=1, 143 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "failure"
+    },
+    "instance_id": "psf__requests-2317",
+    "known_artifact": "",
+    "reason": "INADMISSIBLE: gold leg is 'failure', not success \u2014 a known-correct fix does not register as a pass (grader: NOT resolved \u2014 F2P 0/8, P2P 101/133 (rc=1, 143 statuses parsed)), so every red this instance emits is uninformative. A negative here is a coverage-gap, not a falsification."
+  },
+  "pydata__xarray-2905": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 364/364 (rc=1, 436 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "895d3f9fc25841bc5b5308b2a6dada293fe8e86ece6c46ef03fad2241b5b8e7d",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 364/364 (rc=0, 436 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-2905",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-3095": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 253/253 (rc=1, 265 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "d12304486989e1017b9ae2ef1d2ffa8fa5630cd36707cef6a7a2241acf713558",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 253/253 (rc=0, 265 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-3095",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-3305": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 653/653 (rc=1, 666 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "c45c664c15e7221e2f0f2dfd0df5b21ed22e9816c00b003541871530de74894b",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 653/653 (rc=0, 666 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-3305",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-3677": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 21/21 (rc=1, 22 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "b0058368f4ce2f86f0734104dd36adac1b1e627b6482fe971b032c99d6ab3a10",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 21/21 (rc=0, 22 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-3677",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-3993": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 2394/2398 (rc=1, 2535 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "676f9fc77aa3a0109c741c2d0cfa006115ba5e316d161d8bad9bbfc8ef99f25d",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 2398/2398 (rc=1, 2535 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-3993",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-4075": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 958/958 (rc=1, 962 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "d7efd43e6f93ef27d4d638acb48c54613b2cd4a5c7324ba58114002de2079ad3",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 958/958 (rc=0, 962 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-4075",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-4094": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 862/862 (rc=1, 873 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "9480f89293011f19b02d020a5a82bbde452d7f7683ff8376ceca8b5352fa24a5",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 862/862 (rc=1, 873 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-4094",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-4687": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 1717/1717 (rc=1, 1842 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "d4f721dd7b6248f9326c220142c317540b14b9ab5357e3b80411d7aea46325eb",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 1717/1717 (rc=1, 1842 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-4687",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-4695": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 875/875 (rc=1, 884 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "9aaefdf771895d405bf62d2a47f50fc09a37f2c57bc869fb8dc3a307f8181015",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 875/875 (rc=1, 884 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-4695",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-4966": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/4, P2P 21/21 (rc=1, 25 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "51b3371754a516848a75fd33e63626d15bc6b3158953d9f1a26671e3524c418c",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 4/4, P2P 21/21 (rc=0, 25 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-4966",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-6461": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 247/247 (rc=1, 249 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "d6a228ba0d2130b73af1a53ceba350d03b09f9845288ed74aeebeb86621d6327",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 247/247 (rc=0, 249 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-6461",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-6599": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 263/264 (rc=1, 266 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "69c989429ce36f01ba5a08c024282dbbe4e183b64c713727e911a9b8ee26a331",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 264/264 (rc=0, 266 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-6599",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-6721": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 1405/1405 (rc=1, 1409 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "7d1686586a268e6fcf3fa457afaa81df8ce9529cfea55d18219f9a2a268c2178",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 1405/1405 (rc=0, 1409 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-6721",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-6744": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/3, P2P 1812/1815 (rc=1, 1819 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "15c80c8dc7af9b5204492a5203035c9fbeeed9be38b7348f58a152f0f7c9c8cd",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 3/3, P2P 1815/1815 (rc=0, 1819 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-6744",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-6938": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 430/430 (rc=1, 449 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "d63d55b8d214b57c726243d7abaed01612f9c780b6d35222735483a361793b99",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 430/430 (rc=0, 449 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-6938",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-6992": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/12, P2P 945/945 (rc=1, 966 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "4328c4077a9e9ce61645808c27690cd3bd715a8d2e5cef21b1e11c4627bd517f",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 12/12, P2P 945/945 (rc=0, 966 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-6992",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-7229": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 280/280 (rc=1, 282 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "207ac7f84432891c8cb33647f9f0b38680c7cde8b3b085403109be2e6f82bed4",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 280/280 (rc=0, 282 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-7229",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-7233": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 189/189 (rc=1, 191 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "ac2d2fae46d9fec0fb7720ce412c08fbef7f7279efd17f6c09cde4bd62b72c70",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 189/189 (rc=0, 191 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-7233",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pydata__xarray-7393": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 71/71 (rc=1, 73 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "76cd9492097e7fe1b575822c6a3b161f10ab74057e96fe8949e585fcf644fc6c",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 71/71 (rc=0, 73 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pydata__xarray-7393",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pylint-dev__pylint-4661": {
+    "admissible": false,
+    "base": {
+      "detail": "environment/collection error (rc=2)",
+      "exit_code": 2,
+      "is_infra_failure": true,
+      "leg": "base",
+      "outcome": "unknown"
+    },
+    "gate_key": "6dc64b15b6bbac47b96bc8a4e40d83254a016d5e1baa87d9d14093a79528ac09",
+    "gold": {
+      "detail": "environment/collection error (rc=4)",
+      "exit_code": 4,
+      "is_infra_failure": true,
+      "leg": "gold",
+      "outcome": "unknown"
+    },
+    "instance_id": "pylint-dev__pylint-4661",
+    "known_artifact": "",
+    "reason": "INADMISSIBLE: gold leg is 'unknown' (not success) AND base leg is 'unknown' (not failure) \u2014 the replay cannot resolve this instance in either direction; its per-step outcomes carry no information about the agent."
+  },
+  "pylint-dev__pylint-6386": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 7/7 (rc=1, 8 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "dd52842a97a8d83f45eec8119337533923e9a1a14592a45464e6a5c0e54a867c",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 7/7 (rc=0, 8 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pylint-dev__pylint-6386",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pylint-dev__pylint-6528": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/4, P2P 171/171 (rc=1, 178 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "a6af8869e753ead0596ee9fb3e911c017cd8170548cf6872a04cc046b5321829",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 4/4, P2P 171/171 (rc=1, 178 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pylint-dev__pylint-6528",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pylint-dev__pylint-7080": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 120/120 (rc=1, 125 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "474a71a30a5393a6dd71abeca264055b7af11e512c63295ff33e526901e96e66",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 120/120 (rc=1, 125 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pylint-dev__pylint-7080",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pylint-dev__pylint-7277": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 122/122 (rc=1, 126 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "934d9a75651f00086b276d8aa61ee29db9266521697e61e653a372c448e36cd5",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 122/122 (rc=1, 126 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pylint-dev__pylint-7277",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pylint-dev__pylint-8898": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 17/18 (rc=1, 19 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "4c7f49109a74ab7434dfa4090b158172fbb5284a6ab4a3ad524fc0b50e6307ed",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 18/18 (rc=0, 19 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pylint-dev__pylint-8898",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-10051": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 15/15 (rc=1, 23 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "d4e8ec5bda71b2ef5f71c3e46ef3b2599555fc46fadeff860266346fcab28329",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 15/15 (rc=0, 23 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-10051",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-10081": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 63/63 (rc=1, 92 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "dbdc5bf17e7aac342b9d4453e564cfa32a4e646fb7bb530a9b8b628aa9cd4a14",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 63/63 (rc=0, 92 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-10081",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-10356": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 79/79 (rc=1, 89 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "0ce26404c189426f46a02e680fb5a0d6e6cd3a965a808640a7528c006523567c",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 79/79 (rc=0, 89 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-10356",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-5262": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 108/108 (rc=1, 112 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "756f409e0d2431e0fb10159eff25a93d70de1587bc709b385b6a670d02fe7130",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 108/108 (rc=0, 112 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-5262",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-5631": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 15/15 (rc=1, 17 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "d9db1ea0491751fd788751e99133a917c8fc12eaf7c9bd3824a0fa29806d7607",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 15/15 (rc=0, 17 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-5631",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-5787": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 123/123 (rc=1, 126 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "8e43aa268b56dd07abb02b37710a378175c65abf84fd46e22fc9d38007b4cb9c",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 123/123 (rc=0, 126 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-5787",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-5809": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 3/3 (rc=1, 4 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "3dd59bedfeea7acf894f483d803b3c6e764a6cb4f39e03ad2c8d7ce9b361cff7",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 3/3 (rc=0, 4 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-5809",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-5840": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 51/51 (rc=1, 54 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "d9597ec125aa43680c8614f94bd3bd877f2316ac584426376aa25ebc0e0310cc",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 51/51 (rc=0, 54 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-5840",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-6202": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 72/72 (rc=1, 74 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "0f1f69540ecf5584f011438c78ee49cfa26073833a02d4aa000c67c8b1278e03",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 72/72 (rc=0, 74 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-6202",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-7236": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 51/51 (rc=1, 73 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "7b93f25d1a369d7c0e8960ca054d3d7b04d1ca8ef4fe44c362ac975958cc0d68",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 51/51 (rc=0, 73 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-7236",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-7432": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 77/77 (rc=1, 101 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "94c2bf35dbb0b7600def72e304da96967ff419b170c31c46f41f4320ac4360c2",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 77/77 (rc=0, 101 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-7432",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-7490": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 78/78 (rc=1, 104 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "5a837a0e4f247b537d79bebd49698a2522866f694432f891d015694d48d8a2fb",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 78/78 (rc=0, 104 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-7490",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-7571": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 14/14 (rc=1, 24 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "f7fc09d70ebc0a219a105f0f455e4138abadeb236e3ec3ddcee83a0cfad169ea",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 14/14 (rc=0, 22 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-7571",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-7982": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 78/78 (rc=1, 90 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "918b4fce7439610ccc6c088f94ab406a791cd2335de56544b5505a8df7ecae03",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 78/78 (rc=0, 90 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-7982",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "pytest-dev__pytest-8399": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 59/59 (rc=1, 88 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "ce333f2862a150ddf5a1b8df2450156f60e6a6b9c8bdf9c8e7ce134edf53ad3d",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 59/59 (rc=0, 88 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "pytest-dev__pytest-8399",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-10297": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 28/28 (rc=1, 30 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "5bc4ac5f465c4b2d88bdc6f914d141edefaadc459faf441b2c9a40319fcedc01",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 28/28 (rc=0, 30 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-10297",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-12682": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 66/66 (rc=1, 67 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "7dba8c10eb7a123afdb11214df0cadd68034d25330864876f8a675bcf055c587",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 66/66 (rc=0, 67 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-12682",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-12973": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 32/32 (rc=1, 34 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "6d0869d81485277888f4eaf5a171c94cbfcd76435dcd84448fcb7c6c45a58c20",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 32/32 (rc=0, 34 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-12973",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-13135": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 33/33 (rc=1, 34 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "66d980c75b209cf4d68f9dc5bc510edf99b607ffc79dfd06bab04b4e277d72bf",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 33/33 (rc=0, 34 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-13135",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-13142": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 54/54 (rc=1, 56 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "719cc91846081bc4c5f83dec7c01f6d0f48f256dcd97becb1925dc7b27569b3a",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 54/54 (rc=0, 56 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-13142",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-13328": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 9/9 (rc=1, 10 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "bb97b67d9eb649eed4ceac5cb760a251b1f159d834d20e07c90e9f1d72bf291f",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 9/9 (rc=0, 10 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-13328",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-13439": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 40/40 (rc=1, 41 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "5f215a76440d86296cf21633006957328fb8f0c323cfbc08145b18165778346c",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 40/40 (rc=0, 41 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-13439",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-13779": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 18/18 (rc=1, 20 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "04930daff753799f0034550dcf1a7903db7cfa97ae10c94898c0927487e181f9",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 18/18 (rc=0, 20 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-13779",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-14053": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 5/5 (rc=1, 8 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "3d0f822f2be28f04a28ff862618740594aeff32e3567d521d22c8308a19154fa",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 5/5 (rc=1, 8 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-14053",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-14087": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/3, P2P 172/172 (rc=1, 175 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "4c2927fde07a1ac187ab2bbe10d7fb72915a67bb69e8157d72cf44c6527d237a",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 3/3, P2P 172/172 (rc=0, 175 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-14087",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-14141": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 2/2 (rc=1, 3 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "b62738f628dc95baf07290ab90a534a4b76b051ea37369f88ff1d83e74d731f9",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 2/2 (rc=0, 3 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-14141",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-14629": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 26/26 (rc=1, 27 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "ae5ed3ae0071863ca493a7af563d1532b3c02276e87aea1699ae93a978989a76",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 26/26 (rc=0, 27 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-14629",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-14710": {
+    "admissible": false,
+    "base": {
+      "detail": "grader parity: the run did not complete ('>>>>> Tests Timed Out')",
+      "exit_code": 124,
+      "is_infra_failure": true,
+      "leg": "base",
+      "outcome": "unknown"
+    },
+    "gate_key": "ce365e7d54ab55a45130a7a1d00ac4538eec5a02c96fc5cb2c372b159bd3a164",
+    "gold": {
+      "detail": "container reset to base failed",
+      "exit_code": null,
+      "is_infra_failure": true,
+      "leg": "gold",
+      "outcome": "unknown"
+    },
+    "instance_id": "scikit-learn__scikit-learn-14710",
+    "known_artifact": "",
+    "reason": "INADMISSIBLE: gold leg is 'unknown' (not success) AND base leg is 'unknown' (not failure) \u2014 the replay cannot resolve this instance in either direction; its per-step outcomes carry no information about the agent."
+  },
+  "scikit-learn__scikit-learn-14983": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 105/105 (rc=1, 107 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "ced71574268797b03f182c46176029216ec3ffec07c72206399ccb41552aad59",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 105/105 (rc=0, 107 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-14983",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-15100": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 93/93 (rc=1, 97 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "970725f617696b7cc0d68f98f842deabee2b0ff5bce4c334d5b1035f66a65fe1",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 93/93 (rc=0, 97 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-15100",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-25232": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 214/214 (rc=1, 215 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "b467f9f48f9317891cd5f41b9a6d70b396e6f37b84556c893a3df42a740f38b1",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 214/214 (rc=0, 215 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-25232",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-25747": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 14/14 (rc=1, 15 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "df6f9332cca955d9abfebecd8c42138401e55f04b12e3a85d17e97d04551ce22",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 14/14 (rc=0, 15 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-25747",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-25973": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 72/72 (rc=1, 73 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "37d55be9c6e351f9586d01d9a2078eeed2e413b3a334f3d00bbdcf5ae4ee512e",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 72/72 (rc=0, 73 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-25973",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "scikit-learn__scikit-learn-9288": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 123/123 (rc=1, 124 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "2aafbe77eb5ec49b54c7bcdb9ab38c8c5f6d845ffbdc79043fb6226f8695a1f8",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 123/123 (rc=0, 124 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "scikit-learn__scikit-learn-9288",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-10323": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 40/40 (rc=1, 41 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "b5130d5caeec26144487f40a2254c2633fb7288e718729621d1d302c301c6c8a",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 40/40 (rc=0, 41 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-10323",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-11510": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 7/7 (rc=1, 9 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "972f9b717c54413054044706da833f24fce3fb734337220566102efae38e71b5",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 7/7 (rc=0, 9 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-11510",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-7590": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 24/24 (rc=1, 25 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "98509ba72173b241424685cd33ae1f81988294f2c17316c8fb840e28fbe06d47",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 24/24 (rc=0, 25 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-7590",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-7757": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 33/33 (rc=1, 34 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "844db2c8fcf0c814bbe50366d58570b7ec6adb3ecaec4c3cb979a616107de3b5",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 33/33 (rc=0, 34 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-7757",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-8035": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 2/2 (rc=1, 3 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "f358113a6286a36e88273796e96b21909f0fcd0f8f196abf5e5ee08734ce2de8",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 2/2 (rc=0, 3 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-8035",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-8056": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 40/40 (rc=1, 42 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "2585316608d47560d2393f931de33c3211262d19dae585541a313b18c0966762",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 40/40 (rc=1, 42 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-8056",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-8120": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 44/44 (rc=1, 49 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "b8476c8afc5000cc478a4f3d1f410f5356e78a78e3f0fb71d916e5af34bdacb4",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 44/44 (rc=1, 49 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-8120",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-8269": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 5/5 (rc=1, 6 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "1a6d0223b809fd2ec12af492a2ff9e0fb1c12a816415fe0c01e6496860edf513",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 5/5 (rc=0, 6 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-8269",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-8475": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 17/17 (rc=1, 18 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "d74a6b546687376ad301e2ae252af716908fdbbdf3f282caf1f4b483c5d7b1fb",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 17/17 (rc=0, 18 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-8475",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-8548": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 5/5 (rc=1, 6 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "cb9db166abfbcfded410dd145cdc1a6eccd6f6a39d8d54f2539be39b70f71d8b",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 5/5 (rc=0, 6 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-8548",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-8551": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 32/32 (rc=1, 33 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "fa424d95fd4bc208a09bce941b6aa0659010f9badb3e8208bbf596ebbb0cb8a6",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 32/32 (rc=0, 33 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-8551",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-9320": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 9/9 (rc=1, 10 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "8ceee2646798d6eaa1cd98bbf764ac612e5b72959742e4416b41c43fe352f36e",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 9/9 (rc=0, 10 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-9320",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-9461": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/3, P2P 59/59 (rc=1, 62 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "38c63676b0eee6f812247a6b76aee219f341255b3b74eb6f359cfd2ebb78e993",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 3/3, P2P 59/59 (rc=0, 62 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-9461",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-9591": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 44/44 (rc=1, 45 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "4262cd08ae08ddc32aa8592fc100f90834b0e8a202bdd5f5d2ea287c03fd2a0d",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 44/44 (rc=0, 45 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-9591",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-9602": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 45/45 (rc=1, 46 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "355cfc6f30925518f4965d8e7cd437834cc065f97fde0653d5ed72c58384d8b9",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 45/45 (rc=0, 46 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-9602",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-9658": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 24/24 (rc=1, 26 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "ee506f3f4b1d6b76cbdb71494120325956114212a0582537bb5e0b830746698d",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 24/24 (rc=0, 26 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-9658",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-9673": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 24/24 (rc=1, 25 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "b8627277d7ecc425a7aa0c0f7386876fc39c3c3336e1d7a389b7e9a522219a59",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 24/24 (rc=0, 25 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-9673",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-9698": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 45/45 (rc=1, 46 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "fca8923d1097cf638f61273f5538a5d9ec6864ea5fb9dd42b939db03246721c5",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 45/45 (rc=0, 46 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-9698",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sphinx-doc__sphinx-9711": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 0/0 (rc=1, 1 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "fd733c8d02d4627fb78439bbf4ecd971a834f9c9c0b50d604d999a9e7a7744a6",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 0/0 (rc=0, 1 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sphinx-doc__sphinx-9711",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-12489": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 8/8 (rc=1, 10 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "c032aeb0fad04a608fa15468867eaa657866bdeeba8f832cce54e262b1dfac25",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 8/8 (rc=0, 9 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-12489",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-13480": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 43/43 (rc=1, 45 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "8847f96827aa453b9df43def73ddeae928d26d03c4deb81232ec7bcc35535a87",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 43/43 (rc=0, 44 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-13480",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-13852": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 4/4 (rc=1, 17 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "52b8762b80ed9a37d14d116bc09b601a3427e2ded0d97ad3ec6f815e00b9dc31",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 4/4 (rc=1, 16 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-13852",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-13877": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 110/110 (rc=1, 189 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "6761b93a2cacec759a8f8f62e7fc3a5e2d0b81d20ec110d3de07892237bb90ae",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 110/110 (rc=1, 188 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-13877",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-13878": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 19/19 (rc=1, 93 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "968b4725232c20f09941eb7de9d159120dd2ee2d96dc8a355ecf7cce49fc652f",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 19/19 (rc=1, 92 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-13878",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-13974": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 4/4 (rc=1, 8 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "47d41cf6db6d5eb06f415740ca76a794071d558384beeb7e2f7786873bd090ee",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 4/4 (rc=1, 7 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-13974",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-14248": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 433/433 (rc=1, 456 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "13507775a3256580574d826ca0dedf6b979c2f63ae6fd358f741f4203d48b69c",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 433/433 (rc=1, 445 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-14248",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-14976": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 13/13 (rc=1, 16 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "4269df9c42bab7bd34ad17b8f2df9da5198fed2a9eb6b072fe2c2f7df2751ca9",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 13/13 (rc=0, 14 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-14976",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-15017": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 14/14 (rc=1, 16 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "850563237bef9d8cdc770d60ea510be5e7124ca21e17f0cc958dea2bfb115f10",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 14/14 (rc=0, 15 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-15017",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-16450": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 38/38 (rc=1, 41 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "653d5bb4f35176e18486af945d1db85a96a7da15d797aeb3704a2a896f95b070",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 38/38 (rc=0, 40 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-16450",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-16597": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/3, P2P 74/74 (rc=1, 80 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "f231a48d6b1c245d800b0f783f23106550174054fdd5f2bb6e61cd64d925a747",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 3/3, P2P 74/74 (rc=0, 77 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-16597",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-17139": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 67/67 (rc=1, 71 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "31d39352954b4db4a910761a667521a5704c7d149ec79fcd11fd8dce930db81c",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 67/67 (rc=0, 69 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-17139",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-17318": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 10/10 (rc=1, 12 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "7da6da989925bafe0ccf74c8612083e7427b6da1e33642524a42c608646f27cf",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 10/10 (rc=0, 11 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-17318",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-17630": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 19/19 (rc=1, 23 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "8f7d0ca93c6814b2fa2c1f72635f0c21f383711ce45aebdc1e3e6666d15e18b5",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 19/19 (rc=0, 21 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-17630",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-17655": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 9/9 (rc=1, 13 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "a8bcc425f459d943c1905a1c59bf7f5cead05c913de74ceabc356c79edc979be",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 9/9 (rc=0, 11 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-17655",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-20154": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/2, P2P 40/40 (rc=1, 44 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "e787e62861683958a731da9434a249518d755d5fafcf224af949c457dc0c768d",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 2/2, P2P 40/40 (rc=0, 42 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-20154",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-20590": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 21/21 (rc=1, 23 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "9f4aa0cb6b14f6aa85a630d5560b142262b60c0f3bc9ad6783781dadc57c1ccc",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 21/21 (rc=0, 22 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-20590",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-20916": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 1/1 (rc=1, 3 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "abca060043933268615cf2ce44e386901c08e083b456de1ddee66b92a6e5d662",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 1/1 (rc=0, 2 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-20916",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-21596": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 46/46 (rc=1, 48 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "61bf129ab684484a010b62b04469d2171d97823011926d47aa76fbb46aa9f0a0",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 46/46 (rc=0, 47 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-21596",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  },
+  "sympy__sympy-24539": {
+    "admissible": true,
+    "base": {
+      "detail": "grader: NOT resolved \u2014 F2P 0/1, P2P 62/62 (rc=1, 64 statuses parsed)",
+      "exit_code": 1,
+      "is_infra_failure": false,
+      "leg": "base",
+      "outcome": "failure"
+    },
+    "gate_key": "e6dceb77b883b1c50c684201bf3999a908509c713013513d244ba2e03126e698",
+    "gold": {
+      "detail": "grader: RESOLVED \u2014 F2P 1/1, P2P 62/62 (rc=0, 63 statuses parsed)",
+      "exit_code": 0,
+      "is_infra_failure": false,
+      "leg": "gold",
+      "outcome": "success"
+    },
+    "instance_id": "sympy__sympy-24539",
+    "known_artifact": "",
+    "reason": "ADMISSIBLE: gold patch classifies SUCCESS (the pipeline can recover a planted fix) and the base state classifies FAILURE (it does not report success without one)."
+  }
+}

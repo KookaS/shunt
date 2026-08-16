@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 import numpy as np
 
 from shunt.capture.coordinator import CaptureCoordinator, WorkDirResolver
-from shunt.router.engine import RouterEngine
+from shunt.router.engine import RouterEngine, task_state_key
 from shunt.router.escalation import EscalationConfig
 from shunt.session import Session
 from shunt.verifiers.base import VerifierResult
@@ -26,19 +26,23 @@ class _M:
     name: str
 
 
-class _TieredPool:
-    """cheap=qwen, mid=glm, high=opus — all healthy."""
+class _RankedPool:
+    """qwen < glm < opus (weakest -> strongest) — all healthy."""
 
     def __init__(self) -> None:
-        self._tiers = {
-            "cheap": [_M("qwen")],
-            "mid": [_M("glm")],
-            "high": [_M("opus")],
-            "frontier": [],
-        }
+        self._ranked = [_M("qwen"), _M("glm"), _M("opus")]
 
-    def get_tier_models(self, tier: str) -> list[_M]:
-        return self._tiers.get(tier, [])
+    def ranked_models(self) -> list[_M]:
+        return list(self._ranked)
+
+    def rank_of(self, name: str) -> int | None:
+        for i, m in enumerate(self._ranked):
+            if m.name == name:
+                return i
+        return None
+
+    def models_from_rank(self, i: int) -> list[_M]:
+        return self._ranked[max(i, 0) :]
 
     def is_healthy(self, name: str) -> bool:
         return True
@@ -89,7 +93,7 @@ def _engine(
     session_manager: _SessionManager | None = None,
 ) -> RouterEngine:
     return RouterEngine(
-        model_pool=_TieredPool(),
+        model_pool=_RankedPool(),
         session_manager=session_manager or _SessionManager(),
         outcome_index=_Index(),
         embedder=_Embedder(),
@@ -177,7 +181,7 @@ def _fail(eng: RouterEngine, key: str = "t::a", task_key: str = "repoA") -> None
         task_key=task_key,
         dedup_key=key,
         exit_code=1,
-        blocking=True,
+        is_infra_failure=False,
         confirmed=True,
     )
 
@@ -206,7 +210,7 @@ def test_no_alarm_still_escalates() -> None:
 # ── B3: two different repos with the same test node id do NOT aggregate ─────────
 def test_cross_repo_same_node_id_does_not_aggregate() -> None:
     eng = RouterEngine(
-        model_pool=_TieredPool(),
+        model_pool=_RankedPool(),
         session_manager=_SessionManager(),
         outcome_index=_Index(),
         embedder=_Embedder(),
@@ -230,7 +234,7 @@ def test_escalation_state_round_trips() -> None:
     eng.decide("s1", "task")
     _fail(eng)  # one accrued failure for repoA
     state = eng.snapshot_escalation_state()
-    assert state["failure_log"]["repoA"]  # the log serialized
+    assert state["failure_log"][task_state_key("repoA")]  # the log serialized
 
     restored = _engine()
     restored.restore_escalation_state(state)
@@ -245,7 +249,7 @@ def test_escalation_state_round_trips() -> None:
 
 def test_snapshot_empty_when_disabled() -> None:
     eng = RouterEngine(
-        model_pool=_TieredPool(),
+        model_pool=_RankedPool(),
         session_manager=_SessionManager(),
         outcome_index=_Index(),
         embedder=_Embedder(),
@@ -304,7 +308,7 @@ def test_unconfirmed_failure_does_not_escalate() -> None:
             task_key="repoA",
             dedup_key="t::a",
             exit_code=1,
-            blocking=True,
+            is_infra_failure=False,
             confirmed=False,  # a bare AutoDetectVerifier never sets this
         )
     m3, r3, _ = eng.decide("s3", "task")

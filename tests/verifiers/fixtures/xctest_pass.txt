@@ -1,0 +1,8 @@
+Test Suite 'All tests' started at 2026-08-11 10:00:00.000
+Test Suite 'WidgetTests.xctest' started at 2026-08-11 10:00:00.000
+Test Case '-[WidgetTests testDoesThing]' passed (0.001 seconds).
+Test Case '-[WidgetTests testParsesInput]' passed (0.001 seconds).
+Test Suite 'WidgetTests.xctest' passed at 2026-08-11 10:00:00.002.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.01 (0.01) seconds
+Test Suite 'All tests' passed at 2026-08-11 10:00:00.002.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.01 (0.01) seconds

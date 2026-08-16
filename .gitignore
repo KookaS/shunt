@@ -30,7 +30,20 @@ data/
 # (the generic data/ rule above would otherwise silently ignore new inputs).
 !benchmark/routing/data/
 !benchmark/routing/data/**
+# The escalation detector's curated input dir is tracked too (same rationale as routing/data/).
+!benchmark/escalation/data/
+!benchmark/escalation/data/**
+# ...except the parallel stamping stage's plumbing inside it: the inter-process lock file and
+# the sibling temps that `corpus_lock.atomic_write_text` renames from. Transient by
+# construction — a `git add -A` mid-rebuild must not sweep them into the public repo.
+benchmark/escalation/data/**/.corpus.lock
+benchmark/escalation/data/**/*.tmp
 index/
+
+# Live full-content trajectory capture — encrypted, LOCAL only, NEVER committed. Belt-and-
+# suspenders: the recorder defaults to a dir outside the repo, but guard a misconfigured path.
+trajectories/
+*.traj.enc
 
 # Documentation build artifacts
 site/
@@ -50,6 +63,14 @@ docs/backlog/
 # else (per-strategy summary, param sweeps, per-run eval outputs) is derived.
 # Parameterized eval outputs (results_k*_sr*_ms*.csv) and other per-run files.
 benchmark/routing/artifacts/
+# Per-step code snapshots for offline verified-outcome replay — ephemeral session scratch,
+# regenerable from a live run, NEVER committed.
+benchmark/runner/artifacts/
+# Full agent message-list dumps (mini-swe-agent `output_path`) — RAW, UNREDACTED transcripts.
+# Subsumed by the artifacts/ rule above; kept explicit so the pairing with the per-step snapshot
+# scratch is documented and survives any future un-ignore of a sibling subdir. Untrusted output:
+# never commit, never publish, collection-host only.
+benchmark/runner/artifacts/message_lists/
 results_k*_sr*_ms*.csv
 # Derived per-strategy summary — regenerated into reports/ (below); never the
 # legacy committed path.
@@ -57,6 +78,13 @@ benchmark/routing/strategy_summary.csv
 
 # Logs
 *.log
+# The kill-gate verdict is the ONE tracked run-output exception: it is a deterministic,
+# diffable JSON artifact (benchmark/runner/kill_gate_verdict.json) that a reviewer diffs
+# to see a verdict move. It was renamed out of the *.log class on purpose — never pull it
+# under a blanket artifact rule, and never reintroduce a kill_gate.log-style free-form
+# verdict that version control cannot audit. Explicit negation so a future ignore rule
+# cannot silently swallow it.
+!benchmark/runner/kill_gate_verdict.json
 
 # Editor / OS
 .vscode/
@@ -64,9 +92,17 @@ benchmark/routing/strategy_summary.csv
 .DS_Store
 reports/
 
-# …but DO ship the benchmark plots — users read the routing insights from them, and
-# they are regenerable from the committed benchmark/routing/results.csv. ALL PNGs in
-# this dir are tracked; the derived intermediate CSVs stay ignored above.
-!benchmark/routing/reports/
-benchmark/routing/reports/*
-!benchmark/routing/reports/*.png
+# The benchmark PNGs are NOT here any more: they are written straight into the published
+# docs tree (`docs/assets/figures/<half>/`, never ignored), because mkdocs only copies what lives
+# under `docs_dir` and `mkdocs build --strict` fails a link it cannot resolve. Both reports
+# dirs now hold only derived intermediates, which stay ignored by the `reports/` rule above.
+
+# metrics.json is one exception and is TRACKED: it holds the exact scalars each
+# escalation figure renders, so a committed PNG can be checked against its numbers after
+# the fact. Without it the images are the only artifact and nothing can diff them.
+# difficulty_go_no_go.json is the same class of artifact: the claim page quotes its scalars
+# (the predicted-difficulty go/no-go outcome), so it is tracked for the same reason.
+!benchmark/escalation/reports/
+benchmark/escalation/reports/*
+!benchmark/escalation/reports/metrics.json
+!benchmark/escalation/reports/difficulty_go_no_go.json

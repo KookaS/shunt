@@ -48,5 +48,6 @@
     "test_swapping_fields_names (migrations.test_optimizer.OptimizerTests.test_swapping_fields_names)"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-16819:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "Reduce Add/RemoveIndex migration operations.\nDescription\n\t\nWe should reduce AddIndex/RemoveIndex operations when optimizing migration operations.\n"
 }

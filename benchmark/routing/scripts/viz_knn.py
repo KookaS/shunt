@@ -1,312 +1,537 @@
 #!/usr/bin/env python3
-"""kNN router visualization on REAL jina embeddings for the challenges matrix."""
+"""knn_calibration.png — is the weighted neighbour pass-rate, the router's one input, calibrated?"""
 
-# Neighbours are found over the REAL shipped jina prompt embeddings (the same
-# ``Embedder`` the router runs), then a nearest-neighbour classifier picks a model
-# with the SAME cost-aware rule the shipped router uses — cheapest model whose
-# neighbourhood pass-rate clears the threshold (see knn_select). Pass-rates are read
-# from the real measured outcomes. This mirrors routing.strategies.knn.kNNStrategy's
-# decision; the cost bars use each selected model's default-arm cost, so exact totals
-# differ from strategy_comparison.png (which runs the live engine).
+# THE WHOLE PRODUCT RESTS ON ONE NUMBER AND NOTHING USED TO CHECK IT. `docs/routing.md`'s
+# rule is "a model is eligible when its weighted neighbourhood success rate >= 0.6", and
+# `shunt.router.selection.SelectionRule` computes exactly that: sum over the k nearest
+# neighbours of similarity x outcome, over the summed similarity. Every routing decision
+# the product ever makes is a comparison of that number against 0.6. Twenty-four committed
+# figures drew allocations, purities, PCA shadows and cost bars derived FROM it; not one
+# asked whether it predicts anything.
+#
+# This file replaces five of them (knn_cost_comparison, knn_pca_scatter, model_allocation,
+# model_performance_descriptive, neighborhood_purity) with the reliability diagram, the
+# threshold's position in the score distribution, and a Brier skill score against both a
+# shuffled-outcome null and a human-difficulty-tag positive control.
+#
+# ON THE RETIRED FIGURES. `neighborhood_purity` computed purity over the ROUTER'S OWN
+# selection labels, which are 98.3% one class; observed 0.9616 sat below chance 0.9667 and
+# below the majority share 0.9831, so it was arithmetically incapable of a positive result.
+# `knn_pca_scatter` projected 768 dimensions onto two carrying 15.1% of the variance.
+# `knn_cost_comparison` published a SECOND (cost, pass) pair for the kNN router — a proxy
+# 77.7% at $1.73 against the live engine's 81.71% at $13.34 in the same report set — which
+# is a correctness bug, not a second view; the live engine's number in
+# strategy_summary.csv is now the only one.
 
 from __future__ import annotations
 
+import argparse
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Final
 
-import matplotlib
+import numpy as np
 
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-from sklearn.decomposition import PCA  # noqa: E402
+from benchmark import config, plot_frame
+from benchmark.plot_frame import Annotations, FigureSpec
+from benchmark.routing import plot_style, summary
+from benchmark.routing.figures import context as ctxmod
+from benchmark.routing.instrument_control import routing_instrument_admissibility
+from benchmark.routing.scripts import knn_nulls
+from benchmark.routing.strategies import routing_text
+from benchmark.routing.strategies.knn import _embed_texts
 
-from benchmark import config  # noqa: E402
-from benchmark.routing import plot_style  # noqa: E402
-from benchmark.routing.strategies.knn import _embed_texts  # noqa: E402
+# `python -m` sets __name__ to "__main__", which would land in the figure
+# manifest instead of the module that drew it.
+_GENERATOR = "benchmark.routing.scripts.viz_knn"
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
 
 # Cheapest-above-threshold cutoff, matching the shipped KnnPolicy.success_rate_threshold
-# (0.6) and router.selection.SelectionRule. The proxy applies the product rule so its
-# allocation reflects what the router would do, not a best-quality diagnostic.
-_DEFAULT_SUCCESS_RATE_THRESHOLD = 0.6
+# (0.6) and router.selection.SelectionRule.
+_DEFAULT_SUCCESS_RATE_THRESHOLD: Final[float] = 0.6
 
-# One-line imputation disclosure, restated verbatim on every figure whose selection
-# reads neighbourhood pass-rates (an unmeasured cell counts as a non-pass there).
-_IMPUTE_CAVEAT = (
-    "Selection reads measured pass-rates; an unmeasured (model, task) cell counts as a "
-    "non-pass for that model's neighbourhood rate."
+# Reliability bins. Ten is too many at n=175 x 6 models for the extreme bins to carry a
+# usable count; five keeps every bin's Wilson interval readable.
+_N_BINS: Final[int] = 5
+_NULL_DRAWS: Final[int] = 400
+
+_OBSERVED = "#0072B2"
+_CONTROL = "#009E73"
+_NULLC = "#9aa0a6"
+_THRESHOLD = "#B71C1C"
+
+SPEC = FigureSpec(
+    title="The router's one input does not predict outcomes; a 3-level human tag does",
+    reading=(
+        "Left: the reliability diagram. x is the weighted neighbourhood success rate the "
+        "shipped rule computes for a (task, model) pair; y is how often that pair actually "
+        "passed. A calibrated predictor tracks the dashed diagonal. Bars carry 95% Wilson "
+        "intervals and the count in each bin. The red line is the shipped 0.6 eligibility "
+        "threshold. Middle: how those scores are distributed, so the threshold's position "
+        "is visible geometry rather than a claim. Right: Brier skill score against the "
+        "marginal pass rate — above zero means the neighbourhood rate beats simply knowing "
+        "how often each model passes — with the shuffled-outcome null band and the "
+        "human-difficulty-tag positive control on the same axis."
+    ),
+    goal=(
+        "Look at the right panel first. The positive control must sit above the null band, "
+        "or the instrument proves nothing either way. It does. Then look at where the "
+        "observed bar sits: inside the band is a falsification, not a coverage gap."
+    ),
+    definitions=(
+        (
+            "weighted success rate",
+            "sum(similarity x outcome) / sum(similarity) over the k nearest OTHER tasks, "
+            "the quantity SelectionRule thresholds at 0.6.",
+        ),
+        (
+            "Brier skill score",
+            "1 - Brier(neighbour rate) / Brier(per-model base rate). Zero means the "
+            "neighbourhood adds nothing over the model's marginal pass rate.",
+        ),
+        (
+            "positive control",
+            "The same pipeline run with the task's human difficulty label (easy/medium/hard) "
+            "as the similarity, so a task's neighbours are the tasks a human called equally "
+            "hard. It is a control on the MEASUREMENT, not a routing proposal.",
+        ),
+    ),
+    notes=(
+        "Every rate is leave-one-out: a task is never its own neighbour, so a task cannot "
+        "predict itself.",
+    ),
+    limitations=(
+        "The neighbour weight is similarity only. The shipped rule also multiplies by each "
+        "neighbour's verification confidence, which is 1.0 for every cell in this corpus, "
+        "so the two coincide here and could diverge on live traffic.",
+    ),
 )
 
 
-def build_feature_vectors(results, models_order):
-    task_ids = sorted(results.keys())
-    n = len(task_ids)
-    vecs = np.zeros((n, len(models_order) * 4))
+# ---------------------------------------------------------------------------
+# The quantity itself
+# ---------------------------------------------------------------------------
 
+
+def build_feature_vectors(results: dict, models_order: list[str]) -> tuple[list[str], np.ndarray]:
+    """(task_ids, per-model [pass, log cost, log tokens, log calls]) — the outcome features."""
+    task_ids = sorted(results.keys())
+    vecs = np.zeros((len(task_ids), len(models_order) * 4))
     for i, tid in enumerate(task_ids):
         for j, model in enumerate(models_order):
             r = results[tid].get(model, {})
-            passed = 1.0 if r.get("pass", False) else 0.0
-            cost = r.get("cost", 0.0)
-            total_tok = r.get("in_tok", 0) + r.get("out_tok", 0)
-            calls = r.get("calls", 0)
             base = j * 4
-            vecs[i, base] = passed
-            vecs[i, base + 1] = np.log10(cost + 1e-9) + 5
-            vecs[i, base + 2] = np.log10(total_tok + 1)
-            vecs[i, base + 3] = np.log10(calls + 1)
-
+            vecs[i, base] = 1.0 if r.get("pass", False) else 0.0
+            vecs[i, base + 1] = np.log10(plot_style.row_real_cost(r) + 1e-9) + 5
+            vecs[i, base + 2] = np.log10(r.get("in_tok", 0) + r.get("out_tok", 0) + 1)
+            vecs[i, base + 3] = np.log10(r.get("calls", 0) + 1)
     return task_ids, vecs
 
 
-def build_task_embeddings(matrix, task_ids):
+def build_task_embeddings(matrix: dict, task_ids: list[str]) -> np.ndarray:
     """Real normalized jina prompt embeddings (unit vectors), aligned to ``task_ids``."""
     tasks = matrix.get("tasks", {})
-    descs = [tasks.get(tid, {}).get("description", tid) for tid in task_ids]
-    emb = np.asarray(_embed_texts(descs), dtype=np.float64)
+    texts = [routing_text(tid, tasks.get(tid, {})) for tid in task_ids]
+    emb = np.asarray(_embed_texts(texts), dtype=np.float64)
     norms = np.linalg.norm(emb, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return emb / norms
 
 
-def compute_task_similarity(vecs):
-    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
-    norms[norms == 0] = 1
-    normalized = vecs / norms
-    return normalized @ normalized.T
+def _nearest_neighbors(sims: np.ndarray, query_idx: int, k: int) -> np.ndarray:
+    """Indices of the k most similar OTHER tasks, nearest first."""
+    k_eff = min(int(k), len(sims) - 1)
+    if k_eff <= 0:
+        return np.empty(0, dtype=int)
+    ranked = np.argsort(sims)[::-1]
+    return ranked[ranked != query_idx][:k_eff]
 
 
-def knn_select(vecs, emb, query_idx, models_order, k=10, success_rate_threshold=None):
-    """Cost-aware selection over REAL-embedding neighbours: cheapest model whose
-    neighbourhood pass-rate clears the threshold, else best-available (mirrors
-    SelectionRule). ``emb`` = normalized jina vectors; ``vecs`` = measured pass-rates."""
+def knn_select(
+    vecs: np.ndarray,
+    emb: np.ndarray,
+    query_idx: int,
+    models_order: list[str],
+    k: int = 10,
+    success_rate_threshold: float | None = None,
+) -> str:
+    """Cheapest model whose neighbourhood pass-rate clears the threshold, else best-scoring."""
     threshold = (
         _DEFAULT_SUCCESS_RATE_THRESHOLD
         if success_rate_threshold is None
         else success_rate_threshold
     )
     similarities = emb @ emb[query_idx]
-    similarities[query_idx] = -np.inf
-    nearest = np.argsort(similarities)[-k:][::-1]
-
-    model_scores = {}
-    for model_idx, model in enumerate(models_order):
-        model_pass_col = model_idx * 4
-        pass_rates = [vecs[n, model_pass_col] for n in nearest]
-        model_scores[model] = float(np.mean(pass_rates))
-
+    nearest = _nearest_neighbors(similarities, query_idx, k)
     price_order = sorted(
         models_order, key=lambda m: config.cost_per_1m(m, config.enabled_pricing())
     )
-
-    # Cheapest model that clears the threshold (the product rule).
-    for m in price_order:
-        if model_scores.get(m, 0.0) >= threshold:
-            return m
-
-    # None qualify -> escalate to the best-available model (highest pass, cheapest tie),
-    # matching SelectionRule's fall-through past the tested set.
-    max_pass = max(model_scores.values()) if model_scores else 0.0
-    for m in price_order:
-        if model_scores.get(m, 0.0) == max_pass:
-            return m
-    return price_order[0] if price_order else models_order[0]
+    if not price_order:
+        return models_order[0]
+    if len(nearest) == 0:
+        return price_order[0]
+    # The rule itself lives in knn_nulls.select_from_rates so this figure and the null
+    # models that test it can never diverge.
+    pass_cols = [list(models_order).index(m) * 4 for m in price_order]
+    rates = np.array([[float(np.mean(vecs[nearest, c])) for c in pass_cols]])
+    return price_order[int(knn_nulls.select_from_rates(rates, threshold)[0])]
 
 
-def compute_neighborhood_purity(
-    similarity_matrix, task_ids, vecs, emb, models_order, k=10, success_rate_threshold=None
-):
-    n = len(task_ids)
-    selections = {}
-    for i in range(n):
-        selections[task_ids[i]] = knn_select(
-            vecs, emb, i, models_order, k=k, success_rate_threshold=success_rate_threshold
+def weighted_rates(sims: np.ndarray, pass_mat: np.ndarray, k: int) -> np.ndarray:
+    """(n_tasks, n_models) leave-one-out SIMILARITY-WEIGHTED neighbourhood pass-rate."""
+    # This is `SelectionRule`'s `weighted_success`, vectorised: weight = confidence x
+    # (1 - distance), confidence is 1.0 on every measured cell here and cosine distance is
+    # 1 - similarity, so the weight IS the similarity. Negative similarities are clamped
+    # exactly as `_confidence_weight` clamps them.
+    n = sims.shape[0]
+    masked = np.array(sims, dtype=float, copy=True)
+    np.fill_diagonal(masked, -np.inf)
+    k_eff = max(1, min(int(k), n - 1))
+    nbrs = np.argsort(-masked, axis=1)[:, :k_eff]
+    weights = np.clip(np.take_along_axis(masked, nbrs, axis=1), 0.0, None)
+    total = weights.sum(axis=1, keepdims=True)
+    total[total == 0] = 1.0
+    return np.einsum("nk,nkm->nm", weights, pass_mat[nbrs]) / total
+
+
+def brier_skill(rates: np.ndarray, pass_mat: np.ndarray) -> float:
+    """1 - Brier(neighbour rate) / Brier(per-model base rate), over every (task, model) cell."""
+    base = np.broadcast_to(pass_mat.mean(axis=0, keepdims=True), pass_mat.shape)
+    ref = float(((pass_mat - base) ** 2).mean())
+    if ref <= 0:
+        return 0.0
+    return 1.0 - float(((pass_mat - rates) ** 2).mean()) / ref
+
+
+def reliability(rates: np.ndarray, pass_mat: np.ndarray, n_bins: int = _N_BINS) -> list[dict]:
+    """Per bin of predicted rate: mean prediction, observed pass rate, Wilson CI, count."""
+    # `base` is the per-model marginal pass rate broadcast over the cells, so each bin also
+    # reports what you would predict knowing ONLY which model the cell belongs to. A pooled
+    # reliability curve rises whenever the score merely ranks models, which is why that
+    # reference is drawn next to the diagonal rather than left implicit.
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    base = np.broadcast_to(pass_mat.mean(axis=0, keepdims=True), pass_mat.shape).ravel()
+    flat_r, flat_y = rates.ravel(), pass_mat.ravel()
+    out: list[dict] = []
+    for lo, hi in zip(edges[:-1], edges[1:], strict=True):
+        mask = (flat_r >= lo) & (flat_r < hi if hi < 1.0 else flat_r <= hi)
+        n = int(mask.sum())
+        if n == 0:
+            continue
+        passes = int(flat_y[mask].sum())
+        ci_lo, ci_hi = plot_style.wilson_interval(passes, n)
+        out.append(
+            {
+                "lo": float(lo),
+                "hi": float(hi),
+                "predicted": float(flat_r[mask].mean()),
+                "observed": passes / n,
+                "model_base": float(base[mask].mean()),
+                "ci": (ci_lo, ci_hi),
+                "n": n,
+            }
         )
-
-    purity = np.zeros(n)
-    for i in range(n):
-        sims = similarity_matrix[i].copy()
-        sims[i] = -np.inf
-        nearest = np.argsort(sims)[-k:][::-1]
-        selected = selections[task_ids[i]]
-        match_count = sum(1 for n_idx in nearest if selections[task_ids[n_idx]] == selected)
-        purity[i] = match_count / k
-
-    return purity, selections
+    return out
 
 
-def descriptive_model_stats(results, models_order):
-    """STRATEGY-AGNOSTIC per-model stats straight from the raw matrix — no routing
-    rule in the loop. Returns per-model pass rate + mean cost on (a) the full set of
-    tasks THAT model ran and (b) the common-coverage subset every model ran."""
-    tasks = sorted(results.keys())
-    common = [t for t in tasks if all(m in results[t] for m in models_order)]
-    stats = {}
-    for m in models_order:
-        measured = [t for t in tasks if m in results[t]]
-        full_pass = [1.0 if results[t][m].get("pass") else 0.0 for t in measured]
-        comm_pass = [1.0 if results[t][m].get("pass") else 0.0 for t in common if m in results[t]]
-        comm_cost = [
-            float(results[t][m].get("real_cost", results[t][m].get("cost", 0.0)))
-            for t in common
-            if m in results[t]
-        ]
-        stats[m] = {
-            "n_measured": len(measured),
-            "full_pass": float(np.mean(full_pass)) if full_pass else float("nan"),
-            "common_pass": float(np.mean(comm_pass)) if comm_pass else float("nan"),
-            "common_cost": float(np.mean(comm_cost)) if comm_cost else 0.0,
-        }
-    return stats, len(common), len(tasks)
+def null_band(
+    sims: np.ndarray, pass_mat: np.ndarray, k: int, draws: int = _NULL_DRAWS
+) -> knn_nulls.Band:
+    """Brier skill under task-wise shuffles of the outcome matrix."""
+    rng = np.random.default_rng(0)
+    samples = np.empty(draws, dtype=float)
+    for i in range(draws):
+        shuffled = pass_mat[rng.permutation(pass_mat.shape[0])]
+        samples[i] = brier_skill(weighted_rates(sims, shuffled, k), shuffled)
+    return knn_nulls.band_of(samples)
 
 
-def plot_descriptive_model_performance(results, models_order, output_dir):
-    """Descriptive all-model figure computed directly from results.csv, irrespective of
-    any routing/exploration strategy — complements (does not replace) the strategy-
-    conditioned model_allocation / neighborhood_purity plots that show only selected models."""
-    stats, n_common, n_total = descriptive_model_stats(results, models_order)
-    colors = plot_style.model_color_map(models_order)
-    bar_colors = [colors[m] for m in models_order]
-    x = np.arange(len(models_order))
-    w = 0.38
+def difficulty_similarity(matrix: dict, task_ids: list[str], sims: np.ndarray) -> np.ndarray | None:
+    """Positive control: two tasks are 'similar' when a human gave them the same difficulty."""
+    tasks = matrix.get("tasks", {})
+    tags = np.array([str(tasks.get(t, {}).get("difficulty_stratum") or "") for t in task_ids])
+    if len(set(tags.tolist()) - {""}) < 2:
+        return None
+    # The embedding similarity is added at 1e-3 purely to break ties deterministically, so
+    # the control's neighbour ORDER is reproducible without the tag carrying any of it.
+    return (tags[:, None] == tags[None, :]).astype(float) + 1e-3 * sims
 
-    fig, (ax_p, ax_c) = plt.subplots(1, 2, figsize=(16, 7))
 
-    full = [stats[m]["full_pass"] for m in models_order]
-    common = [stats[m]["common_pass"] for m in models_order]
-    gaps = [
-        abs(f - c) for f, c in zip(full, common, strict=True) if not (np.isnan(f) or np.isnan(c))
+# ---------------------------------------------------------------------------
+# Panels
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Calibration:
+    """Everything the three panels draw, computed once."""
+
+    bins: list[dict]
+    rates: np.ndarray
+    observed: float
+    null: knn_nulls.Band
+    control: float | None
+    control_null: knn_nulls.Band | None
+    threshold: float
+    k: int
+    n_tasks: int
+    n_models: int
+
+
+def _draw_reliability(ax: Axes, cal: Calibration) -> None:
+    ax.plot([0, 1], [0, 1], ls="--", lw=1.0, color="#bbbbbb", zorder=1, label="perfect calibration")
+    xs = [b["predicted"] for b in cal.bins]
+    ys = [b["observed"] for b in cal.bins]
+    yerr = np.array([plot_style.ci_yerr(b["observed"], *b["ci"]) for b in cal.bins]).T
+    ax.errorbar(
+        xs,
+        ys,
+        yerr=yerr,
+        fmt="o-",
+        color=_OBSERVED,
+        ms=6,
+        lw=1.6,
+        capsize=3,
+        zorder=3,
+        label="observed",
+    )
+    ax.plot(
+        xs,
+        [b["model_base"] for b in cal.bins],
+        "s--",
+        color="#8a8a8a",
+        ms=4,
+        lw=1.2,
+        zorder=2,
+        label="knowing only which model",
+    )
+    for b in cal.bins:
+        ax.annotate(
+            f"n={b['n']}",
+            xy=(b["predicted"], b["ci"][1]),
+            xytext=(0, 5),
+            textcoords="offset points",
+            fontsize=7,
+            ha="center",
+            color="#555555",
+        )
+    ax.axvline(cal.threshold, color=_THRESHOLD, lw=1.4, ls="-", zorder=2)
+    ax.annotate(
+        f"shipped threshold {cal.threshold:g}",
+        xy=(cal.threshold, 1.15),
+        xytext=(4, 0),
+        textcoords="offset points",
+        fontsize=7.5,
+        color=_THRESHOLD,
+        ha="left",
+        va="top",
+    )
+    ax.set_xlim(-0.03, 1.03)
+    ax.set_ylim(-0.03, 1.16)
+    ax.set_xlabel("weighted neighbourhood success rate", fontsize=9)
+    ax.set_ylabel("observed pass rate", fontsize=9)
+    ax.legend(fontsize=7, loc="lower right", frameon=False)
+    ax.grid(color="#eeeeee", lw=0.6)
+    ax.set_axisbelow(True)
+    plot_frame.panel_label(ax, "A · reliability of the routed score")
+
+
+def _draw_distribution(ax: Axes, cal: Calibration) -> None:
+    flat = cal.rates.ravel()
+    ax.hist(flat, bins=24, range=(0.0, 1.0), color="#c9d7e6", edgecolor="#8fa6bd", lw=0.5)
+    ax.axvline(cal.threshold, color=_THRESHOLD, lw=1.4, zorder=3)
+    above = float((flat >= cal.threshold).mean())
+    ax.annotate(
+        f"{above:.0%} of (task, model) scores\nland above the shipped threshold",
+        xy=(0.02, 0.98),
+        xycoords="axes fraction",
+        fontsize=7.5,
+        color=_THRESHOLD,
+        ha="left",
+        va="top",
+    )
+    ax.set_xlim(0.0, 1.0)
+    ax.set_xlabel("weighted neighbourhood success rate", fontsize=9)
+    ax.set_ylabel("(task, model) pairs", fontsize=9)
+    ax.grid(axis="y", color="#eeeeee", lw=0.6)
+    ax.set_axisbelow(True)
+    plot_frame.panel_label(ax, "B · where the threshold cuts")
+
+
+def _draw_skill(ax: Axes, cal: Calibration) -> None:
+    entries: list[tuple[str, float, knn_nulls.Band | None, str]] = [
+        ("embedded\nproblem statement", cal.observed, cal.null, _OBSERVED)
     ]
-    max_gap_pp = (max(gaps) * 100) if gaps else 0.0
-
-    ax_p.bar(
-        x - w / 2,
-        full,
-        w,
-        color=bar_colors,
-        edgecolor="black",
-        alpha=0.5,
-        label="full measured set",
-    )
-    ax_p.bar(
-        x + w / 2,
-        common,
-        w,
-        color=bar_colors,
-        edgecolor="black",
-        label=f"common subset (N={n_common}, cross-comparable)",
-    )
-    for m, xi in zip(models_order, x, strict=True):
-        top = max(
-            [v for v in (stats[m]["full_pass"], stats[m]["common_pass"]) if not np.isnan(v)] or [0]
+    if cal.control is not None:
+        entries.append(
+            ("human difficulty tag\n(positive control)", cal.control, cal.control_null, _CONTROL)
         )
-        ax_p.text(
-            xi, top + 0.02, f"n={stats[m]['n_measured']}", ha="center", va="bottom", fontsize=7
-        )
-    ax_p.set_xticks(x)
-    ax_p.set_xticklabels(models_order, rotation=45, ha="right", fontsize=9)
-    ax_p.set_ylabel("Pass rate")
-    ax_p.set_ylim(0, 1.12)
-    ax_p.set_title("Per-model pass rate — full measured set vs common-coverage subset")
-    ax_p.legend(fontsize=8, loc="lower right")
-
-    costs = [max(stats[m]["common_cost"], 1e-9) for m in models_order]
-    cbars = ax_c.bar(x, costs, color=bar_colors, edgecolor="black")
-    ax_c.set_yscale("log")
-    ax_c.set_xticks(x)
-    ax_c.set_xticklabels(models_order, rotation=45, ha="right", fontsize=9)
-    ax_c.set_ylabel("Mean real cost per task, common subset ($, log)")
-    ax_c.set_title(f"Per-model mean cost on the {n_common} common-coverage tasks")
-    for bar, m in zip(cbars, models_order, strict=True):
-        ax_c.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height(),
-            f"${stats[m]['common_cost']:.4f}",
+    xs = list(range(len(entries)))
+    for x, (_label, value, band, colour) in zip(xs, entries, strict=True):
+        if band is not None:
+            ax.fill_between(
+                [x - 0.34, x + 0.34], band.lo, band.hi, color=_NULLC, alpha=0.30, zorder=1
+            )
+            ax.plot([x - 0.34, x + 0.34], [band.mean, band.mean], color=_NULLC, lw=1.0, zorder=2)
+        inside = band is not None and band.contains(value)
+        ax.plot([x], [value], "o", color=colour, ms=11, zorder=4)
+        ax.annotate(
+            f"{value:+.3f}\n{'INSIDE the null' if inside else 'above the null'}",
+            xy=(x, value),
+            xytext=(0, 14),
+            textcoords="offset points",
+            fontsize=7.5,
             ha="center",
             va="bottom",
-            fontsize=7,
+            color=colour,
         )
-
-    fig.suptitle(
-        "Descriptive all-model view — every enabled model, straight from results.csv "
-        "(NO routing/exploration strategy in the loop)",
-        fontsize=12,
+    ax.axhline(0.0, color="#bbbbbb", lw=0.8, zorder=1)
+    ax.set_xticks(xs)
+    ax.set_xticklabels([e[0] for e in entries], fontsize=8)
+    ax.set_xlim(-0.6, len(entries) - 0.4)
+    values = [e[1] for e in entries]
+    bounds = [b.lo for _l, _v, b, _c in entries if b] + [b.hi for _l, _v, b, _c in entries if b]
+    top, bottom = max(values + bounds), min(values + bounds)
+    ax.set_ylim(bottom - 0.18 * (top - bottom), top + 0.55 * (top - bottom))
+    ax.set_ylabel("Brier skill vs the per-model base rate", fontsize=9)
+    ax.fill_between(
+        [], [], [], color=_NULLC, alpha=0.30, label="shuffled-outcome null, central 95%"
     )
-    fig.text(
-        0.5,
-        0.01,
-        "Coverage is ADAPTIVE (frontier models run on fewer tasks): each full-set bar is "
-        "computed on the n tasks\nTHAT model ran, so full-set bars are NOT strictly "
-        "cross-comparable (a selection / MNAR bias). The darker bars\n"
-        f"restrict to the {n_common} of {n_total} tasks EVERY model ran — that subset IS "
-        "cross-comparable. Here full-set vs\n"
-        f"common-subset pass rates differ by at most {max_gap_pp:.1f}pp, so the pooling bias "
-        "is small in this matrix;\ntrust the common-subset bars for ranking.",
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        color="#444444",
-        style="italic",
+    ax.legend(fontsize=7.5, loc="lower right", frameon=False)
+    ax.grid(axis="y", color="#eeeeee", lw=0.6)
+    ax.set_axisbelow(True)
+    plot_frame.panel_label(ax, "C · does the score carry signal?")
+
+
+def _annotations(cal: Calibration, admissibility_reason: str, imputation: str) -> Annotations:
+    inside = cal.null.contains(cal.observed)
+    control_fired = (
+        cal.control is not None
+        and cal.control_null is not None
+        and not cal.control_null.contains(cal.control)
     )
-    fig.tight_layout(rect=(0, 0.10, 1, 0.95))
-    fig.savefig(str(output_dir / "model_performance_descriptive.png"), dpi=150)
-    print("Saved model_performance_descriptive.png")
-    plt.close(fig)
+    facts = [
+        f"{cal.n_tasks} tasks x {cal.n_models} models, k={cal.k}, leave-one-out",
+        f"Brier skill {cal.observed:+.3f} vs null 95% [{cal.null.lo:+.3f}, {cal.null.hi:+.3f}]",
+    ]
+    if cal.control is not None:
+        facts.append(f"human-tag positive control {cal.control:+.3f}")
+    caveat = None
+    if inside and control_fired:
+        caveat = (
+            "Falsified, not untested: the control fires on this same pipeline while the "
+            "embedding sits inside the null."
+        )
+    elif inside:
+        caveat = "Inside the null AND the control did not fire — the instrument is unproven."
+    return Annotations(
+        subtitle_facts=tuple(facts),
+        caveat=caveat,
+        notes=(
+            admissibility_reason,
+            *(
+                f"bin [{b['lo']:.1f},{b['hi']:.1f}): predicted {b['predicted']:.3f}, "
+                f"observed {b['observed']:.3f} (n={b['n']})"
+                for b in cal.bins
+            ),
+        ),
+        limitations=(imputation,),
+        counts=(("tasks", cal.n_tasks), ("models", cal.n_models), ("k", cal.k)),
+    )
 
 
-# Secondary (non-colour) identity channel for the all-pairs scatter form. The
-# canonical model palette (plot_style.OKABE_ITO) lands adjacent hues in the 6-8 CVD
-# floor band on the all-pairs pairlist, so every scatter using it MUST carry a
-# second channel — here a per-model marker shape — never colour alone (plot_style
-# color note; dataviz check 4). Assigned by POSITION in models_order so a model's
-# marker is as stable across figures as its colour.
-_MODEL_MARKERS: tuple[str, ...] = ("o", "s", "^", "D", "v", "P", "X", "*")
+def imputed_census(
+    results: dict, task_ids: list[str], models_order: list[str]
+) -> tuple[int, int, int]:
+    """``(n_imputed, n_cells, n_imputed_passes)`` over the cells this figure scores."""
+    cells = [results.get(tid, {}).get(m) for tid in task_ids for m in models_order]
+    present = [c for c in cells if c]
+    imputed = [c for c in present if c.get("imputed")]
+    return len(imputed), len(present), sum(1 for c in imputed if c.get("pass"))
 
 
-def _model_marker_map(models_in_order: list[str]) -> dict[str, str]:
-    """Assign each model a fixed marker shape by position — the scatter's second
-    (non-colour) identity channel, mirroring plot_style.model_color_map."""
-    return {m: _MODEL_MARKERS[i % len(_MODEL_MARKERS)] for i, m in enumerate(models_in_order)}
+def imputation_limit_line(results: dict, task_ids: list[str], models_order: list[str]) -> str:
+    """The LIMITS line naming the pass-only imputation this figure rests on."""
+    n_imp, n_cells, n_imp_pass = imputed_census(results, task_ids, models_order)
+    if not n_cells or not n_imp:
+        return "Every scored cell is a real measurement — no imputation on this path."
+    return (
+        f"{n_imp}/{n_cells} scored cells ({n_imp / n_cells:.1%}) are monotone-IMPUTED, not "
+        f"measured, and {n_imp_pass}/{n_imp} of them are filled pass=True — imputation here "
+        f"is near-exclusively pass-filling (the ladder's fail branch fires rarely), so it "
+        f"almost never adds a failure. Every rate on this "
+        f"figure is biased UPWARD by that fill."
+    )
 
 
-def main(config_path: str = "benchmark/benchmark.yaml"):
+def compute(
+    matrix: dict, task_ids: list[str], models_by_price: list[str], k: int, threshold: float
+) -> Calibration:
+    """Embed, score, null, control — everything the figure needs, in one pass."""
+    emb = build_task_embeddings(matrix, task_ids)
+    sims = emb @ emb.T
+    pass_mat = _pass_matrix(matrix["results"], task_ids, models_by_price)
+    rates = weighted_rates(sims, pass_mat, k)
+    control_sims = difficulty_similarity(matrix, task_ids, sims)
+    control = control_null = None
+    if control_sims is not None:
+        control = brier_skill(weighted_rates(control_sims, pass_mat, k), pass_mat)
+        control_null = null_band(control_sims, pass_mat, k)
+    return Calibration(
+        bins=reliability(rates, pass_mat),
+        rates=rates,
+        observed=brier_skill(rates, pass_mat),
+        null=null_band(sims, pass_mat, k),
+        control=control,
+        control_null=control_null,
+        threshold=threshold,
+        k=k,
+        n_tasks=len(task_ids),
+        n_models=len(models_by_price),
+    )
+
+
+def _pass_matrix(results: dict, task_ids: list[str], models_by_price: list[str]) -> np.ndarray:
+    mat = np.zeros((len(task_ids), len(models_by_price)), dtype=float)
+    for i, tid in enumerate(task_ids):
+        cells = results.get(tid, {})
+        for j, model in enumerate(models_by_price):
+            mat[i, j] = 1.0 if cells.get(model, {}).get("pass", False) else 0.0
+    return mat
+
+
+def plot(cal: Calibration, out_path: Path, extra: Annotations, digest: str) -> Path:
+    size = plot_frame.WIDE
+    fig, axes = plot_frame.subplots(size, 1, 3, width_ratios=(1.15, 1.0, 0.85))
+    _draw_reliability(axes[0], cal)
+    _draw_distribution(axes[1], cal)
+    _draw_skill(axes[2], cal)
+    return plot_frame.save(
+        fig,
+        out_path,
+        SPEC,
+        extra=extra,
+        provenance=plot_frame.Provenance(_GENERATOR, digest, ctxmod.MANIFEST),
+        size=size,
+    )
+
+
+def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     config.load(config_path)
-    import argparse
-
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", default=config_path, help="Path to config YAML")
     ap.add_argument("--matrix", default=None)
-    ap.add_argument("--output-dir", default="benchmark/routing/reports")
-    # Default k tracks the configured kNN strategy (benchmark.yaml
-    # strategies.knn.k) so the proxy at least uses the same neighbourhood size
-    # as the routed strategy — the neighbour SPACE still differs (see docstring).
-    ap.add_argument(
-        "--k",
-        type=int,
-        default=None,
-        help="neighbourhood size for the kNN router (real jina neighbourhoods) "
-        "(default: configured strategies.knn.k)",
-    )
+    ap.add_argument("--output-dir", default="docs/assets/figures/routing")
+    ap.add_argument("--k", type=int, default=None, help="neighbourhood size (default: configured)")
     args = ap.parse_args()
-
     if args.config != config_path:
         config.load(args.config)
 
     matrix_path = Path(args.matrix) if args.matrix else config.challenges_path()
-    matrix = config.load_matrix(matrix_path)
-
-    models_order = config.enabled_models()
-    if not models_order:
-        models_order = list(matrix.get("models", {}).keys())
-
-    k_neighbors = args.k if args.k is not None else int(config.knn_params().get("k", 10))
-    threshold = float(
-        config.knn_params().get("success_rate_threshold", _DEFAULT_SUCCESS_RATE_THRESHOLD)
-    )
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    results = matrix["results"]
-
+    matrix = summary.load_scored_matrix(matrix_path)
+    results = matrix.get("results", {})
     if not results:
         print(
             "No results yet — results.csv holds no rows. "
@@ -314,380 +539,33 @@ def main(config_path: str = "benchmark/benchmark.yaml"):
         )
         return
 
-    task_ids, vecs = build_feature_vectors(results, models_order)
-    emb = build_task_embeddings(matrix, task_ids)
-    n = len(task_ids)
-    print(f"Loaded {n} tasks; real jina embeddings {emb.shape}, pass-rate vectors {vecs.shape}")
-
-    # ONE canonical model palette for the whole file — the same Okabe-Ito map the
-    # descriptive figure uses (plot_style.model_color_map), so a model wears the
-    # SAME colour in every plot here and in model_performance_descriptive.png.
-    model_colors = plot_style.model_color_map(models_order)
-    model_markers = _model_marker_map(models_order)
-
-    selections = {}
-    for i in range(n):
-        selections[task_ids[i]] = knn_select(
-            vecs, emb, i, models_order, k=k_neighbors, success_rate_threshold=threshold
-        )
-
-    unique, counts = np.unique(list(selections.values()), return_counts=True)
-    print("kNN router (real jina neighbourhoods) — model allocation:")
-    for m, c in sorted(zip(unique, counts, strict=True), key=lambda x: -x[1]):
-        print(f"  {m}: {c} tasks ({c / n * 100:.1f}%)")
-
-    similarity = compute_task_similarity(emb)
-    purity, _ = compute_neighborhood_purity(
-        similarity,
-        task_ids,
-        vecs,
-        emb,
-        models_order,
-        k=k_neighbors,
-        success_rate_threshold=threshold,
-    )
-    print(f"Mean neighborhood purity: {np.mean(purity):.3f}")
-
-    # 1. PCA Scatter — one point per task, coloured AND shaped by the proxy's
-    # selected model. Marker shape is a second identity channel so the two
-    # adjacent-blue Okabe hues (deepseek / qwen) never rely on colour alone in
-    # this all-pairs scatter form (plot_style color note; dataviz check 4).
-    # random_state pins the randomized SVD solver ('auto' picks it for 768-d input),
-    # so the committed scatter is byte-reproducible run-to-run, not just content-stable.
-    pca = PCA(n_components=2, random_state=0)
-    coords = pca.fit_transform(emb)
-    explained = pca.explained_variance_ratio_
-
-    fig, ax = plt.subplots(figsize=(11, 8))
-    selected_models = [m for m in models_order if m in set(unique)]
-    for m in selected_models:
-        idx = [i for i, tid in enumerate(task_ids) if selections[tid] == m]
-        ax.scatter(
-            coords[idx, 0],
-            coords[idx, 1],
-            color=model_colors[m],
-            marker=model_markers[m],
-            s=55,
-            alpha=0.85,
-            edgecolors="black",
-            linewidth=0.4,
-            label=f"{m} (n={len(idx)})",
-        )
-
-    ax.legend(title="kNN-router-selected model (colour + shape)", fontsize=9, loc="upper right")
-    ax.set_xlabel(f"PC1 ({explained[0] * 100:.1f}% of variance)")
-    ax.set_ylabel(f"PC2 ({explained[1] * 100:.1f}% of variance)")
-    ax.set_title(
-        "kNN router on REAL jina embeddings — PCA of the prompt-embedding space\n"
-        "(each task coloured by the model the router selects for it)",
-        fontsize=12,
-    )
-    ax.grid(True, alpha=0.25)
-    ax.set_axisbelow(True)
-
-    never = [m for m in models_order if m not in set(unique)]
-    never_txt = (
-        f"Enabled models the router never selected (absent by result, not missing data): "
-        f"{', '.join(never)}.\n"
-        if never
-        else ""
-    )
-    fig.text(
-        0.5,
-        0.015,
-        "Each dot = one task, placed by the 2 leading principal components of its REAL "
-        "768-d jina prompt embedding.\n"
-        + never_txt
-        + "GOOD = each colour/shape forms a tight cluster (tasks needing the same model "
-        "sit together, so a near-neighbour vote is decisive).\n" + _IMPUTE_CAVEAT,
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        color="#444444",
-        style="italic",
-    )
-    fig.tight_layout(rect=(0, 0.11, 1, 1))
-    fig.savefig(str(output_dir / "knn_pca_scatter.png"), dpi=150)
-    print("Saved knn_pca_scatter.png")
-    plt.close(fig)
-
-    # 2. Neighborhood Purity Heatmap
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
-
-    sort_order = sorted(
-        range(n),
-        key=lambda i: (
-            list(models_order).index(selections[task_ids[i]])
-            if selections[task_ids[i]] in models_order
-            else 999
-        ),
-    )
-    sorted_sim = similarity[sort_order][:, sort_order]
-
-    im = axes[0].imshow(sorted_sim, aspect="auto", cmap="viridis", vmin=0, vmax=1)
-    axes[0].set_title("Task Similarity Matrix (grouped by selected model)")
-    axes[0].set_xlabel("Task index (sorted)")
-    axes[0].set_ylabel("Task index (sorted)")
-    cbar = fig.colorbar(im, ax=axes[0], shrink=0.8)
-    cbar.set_label("Cosine similarity")
-
-    sep_positions = [0]
-    current = selections[task_ids[sort_order[0]]]
-    for i in range(1, n):
-        m = selections[task_ids[sort_order[i]]]
-        if m != current:
-            sep_positions.append(i)
-            current = m
-    sep_positions.append(n)
-    for sp in sep_positions[:-1]:
-        axes[0].axhline(sp - 0.5, color="white", linestyle="--", linewidth=0.5, alpha=0.5)
-        axes[0].axvline(sp - 0.5, color="white", linestyle="--", linewidth=0.5, alpha=0.5)
-
-    y_centers = []
-    for j in range(len(sep_positions) - 1):
-        y_centers.append((sep_positions[j] + sep_positions[j + 1]) / 2)
-    tick_models = []
-    for j in range(len(sep_positions) - 1):
-        mid = sort_order[sep_positions[j]]
-        tick_models.append(selections[task_ids[mid]])
-    axes[0].set_yticks(y_centers)
-    axes[0].set_yticklabels(tick_models, fontsize=8)
-    axes[0].set_xticks([])
-
-    purity_by_model: dict[str, list[float]] = {m: [] for m in models_order}
-    for i, tid in enumerate(task_ids):
-        sel = selections[tid]
-        if sel in purity_by_model:
-            purity_by_model[sel].append(purity[i])
-
-    x_pos = np.arange(len(models_order))
-    mean_purities = [np.mean(purity_by_model[m]) if purity_by_model[m] else 0 for m in models_order]
-    bar_colors = [model_colors.get(m, "#9E9E9E") for m in models_order]
-    bars = axes[1].bar(x_pos, mean_purities, color=bar_colors, edgecolor="black", linewidth=0.5)
-    axes[1].set_xticks(x_pos)
-    axes[1].set_xticklabels(models_order, rotation=45, ha="right", fontsize=9)
-    axes[1].set_ylabel("Mean neighborhood purity")
-    axes[1].set_title("kNN Router (real jina) — Neighborhood Purity by Selected Model")
-    axes[1].set_ylim(0, 1.05)
-    axes[1].axhline(
-        y=0.5, color="gray", linestyle="--", linewidth=0.5, alpha=0.7, label="0.5 baseline"
-    )
-    axes[1].legend(fontsize=8)
-
-    for bar, val in zip(bars, mean_purities, strict=True):
-        axes[1].text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + 0.01,
-            f"{val:.2f}",
-            ha="center",
-            va="bottom",
-            fontsize=8,
-        )
-
-    # Explain both panels + the 0 bars: a model the proxy (almost) never selects has
-    # no neighbourhoods of its own, so its purity is 0 — a real consequence of the
-    # allocation, not missing data. "Good" = bars near 1.0 (tight, self-similar clusters).
-    fig.suptitle(
-        "kNN router (real jina embeddings) — do the router's model choices form clean clusters? "
-        "(purity → 1.0 = clean; each x-axis bar is one enabled model, 0 = (almost) never selected)",
-        fontsize=10,
-    )
-    fig.text(
-        0.5,
-        0.02,
-        "GOOD = purity bars near 1.0 (a selected model's neighbours pick the same model). "
-        "A model at exactly 0 is a real result — the router never selected it, so it owns no "
-        "neighbourhoods — not missing data.\n"
-        "Task similarity is cosine over the REAL 768-d jina prompt embeddings (left panel).\n"
-        + _IMPUTE_CAVEAT,
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        color="#444444",
-        style="italic",
-    )
-    fig.tight_layout(rect=(0, 0.07, 1, 0.96))
-    fig.savefig(str(output_dir / "neighborhood_purity.png"), dpi=150)
-    print("Saved neighborhood_purity.png")
-    plt.close(fig)
-
-    # 3. Model Allocation Bar
-    fig, ax = plt.subplots(figsize=(10, 6))
-    model_counts = [counts[list(unique).index(m)] if m in unique else 0 for m in models_order]
-    bars = ax.bar(
-        range(len(models_order)),
-        model_counts,
-        color=[model_colors.get(m, "#9E9E9E") for m in models_order],
-        edgecolor="black",
-        linewidth=0.8,
-    )
-    ax.set_xticks(range(len(models_order)))
-    ax.set_xticklabels(models_order, rotation=45, ha="right", fontsize=10)
-    ax.set_ylabel("Number of tasks routed")
-    ax.set_title(f"kNN Router (real jina) — Model Allocation Across {n} Tasks (k={k_neighbors})")
-
-    for bar, cnt in zip(bars, model_counts, strict=True):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + 0.5,
-            str(cnt),
-            ha="center",
-            va="bottom",
-            fontsize=10,
-            fontweight="bold",
-        )
-
-    ax.set_ylim(0, max(model_counts) * 1.15)
-    # Every enabled model is on the axis. A model at 0 is a REAL result — the proxy
-    # never picked it — not missing data. Say so, or a 0 bar reads as a data gap.
-    zero_models = [m for m, c in zip(models_order, model_counts, strict=True) if c == 0]
-    zero_note = (
-        "Each bar is one enabled model; a bar at 0 means the router never selected it "
-        "(real result, not missing data).\n"
-        "The router applies the product rule (cheapest model whose real-jina-neighbourhood "
-        "pass-rate clears the threshold),\nso routine work lands on the cheap models and only "
-        "the hard tail escalates to the frontier.\n"
-        if zero_models
-        else ""
-    )
-    fig.text(
-        0.5,
-        0.01,
-        zero_note + _IMPUTE_CAVEAT,
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        color="#444444",
-        style="italic",
-    )
-    fig.subplots_adjust(bottom=0.30 if zero_models else 0.20)
-    fig.savefig(str(output_dir / "model_allocation.png"), dpi=150)
-    print("Saved model_allocation.png")
-    plt.close(fig)
-
-    # 3b. Descriptive all-model view (strategy-agnostic, straight from results.csv).
-    # Answers "how does EVERY model do", not "which model does the router pick".
-    plot_descriptive_model_performance(results, models_order, output_dir)
-
-    # 4. Cost comparison plot (replaces the old knn_viz_report.txt)
+    models = config.enabled_models() or list(matrix.get("models", {}).keys())
     pricing = config.enabled_pricing()
-    cheapest_model = min(pricing, key=lambda m: config.cost_per_1m(m, pricing)) if pricing else ""
-    frontier_model = max(pricing, key=lambda m: config.cost_per_1m(m, pricing)) if pricing else ""
+    models_by_price = sorted(models, key=lambda m: config.cost_per_1m(m, pricing))
+    k = args.k if args.k is not None else int(config.knn_params().get("k", 10))
+    threshold = float(
+        config.knn_params().get("success_rate_threshold", _DEFAULT_SUCCESS_RATE_THRESHOLD)
+    )
+    task_ids = sorted(results)
 
-    cheap_cost = (
-        sum(results[tid].get(cheapest_model, {}).get("cost", 0) for tid in task_ids)
-        if cheapest_model
-        else 0.0
-    )
-    frontier_cost = (
-        sum(results[tid].get(frontier_model, {}).get("cost", 0) for tid in task_ids)
-        if frontier_model
-        else 0.0
-    )
-    # A task whose selected model was never measured is a coverage gap — EXCLUDE it
-    # from the kNN bar (cost + pass), never impute the $0/non-pass the phantom guard
-    # already screens out of the frontier bar.
-    knn_scored = [tid for tid in task_ids if selections[tid] in results[tid]]
-    knn_excluded = n - len(knn_scored)
-    n_knn = len(knn_scored)
-    knn_total = sum(results[tid][selections[tid]].get("cost", 0) for tid in knn_scored)
-    knn_pass = sum(1 for tid in knn_scored if results[tid][selections[tid]].get("pass", False))
-    # Phantom-baseline guard (matches report.py::_frontier_coverage): the frontier
-    # bar sums cost over only the tasks the frontier model actually ran. If that is
-    # a subset of n, "saves X% vs frontier" compares kNN-over-n against
-    # frontier-over-few — apples to oranges. Suppress the claim and flag it.
-    frontier_covered = (
-        sum(1 for tid in task_ids if frontier_model in results[tid]) if frontier_model else 0
-    )
-    phantom_frontier = bool(frontier_model) and frontier_covered < n
-    savings_pct = (1 - knn_total / frontier_cost) * 100 if frontier_cost else 0.0
+    # BEFORE the figure: does this pipeline recover a signal it is KNOWN to contain?
+    admissibility = routing_instrument_admissibility(k=k, threshold=threshold)
+    print(admissibility.reason)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    labels = [
-        f"cheapest\n({cheapest_model})",
-        "kNN router\n(real jina)",
-        f"frontier\n({frontier_model})",
-    ]
-    values = [cheap_cost, knn_total, frontier_cost]
-    # The two flanking bars are single models — paint them their CANONICAL model
-    # colour (same as every other figure). The middle bar is the proxy's MIXTURE
-    # across models, not one model, so it is neutral grey — never a model's hue.
-    bar_colors = [
-        model_colors.get(cheapest_model, "#9E9E9E"),
-        "#9E9E9E",
-        model_colors.get(frontier_model, "#9E9E9E"),
-    ]
-    bars = ax.bar(labels, values, color=bar_colors, edgecolor="black")
-    for bar, val in zip(bars, values, strict=True):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + (max(values) or 1) * 0.01,
-            f"${val:.4f}",
-            ha="center",
-            va="bottom",
-            fontsize=9,
-            fontweight="bold",
+    cal = compute(matrix, task_ids, models_by_price, k, threshold)
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    extra = _annotations(
+        cal, admissibility.reason, imputation_limit_line(results, task_ids, models_by_price)
+    )
+    plot(cal, out_dir / "knn_calibration.png", extra, ctxmod.corpus_digest(matrix, task_ids))
+    print("Saved knn_calibration.png")
+    print(f"  Brier skill {cal.observed:+.4f}  null95 [{cal.null.lo:+.4f}, {cal.null.hi:+.4f}]")
+    if cal.control is not None and cal.control_null is not None:
+        print(
+            f"  positive control {cal.control:+.4f}  "
+            f"null95 [{cal.control_null.lo:+.4f}, {cal.control_null.hi:+.4f}]"
         )
-    ax.set_ylabel("Total cost across tasks ($)")
-    knn_pass_pct = (knn_pass / n_knn * 100) if n_knn else 0.0
-    if phantom_frontier:
-        title_tail = f"pass {knn_pass}/{n_knn} ({knn_pass_pct:.0f}%) — frontier savings N/A"
-    else:
-        title_tail = (
-            f"pass {knn_pass}/{n_knn} ({knn_pass_pct:.0f}%), saves {savings_pct:.0f}% vs frontier"
-        )
-    ax.set_title(f"kNN Router (real jina) — Cost Across {n} Tasks (k={k_neighbors})\n{title_tail}")
-    ax.grid(True, axis="y", alpha=0.3)
-    ax.set_axisbelow(True)
-    fig.tight_layout()
-    # Figure-level captions BELOW the axes: drawn inside the bars, they collided
-    # with the value labels.
-    fig.subplots_adjust(bottom=0.34 if phantom_frontier else 0.22)
-    knn_excluded_note = (
-        f"\nkNN bar EXCLUDES {knn_excluded} coverage-gap task(s) (selected model unmeasured) "
-        f"— its cost/pass sum over {n_knn} of {n}, never imputed $0."
-        if knn_excluded
-        else ""
-    )
-    fig.text(
-        0.5,
-        0.02,
-        "Note: the middle bar sums each selected model's default-arm cost per task; "
-        "strategy_comparison.png\nruns the live kNN engine (per-arm), so exact totals "
-        "differ — compare shapes, not cents." + knn_excluded_note,
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        color="#444444",
-        style="italic",
-    )
-    if phantom_frontier:
-        fig.text(
-            0.5,
-            0.13,
-            f"⚠ PHANTOM BASELINE — {frontier_model} evaluated on {frontier_covered}/{n} "
-            f"tasks;\nits bar sums only those, so a 'vs frontier' saving is not comparable",
-            ha="center",
-            va="bottom",
-            fontsize=9,
-            color="#B00020",
-            fontweight="bold",
-        )
-    fig.savefig(str(output_dir / "knn_cost_comparison.png"), dpi=150)
-    print("Saved knn_cost_comparison.png")
-    plt.close(fig)
-
-    savings_str = (
-        "frontier savings N/A (phantom baseline)"
-        if phantom_frontier
-        else f"saves {savings_pct:.1f}% vs frontier"
-    )
-    print(
-        f"Cost across {n} tasks: cheapest ${cheap_cost:.4f}, "
-        f"kNN router (real jina) ${knn_total:.4f}, "
-        f"frontier ${frontier_cost:.4f} ({frontier_covered}/{n} tasks); "
-        f"router pass {knn_pass}/{n_knn} (excluded {knn_excluded} coverage-gap), {savings_str}"
-    )
 
 
 if __name__ == "__main__":

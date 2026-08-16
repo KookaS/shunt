@@ -18,17 +18,22 @@ so it stays correct as the codebase grows.
 | Need | Start here |
 |------|-----------|
 | What Shunt is · status · quick start | `README.md` |
-| The repo & package layout | `README.md` → "Repository layout" |
+| The repo & package layout | `docs/architecture.md` → "Repository layout" |
+| What the platform supports today | `docs/architecture.md` → "Capabilities" |
+| The measured results (routing + escalation) | `docs/results.md` |
+| Published ideas we tested, and what held | `docs/research-log.md` |
 | **The docs map** — every doc, in order | `mkdocs.yml` (`nav:`) and `docs/index.md` (Contents) |
 | How the pieces fit at runtime | `docs/architecture.md` |
 | The feedback / learning loop (Context → Action → Feedback) | `docs/feedback.md` |
+| How the two models decide (routing · escalation) | `docs/routing.md` · `docs/escalation.md` |
 | Configure providers, models, the router, the embedder | `docs/configuration.md` + `src/shunt/config/{models,router,embedding}.yaml` |
-| Add a provider or model | `examples/providers/README.md` — registry is `src/shunt/config/models.yaml`, **row order is semantic** |
+| Add a provider or model | `examples/providers/README.md` — registry is `src/shunt/config/models.yaml`, **models rank by price (row order not semantic)** |
 | Hook up a tool (Claude Code, opencode, aider, n8n, …) | `examples/integrations/README.md` + the shared handshake harness (`tests/integrations/`) |
 | The benchmark / eval harness | `docs/benchmark.md`, `docs/benchmark-design.md`, `benchmark/` |
 | Add a routing strategy | `benchmark/routing/strategies/_template.py` — copy it, don't invent structure |
 | The exact lint / type ceilings | `pyproject.toml` (the one manifest) |
-| The custom AST gates (`SH0xx`) | `tools/lint/` |
+| The custom lint gates (`SH0xx`) | `tools/lint/` |
+| Secret scanning rules (gitleaks allowlist) | `.gitleaks.toml` |
 
 New area? Add a row here pointing at its entrypoint — never restate what the
 entrypoint already says.
@@ -39,7 +44,7 @@ entrypoint already says.
 - `benchmark/` — the eval harness (not installed; tests reach it via pytest
   `pythonpath = ["."]`). Absolute imports only: `from benchmark import config`,
   never `sys.path` hacks.
-- `tools/lint/` — custom `SH0xx` AST checks · `tests/` — pytest suite · `examples/`
+- `tools/lint/` — custom `SH0xx` gates (AST checks, plus SH010 mermaid) · `tests/` — pytest suite · `examples/`
   — provider + integration configs.
 
 Install once: `pip install -e '.[dev,benchmark]'` — then `benchmark` imports resolve

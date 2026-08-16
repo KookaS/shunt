@@ -12,13 +12,13 @@ from typing import Final
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from shunt.models.config import strict_yaml_load
-from shunt.router.escalation import EscalationConfig
+from shunt.router.escalation import ESCALATION_LADDERS, EscalationConfig
 
 logger = logging.getLogger(__name__)
 
 # Live-eligible routing strategies — the set ``router.strategy`` may name. Benchmark-only
-# strategies (oracle, external_prior, random) are deliberately absent: they need ground
-# truth / external priors and cannot run on live traffic. ``knn_cascade`` is also absent:
+# strategies (oracle, random) are deliberately absent: they need ground truth or are
+# not routers at all, so they cannot run on live traffic. ``knn_cascade`` is also absent:
 # a true quality-cascade needs mid-session verify-then-escalate, which is not one cache-safe
 # per-session decision (routing once per session is the product's spine), and the upstream
 # fallback chain is availability-only, not quality-based — so it stays benchmark-only.
@@ -62,21 +62,30 @@ class ExplorationPolicy(BaseModel):
 
 
 class EscalationPolicy(BaseModel):
-    """Auto-escalation knobs. Shipped OFF — enabling is a config change."""
+    """Auto-escalation knobs. Ships ON (owner choice, 2026-08-08) but only fires once a
+    `capture.work_dir` gives it a repo to verify (a boot warning covers enabled-without-one);
+    the trigger is a null detector at the live cadence — see EscalationConfig.enabled."""
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = False
+    enabled: bool = True
     escalate_after_n: int = Field(default=2, gt=0)
     stale_window: int = Field(default=10, gt=0)
-    blocking_exit_code: int = Field(default=2, ge=0)
-    ladder: str = Field(default="effort_then_tier")
+    ladder: str = Field(default="effort_then_rank")
+    # The cheapest N ranks are walked one rung at a time; the rung that leaves them jumps to the
+    # top rank instead of paying every model in between. 0 restores the every-rank walk.
+    rank_shortlist: int = Field(default=3, ge=0)
+    # Additionally opt-in on top of `enabled` — enabling escalation must never silently
+    # randomize. 0.0 = deterministic; above 0, flagged checkpoints are randomized so the
+    # policy's value becomes identifiable. Bounded below 1.0: at 1.0 the policy arm is never
+    # taken, which loses overlap on the other side.
+    exploration_epsilon: float = Field(default=0.0, ge=0.0, lt=1.0)
+    exploration_seed: int | None = Field(default=None)
 
     @model_validator(mode="after")
     def _check_ladder(self) -> EscalationPolicy:
-        allowed = ("effort_then_tier", "tier_only")
-        if self.ladder not in allowed:
-            joined = ", ".join(allowed)
+        if self.ladder not in ESCALATION_LADDERS:
+            joined = ", ".join(ESCALATION_LADDERS)
             raise ValueError(f"unknown escalation.ladder {self.ladder!r}; allowed: {joined}")
         return self
 
@@ -86,8 +95,10 @@ class EscalationPolicy(BaseModel):
             enabled=self.enabled,
             escalate_after_n=self.escalate_after_n,
             stale_window=self.stale_window,
-            blocking_exit_code=self.blocking_exit_code,
             ladder=self.ladder,
+            rank_shortlist=self.rank_shortlist,
+            exploration_epsilon=self.exploration_epsilon,
+            exploration_seed=self.exploration_seed,
         )
 
 
@@ -102,6 +113,33 @@ class CapturePolicy(BaseModel):
 
     work_dir: str | None = None
     work_dirs: dict[str, str] = Field(default_factory=dict)
+    # Opt-in full-content per-step trajectory capture. Shipped OFF (kill-gate posture): unset
+    # ⇒ only the behaviour-only verified-outcome fields are recorded. When true, the recorder
+    # redacts every free-text field then encrypts it to a LOCAL, gitignored dir at rest —
+    # never on the wire, never mid-cached-turn, and it never alters a routing decision.
+    full_content: bool = False
+    # Where the encrypted local plane is written. Unset ⇒ the recorder resolves a default
+    # OUTSIDE the repo ($SHUNT_HOME/trajectories); never inside the tree, never committed.
+    trajectory_dir: str | None = None
+    # Wall-clock budget for ONE off-wire verification run. null ⇒ the verifier's built-in
+    # 1800s (30 min — the floor for a real repo suite). A suite slower than the budget times
+    # out, returns `unknown` + infra-failure and writes nothing — so on a big repo the whole
+    # loop is a silent no-op until this is raised.
+    verify_timeout_seconds: float | None = Field(default=None, gt=0.0)
+    # How many times a FAILING suite is re-run before the red is trusted (flake guard).
+    # Total worst-case runs = 1 + rerun_confirmations, each up to verify_timeout_seconds.
+    # Floored at 1, not 0: an unconfirmed failure is dropped by the escalation gate, so 0
+    # ("stop re-running my slow suite") would silently turn auto-escalation into a null
+    # detector with nothing in the logs. Turn escalation off explicitly instead.
+    rerun_confirmations: int = Field(default=2, ge=1)
+    # Trust Shunt's OWN launch directory (promoted to its git root) as the last work_dir
+    # layer, so `cd myrepo && shunt start` captures out of the box. It is checked for
+    # capability (git root · test framework present), NOT for trust — the directory is one
+    # the operator chose by starting the binary in it. Arming ANY work_dir arms arbitrary
+    # code execution: the verifier runs the tree's own test command, which executes its
+    # `conftest.py` / `build.rs` / npm scripts. This switch is how you refuse that on a
+    # shared or multi-tenant host, and it is the only gate on the layer.
+    trust_launch_dir: bool = True
 
 
 class RefitPolicy(BaseModel):
@@ -115,6 +153,25 @@ class RefitPolicy(BaseModel):
     every_n_outcomes: int = Field(default=50, ge=0)
 
 
+class BudgetPolicy(BaseModel):
+    """Refuse routing once a session's cumulative reported spend reaches the cap."""
+
+    # A SOFT ceiling enforced at the NEXT request boundary: the check runs before the
+    # upstream call, so the request that crosses ``max_spend_usd`` completes and the
+    # following one is refused. The bound is one session's cumulative PROVIDER-REPORTED
+    # charge (``usage.cost`` from the upstream, never a locally derived price); at the cap
+    # the router refuses further routing for that session with a clean error instead of a
+    # fabricated success. null = unlimited (the default). This is the knob the live tier's
+    # spend cap (compose.live.yaml) documents; the exploration budget is a separate, softer knob.
+
+    model_config = ConfigDict(extra="forbid")
+
+    # null = unlimited. A number >= 0 is a ceiling on one session's cumulative spend,
+    # enforced at the next request boundary; 0.0 refuses every request for a session
+    # (explicit "no spend allowed").
+    max_spend_usd: float | None = Field(default=None, ge=0.0)
+
+
 class RouterPolicy(BaseModel):
     """Top-level ``router.yaml`` schema: one active strategy + its knobs + exploration."""
 
@@ -126,6 +183,9 @@ class RouterPolicy(BaseModel):
     escalation: EscalationPolicy = Field(default_factory=EscalationPolicy)
     capture: CapturePolicy = Field(default_factory=CapturePolicy)
     refit: RefitPolicy = Field(default_factory=RefitPolicy)
+    # Per-session spend cap; absent ⇒ no cap (unlimited). The live tier's
+    # documented cap key (compose.live.yaml `router.budget.max_spend_usd`) is this.
+    budget: BudgetPolicy = Field(default_factory=BudgetPolicy)
     # Which registry models are live-routable. Empty = every model in models.yaml
     # (backward compatible). Each name must exist in the registry; that cross-check
     # happens at ModelPool wiring (this schema has no registry access). Benchmark
@@ -139,6 +199,17 @@ class RouterPolicy(BaseModel):
             raise ValueError(f"unknown router.strategy {self.strategy!r}; live-eligible: {allowed}")
         return self
 
+    # NOTE — the escalation/work_dir precondition is deliberately NOT a load error. Escalation's
+    # only signal is a verified failure keyed by the resolved work_dir (the repo): without one the
+    # engine's `_task_key` resolves to None and no FailureEvent is ever logged, so escalation is
+    # INERT. While escalation shipped OFF, an enabled-without-work_dir config was an operator
+    # footgun worth rejecting at load. Escalation now ships ON by default, which makes
+    # "enabled without a work_dir" the COMMON default state (a plain install has no repo to test)
+    # — a load error there would brick every install until a work_dir is set. The never-silently-
+    # inert guarantee now lives as a prominent boot WARNING in `server.py`'s disclosure
+    # (`_log_capture_disclosure` warns when escalation is enabled but no work_dir is resolvable)
+    # and in the docs. Revisit as a hard error only if escalation gains a signal needing no repo.
+
 
 def parse_router_policy(data: dict[str, object] | None) -> RouterPolicy:
     """Validate a ``router:`` config mapping into a RouterPolicy (defaults if empty)."""
@@ -147,6 +218,14 @@ def parse_router_policy(data: dict[str, object] | None) -> RouterPolicy:
     router_section = data.get("router", data)
     if router_section is None:  # a present-but-null `router:` key → defaults, not a crash
         return RouterPolicy()
+    # ESCAPE HATCH — an `escalation:` block that is ABSENT is an OLD config, not an opt-in.
+    # A user policy file replaces the packaged one wholesale (no key-by-key merge), so a
+    # config that predates the escalation block never had a chance to write
+    # `escalation.enabled` — yet the schema's default_factory would silently flip it ON.
+    # An absent key therefore means OFF (the operator never opted in); only an explicit
+    # `enabled: true`, the packaged file, or the bare code default ships escalation ON.
+    if isinstance(router_section, dict) and "escalation" not in router_section:
+        router_section = {**router_section, "escalation": {"enabled": False}}
     return RouterPolicy.model_validate(router_section)
 
 
@@ -192,14 +271,22 @@ def packaged_policy_path() -> Path:
         return Path(path)
 
 
-def load_router_policy(path: str | Path | None = None) -> RouterPolicy:
-    """Explicit path → $SHUNT_CONFIG_DIR/router.yaml → packaged router.yaml → defaults."""
-    # Env-var / CLI-flag overlays are applied by the server layer, not here.
+def resolved_policy_path(path: str | Path | None = None) -> Path | None:
+    """The router.yaml `load_router_policy` reads, or None when it falls back to code defaults."""
+    # Public so an inspection surface can name the file a value came from. Same resolution as the
+    # loader below, once — a second copy would let the CLI cite a file the server never read.
     resolved = Path(path) if path is not None else _user_config_path()
     if not resolved.exists():
         logger.debug("router policy: %s absent, falling back to packaged", resolved)
         resolved = packaged_policy_path()
-    if resolved.exists():
+    return resolved if resolved.exists() else None
+
+
+def load_router_policy(path: str | Path | None = None) -> RouterPolicy:
+    """Explicit path → $SHUNT_CONFIG_DIR/router.yaml → packaged router.yaml → defaults."""
+    # Env-var / CLI-flag overlays are applied by the server layer, not here.
+    resolved = resolved_policy_path(path)
+    if resolved is not None:
         # Which FILE won matters: a rig can serve a config that differs from the one
         # you last edited, and nothing else in the logs distinguishes them.
         logger.debug("router policy: loaded from %s", resolved)

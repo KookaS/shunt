@@ -12,7 +12,6 @@ models:
   glm-5.2-fireworks:
     # Fireworks model ids are fully qualified: accounts/<account>/models/<name>.
     model_id: accounts/fireworks/models/glm-5.2
-    tier: frontier
     provider: fireworks
     supports_streaming: true
     supports_cache_control: true

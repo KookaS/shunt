@@ -18,7 +18,16 @@ _CONFIG: Final = "benchmark/benchmark.yaml"
 def _args(**over: object) -> Namespace:
     """A parsed-args stand-in with the runner's defaults, overridable per test."""
     base = dict(
-        strategy="cost_optimal", config=_CONFIG, live=False, timeout=600, workers=1, max_cost=None
+        strategy="cost_optimal",
+        config=_CONFIG,
+        live=False,
+        timeout=600,
+        workers=1,
+        max_cost=None,
+        max_cost_overshoot=0.0,
+        max_start_failures=5,
+        max_consecutive_failures=5,
+        check_images=False,
     )
     base.update(over)
     return Namespace(**base)

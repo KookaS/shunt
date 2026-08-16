@@ -4,8 +4,6 @@ import logging
 import os
 from typing import TYPE_CHECKING, Final
 
-from shunt.models import TIER_ORDER
-
 if TYPE_CHECKING:
     from shunt.router.selection import ModelPoolProtocol
 
@@ -89,14 +87,13 @@ class ColdStartStrategy:
                 )
                 return fallback
 
-        for tier in TIER_ORDER:
-            for model in model_pool.get_tier_models(tier):
-                if model_pool.is_healthy(model.name):
-                    logger.warning(
-                        "Cold-start fallback chain exhausted, escalating to %s",
-                        model.name,
-                    )
-                    return model.name
+        for model in model_pool.ranked_models():
+            if model_pool.is_healthy(model.name):
+                logger.warning(
+                    "Cold-start fallback chain exhausted, escalating to %s",
+                    model.name,
+                )
+                return model.name
 
         logger.warning("No healthy models found, returning cold-start default")
         return _COLD_START_MODEL

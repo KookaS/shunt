@@ -180,7 +180,7 @@ class _RecordingCallback:
         task_key: str | None = None,
         dedup_key: str | None = None,
         exit_code: int | None = None,
-        blocking: bool = False,
+        is_infra_failure: bool = False,
         confirmed: bool = False,
         decision_index: int | None = None,
     ) -> None:
@@ -191,7 +191,7 @@ class _RecordingCallback:
                 "task_key": task_key,
                 "dedup_key": dedup_key,
                 "exit_code": exit_code,
-                "blocking": blocking,
+                "is_infra_failure": is_infra_failure,
                 "confirmed": confirmed,
                 "decision_index": decision_index,
             }
@@ -207,6 +207,52 @@ def _coord(
         store=store,
         record_outcome_callback=cb,
     )
+
+
+def test_trajectory_recorder_fires_at_the_offwire_boundary(store: OutcomeStore) -> None:
+    from shunt.capture.trajectory import StepRecord, TrajectoryRecorder
+
+    captured: list[list[StepRecord]] = []
+
+    class _SpySink:
+        def write(self, records: list[StepRecord]) -> None:
+            captured.append(records)
+
+    sid = "s-traj"
+    _store_embedded_session(store, sid, _emb())
+    result = VerifierResult(
+        outcome="failure", confidence=0.7, failing_check_id="t::y", confirmed=True
+    )
+    coord = CaptureCoordinator(
+        resolver=WorkDirResolver(work_dir="/repo"),
+        verifier=_FakeVerifier(result),
+        store=store,
+        trajectory_recorder=TrajectoryRecorder(_SpySink(), enabled=True),
+    )
+    coord.capture(_closed_session(sid))
+    assert len(captured) == 1  # recorded once at the boundary
+    assert captured[0][0].blocking is True  # confirmed non-infra failure
+
+
+def test_trajectory_recorder_inert_when_disabled(store: OutcomeStore) -> None:
+    from shunt.capture.trajectory import StepRecord, TrajectoryRecorder
+
+    captured: list[list[StepRecord]] = []
+
+    class _SpySink:
+        def write(self, records: list[StepRecord]) -> None:
+            captured.append(records)
+
+    sid = "s-traj-off"
+    _store_embedded_session(store, sid, _emb())
+    coord = CaptureCoordinator(
+        resolver=WorkDirResolver(work_dir="/repo"),
+        verifier=_FakeVerifier(VerifierResult(outcome="success", confidence=0.9)),
+        store=store,
+        trajectory_recorder=TrajectoryRecorder(_SpySink(), enabled=False),
+    )
+    coord.capture(_closed_session(sid))
+    assert captured == []  # default-off recorder never persists
 
 
 def test_ac1_verified_failure_records_outcome(store: OutcomeStore) -> None:
@@ -232,7 +278,7 @@ def test_ac1_verified_failure_records_outcome(store: OutcomeStore) -> None:
             "task_key": "/repo",  # == resolved work_dir (the repo), NOT session.tool_identity
             "dedup_key": "tests/test_x.py::test_y",
             "exit_code": 1,
-            "blocking": True,  # confirmed non-infra failure IS a blocking capability failure
+            "is_infra_failure": False,  # confirmed non-infra; constructor derives blocking
             "confirmed": True,  # carried from the verifier result, not hardcoded
             "decision_index": None,  # no index stamped on this session's provenance
         }
@@ -253,7 +299,7 @@ def test_ac1_verified_success_records_outcome(store: OutcomeStore) -> None:
             "task_key": "/repo",
             "dedup_key": None,
             "exit_code": None,
-            "blocking": False,
+            "is_infra_failure": False,
             "confirmed": False,
             "decision_index": None,
         }
@@ -284,7 +330,7 @@ def test_records_downshift_from_stored_provenance(store: OutcomeStore) -> None:
             "task_key": "/repo",
             "dedup_key": None,
             "exit_code": None,
-            "blocking": False,
+            "is_infra_failure": False,
             "confirmed": False,
             "decision_index": None,
         }

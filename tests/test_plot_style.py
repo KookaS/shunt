@@ -165,30 +165,94 @@ class TestArmColumnsAndStats:
         assert ps.is_single_arm(self._raw()) is False
 
 
-class TestLabelPointsWithLeaders:
+class TestRowRealCost:
+    """arm_stats must read `real_cost`, not `cost` — they agree today only by luck."""
+
+    def test_prefers_real_cost_over_cost(self):
+        # estimated_cost is ~4.8x real_cost across results.csv, and `cost` is the column
+        # that could silently drift to it; naming real_cost makes the invariant structural.
+        assert ps.row_real_cost({"real_cost": 1.5, "cost": 9.9}) == 1.5
+
+    def test_falls_back_to_cost_when_real_cost_absent(self):
+        assert ps.row_real_cost({"cost": 2.25}) == 2.25
+
+    def test_falls_back_when_real_cost_is_blank(self):
+        assert ps.row_real_cost({"real_cost": "", "cost": 3.0}) == 3.0
+
+    def test_missing_both_is_zero(self):
+        assert ps.row_real_cost({}) == 0.0
+
+    def test_arm_stats_totals_real_cost(self):
+        raw = {
+            "t1": {"m": {"a": {"pass": True, "cost": 100.0, "real_cost": 1.0}}},
+            "t2": {"m": {"a": {"pass": False, "cost": 100.0, "real_cost": 2.0}}},
+        }
+        stats = ps.arm_stats(raw, "m", "a")
+        assert stats.n == 2
+        assert stats.passes == 1
+        assert stats.total_cost == 3.0
+
+
+class TestUsd:
+    r"""Money in a matplotlib caption must be escaped — two bare `$` open mathtext."""
+
+    def test_escapes_the_dollar_sign(self):
+        assert ps.usd(12.5) == r"\$12.50"
+
+    def test_two_amounts_leave_no_unescaped_pair(self):
+        caption = f"router {ps.usd(1.47)} vs frontier {ps.usd(87.04)}"
+        assert "$" in caption
+        assert caption.count("$") == caption.count(r"\$")
+
+    def test_honours_precision(self):
+        assert ps.usd(1.23456, 4) == r"\$1.2346"
+
+
+class TestPlaceLabels:
+    """`place_labels` replaced a margin-column labeller whose leader lines crossed the panel."""
+
+    @staticmethod
+    def _axes():
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        ax.set_xlim(0, 10)
+        ax.set_ylim(0, 10)
+        return fig, ax
+
     def test_empty_points_is_a_noop(self):
-        import matplotlib
+        fig, ax = self._axes()
+        ps.place_labels(ax, [])
+        assert not ax.texts
 
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+    def test_one_annotation_per_point_even_when_they_coincide(self):
+        fig, ax = self._axes()
+        points = [ps.LabelPoint(5.0, 5.0, f"p{i}") for i in range(4)]
+        ps.place_labels(ax, points)
+        assert len(ax.texts) == len(points)
+        assert {t.get_text() for t in ax.texts} == {"p0", "p1", "p2", "p3"}
 
-        fig, ax = plt.subplots()
-        ps.label_points_with_leaders(ax, [])
-        assert len(ax.texts) == 0
-        plt.close(fig)
+    def test_a_label_never_sits_below_a_point_with_a_lower_error_bar(self):
+        fig, ax = self._axes()
+        ps.place_labels(ax, [ps.LabelPoint(5.0, 5.0, "solo", yerr_lo=1.0, yerr_hi=1.0)])
+        (annotation,) = ax.texts
+        # xyann is in points offset from the marker; a negative dy would put the text on
+        # top of the whisker the label describes.
+        assert annotation.xyann[1] >= 0
 
-    def test_one_annotation_per_point_even_with_duplicates(self):
-        import matplotlib
+    def test_a_near_placement_carries_no_leader_line(self):
+        fig, ax = self._axes()
+        ps.place_labels(ax, [ps.LabelPoint(5.0, 5.0, "x")])
+        (annotation,) = ax.texts
+        assert annotation.arrow_patch is None
 
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
-        fig, ax = plt.subplots()
-        # Two identical (x, y) points (the Oracle == Always-Cheap collision case)
-        # must still each get their own, distinctly-positioned label.
-        points = [(1.0, 80.0, "Oracle"), (1.0, 80.0, "Always-Cheap"), (2.0, 50.0, "kNN")]
-        ps.label_points_with_leaders(ax, points)
-        assert len(ax.texts) == 3
-        names = {t.get_text() for t in ax.texts}
-        assert names == {"Oracle", "Always-Cheap", "kNN"}
-        plt.close(fig)
+    def test_a_crowded_point_earns_a_leader_line(self):
+        fig, ax = self._axes()
+        points = [ps.LabelPoint(5.0, 5.0, f"crowded-label-{i}") for i in range(6)]
+        ps.place_labels(ax, points)
+        # With six identical points the later labels cannot sit adjacent to their marker,
+        # so at least one must be connected rather than left floating ambiguously.
+        assert any(t.arrow_patch is not None for t in ax.texts)

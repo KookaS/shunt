@@ -1,0 +1,14 @@
+widget
+
+  does the thing [OK]
+  parses input [✘]
+
+Failures:
+
+  test/WidgetSpec.hs:9:
+  1) widget parses input
+     expected: 3
+      but got: 2
+
+Finished in 0.01 seconds
+2 examples, 1 failure

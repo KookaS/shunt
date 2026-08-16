@@ -69,5 +69,6 @@
     "tests/test_blueprints.py::test_blueprint_renaming"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.pallets_1776_flask-5014:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "Require a non-empty name for Blueprints\nThings do not work correctly if a Blueprint is given an empty name (e.g. #4944).\r\nIt would be helpful if a `ValueError` was raised when trying to do that.\n"
 }

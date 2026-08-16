@@ -1,0 +1,5 @@
+
+An error occurred while loading ./spec/widget_spec.rb.
+Failure/Error: require "./lib/widget"
+LoadError:
+  cannot load such file -- ./lib/widget

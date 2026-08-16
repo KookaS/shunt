@@ -106,23 +106,24 @@ class TestColdStartSelect:
 
     def test_escalates_when_all_fallback_exhausted(self):
         pool = MagicMock()
-        # Fallback models unhealthy, but escalation models are healthy
-        pool.is_healthy.side_effect = lambda m: (
-            m == "deepseek-v4-flash" or m == "emergency-fallback"
-        )
-        pool.get_tier_models.side_effect = lambda tier: {
-            "cheap": [FakeModel("deepseek-v4-flash"), FakeModel("emergency-fallback")],
-            "mid": [],
-            "frontier": [],
-        }.get(tier, [])
+        # Cold-start model AND both default fallbacks (deepseek-v4-flash, zai-glm-5.2)
+        # unhealthy, so select() falls through to the rank-sourced escalation loop; only a
+        # model reachable there (kimi-k3) is healthy.
+        pool.is_healthy.side_effect = lambda m: m == "kimi-k3"
+        pool.ranked_models.return_value = [
+            FakeModel("deepseek-v4-flash"),
+            FakeModel("zai-glm-5.2"),
+            FakeModel("kimi-k3"),
+        ]
         strategy = ColdStartStrategy()
         model = strategy.select(pool)
-        assert model == "deepseek-v4-flash"
+        assert model == "kimi-k3"
+        assert pool.ranked_models.called  # the rank-sourced escalation branch was reached
 
     def test_ultimate_fallback_returns_default(self):
         pool = MagicMock()
         pool.is_healthy.return_value = False
-        pool.get_tier_models.return_value = []
+        pool.ranked_models.return_value = []
         strategy = ColdStartStrategy()
         model = strategy.select(pool)
         assert model == "qwen3.7-plus"

@@ -1,0 +1,7 @@
+
+  Widget
+    ✓ returns a value
+    ✓ throws on bad input
+
+
+  2 passing (10ms)

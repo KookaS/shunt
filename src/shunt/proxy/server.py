@@ -18,17 +18,20 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from shunt.capture import CaptureCoordinator, CaptureWorker, RefitScheduler, WorkDirResolver
-from shunt.db.loop_health import LoopHealth
+from shunt.capture.trajectory import TrajectoryRecorder
+from shunt.capture.trajectory_store import LiveTrajectorySink, load_key, resolve_live_dir
 from shunt.db.outcome_index import OutcomeIndexAdapter
 from shunt.db.store import OutcomeStore, SessionProvenance
 from shunt.log_config import configure_logging
 from shunt.models import ModelPool
 from shunt.proxy.redaction import header_safe, redact_secrets
-from shunt.proxy.router import ProxyRouter, UpstreamError
+from shunt.proxy.router import BudgetExceededError, ProxyRouter, UpstreamError
 from shunt.router.cold_start import ColdStartStrategy
 from shunt.router.embedder import Embedder, embedding_cache_dir
 from shunt.router.engine import RouterEngine
+from shunt.router.inspection import loop_health_for
 from shunt.router.policy import (
+    CapturePolicy,
     ExplorationPolicy,
     RouterPolicy,
     apply_env_overrides,
@@ -49,12 +52,8 @@ _MODEL_CONFIG_PATH = os.environ.get("SHUNT_MODEL_CONFIG_PATH")
 
 
 def _model_inventory(model_pool: ModelPool) -> str:
-    """`tier:name` for every routable model, cheapest tier first."""
-    from shunt.models import TIER_ORDER
-
-    listed = [
-        f"{tier}:{model.name}" for tier in TIER_ORDER for model in model_pool.get_tier_models(tier)
-    ]
+    """`rank:name` for every routable model, cheapest (lowest rank) first."""
+    listed = [f"{rank}:{model.name}" for rank, model in enumerate(model_pool.ranked_models())]
     return ", ".join(listed) or "(none)"
 
 
@@ -91,6 +90,12 @@ def _log_config_disclosure(
         _GRACE_PERIOD,
         _RETRY_COUNT,
     )
+    cap = (
+        "unlimited"
+        if policy.budget.max_spend_usd is None
+        else f"${policy.budget.max_spend_usd:.6f}"
+    )
+    logger.info("Shunt config | budget: max_spend_usd=%s", cap)
     if embedder is not None:
         # The RESOLVED embedder (from embedding.yaml, env applied), not the raw env var —
         # plus whether its fingerprint matches the stored corpus space.
@@ -115,17 +120,28 @@ def _log_config_disclosure(
         )
 
 
-def _capture_auto_configured(policy: RouterPolicy) -> bool:
+def _build_work_dir_resolver(policy: RouterPolicy, launch_dir: str) -> WorkDirResolver:
+    """The one resolver shared by the engine's decide-side key and the capture side."""
+    return WorkDirResolver.from_config(
+        work_dir=policy.capture.work_dir,
+        work_dirs=policy.capture.work_dirs,
+        launch_dir=launch_dir,
+        trust_launch_dir=policy.capture.trust_launch_dir,
+    )
+
+
+def _capture_auto_configured(resolver: WorkDirResolver) -> bool:
     """True when off-wire capture can auto-record outcomes (a work_dir is resolvable).
 
-    With one set, a verified Tier-2 downshift outcome feeds the in-process ConservativeGate
-    at session close, so the downshift gate can open within this process's lifetime.
+    Asks the RESOLVER, not the policy: the launch-directory layer is validated at runtime,
+    so config alone cannot say whether capture armed, and a disclosure that guesses lies.
     """
-    capture = policy.capture
-    return bool(os.environ.get("SHUNT_WORK_DIR") or capture.work_dir or capture.work_dirs)
+    return resolver.armed_layer() is not None
 
 
-def _log_exploration_disclosure(policy: RouterPolicy, *, cold_start_active: bool) -> None:
+def _log_exploration_disclosure(
+    policy: RouterPolicy, resolver: WorkDirResolver, *, cold_start_active: bool
+) -> None:
     """Loud one-line startup disclosure of the exploration state (least-surprise)."""
     # Must not promise spending that cannot happen. The gate is COLD-START, not "any
     # outcome exists": while cold-start is active the engine returns before it can
@@ -153,7 +169,7 @@ def _log_exploration_disclosure(policy: RouterPolicy, *, cold_start_active: bool
         # auto-capture (a configured work_dir) feeds verified downshift outcomes back
         # in-process at session close, so the gate CAN open; with manual-only `shunt flag`
         # (a separate CLI process writing SQLite) slack stays 0 and a downshift never fires.
-        if _capture_auto_configured(policy):
+        if _capture_auto_configured(resolver):
             logger.warning(
                 "Shunt downshift exploration is ARMED (conservative_alpha=%.2f): the "
                 "gate banks slack from auto-captured verified downshift outcomes at session "
@@ -216,7 +232,7 @@ def _build_collapse_alarm(outcome_store: OutcomeStore, model_pool: ModelPool) ->
     """A live routing-collapse alarm probe: True when the choice distribution has collapsed."""
 
     def _alarm() -> bool:
-        return _loop_health(outcome_store, model_pool).routing_collapse.alarm
+        return loop_health_for(outcome_store, model_pool).routing_collapse.alarm
 
     return _alarm
 
@@ -283,6 +299,14 @@ def _warm_embedder_in_background(engine: RouterEngine) -> None:
     # In a thread on purpose: the first load downloads ~600MB, and blocking startup on
     # it would mean no network → the server never starts at all, instead of starting
     # and reporting a clear error. Health stays answerable throughout.
+    if not engine.needs_embeddings:
+        # Nothing to warm, and nothing to report as "ready": the ~600MB download, its disk
+        # write and its resident memory are all skipped for a strategy that never embeds.
+        logger.info(
+            "Shunt config | embedding model NOT loaded: the active strategy does not consult "
+            "neighbours, so no embedding is ever computed (~600MB download/load skipped)."
+        )
+        return
 
     def _warm() -> None:
         try:
@@ -304,25 +328,47 @@ def _effective_exploration(policy: RouterPolicy) -> ExplorationPolicy | None:
     return policy.exploration
 
 
-def _log_capture_disclosure(policy: RouterPolicy) -> None:
+def _log_capture_disclosure(policy: RouterPolicy, resolver: WorkDirResolver) -> None:
     """Say whether automatic outcome capture can run, or is manual-only (least-surprise)."""
-    # Off-wire capture needs an operator-configured repo root. With none set, no session
-    # can auto-label — the loop is inert and `shunt flag` is the only outcome-write path.
-    if _capture_auto_configured(policy):
+    # Off-wire capture needs a repo root: an operator-configured one, or Shunt's own
+    # validated launch directory. With none, no session can auto-label — the loop is inert
+    # and `shunt flag` is the only outcome-write path. Naming WHICH layer armed it matters:
+    # "capture is ON" alone leaves an operator unable to tell a configured repo from the
+    # working directory they happened to launch in — whose tests are about to be executed.
+    layer = resolver.armed_layer()
+    if layer is not None:
         logger.info(
-            "Shunt capture is ON: verified outcomes are recorded automatically at session "
-            "close by re-running the repo's tests off the wire."
+            "Shunt capture is ON via %s: verified outcomes are recorded automatically at "
+            "session close by re-running THAT repo's tests off the wire — which executes the "
+            "tree's own test code (conftest.py, build.rs, npm scripts).",
+            layer,
         )
     else:
         logger.warning(
-            "Shunt capture is MANUAL-ONLY: no work_dir configured (SHUNT_WORK_DIR / "
-            "capture.work_dir), so no session is labelled automatically. Record outcomes "
-            "with `shunt flag`, or set a work_dir to enable off-wire auto-capture."
+            "Shunt capture is MANUAL-ONLY: no work_dir resolved (SHUNT_WORK_DIR / "
+            "capture.work_dir / --work-dir, and the launch directory is not a git repo with "
+            "a detectable test framework, or capture.trust_launch_dir is false), so no "
+            "session is labelled automatically. Record outcomes with `shunt flag`, or set "
+            "a work_dir."
+        )
+    # Escalation's ONLY signal is a verified failure, which needs the repo above. Escalation
+    # ships ON, so enabled-without-a-work_dir is the common default state — it must not brick
+    # the router, but it must NEVER be silent: without this warning an operator would think
+    # escalation is working while it can fire on nothing.
+    if policy.escalation.enabled and not _capture_auto_configured(resolver):
+        logger.warning(
+            "Auto-escalation is ENABLED but capture resolved no repo, so it will NOT fire: "
+            "it re-runs the REPO's tests at session close and has no repo to verify. Launch "
+            "shunt from inside your repo, or set SHUNT_WORK_DIR / capture.work_dir / "
+            "--work-dir to arm it. (docs/escalation.md)"
         )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Sampled FIRST, before the embedder-warm thread or any worker exists: a chdir by any
+    # of them would otherwise silently repoint the launch-directory layer at another tree.
+    launch_dir = os.getcwd()
     session_manager = SessionManager(
         inactivity_timeout=_INACTIVITY_TIMEOUT,
         grace_period=_GRACE_PERIOD,
@@ -339,16 +385,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     trust_neighbors = _resolve_embedding_trust(embedder, outcome_store)
     _log_config_disclosure(policy, model_pool, embedder, fingerprint_trusted=trust_neighbors)
     _log_missing_credentials(model_pool)
+    # One resolver, shared by the engine (decide-side task key) and the capture worker
+    # (capture-side task key) so both key escalation on the SAME repo. Built BEFORE the
+    # exploration disclosure, which must report whether capture actually armed.
+    resolver = _build_work_dir_resolver(policy, launch_dir)
     _log_exploration_disclosure(
         policy,
+        resolver,
         cold_start_active=ColdStartStrategy().is_active_effective(
             _index.effective_labeled(), _index.effective_tier2()
         ),
-    )
-    # One resolver, shared by the engine (decide-side task key) and the capture worker
-    # (capture-side task key) so both key escalation on the SAME repo.
-    resolver = WorkDirResolver.from_config(
-        work_dir=policy.capture.work_dir, work_dirs=policy.capture.work_dirs
     )
     engine = _build_engine(
         model_pool,
@@ -371,6 +417,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         session_manager=session_manager,
         retry_count=_RETRY_COUNT,
         engine=engine,
+        max_spend_usd=policy.budget.max_spend_usd,
     )
     app.state.session_manager = session_manager
     app.state.model_pool = model_pool
@@ -396,12 +443,25 @@ def _build_verifier(policy: RouterPolicy) -> AutoDetectVerifier | RerunConfirmin
     """Off-wire verifier, rerun-confirmed when escalation is on so a flake never trips it.
 
     Rerun-confirm re-runs a failing suite on unchanged state (fail-then-pass = flake, abstained);
-    default capture behaviour is unchanged while escalation ships OFF.
+    default capture behaviour is unchanged by escalation's enabled state (it ships ON).
     """
-    base = AutoDetectVerifier()
+    base = AutoDetectVerifier(timeout=policy.capture.verify_timeout_seconds)
     if policy.escalation.enabled:
-        return RerunConfirmingVerifier(base)
+        return RerunConfirmingVerifier(base, reruns=policy.capture.rerun_confirmations)
     return base
+
+
+def _build_trajectory_recorder(capture: CapturePolicy) -> TrajectoryRecorder | None:
+    """Build the opt-in full-content recorder only when enabled; None (inert) otherwise.
+
+    Enabling it requires the encryption key + the 'capture' extra — resolved here, at boot,
+    never on the wire. Off by default keeps every unconfigured deployment behaviour-only.
+    """
+    if not capture.full_content:
+        return None
+    live_dir = resolve_live_dir(capture.trajectory_dir)
+    sink = LiveTrajectorySink(live_dir, load_key())
+    return TrajectoryRecorder(sink, enabled=True)
 
 
 def _wire_capture(
@@ -412,7 +472,7 @@ def _wire_capture(
     resolver: WorkDirResolver,
 ) -> CaptureWorker:
     """Build the capture worker+coordinator and wire close→enqueue."""
-    _log_capture_disclosure(policy)
+    _log_capture_disclosure(policy, resolver)
     coordinator = CaptureCoordinator(
         resolver=resolver,
         verifier=_build_verifier(policy),
@@ -422,6 +482,8 @@ def _wire_capture(
         record_outcome_callback=engine.record_outcome,
         # Batch-first learning: re-fit the kNN index from the log every N captured outcomes.
         refit_scheduler=RefitScheduler(outcome_store, policy.refit.every_n_outcomes),
+        # Opt-in full-content capture — built only when explicitly enabled; inert otherwise.
+        trajectory_recorder=_build_trajectory_recorder(policy.capture),
     )
     worker = CaptureWorker(
         coordinator=coordinator,
@@ -470,6 +532,16 @@ def _store_session_with_provenance(
         fallback_chain_triggered=False,
         router_propensity=1.0,
     )
+    # FALLBACK HONESTY: when the engine locked model A but the retry/fallback loop
+    # actually served model B (A failed upstream), the engine's decision-time
+    # provenance still names A — the model that was CHOSEN, not the model that RAN.
+    # The sessions.model_chosen COLUMN is already the served model (what kNN learns
+    # from), but decision_provenance.model_chosen is what `shunt explain` prints, so
+    # a fallback session would explain as "chose A, fallback: no" while serving B.
+    # Correct the provenance to the served model and mark the fallback.
+    served_model = provenance.get("model_chosen")
+    if served_model is not None and served_model != model_name:
+        provenance = {**provenance, "model_chosen": model_name, "fallback_chain_triggered": True}
     session.decision_provenance = provenance
     outcome_store.store_session(
         session_id=session.session_id,
@@ -531,32 +603,26 @@ async def _build_decision_headers(
     }
 
 
+def _error_response_headers(headers: dict[str, str], exc: UpstreamError) -> dict[str, str]:
+    """Mark a permanent refusal so a retry-happy SDK stops: the budget cap is not transient."""
+    if isinstance(exc, BudgetExceededError):
+        # The OpenAI SDK obeys `x-should-retry: false` before its status-code check, so the
+        # header is the belt-and-suspenders on top of 402 — even a client that normalizes
+        # 402 into a retry path must honor it.
+        return {**headers, "x-should-retry": "false"}
+    return headers
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
-
-
-def _loop_health(outcome_store: OutcomeStore, model_pool: ModelPool) -> LoopHealth:
-    """Compute the full loop-health object from the store — shared by the endpoint + the alarm."""
-    from shunt.db.loop_health import LoopHealthThresholds, compute_loop_health
-
-    thresholds = LoopHealthThresholds()
-    snapshot = outcome_store.loop_health_snapshot(recent_window=thresholds.recent_window)
-    names = set(model_pool.model_names())
-    frontier = {name for name in names if model_pool.get_tier(name) == "frontier"}
-    return compute_loop_health(
-        snapshot,
-        frontier_models=frontier,
-        candidate_models=names,
-        thresholds=thresholds,
-    )
 
 
 def _loop_health_payload(outcome_store: OutcomeStore, model_pool: ModelPool) -> dict[str, Any]:
     """Aggregate loop-health metrics as a JSON-able dict — no prompt_text, no PII."""
     from dataclasses import asdict
 
-    return asdict(_loop_health(outcome_store, model_pool))
+    return asdict(loop_health_for(outcome_store, model_pool))
 
 
 @app.get("/admin/loop-health")
@@ -634,7 +700,9 @@ async def chat_completions(request: Request) -> Response:
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": {"message": safe, "type": "proxy_error"}},
-            headers=await _build_decision_headers(session, "error", safe),
+            headers=_error_response_headers(
+                await _build_decision_headers(session, "error", safe), exc
+            ),
         )
     except Exception as exc:
         safe = redact_secrets(str(exc))
@@ -692,7 +760,9 @@ async def messages(request: Request) -> Response:
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": {"message": safe, "type": "proxy_error"}},
-            headers=await _build_decision_headers(session, "error", safe),
+            headers=_error_response_headers(
+                await _build_decision_headers(session, "error", safe), exc
+            ),
         )
     except Exception as exc:
         safe = redact_secrets(str(exc))

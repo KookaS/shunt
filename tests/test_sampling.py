@@ -231,3 +231,18 @@ class TestFrontierAudit:
 
         with pytest.raises(ValueError):
             sampling.in_frontier_audit("x", 1.5)
+
+
+class TestArmSamplingWeightsValidation:
+    def test_real_weights_are_probabilities(self):
+        # Each weight is an independent p in [0, 1] — the real invariant (not sum == 1).
+        config.load("benchmark/benchmark.yaml")
+        assert all(0.0 <= w <= 1.0 for w in config.arm_sampling_weights())
+
+    def test_out_of_range_weight_raises(self, monkeypatch):
+        import pytest
+
+        config.load("benchmark/benchmark.yaml")
+        monkeypatch.setitem(config.get()["arm_sampling"], "weights", [0.6, 1.5, 0.1])
+        with pytest.raises(ValueError, match=r"\[0, 1\]"):
+            config.arm_sampling_weights()

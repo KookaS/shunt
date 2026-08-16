@@ -27,7 +27,7 @@ _UNPRICED_REGISTRY: Final = {
             "litellm_prefix": "openai",
         }
     },
-    "models": {"cheapo": {"model_id": "p/cheapo", "tier": "cheap", "provider": "p"}},
+    "models": {"cheapo": {"model_id": "p/cheapo", "provider": "p"}},
 }
 
 
@@ -86,7 +86,10 @@ class TestOptionalPricingIsTheNoBenchmarkPath:
         path = tmp_path / "models.yaml"
         path.write_text(yaml.safe_dump(_UNPRICED_REGISTRY, sort_keys=False))
         pool = ModelPool(str(path))
-        assert [m.name for m in pool.get_tier_models("cheap")] == ["cheapo"]
+        # Routable = present in the pool; an unpriced model is unranked (ranking would
+        # fail loud) but still loads and can be reached directly / by cold-start.
+        assert pool.model_names() == ["cheapo"]
+        assert pool.get_model("cheapo") is not None
 
     def test_unpriced_model_is_invisible_to_the_benchmark(self, tmp_path, monkeypatch):
         path = tmp_path / "models.yaml"
@@ -105,7 +108,6 @@ class TestVersionIsModelLevel:
     def _priced_model(self, **over) -> dict:
         row = {
             "model_id": "p/m",
-            "tier": "cheap",
             "provider": "p",
             "version": "m",
             "pricing": {
@@ -155,9 +157,7 @@ class TestRegistrySchemaIsEnforced:
         # A stale-schema file (per-model base_url) fails loudly, naming the key.
         data = {
             "providers": {"p": _provider_row()},
-            "models": {
-                "m": {"model_id": "m", "tier": "cheap", "provider": "p", "base_url": "stale"}
-            },
+            "models": {"m": {"model_id": "m", "provider": "p", "base_url": "stale"}},
         }
         with pytest.raises(ValidationError, match="base_url"):
             parse_registry(data)
@@ -165,25 +165,9 @@ class TestRegistrySchemaIsEnforced:
     def test_dangling_provider_fk_is_rejected(self):
         data = {
             "providers": {"p": _provider_row()},
-            "models": {"m": {"model_id": "m", "tier": "cheap", "provider": "nope"}},
+            "models": {"m": {"model_id": "m", "provider": "nope"}},
         }
         with pytest.raises(ValueError, match="unknown provider"):
-            parse_registry(data)
-
-    def test_high_tier_is_valid_vocabulary(self):
-        # `high` is a registered tier (cheap|mid|high|frontier) — zai-glm-5.2 carries it.
-        data = {
-            "providers": {"p": _provider_row()},
-            "models": {"m": {"model_id": "m", "tier": "high", "provider": "p"}},
-        }
-        parse_registry(data)  # must not raise
-
-    def test_unregistered_tier_is_rejected(self):
-        data = {
-            "providers": {"p": _provider_row()},
-            "models": {"m": {"model_id": "m", "tier": "ultra", "provider": "p"}},
-        }
-        with pytest.raises(ValidationError):
             parse_registry(data)
 
 
@@ -295,13 +279,12 @@ class TestEnabledModelsList:
         with pytest.raises(ValueError, match="ghost-model"):
             config.enabled_models()
 
-    def test_tier_sort_is_preserved(self, monkeypatch):
-        # cheap → mid → high → frontier, cheapest-first within tier.
+    def test_price_sort_is_preserved(self, monkeypatch):
+        # enabled_models() sorts by total list price ascending (name tie-break).
         self._load(monkeypatch, ["kimi-k3", "deepseek-v4-flash", "gpt-5-mini", "zai-glm-5.2"])
         ordered = config.enabled_models()
-        tiers = [config.load_pricing()[m]["tier"] for m in ordered]
-        rank = {t: i for i, t in enumerate(("cheap", "mid", "high", "frontier"))}
-        assert tiers == sorted(tiers, key=lambda t: rank[t])
+        costs = [config.cost_per_1m(m) for m in ordered]
+        assert costs == sorted(costs)
         assert ordered[0] == "deepseek-v4-flash"
         assert ordered[-1] == "kimi-k3"
 

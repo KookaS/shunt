@@ -43,12 +43,14 @@ your own, start from a copy of the packaged file.
 
 ### Without a benchmark run
 
-Three fields make a model registerable — `model_id`, `tier`, and `provider`. A
-model row is picked up the moment it exists; `tier` is the prior the routing is
-designed to start from before real outcomes accumulate. (Pre-alpha note: the live
+Two fields make a model registerable — `model_id` and `provider`. A model row is
+picked up the moment it exists. Its **capability rank** — the prior the routing
+starts from before real outcomes accumulate — is derived from the model's total
+list price (`input_cost_per_1m + output_cost_per_1m`, cheapest = weakest prior), so
+a live-routable model also needs a `pricing` block. (Pre-alpha note: the live
 proxy now calls `engine.decide()` to choose a model on the first turn. Outcomes can be
-recorded manually via `shunt flag`, or captured automatically at session close once you
-configure a capture work_dir (see [Tune the router](#tune-the-router)); with neither, the
+recorded manually via `shunt flag`, or captured automatically at session close from a
+resolved capture work_dir (see [Tune the router](#tune-the-router)); with neither, the
 router typically cold-starts every session to the cheap default — see [architecture.md](architecture.md).
 Registering models sets up the pool the router uses for decision seeding and
 makes them scoreable in the offline benchmark.) The two `supports_*` fields below
@@ -64,7 +66,6 @@ providers:
 models:
   gpt-oss-120b-groq:
     model_id: openai/gpt-oss-120b   # the id the provider knows it by
-    tier: cheap                     # cheap | mid | high | frontier
     provider: groq                  # must name a row in `providers:`
     supports_streaming: true
     supports_cache_control: false   # true only if you've confirmed it
@@ -80,14 +81,12 @@ Adding a model to the registry makes it *known*, not *live*. To have the running
 router actually pick it, also add its name to `router.yaml`'s `models:` list — see
 [Choose which models are live-routable](#choose-which-models-are-live-routable).
 
-**Order matters.** Models are read in file order, and that order is load-bearing.
-The benchmark's *cascade* strategy walks models in this order — trying the first
-model it hasn't tested yet, cheapest tier first, and falling back to the *last*
-model of the highest tier once everything has been tried. The live router's
-[auto-escalation ladder](#auto-escalate-on-repeated-verified-failure) is a
-different mechanism (it raises the current model's reasoning effort first, then
-steps a tier), but it too reads tiers in registry order. Reordering rows changes
-both behaviors, so add new rows deliberately rather than sorting the file.
+**Order does not matter.** The router ranks models by capability, derived from
+total list price (input + output per 1M) ascending, so row order is for readability
+only. The live router's [auto-escalation ladder](#auto-escalate-on-repeated-verified-failure)
+raises the current model's reasoning effort first, then steps to the next-higher-rank
+model; adding or removing a `pricing` block (not reordering rows) is what changes
+routing.
 
 ### With a benchmark run
 
@@ -98,7 +97,6 @@ The benchmark scores models on cost, so it needs prices. Add an optional
 models:
   gpt-oss-120b-groq:
     model_id: openai/gpt-oss-120b
-    tier: cheap
     provider: groq
     version: gpt-oss-120b            # model identity — see "A model id is immutable"
     supports_streaming: true
@@ -122,14 +120,42 @@ without a date is a number you can't audit.
 Watch for models with no cache-read discount. They resend the full context at
 full price every turn, which shows up as a benchmark bill rather than an error.
 
-Once a model is registered, score it with `python -m benchmark.runner.run_matrix`. The
+Once a model is registered, score it with `make benchmark-live` (i.e. `uv run --extra
+benchmark python -m benchmark.runner.run_matrix`; the extra is required — a bare `uv run`
+strips the eval deps). The
 default `--strategy cost_optimal` runs the cheap adaptive collection (frontier only where
-tiers disagree, plus a random audit); `--strategy full` runs the exhaustive matrix. Both
+cheaper models disagree, plus a random audit); `--strategy full` runs the exhaustive matrix; and
+`--strategy ladder` runs cheap-first, escalating each task only until a model passes. All
 are simulated unless you pass `--live`. See [benchmark.md](benchmark.md) for the details.
+
+### Production-required model fields
+
+Not every field is optional. A model that a consumer actually *uses* — named in
+`router.yaml`'s `models:` list or in `benchmark.yaml`'s `models:` list — must carry
+the full production set, or the router cannot rank it, cost it, or climb its effort
+ladder. The schema (`src/shunt/models/config.py`, `extra="forbid"`) enforces presence
+at load and fails loudly naming the offender; the table below is the contract, and a
+test locks it (`tests/models/test_consumer_config_contract.py`).
+
+| Field | Required for | Why it matters |
+|---|---|---|
+| `model_id` + `provider` | every used model | the model is reachable and routes to the right access channel |
+| `version` | every priced model | model identity + the benchmark's staleness key (a real weight change is a new id) |
+| `supports_streaming` | every used model | wire behaviour; defaults `true` |
+| `supports_cache_control` | every used model | the cache-safety spine — over-claiming earns a 400 mid-request; defaults `false` |
+| `pricing` (`input_cost_per_1m`, `output_cost_per_1m`, `cache_read_cost_per_1m`, `price_provider`, `price_source`, `price_as_of`) | every used model | the price-implied capability-rank prior (input + output), cost scoring, and the imputation ladder; absent pricing = routable but unscored |
+| `reasoning` (`default_arm` + rank-ordered `arms`) | every used model | the escalation ladder's first step is a same-model effort raise — it only exists when `default_arm` is not the model's top arm; a model with no bracket would step rank directly and lose that cache-safe rung |
+
+The two consumers each keep their own policy on top of this shared data layer: the
+router's (`router.yaml`) selects the live model set and the escalation knobs; the
+benchmark's (`benchmark.yaml`) selects the scored model set and the arm-sampling
+weights (its escalation sweep runs from its own grid). The router never reads
+`benchmark.yaml`, and the benchmark never reads a user `router.yaml` — its escalation
+eval reads the *packaged* `router.yaml` only, as the shipped-knobs reference.
 
 ### A model id is immutable — new version, new id
 
-`version` sits on the model row, next to `tier` and `provider` — not inside
+`version` sits on the model row, next to `provider` — not inside
 `pricing:`. It records model *identity*, and that distinction is a rule worth
 following:
 
@@ -164,7 +190,6 @@ comparable across models — one model's `high` is not another's.
 models:
   gpt-oss-120b-groq:
     model_id: openai/gpt-oss-120b
-    tier: cheap
     provider: groq
     reasoning:
       default_arm: medium          # must match one arm id below; used when nothing else decides
@@ -249,7 +274,8 @@ last edited. Shunt prints it at startup, so you never have to guess:
 Shunt config | strategy=knn
 Shunt config | knn: k=20 success_rate_threshold=0.60 min_samples=3
 Shunt config | exploration: enabled=True budget_frac=0.15 conservative_alpha=0.10 ...
-Shunt config | models: cheap:qwen3.7-plus, mid:gpt-5-mini, frontier:kimi-k3
+Shunt config | budget: max_spend_usd=unlimited
+Shunt config | models: 0:qwen3.7-plus, 1:gpt-5-mini, 2:kimi-k3
 Shunt config | session: inactivity_timeout=900s grace_period=120s retry_count=3
 ```
 
@@ -295,25 +321,75 @@ verified outcomes accumulate.
 
 ### Record verified outcomes automatically
 
-Exploration and the kNN neighbourhood only learn from *verified* outcomes. By default
-those are recorded by hand (`shunt flag <session_id> good|bad`). To capture them
-automatically, point Shunt at the repo it should test when a session goes idle:
+Exploration and the kNN neighbourhood only learn from *verified* outcomes. Shunt records
+them by re-running your repo's test suite off the request path when a session goes idle —
+pytest / jest / `go test` / `cargo test` / Maven / `dotnet test` / RSpec / PHPUnit /
+GTest, auto-detected — and labelling the session with
+the result.
+
+The common case needs no configuration:
+
+```console
+$ cd ~/my-repo && shunt start
+Shunt capture is ON via launch directory (/home/you/my-repo): verified outcomes are
+recorded automatically at session close by re-running THAT repo's tests off the wire …
+```
+
+Shunt resolves the repo in this order, stopping at the first that yields one:
+
+| # | Layer | Validated? |
+|---|---|---|
+| 1 | `capture.work_dirs[<tool_identity>]` — a repo per client | no (operator path) |
+| 2 | `SHUNT_WORK_DIR` env / `shunt start --work-dir PATH` / `capture.work_dir` | no (operator path) |
+| 3 | **Shunt's own launch directory**, promoted to its git root | yes — see below |
+| 4 | none → capture is `MANUAL-ONLY` (`shunt flag <session_id> good|bad`) | — |
+
+A path announced by a *client on the wire* is never a layer, at any setting: a
+request-supplied path becoming a test-runner working directory is remote code execution.
+
+Layer 3 is the one Shunt picks on its own, so it checks that it *can* run: the launch
+directory is accepted only when it resolves (`realpath`) to a real directory that sits
+inside a git repository which declares a test framework Shunt can detect. Anything else
+falls through to `MANUAL-ONLY`. Those are capability checks, not a trust boundary — the
+directory is the one you `cd`'d into before starting Shunt, so it is confined to no set of
+permitted roots and a repo at `/srv`, `/opt` or a container bind-mount arms exactly like
+one under `$HOME`. Set `trust_launch_dir: false` to disable the layer outright — the right
+choice on a shared or multi-tenant host, and the only gate on it.
+
+> **Arming a work_dir arms arbitrary code execution.** Verifying an outcome means running
+> that tree's own test command, and a test command runs the tree's code: pytest imports
+> its `conftest.py`, `cargo test` compiles its `build.rs`, `npm test` runs its scripts.
+> Point Shunt only at repositories you would run tests in yourself. Validation on layer 3
+> narrows *which* directory is chosen; it does not sandbox what the suite then does.
+
+The full set of knobs:
 
 ```yaml
 router:
   capture:
-    work_dir: /path/to/your/repo        # single repo — the dogfooding default
-    # work_dirs:                        # or several repos, keyed by tool identity:
+    work_dir: /path/to/your/repo        # layer 2 — a single explicit repo
+    # work_dirs:                        # layer 1 — several repos, keyed by tool identity:
     #   <tool_identity>: /path/to/repo-a
+    trust_launch_dir: true              # layer 3 on (default)
+    verify_timeout_seconds: null        # null ⇒ 1800s per verification run
+    rerun_confirmations: 2              # re-runs before a failing suite is believed
+    # full_content: false               # opt-in encrypted full-content trajectory capture
+    # trajectory_dir: null              # null ⇒ a local dir OUTSIDE the repo
 ```
 
-or set `SHUNT_WORK_DIR=/path/to/your/repo` (it overrides the file's single `work_dir`).
-At session close Shunt re-runs the repo's test suite off the request path — pytest /
-jest / `go test` / `cargo test`, auto-detected — and records the pass/fail as a verified
-outcome. A session with no configured work_dir, or whose tests can't be detected or run,
-is left unlabeled: Shunt never guesses an outcome, and the test path comes only from your
-config, never from a request. Startup states which mode is in force (`Shunt capture is
-ON` / `MANUAL-ONLY`).
+| Field | Default | Meaning |
+|---|---|---|
+| `work_dir` | `null` | One repo to verify against. `SHUNT_WORK_DIR` and `shunt start --work-dir` override it. |
+| `work_dirs` | `{}` | Per-`tool_identity` repo map, checked before `work_dir`. |
+| `trust_launch_dir` | `true` | Allow the launch-directory layer. `false` refuses it whatever the directory is — the way to keep a shared host manual-only. |
+| `verify_timeout_seconds` | `null` (⇒ `1800`) | Wall-clock budget for **one** verification run. A suite that exceeds it is recorded as nothing at all, so on a large repo the whole loop is a silent no-op until you raise this. Each run logs its duration at debug level and warns past 70% of the budget. |
+| `rerun_confirmations` | `2` | How many times a *failing* suite is re-run before the failure is believed (most pass→fail transitions are flakes). Worst case `1 + N` runs, each up to the timeout. **Minimum 1**: an unconfirmed failure is discarded by the escalation gate, so `0` would silently disable auto-escalation — the schema rejects it. To stop re-running, set `escalation.enabled: false`. |
+| `full_content` | `false` | Opt-in redacted+encrypted per-step trajectories — see [Capturing your own trajectories](escalation.md#capturing-your-own-trajectories-opt-in-encrypted-local-only). |
+| `trajectory_dir` | `null` | Where that encrypted plane is written; `null` ⇒ outside the repo. |
+
+A session whose repo cannot be resolved, or whose tests cannot be detected or run, is left
+unlabeled: Shunt never guesses an outcome. Startup states which mode is in force and, when
+it is on, **which layer** armed it (`Shunt capture is ON via …` / `MANUAL-ONLY`).
 
 A router that never tries a model it is unsure about never learns which ones it
 can trust, so the shipped default spends a bounded slice of your budget probing
@@ -348,51 +424,121 @@ shunt start --no-explore
 
 or `exploration.enabled: false` in your `router.yaml` for a permanent setting.
 
+### Cap per-session spend (hard-stop)
+
+A ceiling on what ONE session may spend, enforced in the proxy on **recorded**
+cost — the upstream's reported `usage.cost`, never a locally derived price. It is a
+soft ceiling at the next request boundary: the request that crosses the cap completes,
+and once a session's cumulative spend reaches `router.budget.max_spend_usd` the router
+refuses further routing for that session: a clean `402` error naming the cap, never a
+fabricated success, carrying an `x-should-retry: false` header so clients treat it as a
+permanent condition rather than a transient rate limit. `null` (the default) is unlimited.
+
+```yaml
+router:
+  budget:
+    max_spend_usd: 1.00      # null = unlimited; 0.0 refuses every request
+```
+
+This is the knob the live integration tier's spend cap wires to
+(`SHUNT_LIVE_MAX_SPEND_USD`, `examples/integrations/curl/compose.live.yaml`). It is a
+per-session stop enforced at the next request boundary — distinct from the exploration
+budget above (a softer ratio cap on exploratory spend) and not a total-bill ceiling
+across sessions. An unreported cost contributes nothing to the session total, so the
+cap binds only on providers that report `usage.cost`.
+
 ### Auto-escalate on repeated verified failure
 
-Shunt can automatically move up to a higher-effort or higher-tier model when the cheap
+Shunt can automatically move up to a higher-effort or higher-rank model when the cheap
 default fails the *same* verified check repeatedly — no human command needed. This is
 the knob reference; how detection, triggering, the ladder, and the safety rails work is
 covered in full on the [Error detection & auto-escalation](escalation.md) page.
 
-It ships **OFF**. The block and its defaults:
+It ships **ON** (owner choice, 2026-08-08). The block and its defaults:
 
 ```yaml
 router:
   escalation:
-    enabled: false              # shipped OFF — opt-in
+    enabled: true               # shipped ON — armed when a repo is resolved (explicit or auto-detected)
     escalate_after_n: 2         # same verified failure seen this many times
     stale_window: 10            # failures not recurring within N decisions retire
-    blocking_exit_code: 2       # FUTURE: hook-stream path only; off-wire gate gates on outcome/is_infra_failure
-    ladder: effort_then_tier    # effort_then_tier | tier_only (one rung per step, never to frontier)
+    ladder: effort_then_rank    # effort_then_rank | rank_only (rank_only skips the effort rung)
+    rank_shortlist: 3           # the 3 cheapest ranks are rungs; the rung above them is the top rank
+    exploration_epsilon: 0.0    # 0 = deterministic; above 0 randomizes flagged checkpoints
+    exploration_seed: null      # null ⇒ the router draws a seed and records it on every decision
 ```
 
 | Field | Default | Meaning |
 |---|---|---|
-| `enabled` | `false` | Master switch. Off ships nothing; on wires escalation into the live decision path. |
-| `escalate_after_n` | `2` | Same-key verified failures required before a step. `1` would escalate on the first red (failure-biased). |
+| `enabled` | `true` | Master switch. On wires escalation into the live decision path; it fires only once capture resolves a repo to verify. |
+| `escalate_after_n` | `2` | Same-key verified failures required before a step. `1` would escalate on the first red, which is failure-biased (intermediate fail-then-fix is normal). `2` is a **prior, not a tuned value** — under the counter the product runs, every low threshold measures at chance ([escalation](escalation.md#two-things-this-sweep-does-not-establish)), so no measurement prefers one over another. |
 | `stale_window` | `10` | A failure not recurring within this many decisions is retired from the counter. |
-| `ladder` | `effort_then_tier` | `effort_then_tier` raises reasoning effort first (cache-safe), then tier. `tier_only` skips the effort rung. |
-| `blocking_exit_code` | `2` | Reserved for a future hook-stream path — **not read by the current off-wire gate** (see below). |
+| `ladder` | `effort_then_rank` | `effort_then_rank` raises reasoning effort first (cache-safe), then steps to the next-higher-rank model. `rank_only` skips the effort rung. |
+| `rank_shortlist` | `3` | How many of the *cheapest* ranks the ladder walks one at a time. The rung that leaves them jumps straight to the **top rank** instead of buying every model in between — rank order is price order, and each intermediate rung costs another `escalate_after_n` recurrences to leave. `0` restores the every-rank walk. See [the ladder](escalation.md#the-rank-rung-is-a-shortlist-not-every-model). |
+| `exploration_epsilon` | `0.0` | Fraction of *flagged* checkpoints where the escalation is randomly withheld, so its value becomes measurable. `0.0` is fully deterministic. A **separate** opt-in: `enabled: true` alone never randomizes. |
+| `exploration_seed` | `null` | Seed for that randomization. `null` means shunt draws one and records it on every decision, so any logged propensity stays reproducible. |
 
-Escalation triggers only on **confirmed, verified capability failures** — a test suite
-re-run via `work_dir`, or a manual `shunt flag <session_id> bad`. Non-blocking results
-(lint-only or infrastructure failures) and unconfirmed flakes never count. Enable it
-with a flag override:
+Escalation triggers only on **confirmed, verified capability failures** — the test suite
+re-run via `work_dir` at session close. A manual `shunt flag <session_id> bad` feeds the
+routing learner (the outcome index), but it runs in a separate process and never reaches the
+in-process escalation log, so it does not trip escalation. Non-blocking results
+(lint-only or infrastructure failures) and unconfirmed flakes never count. Escalation's
+only signal is the repo's tests re-run off the wire, so it is **inert until capture
+resolves a repo** — an explicit `capture.work_dir` / `capture.work_dirs`, or the validated
+launch directory ([Record verified outcomes automatically](#record-verified-outcomes-automatically)).
+Where none resolves, it is **not** a load error, but the router warns at boot that
+escalation is enabled and not armed:
 
-```bash
-shunt start --config-override 'router.escalation.enabled=true'
+```yaml
+router:
+  escalation:
+    enabled: true               # the shipped default
+  capture:
+    work_dir: /path/to/repo     # REQUIRED for escalation to fire — no repo, no verified signal
 ```
 
-or `escalation.enabled: true` in your `router.yaml`.
+There is no `--config-override` CLI flag. `shunt start` only exposes the routing-strategy
+flags (`--strategy`, `--explore`, `--explore-budget-frac`) and `--work-dir`; escalation
+knobs have no CLI or
+environment override and are configured exclusively through `router.yaml` (the file at
+`$SHUNT_CONFIG_DIR/router.yaml`, else `~/.config/shunt/router.yaml`, else the packaged
+default), which is loaded whole — so copy the packaged file before editing it.
 
-> **Note on `blocking_exit_code`:** reserved for a future hook-stream path (where a Stop
-> hook reports exit 2 for a blocking gate and exit 1 for lint). The **current off-wire
-> gate** (test suite re-run via `work_dir`) distinguishes capability failures from
-> lint/infra failures using the verifier's `outcome` field and `is_infra_failure` flag,
-> not raw exit codes, so test-runner-specific codes (pytest/jest=1, cargo=101) are
-> normalized correctly. The off-wire gate works with your test suite as-is, regardless
-> of its exit-code vocabulary.
+> **There is no exit-code knob.** The off-wire gate (test suite re-run via `work_dir`)
+> distinguishes capability failures from lint/infra failures using the verifier's
+> `outcome` field and `is_infra_failure` flag, not raw exit codes, so test-runner-specific
+> codes (pytest/jest=1, cargo=101) are normalized correctly. The gate works with your test
+> suite as-is, regardless of its exit-code vocabulary.
+
+#### Inspect it: `shunt escalate`
+
+Escalation is a counter over verified failures, so "why did it not escalate?" is a
+question about *state*, not about logs. `shunt escalate` prints that state:
+
+```bash
+shunt escalate                       # the repo the router itself resolves
+shunt escalate --work-dir /path/to/repo
+shunt escalate --json                # the same report, machine-readable
+```
+
+It reports the effective config **and where each value came from** (your `router.yaml`
+or the built-in default), the task's current rung (rank floor, served model, reasoning
+arm), the live failure window — every `dedup_key`, its count, and for a non-counting
+event *why* it does not count (verified success, unconfirmed flake, non-blocking
+lint/infra) — whether the routing-collapse guard is currently suppressing escalation,
+and what the **next** decision would do. That last line is not a re-implementation: the
+CLI runs the router's own decision function against the persisted state, so it cannot
+drift from what the server will do.
+
+It is **read-only**, deliberately. A running server holds this state in memory and
+re-serializes the whole snapshot on its own cadence, so a CLI write would be silently
+clobbered or would restore a half-consistent ladder. Escalation is also boundary-only by
+construction (that is the cache-safety guarantee); a command that pushed a rung mid-flight
+would be the one path able to change a model outside a decision boundary. Change the knobs
+in `router.yaml` and restart instead.
+
+If it prints `INERT`, no repo resolved — escalation has no verified-failure signal at
+all. Set `capture.work_dir` / `SHUNT_WORK_DIR`, or launch shunt from inside the repo.
 
 ### Prior seeding from offline model estimates
 
@@ -526,7 +672,7 @@ a file. Each is read once at startup.
 | `SHUNT_COLD_START_THRESHOLD_TIER1` | `50` | Effective sample size (nₑ) of all labelled outcomes to leave cold start (either threshold ends it) |
 | `SHUNT_EMBEDDER_MODEL` | `jina-code` | Active embedding model — a key (or `repo`) from `embedding.yaml`; overrides the file. See [Choose the embedding model](#choose-the-embedding-model-and-stay-swap-safe) |
 | `SHUNT_EMBED_MAX_CHARS` | `4000` | Prompt characters fed to the embedder; overrides `embedding.yaml`'s `max_chars` |
-| `SHUNT_EMBED_CACHE_DIR` | `$SHUNT_DATA_DIR/models` | Where the ~600MB embedding model is cached. Shunt downloads it once at startup and reuses it; keep this on durable storage or every restart re-downloads it |
+| `SHUNT_EMBED_CACHE_DIR` | `$SHUNT_DATA_DIR/models` | Where the ~600MB embedding model is cached. Shunt downloads it once at startup and reuses it; keep this on durable storage or every restart re-downloads it. Not downloaded at all under a fixed strategy (`always_cheap` / `always_frontier`), which never embeds |
 | `SHUNT_RESPONSE_MODEL_LABEL` | unset | Prefix added to the response `model` field (e.g. `shunt:` → `shunt:qwen3.7-plus`), so a client shows which model actually served the turn |
 | `SHUNT_LOG_LEVEL` | `info` | Log verbosity; `debug` traces the routing decision |
 
@@ -563,8 +709,8 @@ The list decides enablement three ways:
   offender. A model you run must exist, so a typo fails loudly instead of silently
   routing to nothing.
 
-Enabled models are always scored cheapest-tier-first (cheap → mid → high →
-frontier), so list order is for readability only — it does not affect results.
+Enabled models are always scored cheapest-first by total list price, so list
+order is for readability only — it does not affect results.
 
 ```bash
 shunt start

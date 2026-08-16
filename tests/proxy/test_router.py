@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from shunt.models.config import ModelPool
 from shunt.proxy.router import (
     _DEFAULT_MODEL,
+    BudgetExceededError,
     ProxyRouter,
     UpstreamError,
     _anthropic_request_to_openai,
@@ -118,6 +119,15 @@ def test_is_retryable_auth_error() -> None:
 def test_is_retryable_forbidden() -> None:
     exc = Exception("forbidden")
     exc.status_code = 403  # type: ignore[attr-defined]
+    assert _is_retryable(exc) is False
+
+
+def test_budget_refusal_is_402_and_not_retryable() -> None:
+    # The spend cap is a permanent condition, so the refusal must never look transient:
+    # 402 (Payment Required) is outside every SDK's retry set, and the router's own
+    # retry/fallback loop must not treat it as retryable either.
+    exc = BudgetExceededError("session s1 cumulative spend reached the cap; refusing to route")
+    assert exc.status_code == 402
     assert _is_retryable(exc) is False
 
 

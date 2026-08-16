@@ -1,0 +1,10 @@
+error[E0308]: mismatched types
+ --> src/widget.rs:9:17
+  |
+9 |     return parse(input);
+  |            ^^^^^^^^^^^^ expected `&str`, found struct `Widget`
+  |
+  = note: expected reference `&str`
+             found struct `Widget`
+
+error: could not compile `widget` (lib) due to previous error

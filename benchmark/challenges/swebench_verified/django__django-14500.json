@@ -31,5 +31,6 @@
     "#24123 - All models of apps already applied which are"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-14500:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "Squashed migration is not marked as unapplied\nDescription\n\t \n\t\t(last modified by Markus Holtermann)\n\t \nWhen unapplying a squashed migration and the replaced migration files are still around, the MigrationExecutor mark the squash migration as unapplied, too, not only the replaced migrations.\n"
 }

@@ -25,5 +25,6 @@
     "test_strip_tags_files (utils_tests.test_html.TestUtilsHtml)"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-14539:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "urlize() does not handle html escaped string and trailing punctuation correctly\nDescription\n\t\nExample:\nurlize('Search for google.com/?q=1&lt! and see.')\n# expected output\n'Search for <a href=\"http://google.com/?q=1%3C\">google.com/?q=1&lt</a>! and see.'\n# actual output\n'Search for <a href=\"http://google.com/?q=1%3C\">google.com/?q=1&lt</a>lt! and see.'\n"
 }

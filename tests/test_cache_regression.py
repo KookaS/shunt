@@ -8,7 +8,7 @@ from typing import Final
 import pytest
 
 from benchmark import config
-from benchmark.routing import integrity
+from benchmark.routing import impute, integrity
 from benchmark.runner import infer, run_matrix
 
 # ---------------------------------------------------------------------------
@@ -128,13 +128,24 @@ class TestRealCacheSecondRun:
             (cid, m, arm) for cid, cell in cache.items() for m, arms in cell.items() for arm in arms
         }
         st_present = run_matrix.classify_cells(tasks, present_models, cache, hashes, versions)
-        # Run-twice-zero guarantee: no COMMITTED cell recomputes. Nothing is stale,
-        # and every to_run cell is one that genuinely has no committed row (not a
-        # re-run of an existing cell). This survives partial coverage.
-        assert st_present.stale == [], "committed cells must not go stale (0 recompute)"
-        assert all((cid, m, arm) not in existing for cid, m, arm in st_present.to_run), (
-            "no committed cell may re-classify as missing/stale"
+        # Run-twice-zero guarantee, stated over cells that were actually PAID FOR: no
+        # committed cell that recorded work recomputes, and every to_run cell either has
+        # no committed row or is a zero-work residue. Zero-work rows (calls=0 AND $0 —
+        # an aborted collection's leftovers, never executed) are DELIBERATELY stale so
+        # they can be re-collected; pinning `stale == []` would re-freeze that bug.
+        paid_stale = [
+            (cid, m, arm)
+            for cid, m, arm in st_present.stale
+            if not impute.is_zero_work(cache[cid][m][arm])
+        ]
+        assert paid_stale == [], "committed cells that recorded work must not go stale"
+        assert all(impute.is_zero_work(cache[cid][m][arm]) for cid, m, arm in st_present.stale), (
+            "only zero-work residue rows may be stale"
         )
+        assert all(
+            (cid, m, arm) not in existing or impute.is_zero_work(cache[cid][m][arm])
+            for cid, m, arm in st_present.to_run
+        ), "no committed cell that recorded work may re-classify as missing/stale"
 
         # A synthetic never-run model: every cell missing, none stale.
         absent = "no-such-model-xyz"
@@ -210,7 +221,15 @@ class TestClassifyEdgeCases:
         assert st.stale == [("c1", "m1", "default")]
 
     def test_partial_coverage_mix(self):
-        cell = {"version_hash": "h1", "model_version": "v1", "image_digest": ""}
+        # calls/real_cost present so the row reads as REAL work — this case is about
+        # hash/version coverage, not the zero-work staleness rule.
+        cell = {
+            "version_hash": "h1",
+            "model_version": "v1",
+            "image_digest": "",
+            "calls": 3,
+            "real_cost": 0.004,
+        }
         cache = {"c1": {"m1": {"default": cell}}}
         st = run_matrix.classify_cells(
             ["c1", "c2"], ["m1", "m2"], cache, {"c1": "h1", "c2": "h2"}, {"m1": "v1", "m2": "v2"}
@@ -377,3 +396,62 @@ class TestHistoryPathHygiene:
         # Non-xfail companion: pins the filename regardless of the dir bug.
         hist = run_matrix._history_path(Path("/repo/benchmark/routing/results.csv"))
         assert hist.name == "results_history.csv"
+
+
+# ---------------------------------------------------------------------------
+# Zero-work rows are STALE; censored-with-work rows are NOT.
+# A row with zero priced calls and $0 spend never executed — it is an aborted
+# collection's residue. Every other staleness anchor passes on it, so before this
+# rule it was cached forever as though the cell had been measured, silently and
+# permanently removing it from `to_run`. The paired negative case is the one that
+# matters for cost: a CENSORED cell DID run and cost real money, so it must stay
+# PRESENT — re-collecting it buys a likely-identical non-observation at full price.
+# ---------------------------------------------------------------------------
+
+
+class TestZeroWorkRowsAreStale:
+    ANCHORS: Final[tuple[dict, dict, dict]] = (
+        {"c1": "a" * 64},
+        {"m1": "v1"},
+        {"c1": "sha256:abc"},
+    )
+
+    def _classify(self, tmp_path, row):
+        results = tmp_path / "results.csv"
+        run_matrix.merge_rows([row], results, None)
+        cache = config.load_results(results)
+        return run_matrix.classify_cells(["c1"], ["m1"], cache, *self.ANCHORS)
+
+    def test_zero_work_row_is_stale(self, tmp_path):
+        # calls=0 AND real_cost=0 => never executed => must be re-collected.
+        st = self._classify(tmp_path, _typed_row(calls=0, real_cost=0.0, in_tok=0, out_tok=0))
+        assert st.present == 0
+        assert st.stale == [("c1", "m1", "default")]
+
+    def test_censored_row_with_real_work_is_not_stale(self, tmp_path):
+        # step_limit with calls>0 and real spend: a real (if censored) measurement.
+        # Marking this stale would re-run forbidden, already-paid-for cells.
+        st = self._classify(
+            tmp_path,
+            _typed_row(calls=70, real_cost=0.8812, stop_reason="step_limit", **{"pass": False}),
+        )
+        assert st.present == 1
+        assert st.to_run == []
+
+    def test_ordinary_row_with_work_is_not_stale(self, tmp_path):
+        st = self._classify(tmp_path, _typed_row())
+        assert st.present == 1
+
+    def test_zero_calls_but_nonzero_cost_is_not_stale(self, tmp_path):
+        # Real spend recorded => work happened => not a zero-work residue.
+        st = self._classify(tmp_path, _typed_row(calls=0, real_cost=0.0031))
+        assert st.present == 1
+
+    def test_predicate_matches_only_the_zero_work_half(self):
+        # is_non_observation = censored OR zero-work; is_zero_work is the narrow half.
+        censored = {"calls": 70, "real_cost": 0.88, "stop_reason": "step_limit"}
+        zero = {"calls": 0, "real_cost": 0.0}
+        assert impute.is_zero_work(zero) is True
+        assert impute.is_zero_work(censored) is False
+        assert impute.is_non_observation(censored) is True
+        assert impute.is_non_observation(zero) is True

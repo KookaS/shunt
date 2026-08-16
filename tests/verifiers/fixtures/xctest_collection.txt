@@ -1,0 +1,2 @@
+error: could not find module 'Widget' for target 'x86_64-apple-macosx'; found: 0
+note: while building for macOS

@@ -12,7 +12,6 @@ providers:
 models:
   kimi-k2.5:
     model_id: moonshot/kimi-k2.5
-    tier: mid
     provider: requesty
     supports_streaming: true
     supports_cache_control: false

@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630"
+     viewBox="0 0 1200 630" role="img" aria-label="Three policies, one workload.">
+
+  <defs>
+    <!-- userSpaceOnUse is REQUIRED, not stylistic: filter regions default to
+         objectBoundingBox, and a perfectly horizontal path has a zero-height
+         bbox — so a glow filter silently erases flat road segments entirely. -->
+    <filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="1200" height="630">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="1200" height="630" fill="#06070a"/>
+  <g stroke="#161923" stroke-width="1"><line x1="0" y1="60" x2="1200" y2="60"/><line x1="0" y1="120" x2="1200" y2="120"/><line x1="0" y1="180" x2="1200" y2="180"/><line x1="0" y1="240" x2="1200" y2="240"/><line x1="0" y1="300" x2="1200" y2="300"/><line x1="0" y1="360" x2="1200" y2="360"/><line x1="0" y1="420" x2="1200" y2="420"/><line x1="0" y1="480" x2="1200" y2="480"/><line x1="0" y1="540" x2="1200" y2="540"/><line x1="0" y1="600" x2="1200" y2="600"/><line x1="60" y1="0" x2="60" y2="630"/><line x1="120" y1="0" x2="120" y2="630"/><line x1="180" y1="0" x2="180" y2="630"/><line x1="240" y1="0" x2="240" y2="630"/><line x1="300" y1="0" x2="300" y2="630"/><line x1="360" y1="0" x2="360" y2="630"/><line x1="420" y1="0" x2="420" y2="630"/><line x1="480" y1="0" x2="480" y2="630"/><line x1="540" y1="0" x2="540" y2="630"/><line x1="600" y1="0" x2="600" y2="630"/><line x1="660" y1="0" x2="660" y2="630"/><line x1="720" y1="0" x2="720" y2="630"/><line x1="780" y1="0" x2="780" y2="630"/><line x1="840" y1="0" x2="840" y2="630"/><line x1="900" y1="0" x2="900" y2="630"/><line x1="960" y1="0" x2="960" y2="630"/><line x1="1020" y1="0" x2="1020" y2="630"/><line x1="1080" y1="0" x2="1080" y2="630"/><line x1="1140" y1="0" x2="1140" y2="630"/></g>
+
+    <text x="72" y="96" font-family="'DejaVu Sans Mono','SF Mono',Menlo,monospace" font-size="13" letter-spacing="3.2"
+          fill="#8f7cff">SHUNT · THE ROUTING DECISION</text>
+    <text x="72" y="142" font-family="'DejaVu Sans','Inter',Arial,sans-serif" font-size="35" font-weight="700"
+          fill="#eceef4">Three policies, one workload.</text>
+    <text x="72" y="174" font-family="'DejaVu Sans','Inter',Arial,sans-serif" font-size="17" fill="#9195a3">Always-frontier arrives — and it is the most costly, paying top price every trip.</text>
+    <text x="72" y="198" font-family="'DejaVu Sans','Inter',Arial,sans-serif" font-size="17" fill="#9195a3">Always-cheap is cheap but grinds through the tail. Shunt is the cost-effective policy.</text>
+  <text x="72" y="304" font-family="'DejaVu Sans','Inter',Arial,sans-serif" font-size="19" font-weight="700" fill="#eceef4">always-frontier</text><text x="72" y="326" font-family="'DejaVu Sans Mono','SF Mono',Menlo,monospace" font-size="11.5" fill="#5c6070">one model for everything</text><text x="72" y="424" font-family="'DejaVu Sans','Inter',Arial,sans-serif" font-size="19" font-weight="700" fill="#eceef4">always-cheap</text><text x="72" y="446" font-family="'DejaVu Sans Mono','SF Mono',Menlo,monospace" font-size="11.5" fill="#5c6070">one model for everything</text><text x="72" y="564" font-family="'DejaVu Sans','Inter',Arial,sans-serif" font-size="19" font-weight="700" fill="#eceef4">shunt</text><text x="72" y="586" font-family="'DejaVu Sans Mono','SF Mono',Menlo,monospace" font-size="11.5" fill="#5c6070">cheap by default, escalate on evidence</text>
+
+  <!-- always-frontier: it arrives, and it pays frontier price the whole way -->
+  <line x1="300" y1="300" x2="940" y2="300" stroke="#04050a" stroke-width="23" stroke-linecap="round"/><line x1="300" y1="300" x2="940" y2="300" stroke="#5BC8FA" stroke-width="13" stroke-linecap="round" filter="url(#glow)"/>
+
+    <g>
+      <circle cx="300" cy="300" r="18" fill="#5BC8FA" opacity="0.22"/>
+      <circle cx="300" cy="300" r="10.5" fill="#5BC8FA"/>
+      <circle cx="300" cy="300" r="4.5" fill="#ffffff"/>
+    </g><g><rect x="922.5" y="287.0" width="35" height="26" rx="5" fill="#0d1018" stroke="#2b3242" stroke-width="1"/><rect x="926.5" y="291.0" width="9" height="9" fill="#ffffff"/><rect x="935.5" y="291.0" width="9" height="9" fill="#12141c"/><rect x="944.5" y="291.0" width="9" height="9" fill="#ffffff"/><rect x="926.5" y="300.0" width="9" height="9" fill="#12141c"/><rect x="935.5" y="300.0" width="9" height="9" fill="#ffffff"/><rect x="944.5" y="300.0" width="9" height="9" fill="#12141c"/></g>
+  <text x="970" y="298" font-family="'DejaVu Sans Mono','SF Mono',Menlo,monospace" font-size="13" fill="#f2c26b">arrives · most costly</text><text x="970" y="318" font-family="'DejaVu Sans Mono','SF Mono',Menlo,monospace" font-size="11.5" fill="#5c6070">frontier price, every trip</text>
+
+  <!-- always-cheap: MOST tasks get through on it. The hard tail peels off and
+       grinds through traffic to the SAME destination — the honest failure mode is
+       unreliability and retries, not total failure. Contrast with shunt below:
+       there the second road is clear (light blue), here it is congested (red). -->
+  <path d="M700,420 L722.9,437.5 Q742,452 766.0,452.0 L874.0,452.0 Q898,452 917.1,437.5 L940,420" fill="none" stroke="#04050a" stroke-width="21"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M700,420 L722.9,437.5 Q742,452 766.0,452.0 L874.0,452.0 Q898,452 917.1,437.5 L940,420" fill="none" stroke="#E5484D" stroke-width="11"
+        stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+  <line x1="300" y1="420" x2="940" y2="420" stroke="#04050a" stroke-width="23" stroke-linecap="round"/><line x1="300" y1="420" x2="940" y2="420" stroke="#4D6BFE" stroke-width="13" stroke-linecap="round" filter="url(#glow)"/>
+  <circle cx="774.4" cy="452.0" r="3.8" fill="#ffffff"/><circle cx="804.8" cy="452.0" r="3.8" fill="#ffffff"/><circle cx="835.2" cy="452.0" r="3.8" fill="#ffffff"/><circle cx="865.6" cy="452.0" r="3.8" fill="#ffffff"/>
+
+    <g>
+      <circle cx="300" cy="420" r="18" fill="#4D6BFE" opacity="0.22"/>
+      <circle cx="300" cy="420" r="10.5" fill="#4D6BFE"/>
+      <circle cx="300" cy="420" r="4.5" fill="#ffffff"/>
+    </g><g><rect x="922.5" y="407.0" width="35" height="26" rx="5" fill="#0d1018" stroke="#2b3242" stroke-width="1"/><rect x="926.5" y="411.0" width="9" height="9" fill="#ffffff"/><rect x="935.5" y="411.0" width="9" height="9" fill="#12141c"/><rect x="944.5" y="411.0" width="9" height="9" fill="#ffffff"/><rect x="926.5" y="420.0" width="9" height="9" fill="#12141c"/><rect x="935.5" y="420.0" width="9" height="9" fill="#ffffff"/><rect x="944.5" y="420.0" width="9" height="9" fill="#12141c"/></g>
+  <text x="970" y="418" font-family="'DejaVu Sans Mono','SF Mono',Menlo,monospace" font-size="13" fill="#f2c26b">arrives · not reliably</text><text x="970" y="438" font-family="'DejaVu Sans Mono','SF Mono',Menlo,monospace" font-size="11.5" fill="#5c6070">cheap price, stalls on the tail</text>
+
+  <!-- shunt: cheap until the evidence says otherwise, then frontier for the tail -->
+  <line x1="300" y1="560" x2="560" y2="560" stroke="#04050a" stroke-width="23" stroke-linecap="round"/><line x1="300" y1="560" x2="560" y2="560" stroke="#4D6BFE" stroke-width="13" stroke-linecap="round" filter="url(#glow)"/>
+  <path d="M560,560 L560.0,524.0 Q560,500 584.0,500.0 L940,500" fill="none" stroke="#04050a" stroke-width="23"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M560,560 L560.0,524.0 Q560,500 584.0,500.0 L940,500" fill="none" stroke="#5BC8FA" stroke-width="13"
+        stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+  <line x1="560" y1="560" x2="800" y2="560" stroke="#E5484D"
+        stroke-width="13" stroke-linecap="round" filter="url(#glow)"/>
+  <circle cx="588.8" cy="560.0" r="4.2" fill="#ffffff"/><circle cx="680.0" cy="560.0" r="4.2" fill="#ffffff"/><circle cx="771.2" cy="560.0" r="4.2" fill="#ffffff"/>
+  <circle cx="560" cy="560" r="12" fill="#06070a" opacity="0.92"/><circle cx="560" cy="560" r="8" fill="#4D6BFE"/><circle cx="560" cy="560" r="3" fill="#06070a"/>
+
+    <g>
+      <circle cx="300" cy="560" r="18" fill="#4D6BFE" opacity="0.22"/>
+      <circle cx="300" cy="560" r="10.5" fill="#4D6BFE"/>
+      <circle cx="300" cy="560" r="4.5" fill="#ffffff"/>
+    </g><g><rect x="922.5" y="487.0" width="35" height="26" rx="5" fill="#0d1018" stroke="#2b3242" stroke-width="1"/><rect x="926.5" y="491.0" width="9" height="9" fill="#ffffff"/><rect x="935.5" y="491.0" width="9" height="9" fill="#12141c"/><rect x="944.5" y="491.0" width="9" height="9" fill="#ffffff"/><rect x="926.5" y="500.0" width="9" height="9" fill="#12141c"/><rect x="935.5" y="500.0" width="9" height="9" fill="#ffffff"/><rect x="944.5" y="500.0" width="9" height="9" fill="#12141c"/></g>
+  <text x="970" y="498" font-family="'DejaVu Sans Mono','SF Mono',Menlo,monospace" font-size="13" fill="#9ee6c4">arrives · cost-effective</text><text x="970" y="518" font-family="'DejaVu Sans Mono','SF Mono',Menlo,monospace" font-size="11.5" fill="#5c6070">cheap default, frontier tail</text>
+</svg>

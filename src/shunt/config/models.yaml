@@ -1,10 +1,9 @@
 # The model/provider registry — the single source of truth for both the router
 # and the benchmark.
 #
-# ORDER IS SEMANTIC, NOT STYLE. `SelectionRule._escalate` returns
-# `get_tier_models(tier)[-1]` — the LAST row of a tier IN FILE ORDER. Reordering
-# model rows silently changes routing. Never re-serialize this file with a
-# key-sorting dumper. `tests/router/test_selection.py` pins the current order.
+# Row order is NOT semantic: the router ranks models by capability, derived from
+# total list price (input + output per 1M) ascending. Reordering rows does not
+# change routing; adding/removing a `pricing` block does.
 
 # ── providers ────────────────────────────────────────────────────────────────
 # One row per ACCESS CHANNEL. Every provider is bearer-token + OpenAI-compatible
@@ -26,17 +25,16 @@ providers:
     api_key_env_var: DEEPSEEK_API_KEY
     litellm_prefix: deepseek          # litellm's own provider id
 # ── models ───────────────────────────────────────────────────────────────────
-# Required core (model_id, tier, provider, supports_streaming,
-# supports_cache_control) makes a model routable. The optional `pricing` block
-# makes it benchmarkable — absent pricing means the benchmark cannot see it and
-# so can never score it against a fabricated price. `version` is a MODEL-IDENTITY
-# attribute (a sibling of tier/provider, NOT a pricing field): a genuine provider
-# model change is a NEW registry id, and `version` is the opt-in "force re-run
-# under the same id" staleness key — required once a model is priced.
+# Required core (model_id, provider, supports_streaming, supports_cache_control)
+# makes a model routable. The optional `pricing` block makes it benchmarkable AND
+# ranked — absent pricing means the benchmark cannot see it and (for a live model)
+# the router cannot rank it. `version` is a MODEL-IDENTITY attribute (a sibling of
+# provider, NOT a pricing field): a genuine provider model change is a NEW registry
+# id, and `version` is the opt-in "force re-run under the same id" staleness key —
+# required once a model is priced.
 models:
   qwen3.7-plus:
     model_id: alibaba/qwen3.7-plus
-    tier: cheap
     provider: requesty
     version: qwen3.7-plus
     supports_streaming: true
@@ -50,11 +48,16 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"
       price_note: Requesty router listing (qwen3.7-plus, alibaba). $0.40/M cache-write, $0.032/M cache-read.
-    # Bracket: realizable {none,low,med,high} dedupes to {none,high}
-    # (default thinking-on ≈ max). NOTE: Qwen has a known requires_stream quirk on
-    # thinking-on requests — YAGNI for this scope, not modeled as a schema field.
+    # Bracket: realizable {none,low,med,high} dedupes to {none,high}.
+    # `default_arm: nothink` (NOT think) on purpose: the effort-escalation ladder
+    # (`effort_then_rank`) steps the SAME model's reasoning arm first because that rung is
+    # cache-safe — but it only exists if the default is NOT already the top arm. Defaulting
+    # binary-think models to think would leave the ladder nothing to climb and force a
+    # cache-breaking rank step on the first escalation. nothink is also the cheap-first pick.
+    # NOTE: Qwen has a known requires_stream quirk on thinking-on requests — YAGNI for this
+    # scope, not modeled as a schema field.
     reasoning:
-      default_arm: think
+      default_arm: nothink
       arms:
         - id: nothink
           rank: 0
@@ -64,7 +67,6 @@ models:
           api: {enable_thinking: true}
   deepseek-v4-flash:
     model_id: deepseek-v4-flash
-    tier: cheap
     provider: deepseek
     version: deepseek-v4-flash
     supports_streaming: true
@@ -93,7 +95,6 @@ models:
           api: {thinking: {type: enabled}, reasoning_effort: max}
   gpt-5-mini:
     model_id: openai/gpt-5-mini
-    tier: mid
     provider: requesty
     version: gpt-5-mini
     supports_streaming: true
@@ -127,7 +128,6 @@ models:
           api: {reasoning_effort: high}
   zai-glm-5.2:
     model_id: fireworks/glm-5.2      # requesty's serving path, not the origin vendor
-    tier: high                       # high tier: strong but below the frontier baseline (kimi-k3)
     provider: requesty
     version: glm-5.2
     supports_streaming: true
@@ -140,9 +140,10 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-16"
       price_note: Requesty router listing (fireworks/glm-5.2). $0.14/M cache-read (live catalog; was 0.260, corrected 2026-07-16).
-    # Bracket: realizable {none,low,med,high} dedupes to {none,high} — default thinking-on.
+    # Bracket: realizable {none,low,med,high} dedupes to {none,high}.
+    # `default_arm: nothink` for the effort-ladder's cache-safe rung — see qwen3.7-plus.
     reasoning:
-      default_arm: think
+      default_arm: nothink
       arms:
         - id: nothink
           rank: 0
@@ -152,7 +153,6 @@ models:
           api: {thinking: {type: enabled}}
   kimi-k2.5:
     model_id: moonshot/kimi-k2.5
-    tier: mid
     provider: requesty
     version: kimi-k2.5
     supports_streaming: true
@@ -166,8 +166,9 @@ models:
       price_as_of: "2026-07-15"
       price_note: Requesty router listing (kimi-k2.5, moonshot). $0.100/M cache-read.
     # Bracket: realizable {off,on} — binary, no effort gradation.
+    # `default_arm: nothink` for the effort-ladder's cache-safe rung — see qwen3.7-plus.
     reasoning:
-      default_arm: think
+      default_arm: nothink
       arms:
         - id: nothink
           rank: 0
@@ -177,7 +178,6 @@ models:
           api: {thinking: {type: enabled}}
   kimi-k3:
     model_id: moonshot/kimi-k3
-    tier: frontier
     provider: requesty
     version: kimi-k3
     supports_streaming: true
@@ -205,7 +205,6 @@ models:
           api: {reasoning_effort: max}
   gemini-3.1-pro:
     model_id: google/gemini-3.1-pro
-    tier: frontier
     provider: requesty
     version: gemini-3.1-pro
     supports_streaming: true
@@ -224,8 +223,9 @@ models:
     # reasoning_effort is the portable OpenAI-compatible knob requesty's `openai/`
     # driver passes through; Gemini's native `thinking_level` risks a 400 there.
     # UNVERIFIED against a live response — smoke-test before relying on it.
+    # `default_arm: low` for the effort-ladder's cache-safe rung — see qwen3.7-plus.
     reasoning:
-      default_arm: high
+      default_arm: low
       arms:
         - id: low
           rank: 0
@@ -235,7 +235,6 @@ models:
           api: {reasoning_effort: high}
   gpt-5.6-sol:
     model_id: openai/gpt-5.6-sol
-    tier: frontier
     provider: requesty
     version: gpt-5.6-sol
     supports_streaming: true
@@ -265,7 +264,6 @@ models:
           api: {reasoning_effort: high}
   claude-fable-5:
     model_id: anthropic/claude-fable-5
-    tier: frontier
     provider: requesty
     version: claude-fable-5
     supports_streaming: true
@@ -290,7 +288,6 @@ models:
           api: {thinking: {type: enabled}}
   claude-opus-4-8:
     model_id: anthropic/claude-opus-4-8
-    tier: frontier
     provider: requesty
     version: claude-opus-4-8
     supports_streaming: true
@@ -321,7 +318,6 @@ models:
           api: {thinking: {type: enabled}, output_config: {effort: max}}
   claude-opus-4-6:
     model_id: anthropic/claude-opus-4-6
-    tier: frontier
     provider: requesty
     version: claude-opus-4-6
     supports_streaming: true

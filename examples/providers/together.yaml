@@ -11,7 +11,6 @@ providers:
 models:
   gpt-oss-120b-together:
     model_id: openai/gpt-oss-120b
-    tier: cheap
     provider: together
     supports_streaming: true
     supports_cache_control: false

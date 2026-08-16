@@ -10,6 +10,9 @@ env:
 jobs:
   pypi:
     runs-on: ubuntu-latest
+    # ESTIMATE, not measured — this workflow has never run, so there is no history
+    # to derive from. Revisit after the first release.
+    timeout-minutes: 30
     permissions:
       id-token: write
     steps:
@@ -91,6 +94,9 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    # ESTIMATE, not measured — this workflow has never run, so there is no history
+    # to derive from. Revisit after the first release.
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write

@@ -19,8 +19,10 @@ strategies:
     - always_frontier     # baseline: always the most expensive model
     - always_cheap        # baseline: always the cheapest model
     - knn                 # shipped algorithm: predict by nearest neighbors
-    - knn_cascade         # best quality: kNN-informed try-verify-escalate
-    - external_prior      # SWE-bench leaderboard per-tier difficulty prior
+    - knn_cascade         # kNN-informed try-verify-escalate
+    - price_cascade       # zero-ML floor: cheapest-first try-verify-escalate, no embeddings
+    - session_cascade     # the SHIPPED escalation ladder at session cadence (cache-safe analogue)
+    - tier_classifier     # single-shot: predict crossover tier, route there directly
     # - oracle_reward      # same as oracle with different cost weight
     # - random             # not useful for comparison
   knn:
@@ -30,33 +32,69 @@ strategies:
   knn_cascade:
     max_tries: 3
     success_rate_threshold: 0.6
-  external_prior:
-    threshold: 0.5   # escalate when external cheap-tier resolve rate < this
-  # knn_blended is NOT in `enabled` above: it embeds ~490 external statements, too
-  # heavy for the always-run simulated caching loop. Enable it explicitly for the
-  # strategy comparison (scripts/plot_external.py) — params below apply when it is.
-  knn_blended:
-    k: 20
-    success_rate_threshold: 0.5
-    min_samples: 1
-    external_weight: 0.25   # down-weight of external neighbours vs our verified runs
+  tier_classifier:
+    success_rate_threshold: 0.6   # neighbour pass-rate at a tier's rung to route there
+  session_cascade:
+    # The PRODUCT's escalation defaults (src/shunt/router/escalation.py EscalationConfig), so
+    # the offline row scores the policy production actually runs. Changing one here without
+    # changing it there measures a policy nobody ships.
+    escalate_after_n: 2
+    stale_window: 10
+    # PINNED to rank_only, and the product's default is effort_then_rank — a deliberate,
+    # documented divergence, not an oversight. The effort rung serves a NON-DEFAULT reasoning
+    # arm, and results.csv holds a 3-arm measurement for only 54 of 770 (task, model) cells, so
+    # scoring effort_then_rank censors 71 of 200 tasks as coverage gaps AND leaves a survivor set
+    # that is 100% pass at $1.31 — a selection artefact that would be drawn as a Pareto-dominant
+    # point. rank_only is a shipped ladder value (escalation.ESCALATION_LADDERS), scores 0
+    # unscorable on the completed matrix, and is the largest honestly-measurable slice of the live
+    # ladder. Flip this back when per-arm coverage exists; do not flip it to make a nicer number.
+    ladder: rank_only
+    # `rank_shortlist` is deliberately ABSENT: omitting it makes the replay inherit whatever
+    # `EscalationConfig` ships, so the offline row always prices the ladder production runs. Set it
+    # only to SWEEP the knob (0 restores the pre-shortlist every-rank walk); a value pinned here
+    # that disagrees with router.yaml measures a ladder nobody runs.
 
 routing:
   control_model: kimi-k3    # strongest ENABLED frontier = kill-gate baseline (opus-4-6 priced but disabled)
   gamma: 0.1
 
+# Derived per-model capability rank (see docs/benchmark-design.md). The monotone-ladder
+# order is DERIVED from measured co-measured pairwise dominance (Copeland), not from
+# hardcoded tiers — a model that measures weaker than a cheaper one ranks below it from
+# the data, with no manual re-tier hack. A model failing the confidence gate below falls
+# back to its price-implied slot (price ascending). Knobs are pinned (constants_pinned
+# discipline); re-pin only on a material suite-scale change, noting the reason here.
+capability_rank:
+  K: 20            # min real cells for a model's measured rank (guards tiny-n lucky intervals)
+  W: 0.35          # max Wilson CI width for a measured rank (the real confidence gate)
+  min_pairs: 8     # min co-measured disagreement tasks for a pair to inform the Copeland score
+  baseline: null   # optional last-reviewed order; when set, a rank flip requires disjoint CIs
+
+# Monotone-ladder imputation: complete the asymmetric outcome matrix in memory so
+# every strategy is scored on one equal-coverage task set. NEVER persisted to
+# results.csv (recomputed each run). The scoring path reads these flags.
+impute:
+  enabled: true             # gate the completion (false reproduces raw-coverage behaviour)
+  drop_unsolvable: false    # keep universal-fail tasks in the denominator (equal N across strategies)
+
 # p(arm|model) exploration sampling. A model's default_arm always
 # runs; each other bracket arm of rank `r` (0 = cheapest) runs on the fraction of
 # challenges below weights[r] (deterministic, cost-skewed toward cheaper arms).
-# Ranks beyond the list reuse the last weight. Keeps exploration within ~1.3-1.6x
-# of today's cost instead of running the full bracket on every cell.
+# Each weight is an INDEPENDENT per-arm inclusion probability in [0, 1] (a Bernoulli
+# threshold), NOT a categorical distribution — they need not sum to 1. Lower weights
+# on higher-rank (pricier) arms = fewer expensive runs = cheaper exploration.
+# Ranks beyond the list reuse the last weight. Keeps exploration within ~1.5-1.9x
+# of today's cost instead of running the full bracket on every cell — the flatter
+# tail (rank-2 at 0.25, not 0.1) is deliberate: the higher-effort arms ARE the arms
+# the escalation effort-rung escalates into, so starving them at 0.1 left that rung
+# unevaluable. 0.25 lifts them from ~unusable to bare-minimum coverage.
 # `enabled` gates the sweep: the live executor now overlays each arm's registry API
 # params onto the request (infer._scaffold_model_kwargs), so distinct arms bill
 # distinct requests — the wiring this gate previously waited on. Set false to
 # reproduce default-arm-only runs.
 arm_sampling:
   enabled: true
-  weights: [0.5, 0.35, 0.25]
+  weights: [0.6, 0.4, 0.25]   # cheaper-skewed; each is an independent p, not a distribution
   # Models pinned to their DEFAULT arm even while the sweep is on — the expensive
   # tiers (high/frontier), where extra reasoning arms aren't worth the per-cell cost.
   # Their default arm is already the high-reasoning one; other models still explore.
@@ -90,6 +128,41 @@ collect:
   noninferiority_margin: 0.05   # δ: the pre-registered 5pp equal-quality bar for paired McNemar
   budget_phase_a: null      # per-phase --max-cost override (null = shared ceiling)
   budget_phase_c: null
+
+# Ladder collector (benchmark.runner.ladder_collect). Escalates up to --workers challenges
+# concurrently, each serial cheap->strong. The budget "reservation" that keeps concurrent
+# challenges from jointly overspending --max-cost is a CONSERVATIVE UPPER BOUND (the max
+# observed real_cost per model, not the median). A tier with no measured cost yet reserves
+# `cold_start_tier_cost` instead of 0 — otherwise a fresh run (empty results.csv) would
+# reserve 0 per tier and admit --workers challenges that each run uncapped.
+ladder:
+  cold_start_tier_cost: 1.0   # USD reserved per UNMEASURED tier. Conservative: above the
+                              # measured p90 per-cell real_cost (~$0.27) and below the
+                              # observed max (~$2.95), so a cold-start run won't admit an
+                              # unbounded first wave yet still admits challenges under a
+                              # realistic cap. Superseded per-model once a real cost is measured.
+
+# Live agent-scaffold bounds (benchmark.runner.infer). step_limit is the PRIMARY, model-speed-
+# agnostic per-cell bound: every model gets the SAME number of agent steps regardless of inference
+# speed (wall-clock timing unfairly penalises slow models). The wall-clock ceiling is a generous
+# GRACEFUL secondary backstop set from --timeout (default 1800s), and an external watchdog fires
+# strictly LATER (+300s) as a hard last resort for a genuine single-call hang — so a normal slow
+# run always terminates gracefully with its real usage.cost captured, never abandoned at $0.
+# step_limit 150 is justified from the measured HAZARD, not passers' percentiles (the old p90=58 /
+# p95=68 rationale was survivorship-biased — conditioning on cells that passed says nothing about
+# cells still alive at step 70). Of the 92 corpus cells still running at step 70 under the old
+# 250-step budget, 37 (40.2%) went on to pass; 35 of those 37 (95%) finished by step 150, so 150 is
+# where censoring drops from a ~40% loss to a ~2% tail. Raised together with cost_limit so the
+# budget increase cannot relabel cost censors as step censors.
+live:
+  step_limit: 150
+  # Per-cell USD cost ceiling passed to the agent scaffold. 4.0 MOVES WITH step_limit (the two are
+  # raised together: a 150-step kimi-k3 cell projects to ~$2.6, so the step cap binds before the
+  # cost cap and a legitimately step-limited run is never mislabelled a cost censor). A declared
+  # key means the cap a run obeys is recorded where the run is configured. The scaffold raises
+  # LimitsExceeded for BOTH limits and the censoring layer maps it to stop_reason=step_limit, so
+  # raising the step cap alone converts step censors into cost censors under a label that lies.
+  cost_limit: 4.0
 
 paths:
   challenges: routing/data/challenges.json        # curated input, relative to config.py dir

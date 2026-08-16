@@ -14,10 +14,9 @@ import pytest
 from benchmark import config
 from benchmark.routing.scripts import (
     compute_costs,
-    embedding_compare,
+    ladder_evidence,
     plot_exploration,
-    plot_strategies,
-    plot_timing,
+    plot_knn_nulls,
     threshold_sweep,
     viz_knn,
 )
@@ -28,10 +27,9 @@ CONFIG_PATH = str(Path(config.__file__).resolve().parent / "benchmark.yaml")
 # The analysis scripts that must exit cleanly on a header-only results.csv.
 _GUARDED_SCRIPTS: Final = [
     compute_costs.main,
-    embedding_compare.main,
+    ladder_evidence.main,
     plot_exploration.main,
-    plot_strategies.main,
-    plot_timing.main,
+    plot_knn_nulls.main,
     threshold_sweep.main,
     viz_knn.main,
 ]
@@ -46,23 +44,6 @@ def test_script_exits_cleanly_on_empty_matrix(script_main, monkeypatch, capsys, 
     assert script_main(CONFIG_PATH) is None
     out = capsys.readouterr().out
     assert "No results yet" in out
-
-
-class TestEmbeddingCompareNeighbors:
-    """compute_overlap must not crash when fewer challenges than k are populated."""
-
-    def test_fewer_tasks_than_k_does_not_crash(self):
-        # 6 populated challenges, k=10 (the shipped k) — the partial-population state.
-        feats = np.eye(6, dtype=float)
-        neighbors = embedding_compare.compute_overlap(feats, k=10)
-        # One row per task; width clamped to the available non-self neighbors.
-        assert neighbors.shape[0] == 6
-        assert 1 <= neighbors.shape[1] <= 5
-
-    def test_single_task_does_not_crash(self):
-        feats = np.ones((1, 4), dtype=float)
-        neighbors = embedding_compare.compute_overlap(feats, k=10)
-        assert neighbors.shape[0] == 1
 
 
 class TestReportRegretFactories:
@@ -183,67 +164,6 @@ class TestThresholdSweepExcludesUnscorable:
         assert row["AvgPerf%"] == 100.0
 
 
-class TestPlotTimingStrategyCalls:
-    """plot_timing._strategy_calls must unpack _evaluate_strategies' (decisions,
-    unscorable) pair — a populated matrix, since the empty-matrix guard early-returns
-    before reaching it (this is the shape the guard could not catch).
-    """
-
-    def test_strategy_calls_on_populated_matrix(self):
-        config.load(CONFIG_PATH)
-        matrix = {
-            "tasks": {"t1": {}, "t2": {}},
-            "results": {
-                "t1": {"kNN": {"pass": True, "cost": 1.0, "calls": 3}},
-                "t2": {"kNN": {"pass": True, "cost": 1.0, "calls": 5}},
-            },
-        }
-
-        class _Fake:
-            name = "kNN"
-
-            def select(self, tid, meta, matrix):  # noqa: ANN001, ANN201, ARG002
-                return "kNN"
-
-        # Patch the factory builder so the replay uses a measured model on every task.
-        import benchmark.routing.report as report_mod
-
-        orig = report_mod._build_strategy_factories
-        report_mod._build_strategy_factories = lambda gamma: {"kNN": _Fake}
-        try:
-            out = plot_timing._strategy_calls(matrix, ["t1", "t2"], gamma=0.1)
-        finally:
-            report_mod._build_strategy_factories = orig
-        assert out == {"kNN": [3, 5]}
-
-    def test_strategy_calls_excludes_coverage_gap(self):
-        config.load(CONFIG_PATH)
-        matrix = {
-            "tasks": {"t1": {}, "t2": {}},
-            "results": {
-                "t1": {"kNN": {"pass": True, "cost": 1.0, "calls": 4}},
-                # t2 has no kNN cell -> unscorable; its calls must not be counted.
-                "t2": {"other": {"pass": True, "cost": 1.0, "calls": 9}},
-            },
-        }
-
-        class _Fake:
-            name = "kNN"
-
-            def select(self, tid, meta, matrix):  # noqa: ANN001, ANN201, ARG002
-                return "kNN"
-
-        import benchmark.routing.report as report_mod
-
-        orig = report_mod._build_strategy_factories
-        report_mod._build_strategy_factories = lambda gamma: {"kNN": _Fake}
-        try:
-            out = plot_timing._strategy_calls(matrix, ["t1", "t2"], gamma=0.1)
-        finally:
-            report_mod._build_strategy_factories = orig
-        assert out == {"kNN": [4]}
-
-
 class TestZeroEvidenceRows:
     """A strategy with no scorable task must never be certified Pareto-optimal,
     and a degenerate row set must fail loudly instead of crashing mid-report."""
@@ -256,13 +176,6 @@ class TestZeroEvidenceRows:
         assert m["n_tasks"] == 0
         assert m["TotalCost"] == 0.0
         assert m["AvgPerf%"] == 0.0
-
-    def test_zero_task_strategy_is_not_pareto(self):
-        from benchmark.routing.report import _is_pareto
-
-        assert _is_pareto({"strategy": "kNN", "n_tasks": 0, "Pareto": True}) is False
-        assert _is_pareto({"strategy": "kNN", "n_tasks": "", "Pareto": "True"}) is False
-        assert _is_pareto({"strategy": "kNN", "n_tasks": 3, "Pareto": True}) is True
 
     def test_thin_rows_are_rejected_with_a_reason(self):
         from benchmark.routing.report import _validate_rows
@@ -279,3 +192,167 @@ class TestZeroEvidenceRows:
             _validate_rows([{"strategy": "kNN", "n_tasks": 2, "TotalCost": 1.0, "AvgPerf%": 50.0}])
             is None
         )
+
+
+class TestSweepSelectionIsNotRewardArgmax:
+    """gamma=0.1 makes reward-argmax degenerate to escalate-everything."""
+
+    def test_cost_at_equal_quality_prefers_the_cheap_equivalent(self):
+        rows = [
+            # Statistically indistinguishable pass rates, wildly different cost.
+            {"k": 54, "n_scored": 177, "AvgPerf%": 96.0, "TotalCost": 81.2, "Reward": 161.9},
+            {"k": 24, "n_scored": 177, "AvgPerf%": 92.1, "TotalCost": 62.0, "Reward": 155.0},
+        ]
+        best = threshold_sweep.cost_at_equal_quality(rows)
+        assert best["k"] == 24  # cheaper, and not significantly worse
+
+    def test_a_significantly_worse_cell_is_not_selected(self):
+        rows = [
+            {"k": 54, "n_scored": 177, "AvgPerf%": 96.0, "TotalCost": 81.2, "Reward": 161.9},
+            {"k": 2, "n_scored": 177, "AvgPerf%": 40.0, "TotalCost": 1.0, "Reward": 70.0},
+        ]
+        best = threshold_sweep.cost_at_equal_quality(rows)
+        assert best["k"] == 54  # the cheap cell is far below the quality floor
+
+    def test_zero_evidence_rows_are_never_selected(self):
+        rows = [
+            {"k": 9, "n_scored": 0, "AvgPerf%": 0.0, "TotalCost": 0.0, "Reward": 0.0},
+            {"k": 24, "n_scored": 177, "AvgPerf%": 92.1, "TotalCost": 62.0, "Reward": 155.0},
+        ]
+        assert threshold_sweep.cost_at_equal_quality(rows)["k"] == 24
+
+    def test_empty_rows_return_none(self):
+        assert threshold_sweep.cost_at_equal_quality([]) is None
+
+    def test_folds_partition_every_task(self):
+        folds = threshold_sweep.fold_assignment(177, 5)
+        assert len(folds) == 177
+        assert set(folds.tolist()) == {0, 1, 2, 3, 4}
+        # Balanced to within one task, so no fold dominates the index.
+        counts = [int((folds == f).sum()) for f in range(5)]
+        assert max(counts) - min(counts) <= 1
+
+    def test_fold_assignment_is_deterministic(self):
+        a = threshold_sweep.fold_assignment(50, 5)
+        b = threshold_sweep.fold_assignment(50, 5)
+        assert a.tolist() == b.tolist()
+
+
+class TestSweepHeldOutRestrictsTheIndex:
+    """A task must never vote over its own fold — that is what makes the sweep held-out."""
+
+    def test_allowed_restricts_the_neighbourhood(self):
+        config.load(CONFIG_PATH)
+        models = {
+            "cheap-model": {"input_price": 0.1, "output_price": 0.1},
+            "frontier-model": {"input_price": 5.0, "output_price": 5.0},
+        }
+        matrix = {"models": models}
+        # Tasks 0,1 pass on cheap; task 2 (the only one allowed as a neighbour) fails it.
+        results_map = {
+            "t0": {"cheap-model": {"pass": True, "cost": 1.0}},
+            "t1": {"cheap-model": {"pass": True, "cost": 1.0}},
+            "t2": {
+                "cheap-model": {"pass": False, "cost": 1.0},
+                "frontier-model": {"pass": True, "cost": 10.0},
+            },
+        }
+        task_ids = ["t0", "t1", "t2"]
+        features = np.array([[1.0, 0.0], [1.0, 0.01], [0.99, 0.0]])
+
+        # Voting over everything: t0's neighbours include the passing t1 -> cheap qualifies.
+        chosen_all, _p, _c, _s = threshold_sweep.knn_select(
+            0,
+            task_ids,
+            task_ids,
+            features,
+            results_map,
+            matrix,
+            k=2,
+            success_rate_thresh=0.5,
+            min_samples=1,
+        )
+        assert chosen_all == "cheap-model"
+
+        # Restricted to t2 only: the sole neighbour fails cheap, so the rule escalates.
+        chosen_held, _p, _c, _s = threshold_sweep.knn_select(
+            0,
+            task_ids,
+            task_ids,
+            features,
+            results_map,
+            matrix,
+            k=2,
+            success_rate_thresh=0.5,
+            min_samples=1,
+            allowed=np.array([2]),
+        )
+        assert chosen_held == "frontier-model"
+
+    def test_precomputed_sims_row_matches_the_on_the_fly_computation(self):
+        config.load(CONFIG_PATH)
+        matrix = {"models": {"m": {"input_price": 1.0, "output_price": 1.0}}}
+        results_map = {f"t{i}": {"m": {"pass": i % 2 == 0, "cost": 1.0}} for i in range(6)}
+        task_ids = sorted(results_map)
+        rng = np.random.default_rng(0)
+        feats = rng.normal(size=(6, 4))
+        unit = feats / np.linalg.norm(feats, axis=1, keepdims=True)
+        sims = unit @ unit.T
+        for i in range(6):
+            direct = threshold_sweep.knn_select(
+                i,
+                task_ids,
+                task_ids,
+                feats,
+                results_map,
+                matrix,
+                k=3,
+                success_rate_thresh=0.5,
+                min_samples=1,
+            )
+            cached = threshold_sweep.knn_select(
+                i,
+                task_ids,
+                task_ids,
+                feats,
+                results_map,
+                matrix,
+                k=3,
+                success_rate_thresh=0.5,
+                min_samples=1,
+                sims_row=sims[i],
+            )
+            assert direct == cached
+
+    def test_evaluate_params_reports_allocation_degeneracy(self):
+        config.load(CONFIG_PATH)
+        matrix = {
+            "models": {
+                "cheap-model": {"input_price": 0.1, "output_price": 0.1},
+                "frontier-model": {"input_price": 5.0, "output_price": 5.0},
+            }
+        }
+        # Nothing clears a 0.99 threshold on cheap, so every task escalates.
+        results_map = {
+            f"t{i}": {
+                "cheap-model": {"pass": False, "cost": 1.0},
+                "frontier-model": {"pass": True, "cost": 10.0},
+            }
+            for i in range(6)
+        }
+        task_ids = sorted(results_map)
+        rng = np.random.default_rng(1)
+        feats = rng.normal(size=(6, 4))
+        row = threshold_sweep.evaluate_params(
+            task_ids,
+            task_ids,
+            feats,
+            results_map,
+            matrix,
+            k=3,
+            success_rate_thresh=0.99,
+            min_samples=1,
+            frontier_model="frontier-model",
+        )
+        assert row["frontier_share"] == 1.0
+        assert row["n_models_used"] == 1  # a "router" that uses one model is a fixed policy

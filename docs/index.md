@@ -36,10 +36,16 @@ outcomes, pick the cheapest model that succeeded) offline before shipping it.
 On QA and reasoning-style workloads the embedding difficulty signal carries and
 there is routing headroom. On the agentic-coding workload we actually target it
 did **not** clear our viability bar: ranking hard tasks from easy ones off the
-prompt embedding came out near chance. We publish that because it scopes the
-project — it does not kill the cache-safe proxy or the verify-and-escalate path,
-which does not depend on that signal, but it means we do not claim live
-coding-task routing we cannot yet back with evidence.
+prompt embedding came out near chance.
+
+That number is weaker evidence than it looks, and we would rather say so than
+bank it. The embedder was handed a 106-character identifier instead of the task's
+problem statement — still true of every committed task — and the suite's smallest
+detectable effect sits far above any published difficulty detector. So on coding
+work the question is open, not settled ([Results](results.md#routing-results)).
+Either way we do not claim live coding-task routing we cannot back with evidence,
+and neither the cache-safe proxy nor the verify-and-escalate path depends on that
+signal.
 
 ## What runs today
 
@@ -51,16 +57,17 @@ coding-task routing we cannot yet back with evidence.
   fails and Shunt falls back to another model, that model necessarily prefills the
   conversation from scratch — a provider's cache is per-model, so the cost is
   unavoidable rather than a design flaw. It is reported, not hidden.
-- **A visible `X-Shunt-Decision` header** — names the model and the reason; today
-  the reason is always the cold-start default.
+- **A visible `X-Shunt-Decision` header** — names the model and the reason; while
+  the router is cold the reason is the cold-start default, and escalation and fixed
+  strategies report theirs (full token list in [routing](routing.md#the-reason-tokens)).
 - **Bring-your-own keys, zero telemetry** — nothing phoned home, replayed, or resold.
 
 ## Design center (what the roadmap is being built toward)
 
 - **Cache-boundary-aware routing** — decisions at task/session boundaries only,
   never mid-cached-turn.
-- **Pluggable, inspectable policy** — kNN over verified outcomes, no brittle rule
-  tier; every decision surfaced in a header.
+- **Pluggable, inspectable policy** — kNN over verified outcomes, no brittle
+  hand-tuned rules; every decision surfaced in a header.
 - **OpenAI ↔ Anthropic translation** — these two first, not 100+ providers.
 - **Verifier + memory loop** — log `(task → model → verified outcome)` and learn
   from it; verification stays async/backfill, never on the hot path.
@@ -99,7 +106,7 @@ uv run shunt                  # pinned deps from uv.lock
 `uv run shunt`, `python -m shunt`, and the installed `shunt` command are equivalent —
 each starts the proxy on `127.0.0.1:8080`. No uv? `pip install -e . && shunt` works
 too. (Run from the repo root; the same `shunt <subcommand>` verbs — `flag`, `reindex`,
-`explain` — apply.)
+`explain`, `escalate` — apply.)
 
 Point your tool at localhost:8080 (today, every request forwards to the cheap
 default):
@@ -140,17 +147,27 @@ trust rules: [Feedback](feedback.md).
 - [Architecture](architecture.md) — what runs live vs what's waiting for the learning loop
 - [Configuration](configuration.md) — add provider keys and register models
 - [Feedback](feedback.md) — how outcomes are captured (auto + manual) and learned from
-- [Error detection & auto-escalation](escalation.md) — how a verified failure is detected and, on repeat, escalates a rung (opt-in)
+- [The routing model](routing.md) — what the session's model choice reads, how it decides, and where it stops
+- [Error detection & auto-escalation](escalation.md) — how a verified failure is detected and, on repeat, escalates a rung (ships enabled; armed when a repo is resolved)
+- [The escalation claim](escalation-claim.md) — what we do and do not assert about escalation, with its pre-registered falsifiers and their verdicts
+- [Escalation dataset](escalation-data-card.md) — what the escalation corpus is: provenance, census, known defects, access mechanics
+- [Reproducing the escalation eval](escalation-reproduction.md) — run the offline escalation eval from a fresh clone, and the numbers a correct run reproduces
+- [Results](results.md) — every measured routing and escalation number, with its caveats
+- [Research log](research-log.md) — published ideas we tested, and what held
 - [Benchmark](benchmark.md) — run the offline model-capability and routing evals
+- [Benchmark dataset](benchmark-data.md) — what data is collected and usable, censored cells, outliers, collection modes
 - [Benchmark design](benchmark-design.md) — two-tree structure, strategy interface
+- [Live smoke](live-smoke-runbook.md) — run one real, cheap session through Shunt against a real provider
+- [Free-tier smoke](free-tier-smoke.md) — the weekly, zero-cost CI check against a real $0 model
 
 ## Status
 
 Pre-alpha. The core hypothesis — cheap-first routing beats always-frontier at
-equal quality on agentic coding — is unproven and, on the coding workload, the
-embedding difficulty signal did not clear the bar. The kill gate (beat
-fixed-frontier-with-caching at equal quality on a real workflow) is now
-adjudicated online on production sessions. If it does not hold, the router does not ship.
+equal quality on agentic coding — is unproven, and the embedding difficulty
+signal has not cleared the bar on coding work (on an instrument that cannot yet
+resolve it either way — see above). The make-or-break gate has
+been tested offline on SWE-bench Verified; **it has not been passed** (see
+[Results](results.md#why-we-still-do-not-call-the-gate-passed)). The router does not ship unless and until this gate clears on a real workflow.
 
 Apache-2.0. Import as `shunt` (`shunt-router` on PyPI — `shunt` is taken).
 </content>

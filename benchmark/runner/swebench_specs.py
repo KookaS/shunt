@@ -30,18 +30,6 @@ _DIFFICULTY_STRATUM: Final = {
     "1-4 hours": "hard",
     ">4 hours": "hard",
 }
-# Canonical spec key order — the JSON on disk and the hashed content both use it.
-_SPEC_KEYS = (
-    "instance_id",
-    "repo",
-    "base_commit",
-    "version",
-    "difficulty_stratum",
-    "FAIL_TO_PASS",
-    "PASS_TO_PASS",
-    "image_ref",
-    "dataset_revision",
-)
 
 
 def difficulty_stratum(difficulty: str) -> str:
@@ -73,6 +61,10 @@ class SwebenchSpec:
     pass_to_pass: list[str]
     image_ref: str
     dataset_revision: str
+    # The upstream issue text — the same string ``infer.py`` hands the agent
+    # (``instance["problem_statement"]``), mirrored here so routing embeds the task
+    # instead of a repo@commit label. Empty for specs written before it existed.
+    problem_statement: str = ""
 
     def to_dict(self) -> dict[str, object]:
         """Serialise in canonical key order (F2P/P2P upper-cased to match SWE-bench)."""
@@ -86,6 +78,7 @@ class SwebenchSpec:
             "PASS_TO_PASS": list(self.pass_to_pass),
             "image_ref": self.image_ref,
             "dataset_revision": self.dataset_revision,
+            "problem_statement": self.problem_statement,
         }
 
 
@@ -110,6 +103,7 @@ def spec_from_dict(row: dict[str, object]) -> SwebenchSpec:
         pass_to_pass=_as_list(row["PASS_TO_PASS"]),
         image_ref=str(row["image_ref"]),
         dataset_revision=str(row.get("dataset_revision", "")),
+        problem_statement=str(row.get("problem_statement", "")),
     )
 
 
@@ -130,6 +124,7 @@ def spec_from_dataset_row(
         pass_to_pass=_as_list(row["PASS_TO_PASS"]),
         image_ref=image_ref(instance_id, namespace=namespace, arch=arch),
         dataset_revision=DATASET_REVISION,
+        problem_statement=str(row.get("problem_statement", "")),
     )
 
 

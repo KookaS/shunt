@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import ModuleType
 
+import matplotlib
 import pytest
 
 from tests.mock_openai_server import MockOpenAIServer, MockSignature
+
+# Every figure rendered anywhere in the suite is layout-audited (benchmark/plot_contract.py),
+# so an overlapping title or a clipped tick label fails the test that drew it rather than
+# waiting for someone to open the PNG. Agg and DejaVu Sans are pinned because the audit
+# measures device-space extents, which are backend- and font-dependent.
+matplotlib.use("Agg")
+matplotlib.rcParams["font.family"] = "DejaVu Sans"
+os.environ.setdefault("SHUNT_PLOT_STRICT", "1")
 
 
 @pytest.fixture(autouse=True)

@@ -1,0 +1,11 @@
+t/widget.t .......... 1/2
+#   Failed test 'parse returns 3'
+#   at t/widget.t line 9.
+t/widget.t .......... Failed 1/2 subtests
+
+Test Summary Report
+-------------------
+t/widget.t (Wstat: 0 Tests: 2 Failed: 1)
+  Failed test:  1
+Files=1, Tests=2,  0 wallclock secs
+Result: FAIL

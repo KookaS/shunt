@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from benchmark import config
+from benchmark.routing import plot_style
 
 
 def main(config_path: str = "benchmark/benchmark.yaml"):
@@ -45,7 +46,7 @@ def main(config_path: str = "benchmark/benchmark.yaml"):
     for _tid, task_results in results.items():
         for model in models_order:
             r = task_results.get(model, {})
-            totals[model]["cost"] += r.get("cost", 0.0)
+            totals[model]["cost"] += plot_style.row_real_cost(r)
             totals[model]["in_tok"] += r.get("in_tok", 0)
             totals[model]["out_tok"] += r.get("out_tok", 0)
             totals[model]["calls"] += r.get("calls", 0)

@@ -51,5 +51,6 @@
     "test_issue_9538"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.sympy_1776_sympy-18189:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "diophantine: incomplete results depending on syms order with permute=True\n```\r\nIn [10]: diophantine(n**4 + m**4 - 2**4 - 3**4, syms=(m,n), permute=True)\r\nOut[10]: {(-3, -2), (-3, 2), (-2, -3), (-2, 3), (2, -3), (2, 3), (3, -2), (3, 2)}\r\n\r\nIn [11]: diophantine(n**4 + m**4 - 2**4 - 3**4, syms=(n,m), permute=True)\r\nOut[11]: {(3, 2)}\r\n```\r\n\ndiophantine: incomplete results depending on syms order with permute=True\n```\r\nIn [10]: diophantine(n**4 + m**4 - 2**4 - 3**4, syms=(m,n), permute=True)\r\nOut[10]: {(-3, -2), (-3, 2), (-2, -3), (-2, 3), (2, -3), (2, 3), (3, -2), (3, 2)}\r\n\r\nIn [11]: diophantine(n**4 + m**4 - 2**4 - 3**4, syms=(n,m), permute=True)\r\nOut[11]: {(3, 2)}\r\n```\r\n\n"
 }

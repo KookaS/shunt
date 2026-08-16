@@ -1,0 +1,18 @@
+[==========] Running 3 tests from 1 test suite.
+[ RUN      ] WidgetTest.DoesThing
+[       OK ] WidgetTest.DoesThing (1 ms)
+[ RUN      ] WidgetTest.ParsesInput
+/workspace/test/widget_test.cc:9: Failure
+Expected equality of these values:
+  parse("1+1")
+    Which is: 2
+  3
+[  FAILED  ] WidgetTest.ParsesInput (0 ms)
+[ RUN      ] WidgetTest.Roundtrip
+[       OK ] WidgetTest.Roundtrip (1 ms)
+[==========] 3 tests from 1 test suite ran. (2 ms total)
+[  PASSED  ] 2 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] WidgetTest.ParsesInput
+
+ 1 FAILED TEST

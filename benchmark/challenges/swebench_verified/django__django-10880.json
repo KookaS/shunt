@@ -65,5 +65,6 @@
     "test_values_annotation_with_expression (aggregation.tests.AggregateTestCase)"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-10880:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "Query syntax error with condition and distinct combination\nDescription\n\t\nA Count annotation containing both a Case condition and a distinct=True param produces a query error on Django 2.2 (whatever the db backend). A space is missing at least (... COUNT(DISTINCTCASE WHEN ...).\n"
 }

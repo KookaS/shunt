@@ -10,7 +10,6 @@ providers:
 models:
   gpt-oss-120b-nebius:
     model_id: openai/gpt-oss-120b
-    tier: cheap
     provider: nebius
     supports_streaming: true
     supports_cache_control: false

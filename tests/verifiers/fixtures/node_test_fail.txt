@@ -1,0 +1,4 @@
+not ok 1 - test widget returns value
+# FAIL
+ok 2 - test widget throws on bad input
+1..2

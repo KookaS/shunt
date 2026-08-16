@@ -1,0 +1,316 @@
+{
+  "figures": {
+    "corpus_and_coverage.png": {
+      "caveat": "Panels B/C use the eval-only edit-gated counter; panel D's prefix score reads per-step fields production lacks.",
+      "data_digest": "370b4f954df89cdf",
+      "dpi": 150,
+      "figsize": [
+        13.0,
+        8.0
+      ],
+      "generator": "benchmark.escalation.run_eval",
+      "goal": "In C the within-strata bars must stay well above chance: if the pooled edge disappears once ranking happens inside a model or inside a challenge, the score is reading which model or which task the run belongs to. In D read the two base rates against each other \u2014 an admitted population failing far more often than the corpus is a different population, and a null measured on it is a coverage gap, not a falsification.",
+      "limitations": [
+        "Panel D's population is length-selected by construction: the anti-leak margin excludes every short run, and short runs resolve more often, so the admitted base rate is higher than the corpus's by design rather than by accident.",
+        "99/822 trajectories have no per-step verified outcomes and are excluded from this figure.",
+        "EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action \u2014 a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate."
+      ],
+      "n": {
+        "models": 6,
+        "stamped": 723,
+        "trajectories": 822
+      },
+      "notes": [
+        "Stamping coverage tracks capture DATE, and capture date correlates with model, so model and coverage are confounded on this corpus and cannot be separated from it.",
+        "A single-class stratum contributes no comparable pairs and is DROPPED from the within-strata AUROCs rather than scored at chance.",
+        "AUROC pooled 0.778 \u00b7 within-model 0.746 \u00b7 within-challenge 0.709",
+        "723 scored trajectories, status=OK_OFFLINE_ONLY",
+        "OFFLINE-ONLY UPPER BOUND \u2014 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'",
+        "canonical cell: OFFLINE-ONLY UPPER BOUND \u2014 the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'"
+      ],
+      "reading": "A: the share of each model's trajectories that carry per-step verified outcomes, with 95% Wilson intervals and the counts printed \u2014 a run without them cannot fire the trigger at all and is excluded from every per-step metric. B: per model, P(run failed | fired) against P(run failed | quiet) at the canonical cell, drawn as a dumbbell; a model whose two ends coincide contributes no separation. C: the recurrence score's AUROC pooled, then computed WITHIN each model and WITHIN each challenge and pooled by comparable pairs \u2014 the drop between them is how much of the pooled number is the confound rather than the score. D: the prefix risk model's admission waterfall at its reported depth, with the admitted population's base failure rate against the corpus's.",
+      "size": "wide_tall",
+      "subtitle": "6 models \u00b7 723/822 trajectories stamped \u00b7 prefix depth 10 admits 340/723 at base rate 0.497 vs corpus 0.418 \u00b7 723/822 runs scored",
+      "terms": [
+        [
+          "stamped",
+          "the offline container replay wrote per-step verified outcomes for this run"
+        ],
+        [
+          "canonical cell",
+          "the eval-only edit-gated counter at the shipped knobs (panels B, C)"
+        ],
+        [
+          "within-model AUROC",
+          "ranked only against runs of the same model, pooled by pair count"
+        ],
+        [
+          "admission margin",
+          "runs that reached the depth but leave too few steps unread after it"
+        ]
+      ],
+      "title": "Who is in the sample, and whether the edge survives the confounds"
+    },
+    "escalation_budget.png": {
+      "caveat": "99 of 822 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.",
+      "data_digest": "370b4f954df89cdf",
+      "dpi": 150,
+      "figsize": [
+        13.0,
+        8.0
+      ],
+      "generator": "benchmark.escalation.run_eval",
+      "goal": "Want the pre-empted bar clearly taller than the interrupted one \u2014 that ratio is what the trigger buys per unit of disruption. In the left panel, want the failed-run curve to the LEFT of the resolved one: firing earlier on the runs that were going to fail is the whole point.",
+      "limitations": [
+        "COUNTERFACTUAL BY ARITHMETIC, not by measurement: no logged trajectory escalated, so 'pre-empted' is what firing would have cut short assuming the run would otherwise have continued unchanged. See the scope strip.",
+        "The ledger's ratio is driven mostly by ARM SIZE, not by timing: most of it is simply that more of the fired runs failed. Read it beside the fire-position panel, which is where a timing claim would have to come from \u2014 and where the two curves nearly coincide.",
+        "99/822 trajectories have no per-step verified outcomes and are excluded from this figure.",
+        "EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action \u2014 a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate."
+      ],
+      "n": {
+        "fired_positioned": 431
+      },
+      "notes": [
+        "Aggregates only. The per-run timing arrays these summarise are deliberately not kept: the same reasoning that deleted the lead-time figure \u2014 on this corpus a lead time is largely the run length minus a constant.",
+        "Steps are agent decisions, not wall-clock and not dollars. This is a work ledger, not a cost estimate.",
+        "median fire position 0.442 of the run on failed runs, 0.419 on resolved ones",
+        "723 scored trajectories, status=OK_OFFLINE_ONLY",
+        "OFFLINE-ONLY UPPER BOUND \u2014 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'",
+        "canonical cell: OFFLINE-ONLY UPPER BOUND \u2014 the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'"
+      ],
+      "reading": "Left: where in a run the trigger fires, as a fraction of the run's total steps, drawn as an ECDF for the runs that ultimately FAILED and for the runs that were RESOLVED. A curve that rises early means the trigger fires early in those runs. Right: the steps that sit AFTER the trigger point, totalled over every fired run and split by how the run ended. On a failed run that work was spent and lost, so escalating there PRE-EMPTS it; on a resolved run the agent went on to fix the task, so escalating INTERRUPTS work that was about to pay off. The ratio between the two bars is the trigger's budget case.",
+      "size": "wide_tall",
+      "subtitle": "431 fired runs \u00b7 median fire at step 13 of 31 \u00b7 6099 steps pre-empted vs 3946 interrupted (1.55:1) \u00b7 723/822 runs scored",
+      "terms": [
+        [
+          "edit-gated",
+          "failures before the agent's first edit-like action are not counted"
+        ],
+        [
+          "fire position",
+          "the step index the policy first escalated at, over the run's length"
+        ],
+        [
+          "pre-empted",
+          "steps after the trigger on runs that ultimately failed"
+        ],
+        [
+          "interrupted",
+          "steps after the trigger on runs that were ultimately resolved"
+        ]
+      ],
+      "title": "What firing costs: the eval-only edit-gated trigger pre-empts more than it interrupts"
+    },
+    "escalation_decision.png": {
+      "caveat": "99 of 822 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.",
+      "data_digest": "370b4f954df89cdf",
+      "dpi": 150,
+      "figsize": [
+        13.0,
+        8.0
+      ],
+      "generator": "benchmark.escalation.run_eval",
+      "goal": "The two curves must differ. If they do, the reproduction phase \u2014 not the recurrence mechanism \u2014 is what the as-shipped counter is measuring, and the gap between them is its size. Read the middle panel at the shipped threshold: the edit-gated precision there is the operating point every other figure in this set uses.",
+      "limitations": [
+        "Per-step cadence and eval-only: the live router has no per-step action stream to gate on, so the edit-gated family measures what a per-step detector could do, not what ships.",
+        "Association only \u2014 no stored trajectory contains an escalation that actually happened.",
+        "99/822 trajectories have no per-step verified outcomes and are excluded from this figure."
+      ],
+      "n": {
+        "stamped_runs": 723
+      },
+      "notes": [
+        "stale_window is held FIXED at the shipped value for BOTH curves. It is a knob in its own right \u2014 the as-shipped score reaches 0.728 at stale_window=1000 \u2014 so letting it vary between the two curves would have credited the counting change with a window change.",
+        "The AUROC of the score bounds what ANY single escalate_after_n can reach.",
+        "score null 95% [0.474, 0.550], p=0.0005 over 2000 challenge-block shuffles",
+        "723 scored trajectories, status=OK_OFFLINE_ONLY",
+        "OFFLINE-ONLY UPPER BOUND \u2014 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'"
+      ],
+      "reading": "Left: the COMPLETE ROC of the recurrence score as a continuous statistic \u2014 each run is scored by the largest number of times one failing-check id recurred inside the shipped stale_window, and the curve sweeps every threshold, so it has a point at every possible escalate_after_n rather than only the swept grid. Two curves: as-shipped (every same-key failure counted) and edit-gated (failures before the agent's first edit-like action are not counted). The grey band is the score's own challenge-block permutation null. Middle: P(run failed | score >= t) against t for both families, with the corpus base rate as the no-skill line. Right: what share of the corpus each threshold fires on. The shipped escalate_after_n is marked on both right-hand panels.",
+      "size": "wide_tall",
+      "subtitle": "base rate 0.418 \u00b7 AUROC as-shipped 0.600 \u00b7 edit-gated 0.778 \u00b7 723/822 runs scored",
+      "terms": [
+        [
+          "recurrence score",
+          "max same-key verified-failure count a run reaches in the window"
+        ],
+        [
+          "edit-gated",
+          "failures before the agent's first edit-like action are not counted"
+        ],
+        [
+          "null band",
+          "central 95% of ROC curves under challenge-block label shuffles"
+        ]
+      ],
+      "title": "Counting the reproduction phase is what decides the answer: AUROC 0.601 vs 0.781"
+    },
+    "operating_point.png": {
+      "caveat": "as-shipped not-escalated arm n=0: below the n=10 floor, drawn as undefined",
+      "data_digest": "370b4f954df89cdf",
+      "dpi": 150,
+      "figsize": [
+        13.0,
+        8.0
+      ],
+      "generator": "benchmark.escalation.run_eval",
+      "goal": "The left pair IS the negative result and it belongs on a canvas, not in a table row: a shipped configuration whose escalated bar sits on the base rate is a null detector. Then want the right pair's escalated bar clearly above both the dashed line and its own quiet bar, and the red observed line to the right of BOTH null distributions. Clearing the grey null alone is not enough: the challenge-block shuffle destroys the run-length association along with everything else, so a cell whose firing is really length selection can clear it and still sit inside the blue one.",
+      "limitations": [
+        "Association, not causation \u2014 see the scope strip: no logged trajectory escalated.",
+        "Two operating points; the sweep figure shows every other configuration.",
+        "99/822 trajectories have no per-step verified outcomes and are excluded from this figure.",
+        "EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action \u2014 a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate."
+      ],
+      "n": {
+        "fired": 431,
+        "quiet": 292
+      },
+      "notes": [
+        "Both pairs are at the SAME knobs, so the only thing that differs between them is how the counter treats the reproduction phase.",
+        "The intervals are a CHALLENGE-level bootstrap: the corpus is drawn from ~166 challenges, each attempted by several model/effort arms, so a row-level interval is roughly 2x too narrow.",
+        "as-shipped at escalate_after_n=2, stale_window=10; fired on 723/723; P(fail|fired)=0.418 [0.343, 0.484] vs quiet n/a; AUROC 0.500 against a run-length-only 0.500",
+        "edit-gated at escalate_after_n=2, stale_window=10; fired on 431/723; P(fail|fired)=0.589 [0.508, 0.655] vs quiet 0.164; AUROC 0.710 against a run-length-only 0.568",
+        "723 scored trajectories, status=OK_OFFLINE_ONLY",
+        "OFFLINE-ONLY UPPER BOUND \u2014 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'",
+        "canonical cell: OFFLINE-ONLY UPPER BOUND \u2014 the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'"
+      ],
+      "reading": "Left: at the SAME shipped knobs, the share of runs that ultimately failed among those the policy escalated and among those it left alone \u2014 for BOTH counting modes. The left pair is the configuration the product actually ships, which fires on essentially every run: its escalated bar sits on the dashed base rate and its not-escalated arm holds so few runs that no rate can be read off it, so it is drawn as a hatched 'undefined' box rather than as a measured 0.000. The right pair is the same rule with the reproduction phase excluded. Intervals are the central 95% of the same challenge-bootstrap resamples, so the two arms of a pair are paired draw-for-draw. Right: the CANONICAL (edit-gated) cell's AUROC against TWO nulls \u2014 the family-wise max-over-cells challenge-block null (grey), which asks whether any cell in the sweep could reach this by chance, and the length-stratified null (blue), which shuffles failures inside equal-count run-length bins and so asks whether firing predicts failure BEYOND what the lengths of the fired runs already predict.",
+      "size": "wide_tall",
+      "subtitle": "both at escalate_after_n=2, stale_window=10 \u00b7 base rate 0.418 \u00b7 as-shipped fires 723/723 at P(fail|fired)=0.418 \u00b7 edit-gated fires 431/723 at 0.589 vs 0.164 quiet \u00b7 723/822 runs scored",
+      "terms": [
+        [
+          "as-shipped",
+          "every same-key verified failure counts, which is what production runs"
+        ],
+        [
+          "canonical cell",
+          "edit-gated counting at the shipped escalate_after_n/stale_window"
+        ],
+        [
+          "family-wise null",
+          "max AUROC over the swept cells under one shared block shuffle"
+        ],
+        [
+          "length-stratified null",
+          "failures shuffled within equal-count run-length bins"
+        ]
+      ],
+      "title": "The shipped counter sits at the base rate; edit-gated counting separates outcomes"
+    },
+    "policy_sweep.png": {
+      "caveat": "99 of 822 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.",
+      "data_digest": "370b4f954df89cdf",
+      "dpi": 150,
+      "figsize": [
+        16.0,
+        10.45
+      ],
+      "generator": "benchmark.escalation.run_eval",
+      "goal": "Compare the A and B columns row by row. A configuration whose P(fail|fired) sits at the base rate has no measured value at all; the gap between the A and B columns of the SAME row is the reproduction phase's contribution, isolated from every other knob. The two knobs are coupled \u2014 reaching n recurrences needs a window at least that wide \u2014 which is why the stale_window=10 rows stop firing above n=10.",
+      "limitations": [
+        "Every number here is unadjusted for the 60 configurations compared side by side; the family-wise correction lives in each cell's null, not in this table.",
+        "A configuration that never fires has no P(fail|fired) at all and prints n/a.",
+        "30 of 60 configurations across both families clear the base failure rate; every other cell in this table does not.",
+        "99/822 trajectories have no per-step verified outcomes and are excluded from this figure."
+      ],
+      "n": {
+        "configurations": 30
+      },
+      "notes": [
+        "The table is drawn rather than plotted because the sweep has too few distinct results to carry a colour channel honestly.",
+        "The interval is the CHALLENGE-level bootstrap, not a Wilson interval over rows: the corpus is drawn from ~166 challenges, so rows are not independent draws and a row-level interval is roughly 2x too narrow.",
+        "30 configurations per family; highest P(fail|fired) is 0.947 at edit-gated escalate_after_n=50 (stale_window=1000) against a base rate of 0.418",
+        "723 scored trajectories, status=OK_OFFLINE_ONLY",
+        "OFFLINE-ONLY UPPER BOUND \u2014 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'"
+      ],
+      "reading": "One row per configuration of the two coupled knobs \u2014 escalate_after_n and stale_window, with the escalation ladder pinned to the shipped one. The A columns are as-shipped counting (every same-key verified failure counts); the shaded B columns are the same configuration with the reproduction phase excluded, i.e. failures before the agent's first edit-like action are not escalation evidence. Per family: how many trajectories the cell fired on, P(run failed | fired), and the AUROC of the fired flag against the terminal outcome. The row that IS the shipped default is highlighted.",
+      "size": "table_31",
+      "subtitle": "30 configurations x 2 counting modes \u00b7 A = as-shipped \u00b7 B = edit-gated \u00b7 shipped default highlighted \u00b7 len-only = the AUROC run length alone reaches at that cell's flag count \u00b7 723/822 runs scored",
+      "terms": [
+        [
+          "A",
+          "as-shipped counting"
+        ],
+        [
+          "B",
+          "edit-gated counting (failures before the first edit excluded)"
+        ],
+        [
+          "P(fail)",
+          "share of the runs this cell fired on that ultimately failed"
+        ],
+        [
+          "len-only",
+          "the AUROC a pure 'run length >= t' predictor reaches at THIS cell's flag count \u2014 the ceiling run length alone can explain, so an AUROC no higher than it is length selection rather than recurrence"
+        ]
+      ],
+      "title": "Every swept configuration, in both counting modes, against one base rate"
+    },
+    "session_value.png": {
+      "caveat": "Observational, and the escalate arm does not beat always-frontier, random-escalate \u2014 read panel C.",
+      "data_digest": "370b4f954df89cdf",
+      "dpi": 150,
+      "figsize": [
+        13.0,
+        8.0
+      ],
+      "generator": "benchmark.escalation.run_eval",
+      "goal": "The middle panel decides escalate-vs-retry; the right panel decides whether the ladder is worth having at all. A point left of zero there is a competitor the escalate arm does not beat. Neither panel is about the shipped ladder's rungs \u2014 the arm drawn here is the corpus's most expensive models, which the ladder reaches last, if at all.",
+      "limitations": [
+        "Observational: the arms ran in parallel and which tasks got frontier coverage was adaptive. Small n \u2014 read the interval, not the point estimate.",
+        "THE ESCALATE ARM IS NOT THE SHIPPED LADDER. It is the most expensive models in the corpus, and the shipped ladder does not step straight to them: it buys the cheapest ranks first and only then jumps, and those intermediate rungs are measured separately on the routing corpus as null or net-harmful. Read this as the value of escalating TO THIS ARM, never as what the shipped default achieves.",
+        "The escalate arm conditions on a cheap failure; the always-frontier and always-cheap arms do not, so they also cover tasks the cheap model already resolved.",
+        "Scored on ALL 822 trajectories, not the 723-run per-step-stamped subset the other escalation figures use: a session outcome is read from the run header, so an unstamped run is still scorable here."
+      ],
+      "n": {
+        "escalate_sessions": 45,
+        "overlap_instances": 48,
+        "retry_sessions": 34
+      },
+      "notes": [
+        "At session cadence the detector is trivially satisfied \u2014 the failed cheap session carries the task's target failing-check id \u2014 so this measures the LADDER's value, not the trigger's detection quality.",
+        "The dashed line is the cheap model's UNCONDITIONAL base rate. The bars condition on a cheap failure on the same task, so the line is not a ceiling for them.",
+        "instance-level bootstrap over 48 overlap tasks, not Wilson over sessions: several frontier sessions on one task are one draw, not several",
+        "the shipped ladder (rank_shortlist=3) walks qwen3.7-plus -> gpt-5-mini -> kimi-k3 over this corpus's price order: of the escalate arm it reaches kimi-k3, and only after billing qwen3.7-plus, gpt-5-mini first",
+        "cost is the provider's billed real_cost joined per (task, model, reasoning); an arm pays for the sessions it had to run first, so the escalate arm carries its failed cheap session. 'naive' is CACHE-BLIND \u2014 it charges a repeated model as if its prefix were cold; 'cache-aware' applies the shared cache model, whose hit rate is assumed, not measured. USD per marginal resolve is against the always-cheap floor, on that arm's own tasks \u2014 and the escalate arm's tasks are the fired subset, not the whole overlap set.",
+        "822 trajectories read at session cadence (per-step stamping not required), status=OK_OFFLINE_ONLY"
+      ],
+      "reading": "Read on EVERY trajectory in the corpus, not the per-step-stamped subset the other escalation figures score: a session outcome comes off the run header, so a run without per-step stamps still counts here. Measured on the overlap subset \u2014 tasks carrying BOTH a second cheap session and a frontier session, so every arm is read on the same tasks. Left: after a cheap session failed a task, the share of FRONTIER sessions on that task that resolved it (escalate) against the share of a SECOND cheap session that resolved it (retry). Both intervals resample whole INSTANCES, because several frontier sessions on one task are not independent draws. Middle: the PAIRED difference, escalate minus retry, on those same instance resamples, with its 95% interval and zero marked. Right: the same paired difference against the three trivial competitors \u2014 never being cheap (always frontier), never escalating (always cheap), and firing at random at the escalate arm's own rate.",
+      "size": "wide_tall",
+      "subtitle": "escalate arm = the top-2 models by price (zai-glm-5.2, kimi-k3) \u00b7 48 overlap tasks \u00b7 escalate 28/45 vs retry 7/34 \u00b7 lift 3.02x \u00b7 paired difference +0.416 [+0.239, +0.581] \u00b7 baselines not beaten: always_frontier, random_escalate \u00b7 USD per task acted on (naive): escalate 0.554 (0.91/marginal) \u00b7 retry 0.022 (0.05/marginal) \u00b7 frontier 0.566 (1.49/marginal) \u00b7 cheap 0.009 \u00b7 random 0.367 (1.37/marginal) \u00b7 USD per task acted on (cache-aware): escalate 0.554 (0.91/marginal) \u00b7 retry 0.011 (0.01/marginal) \u00b7 frontier 0.566 (1.49/marginal) \u00b7 cheap 0.009 \u00b7 random 0.363 (1.36/marginal) \u00b7 822/822 runs read",
+      "terms": [
+        [
+          "cheap",
+          "the cheapest model present \u2014 the base pick and the retry counterfactual"
+        ],
+        [
+          "overlap subset",
+          "tasks with >=2 cheap sessions AND a frontier session"
+        ],
+        [
+          "always frontier",
+          "the frontier session's outcome, whatever the cheap sessions did"
+        ],
+        [
+          "always cheap",
+          "the first cheap session's outcome, unconditionally"
+        ],
+        [
+          "random escalate",
+          "escalation fired on a seeded subset sized to the real fire rate"
+        ],
+        [
+          "rung",
+          "a model the ladder can step to; the shipped shortlist walks the cheapest ranks one at a time and then jumps to the top rank"
+        ],
+        [
+          "frontier",
+          "the 2 most expensive models present in the corpus: zai-glm-5.2, kimi-k3"
+        ]
+      ],
+      "title": "Escalating to the top-two models beats a cheap retry, but not always-frontier or random"
+    }
+  },
+  "half": "escalation",
+  "schema": 1
+}

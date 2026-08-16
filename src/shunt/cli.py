@@ -5,9 +5,13 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from typing import TYPE_CHECKING
 
 from shunt import __version__
 from shunt.log_config import LEVELS, LOG_LEVEL_ENV
+
+if TYPE_CHECKING:
+    from shunt.router.inspection import EscalationReport
 
 
 def _apply_router_flag_overrides(args: argparse.Namespace) -> None:
@@ -18,8 +22,13 @@ def _apply_router_flag_overrides(args: argparse.Namespace) -> None:
     strategy = getattr(args, "strategy", None)
     explore = getattr(args, "explore", None)
     budget = getattr(args, "explore_budget_frac", None)
+    work_dir = getattr(args, "work_dir", None)
     if strategy is not None:
         os.environ["SHUNT_ROUTER_STRATEGY"] = strategy
+    if work_dir is not None:
+        # Same env var the file's single `work_dir` is overridden by, so the flag inherits
+        # its precedence (map > flag/env > file > validated launch dir) with no second path.
+        os.environ["SHUNT_WORK_DIR"] = work_dir
     if explore is not None:
         os.environ["SHUNT_EXPLORATION_ENABLED"] = "1" if explore else "0"
     if budget is not None:
@@ -44,6 +53,15 @@ def _add_start_flags(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=None,
         help="Exploration budget fraction (~1.4x cost at 0.4).",
+    )
+    parser.add_argument(
+        "--work-dir",
+        default=None,
+        help=(
+            "Repo whose tests are re-run off the wire to verify outcomes. Overrides "
+            "capture.work_dir. Unset: the launch directory is used if it is a git repo with "
+            "a test framework. WARNING: this runs that repo's own test code."
+        ),
     )
     parser.add_argument(
         "--log-level",
@@ -94,9 +112,15 @@ def _explain(args: argparse.Namespace) -> None:
     print(f"Model chosen:   {prov.get('model_chosen', '?')}")
     print(f"Selection rule: {prov.get('selection_rule_used', '?')}")
     print(f"Fallback:       {'yes' if prov.get('fallback_chain_triggered') else 'no'}")
-    es_reason = prov.get("tier_escalation_reason")
+    es_reason = prov.get("rank_escalation_reason")
     if es_reason:
         print(f"Escalation:     {es_reason}")
+    # An EFFORT escalation keeps the model and raises its reasoning arm, so `Model chosen`
+    # alone cannot show it: without this line an effort-escalated session explains
+    # identically to the un-escalated base pick it is no longer running.
+    arm = prov.get("escalated_reasoning_arm")
+    if arm:
+        print(f"Reasoning arm:  {arm}  (escalated)")
     print(f"Router propensity: {prov.get('router_propensity', '?')}")
     print()
 
@@ -114,6 +138,138 @@ def _explain(args: argparse.Namespace) -> None:
         print(f"Top-k neighbors ({len(neighbor_ids)}):")
         for sid, conf in zip(neighbor_ids, confidence_scores, strict=False):
             print(f"  {sid}  (confidence={conf:.3f})")
+
+
+def _escalate(args: argparse.Namespace) -> None:
+    """Inspect the auto-escalation state for a repo — read-only, never mutating."""
+    # READ-ONLY BY DESIGN, and the mutation the flags deliberately omit is the point: a running
+    # server holds this state in memory and re-serializes the WHOLE snapshot on its own cadence,
+    # so a `--force-rank`/`--suppress` writing `router_state` from this process would be silently
+    # clobbered, or would restore a half-consistent ladder (a rank floor with no matching effort
+    # arm). Escalation is also boundary-only by construction; a CLI that pushed a rung mid-flight
+    # would be the one path that can change a model outside a decision boundary, which is the
+    # cache-safety spine. Change the knobs in router.yaml and restart instead.
+    from shunt.db.store import OutcomeStore
+    from shunt.models import ModelPool
+    from shunt.router.inspection import escalation_report, resolve_inspection_work_dir
+    from shunt.router.policy import load_router_policy, resolved_policy_path
+
+    policy_path = resolved_policy_path()
+    policy = load_router_policy()
+    work_dir, source = resolve_inspection_work_dir(policy, args.work_dir, os.getcwd())
+    model_pool = ModelPool(config_path=os.environ.get("SHUNT_MODEL_CONFIG_PATH"))
+    model_pool.restrict_to_live(policy.models)
+    store = OutcomeStore()
+    try:
+        report = escalation_report(
+            policy=policy,
+            policy_path=policy_path,
+            model_pool=model_pool,
+            outcome_store=store,
+            work_dir=work_dir,
+            work_dir_source=source,
+        )
+    finally:
+        store.close()
+
+    if args.as_json:
+        import dataclasses
+        import json
+
+        print(json.dumps(dataclasses.asdict(report), indent=2))
+        return
+    _print_escalation_report(report)
+
+
+def _print_escalation_report(report: EscalationReport) -> None:
+    """Render the escalation report as the CLI's plain stdout block."""
+    print(f"Work dir:       {report.work_dir or '(unresolved)'}  [{report.work_dir_source}]")
+    print(f"Task key:       {report.task_key or '(none)'}")
+    print(f"Escalation:     {'enabled' if report.enabled else 'DISABLED'}")
+    print(f"Policy file:    {report.policy_path}")
+    print()
+    print("Config:")
+    for item in report.config:
+        print(f"  {item.key:<20} {item.value!s:<16} ({item.source})")
+    print()
+    if report.work_dir is None:
+        _print_inert(report)
+        return
+    _print_ladder(report)
+    print()
+    _print_window(report)
+    print()
+    _print_suppression(report)
+    print()
+    _print_next(report)
+
+
+def _print_inert(report: EscalationReport) -> None:
+    """Explain the inert state: no repo resolved means no verified-failure signal at all."""
+    print(
+        "No work_dir resolved, so escalation is INERT: its only signal is the off-wire "
+        "test re-run of a repo, and there is none to run."
+    )
+    print(
+        "Set capture.work_dir / SHUNT_WORK_DIR, launch shunt inside the repo, or pass --work-dir."
+    )
+    if report.mapped_work_dirs:
+        print("Per-tool capture.work_dirs (pass one with --work-dir):")
+        for identity, path in sorted(report.mapped_work_dirs.items()):
+            print(f"  {identity}: {path}")
+
+
+def _print_ladder(report: EscalationReport) -> None:
+    """Print the task's rung: which model, which reasoning arm, how much headroom."""
+    ladder = report.ladder
+    floor = "none climbed yet" if ladder.rank_floor is None else str(ladder.rank_floor)
+    print("Ladder position:")
+    seen = "" if report.state_present else "  (no persisted state for this task)"
+    print(f"  Decisions seen: {report.decision_index}{seen}")
+    print(f"  Rank floor:     {floor}")
+    print(f"  Model:          {ladder.model or '(none)'}  [{ladder.model_source}]")
+    print(f"  Rank:           {ladder.rank_index} of 0..{ladder.max_rank_index}")
+    arm = ladder.effort_arm or "(model has no reasoning arms)"
+    print(f"  Reasoning arm:  {arm}  (rung {ladder.effort_index} of 0..{ladder.max_effort_index})")
+
+
+def _print_window(report: EscalationReport) -> None:
+    """Print the live failure log, per key then per event, with each event's counting verdict."""
+    n = next((c.value for c in report.config if c.key == "escalate_after_n"), "?")
+    print(f"Failure window (a key escalates at {n} counting failures):")
+    if not report.keys:
+        print("  (no failures in the window)")
+    for key in report.keys:
+        due = "  ← DUE" if key.due else ""
+        print(f"  {key.dedup_key}: {key.countable} counting / {key.events} event(s){due}")
+    if report.events:
+        print("  events:")
+    for event in report.events:
+        stale = "" if event.in_window else "  [stale — outside the window]"
+        print(f"    #{event.decision_index} {event.dedup_key}: {event.verdict}{stale}")
+
+
+def _print_suppression(report: EscalationReport) -> None:
+    """Print the collapse guard — the reported failure mode where escalation silently no-ops."""
+    print("Suppression:")
+    print(f"  Routing-collapse alarm: {'YES' if report.collapse_alarm else 'no'}")
+    print(f"  Cold start active:      {'yes' if report.cold_start_active else 'no'}")
+    if report.cold_start_active:
+        print("    (the alarm is ignored while cold-start routes every session to the cheap model)")
+    verdict = "YES — escalation will HOLD" if report.suppressed else "no"
+    print(f"  Escalation suppressed:  {verdict}")
+
+
+def _print_next(report: EscalationReport) -> None:
+    """Print what the real decide_escalation returns against the real persisted state."""
+    print("Next decision (from the real decide_escalation, on the state above):")
+    print(f"  Action: {report.next_action}")
+    print(f"  Reason: {report.next_reason}")
+    if report.exploration_epsilon > 0:
+        print(
+            f"  Note:   exploration_epsilon={report.exploration_epsilon} — at a flagged "
+            "checkpoint the escalation is withheld (HOLD) with that probability."
+        )
 
 
 def _flag(args: argparse.Namespace) -> None:
@@ -189,6 +345,27 @@ def main() -> None:
     explain = sub.add_parser("explain", help="Explain a routing decision")
     explain.add_argument("session_id", help="Session ID to explain")
     explain.set_defaults(func=_explain)
+
+    escalate = sub.add_parser(
+        "escalate",
+        help="Inspect auto-escalation state for a repo (read-only)",
+        description="Read-only: the effective escalation config and where each value came "
+        "from, the task's rung on the ladder, the live failure window, whether the "
+        "collapse guard is suppressing escalation, and what the next decision would do. "
+        "Nothing is mutated — the running server owns this state.",
+    )
+    escalate.add_argument(
+        "--work-dir",
+        default=None,
+        help="Repo whose escalation state to inspect (default: the router's own resolution).",
+    )
+    escalate.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the report as JSON instead of the text block.",
+    )
+    escalate.set_defaults(func=_escalate)
 
     flag = sub.add_parser("flag", help="Flag a session outcome as good or bad")
     flag.add_argument("session_id", help="Session ID to flag")

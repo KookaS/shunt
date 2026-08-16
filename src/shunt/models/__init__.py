@@ -1,3 +1,3 @@
-from shunt.models.config import TIER_ORDER, ModelConfig, ModelPool, Tier
+from shunt.models.config import ModelConfig, ModelPool, RankedModel
 
-__all__ = ["ModelConfig", "ModelPool", "Tier", "TIER_ORDER"]
+__all__ = ["ModelConfig", "ModelPool", "RankedModel"]

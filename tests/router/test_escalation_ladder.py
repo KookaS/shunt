@@ -1,7 +1,7 @@
-"""Multi-rung tier climb, boundary-only application, and post-escalation retire.
+"""Multi-rung rank climb, boundary-only application, and post-escalation retire.
 
 Drives the REAL RouterEngine (decide + record_outcome), not a hand-built directive,
-so the live tier ceiling math and retire semantics are exercised end to end. Fakes only.
+so the live rank ceiling math and retire semantics are exercised end to end. Fakes only.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from shunt.router.engine import RouterEngine
+from shunt.router.engine import RouterEngine, task_state_key
 from shunt.router.escalation import EscalationConfig
 from shunt.router.selection import NeighborResult
 
@@ -20,19 +20,23 @@ class _M:
     name: str
 
 
-class _TieredPool:
-    """cheap=qwen, mid=glm, high=opus, frontier empty — all healthy."""
+class _RankedPool:
+    """qwen < glm < opus (weakest -> strongest) — all healthy."""
 
     def __init__(self) -> None:
-        self._tiers = {
-            "cheap": [_M("qwen")],
-            "mid": [_M("glm")],
-            "high": [_M("opus")],
-            "frontier": [],
-        }
+        self._ranked = [_M("qwen"), _M("glm"), _M("opus")]
 
-    def get_tier_models(self, tier: str) -> list[_M]:
-        return self._tiers.get(tier, [])
+    def ranked_models(self) -> list[_M]:
+        return list(self._ranked)
+
+    def rank_of(self, name: str) -> int | None:
+        for i, m in enumerate(self._ranked):
+            if m.name == name:
+                return i
+        return None
+
+    def models_from_rank(self, i: int) -> list[_M]:
+        return self._ranked[max(i, 0) :]
 
     def is_healthy(self, name: str) -> bool:
         return True
@@ -95,11 +99,11 @@ class _Embedder:
 
 def _engine(index: _ClimbingIndex | None = None) -> RouterEngine:
     return RouterEngine(
-        model_pool=_TieredPool(),
+        model_pool=_RankedPool(),
         session_manager=_SessionManager(),
         outcome_index=index if index is not None else _ClimbingIndex(),
         embedder=_Embedder(),
-        escalation=EscalationConfig(enabled=True, escalate_after_n=2, ladder="tier_only"),
+        escalation=EscalationConfig(enabled=True, escalate_after_n=2, ladder="rank_only"),
         task_key_resolver=lambda _s: "repoA",
     )
 
@@ -111,7 +115,7 @@ def _fail(eng: RouterEngine) -> None:
         task_key="repoA",
         dedup_key="t::a",
         exit_code=1,
-        blocking=True,
+        is_infra_failure=False,
         confirmed=True,
     )
 
@@ -130,15 +134,15 @@ def test_ladder_climbs_one_rung_per_recurrence_then_holds_at_ceiling() -> None:
     eng = _engine(index)
 
     m1, r1 = _two_reds_then_decide(eng, "0")
-    assert (m1, r1) == ("glm", "auto_escalation")  # cheap -> mid
+    assert (m1, r1) == ("glm", "auto_escalation")  # rank 0 -> 1
 
     index.base = "glm"  # the escalated model is now the task's working base
     m2, r2 = _two_reds_then_decide(eng, "1")
-    assert (m2, r2) == ("opus", "auto_escalation")  # mid -> high, one rung
+    assert (m2, r2) == ("opus", "auto_escalation")  # rank 1 -> 2, one rung
 
-    index.base = "opus"  # at the top tier; frontier is empty
+    index.base = "opus"  # at the top rank
     m3, r3 = _two_reds_then_decide(eng, "2")
-    assert m3 == "opus"  # ceiling: no strictly-higher tier, model unchanged
+    assert m3 == "opus"  # ceiling: no strictly-higher rank, model unchanged
     assert r3 != "auto_escalation"  # held, not escalated off the top
 
 
@@ -153,7 +157,7 @@ def test_record_outcome_does_not_mutate_the_served_decision_mid_turn() -> None:
     assert _fail(eng) is None
     state = eng.snapshot_escalation_state()
     assert state["effort_arm"] == {}  # no mid-turn effort switch was applied
-    assert len(state["failure_log"]["repoA"]) == 2  # the reds were only queued
+    assert len(state["failure_log"][task_state_key("repoA")]) == 2  # the reds were only queued
 
 
 def test_no_reescalation_off_already_consumed_reds() -> None:

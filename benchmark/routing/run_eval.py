@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 import argparse
+import random
 from collections.abc import Callable
 from pathlib import Path
+from typing import Final
 
 from benchmark import config
-from benchmark.routing import frontier_estimate, summary
+from benchmark.routing import frontier_estimate, impute, selection_guard, summary
 from benchmark.routing.metrics import discriminating_stats
-from benchmark.routing.strategies.external_prior import ExternalPriorCascade
+from benchmark.routing.session_cascade_control import assert_ladder_quotable
 from benchmark.routing.strategies.fixed import AlwaysCheap, AlwaysFrontier, Random
 from benchmark.routing.strategies.knn import kNNStrategy
-from benchmark.routing.strategies.knn_blended import kNNBlended
 from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
 from benchmark.routing.strategies.oracle import Oracle, OracleRewardAware
+from benchmark.routing.strategies.price_cascade import PriceCascade
+from benchmark.routing.strategies.session_cascade import SessionCascadeStrategy
+from benchmark.routing.strategies.tier_classifier import TierClassifier
+from benchmark.routing.strategy_class import is_live
 
 
 def _results_file(base_dir: Path, k: int, success_rate: float, min_samples: int) -> Path:
@@ -37,6 +42,9 @@ def get_strategies(
     strat_cfg = config.strategies()
     enabled = strat_cfg.get("enabled", [])
     if not enabled:
+        # The no-config fallback means "every registered strategy". It has to stay in step
+        # with `registry` below — it silently omitted tier_classifier, so a run with no
+        # config scored one fewer strategy than a reader of this list would expect.
         enabled = [
             "oracle",
             "oracle_reward",
@@ -45,17 +53,21 @@ def get_strategies(
             "random",
             "knn",
             "knn_cascade",
+            "price_cascade",
+            "session_cascade",
+            "tier_classifier",
         ]
 
     knn_p = dict(strat_cfg.get("knn", {}))
     cascade_p = dict(strat_cfg.get("knn", {}))
     cascade_p.update(strat_cfg.get("knn_cascade", {}))
-    ext_p = dict(strat_cfg.get("external_prior", {}))
-    blend_p = dict(strat_cfg.get("knn_blended", {}))
+    tier_p = dict(strat_cfg.get("knn", {}))
+    tier_p.update(strat_cfg.get("tier_classifier", {}))
 
     if k is not None:
         knn_p.setdefault("k", k)
         cascade_p.setdefault("k", k)
+        tier_p.setdefault("k", k)
     if success_rate is not None:
         knn_p.setdefault("success_rate_threshold", success_rate)
         cascade_p.setdefault("success_rate_threshold", success_rate)
@@ -64,6 +76,17 @@ def get_strategies(
         cascade_p.setdefault("min_samples", min_samples)
     if max_tries is not None:
         cascade_p.setdefault("max_tries", max_tries)
+    # Price-Cascade takes only max_tries — it has no kNN knobs by construction, and
+    # sharing the cascade's depth keeps the two cascades comparable at equal depth.
+    price_p = {"max_tries": cascade_p.get("max_tries", 3)}
+    # Session-Cascade takes the PRODUCT's escalation knobs, not the cascade's depth: its ladder
+    # length is the model pool's, and what it is parameterised by is the live recurrence policy.
+    session_p = dict(strat_cfg.get("session_cascade", {}))
+    # STRUCTURAL: refuse to build the strategy at a ladder its positive control does not cover,
+    # rather than produce a row nobody may quote. Raised here — before any evaluation — so the
+    # failure costs nothing and cannot be mistaken for a result.
+    if "session_cascade" in enabled:
+        assert_ladder_quotable(str(session_p.get("ladder", "rank_only")))
 
     registry: dict[str, Callable[[], object]] = {
         "oracle": lambda: Oracle(),
@@ -73,8 +96,9 @@ def get_strategies(
         "random": lambda: Random(seed=42),
         "knn": lambda: kNNStrategy(**knn_p),
         "knn_cascade": lambda: kNNCascadeStrategy(**cascade_p),
-        "external_prior": lambda: ExternalPriorCascade(**ext_p),
-        "knn_blended": lambda: kNNBlended(**blend_p),
+        "price_cascade": lambda: PriceCascade(**price_p),
+        "session_cascade": lambda: SessionCascadeStrategy(**session_p),
+        "tier_classifier": lambda: TierClassifier(**tier_p),
     }
 
     return [registry[name]() for name in enabled if name in registry]
@@ -236,10 +260,19 @@ def _frontier_gate_inputs(matrix: dict, tasks: list[str]) -> dict:
 def _paired_outcomes(
     matrix: dict, disc: list[str], control: str
 ) -> tuple[dict[str, int], dict[str, int]]:
-    """Router (knn_cascade) vs fixed-frontier (control) realized pass on the disputed set."""
-    from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
-
-    router = kNNCascadeStrategy(**config.knn_params())
+    """Shipped kNN router vs fixed-frontier (control) realized pass on the disputed set."""
+    # The arm has to be a strategy `LIVE_STRATEGIES` accepts, or the gate adjudicates
+    # "should we ship this" on something the product refuses to run. It used to be
+    # kNN-cascade, which is blocked (see benchmark/routing/strategy_class.py) — the same
+    # substitution benchmark/runner/kill_gate.py was fixed away from. Single-shot: one
+    # decision per task, so the contrast is single-shot-vs-single-shot rather than
+    # best-of-N coverage against a single attempt.
+    knn = config.knn_params()
+    router = kNNStrategy(
+        k=knn.get("k", 20),
+        success_rate_threshold=knn.get("success_rate_threshold", 0.6),
+        min_samples=knn.get("min_samples", 3),
+    )
     results = matrix.get("results", {})
     router_pass: dict[str, int] = {}
     baseline_pass: dict[str, int] = {}
@@ -274,16 +307,129 @@ def _print_frontier_gate(gate: dict) -> None:
         print(f"  confidence sequence: {verdict}  e={s.e_value:.2f} CI {sci}")
 
 
+# Below this many shared scorable tasks a paired router-vs-frontier delta is too
+# thin to trust — refuse the headline rather than print a bogus number (design R1).
+_MIN_PAIRED: Final[int] = 10
+
+# The fixed-frontier comparison arm, by display name.
+_BASELINE_STRATEGY: Final[str] = "Always-Frontier"
+
+
+def _pick_router(rows: list[dict]) -> str | None:
+    """Best LIVE router by Reward — the headline must name something an operator can run."""
+    # `is_live` is the product's own allowlist, so this can no longer drift from it. The
+    # frontier baseline IS live; it is excluded because it is the thing being compared
+    # against, not a candidate router.
+    candidates = [
+        r
+        for r in rows
+        if is_live(str(r["strategy"]))
+        and str(r["strategy"]) != _BASELINE_STRATEGY
+        and int(r.get("n_tasks", 0) or 0) > 0
+    ]
+    if not candidates:
+        return None
+    return str(max(candidates, key=lambda r: float(r.get("Reward", 0)))["strategy"])
+
+
+def _strategy_named(strategies: list, name: str) -> object | None:
+    return next((s for s in strategies if getattr(s, "name", None) == name), None)
+
+
+def _paired_bootstrap_ci(diffs: list[int], seed: int, n_boot: int = 1000) -> tuple[float, float]:
+    """95% percentile CI (percentage points) for the mean paired pass-rate difference."""
+    n = len(diffs)
+    rng = random.Random(seed)
+    means = sorted(
+        100.0 * sum(diffs[rng.randrange(n)] for _ in range(n)) / n for _ in range(n_boot)
+    )
+    a = int(0.025 * n_boot)
+    return (means[a], means[n_boot - 1 - a])
+
+
+def _paired_delta(
+    completed: dict, tasks: list[str], router: object, frontier: object, seed: int
+) -> dict | None:
+    """Router-minus-frontier pass rate (pp) on the INTERSECTION of their scorable
+    tasks, with a paired bootstrap CI. None when the two share no scorable task."""
+    r_dec, r_uns = summary.evaluate(router, completed, tasks)
+    f_dec, f_uns = summary.evaluate(frontier, completed, tasks)
+    r_pass = {d[0]: bool(d[2]) for d in r_dec}
+    f_pass = {d[0]: bool(d[2]) for d in f_dec}
+    shared = [t for t in tasks if t not in r_uns and t not in f_uns]
+    if not shared:
+        return None
+    diffs = [int(r_pass[t]) - int(f_pass[t]) for t in shared]
+    delta = 100.0 * sum(diffs) / len(diffs)
+    lo, hi = _paired_bootstrap_ci(diffs, seed)
+    return {"n": len(shared), "delta": delta, "ci": (lo, hi)}
+
+
+def _print_paired(router: str, label: str, res: dict, flip: bool = False) -> None:
+    lo, hi = res["ci"]
+    tag = "  (CI crosses zero — not significant)" if lo <= 0 <= hi else ""
+    if flip:
+        tag += "  ⚠ SIGN FLIPS vs all-tasks"
+    print(
+        f"  Paired contrast ({router} vs Always-Frontier, pass% on {res['n']} shared tasks) "
+        f"[{label}]: {res['delta']:+.1f}pp 95% CI [{lo:+.1f}, {hi:+.1f}]{tag}"
+    )
+
+
+def _print_imputation_gate(
+    matrix: dict, tasks: list[str], strategies: list, rows: list[dict], gamma: float, seed: int
+) -> None:
+    """Print the monotonicity violation rate (Wilson CI) and the PAIRED router-vs-frontier
+    contrast (with a CI) on the shared scorable set, plus the violators-excluded sensitivity."""
+    completed, im = summary.complete_scored_matrix(matrix)
+    if im is None:
+        return
+    v, lo, hi = impute.violation_ci(len(im.violations), im.n_multi_observed)
+    print(
+        f"\nCoverage-completed imputation: monotonicity violation rate "
+        f"v̂={v:.3f} 95% CI [{lo:.3f}, {hi:.3f}] "
+        f"({len(im.violations)} of {im.n_multi_observed} multi-observed tasks)"
+    )
+    router_name = _pick_router(rows)
+    router = _strategy_named(strategies, router_name) if router_name else None
+    frontier = _strategy_named(strategies, "Always-Frontier")
+    if router is None or frontier is None or router_name is None:
+        return
+    full = _paired_delta(completed, tasks, router, frontier, seed)
+    if full is None or full["n"] < _MIN_PAIRED:
+        got = full["n"] if full else 0
+        print(
+            f"  Paired contrast refused — {router_name} and Always-Frontier share only "
+            f"{got} scorable task(s) (< {_MIN_PAIRED}); too few to pair honestly."
+        )
+        return
+    _print_paired(router_name, "all tasks", full)
+    violator_ids = {viol.task_id for viol in im.violations}
+    kept = [t for t in tasks if t not in violator_ids]
+    excl = _paired_delta(completed, kept, router, frontier, seed)
+    if excl is not None and excl["n"] >= _MIN_PAIRED:
+        _print_paired(
+            router_name, "violators-excluded", excl, (full["delta"] >= 0) != (excl["delta"] >= 0)
+        )
+
+
 def _print_rows(rows: list[dict]) -> None:
     for r in rows:
         ci_ap = f"[{r['AvgPerf_ci_lower']:>5.2f},{r['AvgPerf_ci_upper']:>5.2f}]"
+        ci_c = f"[{r['TotalCost_ci_lower']:>8.4f},{r['TotalCost_ci_upper']:>8.4f}]"
         ci_cr = f"[{r['CumReg_ci_lower']:>7.4f},{r['CumReg_ci_upper']:>7.4f}]"
+        # The subset marker rides on the row itself, not only in a footer: a line copied out of
+        # this table alone still carries the fact that it was not scored on the full sample.
+        flag = " *SUBSET" if r.get("subset_selected") else ""
         print(
             f"  {r['strategy']:25}  AvgPerf={r['AvgPerf%']:>5.2f}%  {ci_ap}  "
-            f"TotalCost=${r['TotalCost']:<8.4f}  "
+            f"TotalCost=${r['TotalCost']:<8.4f} {ci_c}  "
+            f"cache-aware=${r['TotalCost_cacheaware']:<8.4f}  "
             f"CumReg={r['CumReg']:<8.4f}  {ci_cr}  "
-            f"rAcc={r['rAcc']:<6.4f}"
+            f"rAcc={r['rAcc']:<6.4f}{flag}"
         )
+    for line in selection_guard.rows_footer(rows):
+        print(line)
 
 
 def main(config_path: str = "benchmark/benchmark.yaml") -> None:
@@ -332,13 +478,21 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         matrix, tasks, strategies, gamma=args.gamma, bootstrap=args.bootstrap, seed=args.seed
     )
     _print_rows(rows)
+    _print_imputation_gate(matrix, tasks, strategies, rows, args.gamma, args.seed)
 
     if config.collect_enabled():
         gate = compute_frontier_gate(**_frontier_gate_inputs(matrix, tasks))
         _print_frontier_gate(gate)
 
     out_file = _results_file(output_dir, args.knn_k, args.knn_success_rate, args.knn_min_samples)
-    summary.write_summary_csv(rows, out_file)
+    table = summary.certified_table(
+        rows,
+        k=args.knn_k,
+        threshold=args.knn_success_rate,
+        min_samples=args.knn_min_samples,
+    )
+    print(f"\n{table.admissibility.reason}")
+    summary.write_summary_csv(table, out_file)
 
     print(f"\nResults written to {out_file}")
     print(f"  k={args.knn_k}, sr={args.knn_success_rate}, ms={args.knn_min_samples}")

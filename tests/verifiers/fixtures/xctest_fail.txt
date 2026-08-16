@@ -1,0 +1,9 @@
+Test Suite 'All tests' started at 2026-08-11 10:00:00.000
+Test Suite 'WidgetTests.xctest' started at 2026-08-11 10:00:00.000
+Test Case '-[WidgetTests testDoesThing]' passed (0.001 seconds).
+Test Case '-[WidgetTests testParsesInput]' failed (0.002 seconds).
+/workspace/test/WidgetTests.swift:9: error: -[WidgetTests testParsesInput] : XCTAssertEqual failed: ("2") is not equal to ("3")
+Test Suite 'WidgetTests.xctest' failed at 2026-08-11 10:00:00.003.
+	 Executed 2 tests, with 1 failure (0 unexpected) in 0.01 (0.01) seconds
+Test Suite 'All tests' failed at 2026-08-11 10:00:00.003.
+	 Executed 2 tests, with 1 failure (0 unexpected) in 0.01 (0.01) seconds

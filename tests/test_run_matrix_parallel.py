@@ -98,7 +98,7 @@ class TestArmRequestWiring:
     def test_generate_patch_live_threads_arm_to_scaffold(self, monkeypatch):
         captured: dict[str, str] = {}
 
-        def fake_invoke(spec, model, scaffold, arm):
+        def fake_invoke(spec, model, scaffold, arm, **kwargs):
             captured["arm"] = arm
             return infer.AgentPatch(patch="p", in_tok=1, out_tok=1, calls=1, cost=0.0)
 
@@ -574,9 +574,8 @@ class TestCostCeilingBoundaries:
 
 
 class TestChallengeMajorOrdering:
-    """Cells complete challenge-at-a-time, so a ceiling leaves a prefix of fully-covered
-    challenges — fixing the old skew where fast models raced ahead across many challenges
-    while slow ones lagged, leaving a --max-cost cut with many partially-covered challenges.
+    """Challenge-major ordering: PARALLEL leaves a prefix of whole challenges at the ceiling;
+    SERIAL hard-stops per cell the instant spend crosses --max-cost (final challenge partial).
     """
 
     _MODELS: Final[tuple[str, str, str, str]] = ("m0", "m1", "m2", "m3")
@@ -634,7 +633,11 @@ class TestChallengeMajorOrdering:
         # On-disk matches returned (nothing paid-for lost).
         assert len(_read_csv_rows(out)) == len(rows)
 
-    def test_ceiling_prefix_holds_serial_too(self, monkeypatch, tmp_path):
+    def test_serial_hard_stops_per_cell_final_challenge_partial(self, monkeypatch, tmp_path):
+        # Serial enforces a HARD per-cell ceiling (unlike parallel's challenge-atomic cut):
+        # 6×4 @ $1, ceiling $10 → stop the instant spent hits $10, i.e. after exactly 10
+        # cells (no $12 overrun). The kept challenges are still a challenge-major prefix,
+        # but the final one is left PARTIAL — the cap wins over clean challenge coverage.
         self._patch(monkeypatch, cost=1.0)
         out = tmp_path / "results.csv"
         rows = run_matrix.run_live_cells(
@@ -648,11 +651,14 @@ class TestChallengeMajorOrdering:
             max_cost=10.0,
             results_path=out,
         )
+        assert len(rows) == 10  # hard cap: exactly $10 spent, never the old $12 overrun
         cov = self._coverage(rows)
         covered = list(cov.keys())
-        assert all(models == set(self._MODELS) for models in cov.values()), cov
-        assert covered == [f"repo__task-{c}" for c in range(1, len(covered) + 1)]
-        assert 0 < len(covered) < 6
+        assert covered == [f"repo__task-{c}" for c in range(1, len(covered) + 1)]  # still a prefix
+        full = [c for c, ms in cov.items() if ms == set(self._MODELS)]
+        partial = [c for c, ms in cov.items() if ms != set(self._MODELS)]
+        assert len(full) == 2 and len(partial) == 1  # 2 full challenges + 1 partial
+        assert len(_read_csv_rows(out)) == len(rows)
 
     def test_grid_serial_parallel_byte_identical(self, monkeypatch, tmp_path):
         # Byte-identity under intra-challenge parallelism: a full grid run must write the

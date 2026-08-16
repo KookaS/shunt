@@ -4,24 +4,96 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
+import resource
 import sys
-import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import Final
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator
 
 from benchmark import config
-from benchmark.routing import plot_style, summary
-from benchmark.routing.metrics import _reward
-from benchmark.routing.plot_style import RawResults
+from benchmark.plot_frame import Annotations
+from benchmark.routing import (
+    censoring,
+    figures,
+    impute,
+    metrics,
+    plot_style,
+    selection_guard,
+    summary,
+)
+from benchmark.routing.figures import arm_manipulation as fig_arms
+from benchmark.routing.figures import cache_economics as fig_cache
+from benchmark.routing.figures import complementarity as fig_complementarity
+from benchmark.routing.figures import cost_quality_frontier as fig_frontier
+from benchmark.routing.figures import decision_audit as fig_audit
+from benchmark.routing.figures import evidence_basis as fig_evidence
+from benchmark.routing.figures import kill_gate as fig_kill_gate
+from benchmark.routing.figures import ladder_rungs as fig_ladder
+from benchmark.routing.figures import live_gap as fig_live_gap
+from benchmark.routing.figures import oracle_gap as fig_oracle
+from benchmark.routing.figures import task_difficulty as fig_difficulty
+from benchmark.routing.impute import ImputedMatrix
+from benchmark.routing.metrics import _reward, compute_cost_decomposition
+from benchmark.routing.plot_style import RawResults, row_real_cost, usd
 from benchmark.routing.strategies import Strategy
 from benchmark.routing.strategies.oracle import OracleRewardAware
+
+# A (model, arm) cell below this many tasks is provisional HERE — stricter than
+# plot_style's shared floor of 10, because at 10 a single cell was silently
+# defining the arm frontier and moving AIQ by 0.03.
+MIN_N_RELIABLE: Final[int] = 30
+
+
+# ---------------------------------------------------------------------------
+# Progress + memory diagnostics. This report holds the kNN family's ONNX embedders
+# and their per-task index in RSS at once and has peaked near 5 GB; an OOM kill is
+# SIGKILL, so nothing it was about to print survives. Every step therefore reports
+# as it completes, on a line-buffered stdout, with the peak RSS so far — the last
+# line printed names the step that was running when the kernel stepped in.
+# ---------------------------------------------------------------------------
+
+_OOM_HEADROOM_MB: Final[float] = 6000.0
+
+
+def _peak_rss_mb() -> float:
+    """Peak resident set size of this process so far, in MB (Linux ru_maxrss is KB)."""
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+
+
+def _available_mb() -> float | None:
+    """MemAvailable from /proc, or None where the kernel does not publish it."""
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                return float(line.split()[1]) / 1024.0
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def _memory_preflight() -> None:
+    """Warn BEFORE the embedders load when this host cannot hold the report."""
+    available = _available_mb()
+    if available is None:
+        return
+    print(f"Memory: {available:,.0f} MB available; this report has peaked near 5,000 MB.")
+    if available < _OOM_HEADROOM_MB:
+        print(
+            f"WARNING: under {_OOM_HEADROOM_MB:,.0f} MB free — the kernel may OOM-kill this "
+            "run (exit 137) mid-figure. Free memory or run it alone.",
+            file=sys.stderr,
+        )
+
+
+def _step(label: str, value: object) -> None:
+    """One completed step, with the peak RSS reached by the time it finished."""
+    print(f"  {label:13}: {value}   [peak RSS {_peak_rss_mb():,.0f} MB]")
 
 
 def _const_factory(strategy: Strategy) -> Callable[[], Strategy]:
@@ -35,8 +107,8 @@ def _build_strategy_factories(gamma: float) -> dict[str, Callable[[], Strategy]]
     """One source of truth for the regret plot's strategy set."""
     # The SAME config-enabled list run_eval.get_strategies reads for every
     # other plot (a hardcoded set here previously added Oracle-reward+Random
-    # but omitted an enabled headline strategy like External-Prior — silently
-    # absent from the regret plot while still shown everywhere else).
+    # but omitted an enabled headline strategy — silently absent from the
+    # regret plot while still shown everywhere else).
     # Oracle-reward is added unconditionally: the regret plot's internal
     # reference baseline every other strategy's regret is measured against,
     # independent of whether it is itself config-enabled for display.
@@ -59,17 +131,6 @@ def load_matrix(path: Path) -> dict | None:
         return config.load_matrix(path)
     except (FileNotFoundError, json.JSONDecodeError):
         return None
-
-
-def _is_pareto(row: dict) -> bool:
-    """Pareto flag, tolerant of bool (in-memory rows) or str (CSV override).
-
-    A strategy with no scorable task is never Pareto-optimal: ($0, 0%) is
-    un-dominated by construction, which is absence of evidence, not efficiency.
-    """
-    if int(float(row.get("n_tasks", 0) or 0)) <= 0:
-        return False
-    return row.get("Pareto") in (True, "True")
 
 
 def _validate_rows(results: list[dict]) -> str | None:
@@ -97,13 +158,27 @@ def print_summary(results: list[dict[str, str]]) -> None:
     results.csv source of truth (no committed derived CSV).
     """
     rows = sorted(results, key=lambda r: float(r.get("Reward", 0)), reverse=True)
-    cols = ["strategy", "n_pass", "AvgPerf%", "TotalCost", "AvgCost", "Reward", "Pareto"]
+    # Both cost models are columns, never one standing in for the other, and `subset_selected`
+    # rides beside them so a coverage-selected row cannot be read as a full-sample row.
+    cols = [
+        "strategy",
+        "n_pass",
+        "AvgPerf%",
+        "TotalCost",
+        "TotalCost_cacheaware",
+        "AvgCost",
+        "Reward",
+        "Pareto",
+        "subset_selected",
+    ]
     widths = {c: max(len(c), *(len(str(r.get(c, ""))) for r in rows)) for c in cols}
     header = "  ".join(c.ljust(widths[c]) for c in cols)
     print(header)
     print("-" * len(header))
     for row in rows:
         print("  ".join(str(row.get(c, "")).ljust(widths[c]) for c in cols))
+    for line in selection_guard.rows_footer(rows):
+        print(line)
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +187,7 @@ def print_summary(results: list[dict[str, str]]) -> None:
 
 
 def _model_colors() -> dict[str, str]:
-    """Okabe-Ito hue per model, fixed by tier/price order (cheap -> frontier)."""
+    """Okabe-Ito hue per model, fixed by price order (cheapest -> priciest)."""
     try:
         order = config.enabled_models()
     except Exception:  # noqa: BLE001 (registry optional at plot time)
@@ -135,210 +210,83 @@ def _arm_ranks() -> dict[tuple[str, str], int]:
     return ranks
 
 
-def _arm_cloud_points(
-    raw: RawResults,
-    model_colors: dict[str, str],
-    arm_ranks: dict[tuple[str, str], int],
-    scale_to_n_tasks: int | None = None,
-) -> list[dict]:
-    """One dict per (model, arm) column: cost/pass_rate/CI/size/color. Pass
-    ``scale_to_n_tasks`` to extrapolate to a total-cost axis (K1's underlay);
-    omit it for the per-task cost scale (N4's own axis).
-    """
-    cols = plot_style.arm_columns(raw)
-    max_rank_by_model: dict[str, int] = {}
-    for model, arm in cols:
-        r = arm_ranks.get((model, arm), 0)
-        max_rank_by_model[model] = max(max_rank_by_model.get(model, 0), r)
-    points: list[dict] = []
-    for model, arm in cols:
-        stats = plot_style.arm_stats(raw, model, arm)
-        if stats.n == 0:
-            continue
-        rank = arm_ranks.get((model, arm), 0)
-        cost = stats.avg_cost * scale_to_n_tasks if scale_to_n_tasks else stats.avg_cost
-        points.append(
-            {
-                "model": model,
-                "arm": arm,
-                "cost": cost,
-                "pass_rate": stats.pass_rate * 100,
-                "n": stats.n,
-                "wilson": stats.wilson,
-                "color": model_colors.get(model, "#9E9E9E"),
-                "size": plot_style.arm_marker_size(rank, max_rank_by_model.get(model, 0)),
-                "provisional": stats.provisional,
-            }
-        )
-    return points
+# ---------------------------------------------------------------------------
+# Footer content. Static construction facts live in the module-level FigureSpec
+# constants; anything that depends on the DATA (counts, coverage, imputation,
+# whether arm variation exists at all) is computed per run and merged in as
+# Annotations, so a caveat can never go stale when the matrix grows.
+# ---------------------------------------------------------------------------
+
+_CI_NOTE = "Error bars and bands are 95% Wilson binomial CIs on the pass rate."
 
 
-def _draw_arm_underlay(
-    ax,  # noqa: ANN001 (matplotlib Axes; benchmark harness relaxed rung)
-    raw: RawResults,
-    model_colors: dict[str, str],
-    arm_ranks: dict[tuple[str, str], int],
-    n_tasks: int,
-) -> None:
-    """Faint (model, arm) dots behind the strategy markers — individual-cell
-    context, extrapolated onto the same total-cost axis (avg cost x n_tasks).
-    """
-    for pt in _arm_cloud_points(raw, model_colors, arm_ranks, scale_to_n_tasks=n_tasks):
-        face = pt["color"] if not pt["provisional"] else "none"
-        ax.scatter(
-            pt["cost"],
-            pt["pass_rate"],
-            s=max(18.0, pt["size"] * 0.3),
-            facecolors=face,
-            edgecolors=pt["color"],
-            alpha=0.22,
-            linewidth=0.6,
-            zorder=1,
-        )
-
-
-def _hull_pareto_indices(names: list[str], pareto_map: dict[str, bool], phantom: bool) -> list[int]:
-    """Indices entering the convex-hull/AIQ computation."""
-    # Pareto-flagged rows, minus a phantom Always-Frontier — near-zero
-    # cost/perf from partial coverage looks non-dominated to the generic
-    # Pareto check but is never a real Pareto point (mirrors the guard N1 /
-    # cost_savings already apply).
-    return [
-        i
-        for i, name in enumerate(names)
-        if pareto_map.get(name, False) and not (phantom and name == "Always-Frontier")
-    ]
-
-
-def plot_pareto(
-    results: list[dict[str, str]],
-    out_dir: Path,
-    raw_results: RawResults | None = None,
-    n_tasks: int = 0,
-    matrix: dict | None = None,
-) -> Path:
-    """K1 — cost-quality Pareto plane. Wilson CI per strategy, a convex-hull
-    frontier (the region a mixture router can reach) with AIQ in the title, and a
-    faint (model, arm) underlay for individual-cell context.
-    """
-    names = [r["strategy"] for r in results]
-    costs = np.array([float(r["TotalCost"]) for r in results], dtype=float)
-    perfs = np.array([float(r["AvgPerf%"]) for r in results], dtype=float)
-    ns = [int(float(r.get("n_tasks", 0) or 0)) for r in results]
-    n_pass = [int(float(r.get("n_pass", 0) or 0)) for r in results]
-    pareto_map = {r["strategy"]: _is_pareto(r) for r in results}
-    cov = _frontier_coverage(matrix)
-    phantom = cov is not None and cov[1] < cov[2]
-
-    fig, ax = plt.subplots(figsize=(10, 6.5))
-
-    has_underlay = bool(raw_results)
-    if raw_results:
-        model_colors = _model_colors()
-        _draw_arm_underlay(ax, raw_results, model_colors, _arm_ranks(), n_tasks or len(raw_results))
-
-    label_points: list[tuple[float, float, str]] = []
-    for i, name in enumerate(names):
-        is_frontier = name == "Always-Frontier"
-        is_pareto = pareto_map.get(name, False)
-        if is_frontier:
-            color, size, marker = "#D55E00", 150, "D"
-        elif is_pareto:
-            color, size, marker = "#009E73", 110, "o"
-        else:
-            color, size, marker = "#9E9E9E", 75, "o"
-        if ns[i] > 0:
-            lo, hi = plot_style.wilson_interval(n_pass[i], ns[i])
-            down, up = plot_style.ci_yerr(perfs[i] / 100.0, lo, hi)
-            ax.errorbar(
-                costs[i],
-                perfs[i],
-                yerr=[[down * 100], [up * 100]],
-                fmt="none",
-                ecolor="#555555",
-                elinewidth=1,
-                capsize=3,
-                zorder=4,
-            )
-        ax.scatter(
-            costs[i],
-            perfs[i],
-            c=color,
-            s=size,
-            marker=marker,
-            zorder=5,
-            edgecolors="white",
-            linewidth=0.5,
-        )
-        label_points.append((float(costs[i]), float(perfs[i]), name))
-
-    plot_style.label_points_with_leaders(ax, label_points)
-    if has_underlay:
-        ax.text(
-            0.01,
-            0.01,
-            "faint dots: (model, arm) extrapolated to every task's cost, alone",
-            transform=ax.transAxes,
-            fontsize=7,
-            color="#777777",
-            va="bottom",
-        )
-
-    pareto_idx = _hull_pareto_indices(names, pareto_map, phantom)
-    aiq = 0.0
-    if pareto_idx:
-        pts = [(float(costs[i]), float(perfs[i])) for i in pareto_idx]
-        hull = plot_style.upper_hull(pts)
-        aiq = plot_style.area_under_frontier(hull)
-        fx = [p[0] for p in hull]
-        fy = [p[1] for p in hull]
-        if fx and fx[0] > 0:
-            fx = [0.0, *fx]
-            fy = [fy[0], *fy]
-        ax.plot(
-            fx,
-            fy,
-            color="#009E73",
-            linewidth=2,
-            linestyle="--",
-            label=f"Pareto frontier (convex hull, AIQ={aiq:.2f})",
-        )
-        ax.fill_between(
-            fx, 0, fy, alpha=0.06, color="#009E73", label="achievable region (mixture routing)"
-        )
-
-    ax.set_xlabel("Total cost ($)")
-    ax.set_ylabel("Average pass rate (%)")
-    ax.set_title(
-        f"Cost vs quality — Pareto frontier spans AIQ={aiq:.2f} of the cost-quality rectangle\n"
-        f"({plot_style.ci_footer()})",
-        fontsize=10,
+def _merge_annotations(*parts: Annotations) -> Annotations:
+    """Concatenate several Annotations (plot_frame drops duplicates on merge)."""
+    return Annotations(
+        definitions=tuple(d for p in parts for d in p.definitions),
+        notes=tuple(n for p in parts for n in p.notes),
+        limitations=tuple(lim for p in parts for lim in p.limitations),
     )
-    ax.legend(fontsize=8)
-    ax.grid(True, alpha=0.3)
 
-    if phantom:
-        assert cov is not None
-        frontier, covered, total = cov
-        if "Always-Frontier" in names:
-            i = names.index("Always-Frontier")
-            ax.annotate(
-                f"⚠ phantom baseline (frontier covered on {covered}/{total} tasks)",
-                xy=(costs[i], perfs[i]),
-                xytext=(0.5, 1.12),
-                textcoords="axes fraction",
-                ha="center",
-                fontsize=8,
-                color="#B71C1C",
-                annotation_clip=False,
-                arrowprops=dict(arrowstyle="->", color="#B71C1C", lw=1.0),
-                bbox=dict(boxstyle="round,pad=0.35", fc="#FFEBEE", ec="#B71C1C", alpha=0.95),
-            )
 
-    path = out_dir / "pareto_scatter.png"
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return path
+def _row_coverage_annotations(ns: list[int]) -> Annotations:
+    """Whether the plotted strategy rows really share one task denominator."""
+    scored = [n for n in ns if n > 0]
+    empty = sum(1 for n in ns if n <= 0)
+    notes: list[str] = []
+    limits: list[str] = []
+    if scored and len(set(scored)) == 1:
+        # Only the SCORED rows were checked — saying "every plotted strategy" while
+        # zero-n rows sit on the canvas contradicts the no-evidence limitation below.
+        subject = (
+            f"Every scored strategy ({len(scored)} of {len(ns)} plotted)"
+            if empty
+            else "Every plotted strategy"
+        )
+        notes.append(f"{subject} is scored on the same {scored[0]} task(s).")
+    elif scored:
+        limits.append(
+            f"Strategies are scored on uneven task counts (n={min(scored)}-{max(scored)}), "
+            "so their totals are not strictly comparable."
+        )
+    if empty:
+        limits.append(
+            f"{empty} strategy row(s) have no scorable task and sit at \\$0 / 0% — "
+            "that is absence of evidence, not efficiency."
+        )
+    return Annotations(notes=tuple(notes), limitations=tuple(limits))
+
+
+def _single_arm_limits(raw: RawResults | None, synthesized: bool = False) -> tuple[str, ...]:
+    """The 'only the default arm has data' caveat, when that is true of this cache.
+
+    Silent on a SYNTHESIZED cache: collapsing every model to one "default" column is
+    an artifact of the missing per-arm cache, not a fact about the sampled arms.
+    """
+    if synthesized or raw is None or not raw or not plot_style.is_single_arm(raw):
+        return ()
+    return (
+        "Every model has exactly one sampled arm on this data (arm sweep pending), "
+        "so nothing here shows reasoning-effort variation.",
+    )
+
+
+def _banner_annotations(banner: str | None) -> Annotations:
+    """The equal-coverage/imputation disclosure, as a footer note instead of a caption."""
+    return Annotations(notes=(banner,) if banner else ())
+
+
+def _provisional_limits(points: list[dict], what: str) -> tuple[str, ...]:
+    """How many plotted (model, arm) cells rest on fewer than MIN_N_PROVISIONAL tasks."""
+    if not points:
+        return ()
+    thin = sum(1 for p in points if p["provisional"])
+    if not thin:
+        return ()
+    return (
+        f"{thin} of {len(points)} {what} rest on fewer than "
+        f"{MIN_N_RELIABLE} tasks (drawn hollow) — their pass rate is provisional.",
+    )
 
 
 def _evaluate_strategies(
@@ -346,25 +294,14 @@ def _evaluate_strategies(
     matrix: dict,
     tasks: list[str],
 ) -> dict[str, tuple[list[tuple[str, str, bool, float]], set[str]]]:
-    """Per strategy: ``(decisions, unscorable)`` where ``unscorable`` is the set of
-    task ids whose chosen model was never measured (a coverage gap, NOT a real
-    fail@$0 — callers exclude them, mirroring summary.evaluate)."""
-    evaluated: dict[str, tuple[list[tuple[str, str, bool, float]], set[str]]] = {}
-    for name, factory in factory_map.items():
-        strategy = factory()
-        decisions: list[tuple[str, str, bool, float]] = []
-        unscorable: set[str] = set()
-        for tid in tasks:
-            task_meta = matrix.get("tasks", {}).get(tid, {})
-            model = strategy.select(tid, task_meta, matrix)
-            outcome = matrix.get("results", {}).get(tid, {}).get(model, {})
-            if not outcome:
-                unscorable.add(tid)
-            passed = outcome.get("pass", False)
-            cost = outcome.get("cost", 0.0)
-            decisions.append((tid, model, passed, cost))
-        evaluated[name] = (decisions, unscorable)
-    return evaluated
+    """Per strategy: ``(decisions, unscorable)`` from ``summary.evaluate``."""
+    # Delegates rather than re-implementing. The private copy that used to live here
+    # dropped a cascade's failed-probe cost and skipped the censoring check, so the
+    # regret plot charged kNN-cascade $3.09 less than strategy_summary.csv did and
+    # printed a headline regret the CSV contradicted.
+    return {
+        name: summary.evaluate(factory(), matrix, tasks) for name, factory in factory_map.items()
+    }
 
 
 def _compute_per_task_regret(
@@ -400,7 +337,7 @@ def _arm_oracle_decisions(
         best_key, best_reward, best_outcome = "", -math.inf, (False, 0.0)
         for model, per_arm in per_model.items():
             for arm, row in per_arm.items():
-                passed, cost = bool(row.get("pass")), float(row.get("cost", 0.0))
+                passed, cost = bool(row.get("pass")), row_real_cost(row)
                 r = _reward(passed, cost, gamma)
                 if r > best_reward:
                     best_reward, best_key, best_outcome = r, f"{model}:{arm}", (passed, cost)
@@ -431,376 +368,128 @@ def _arm_bandit_decisions(
             decisions.append((tid, "", False, 0.0))
             continue
         model, arm, row = max(options, key=lambda opt: _arm_bandit_score(opt, history))
-        passed, cost = bool(row.get("pass")), float(row.get("cost", 0.0))
+        passed, cost = bool(row.get("pass")), row_real_cost(row)
         history.setdefault((model, arm), []).append(_reward(passed, cost, gamma))
         decisions.append((tid, f"{model}:{arm}", passed, cost))
     return decisions
 
 
-def plot_cumulative_regret(
-    results: list[dict[str, str]],
-    out_dir: Path,
-    matrix_path: Path | None = None,
-    gamma: float = 0.1,
-    strategy_factories: dict[str, Callable[[], Strategy]] | None = None,
-    raw_results: RawResults | None = None,
-) -> Path:
-    """K2 — per-task cumulative regret vs Oracle-reward. Adds an Arm-oracle
-    (best realized arm per task among whatever was sampled) and an
-    illustrative Arm-bandit when arm-level data is available.
-    """
-    fig, ax = plt.subplots(figsize=(10, 6))
+# ---------------------------------------------------------------------------
+# Measured vs imputed accounting. 409 of 1062 analytical cells are monotone-imputed
+# and imputation is near-exclusively pass-filling, so "how much of this number is
+# evidence" is a first-class question these figures must be able to answer.
+# ---------------------------------------------------------------------------
 
-    if matrix_path is not None and strategy_factories is not None:
-        matrix = load_matrix(matrix_path)
-        if matrix is not None:
-            # Same sampled denominator the summary rows use (derive_tasks), not the
-            # full results.csv key set — otherwise this plot scores a different task
-            # set than run_eval/plot_strategies.
-            tasks = derive_tasks(matrix, config.benchmark_params().get("seed", 42))
-            if tasks:
-                all_decisions = _evaluate_strategies(strategy_factories, matrix, tasks)
-                oracle_pair = all_decisions.get("Oracle-reward")
-                if oracle_pair:
-                    oracle_decisions, oracle_unscorable = oracle_pair
-                    finals: dict[str, float] = {}
-                    # Tasks dropped from ≥1 series as a coverage gap (chosen model
-                    # unmeasured) — disclosed on canvas, never imputed fail@$0.
-                    excluded_union: set[str] = set(oracle_unscorable)
-                    for name in [r["strategy"] for r in results]:
-                        pair = all_decisions.get(name)
-                        if pair and name != "Oracle-reward":
-                            decisions, strat_unscorable = pair
-                            excluded = strat_unscorable | oracle_unscorable
-                            excluded_union |= strat_unscorable
-                            cumreg = _compute_per_task_regret(
-                                decisions, oracle_decisions, gamma, excluded
-                            )
-                            if not len(cumreg):
-                                continue
-                            label = name + f" (total={cumreg[-1]:.2f})"
-                            ax.plot(range(1, len(cumreg) + 1), cumreg, label=label, lw=1.5)
-                            finals[name] = float(cumreg[-1])
+# tid -> (passed, cost, imputed-anywhere-on-the-billed-path)
+StrategyCells = dict[str, tuple[bool, float, bool]]
 
-                    if raw_results:
-                        raw_sampled = {cid: raw_results[cid] for cid in tasks if cid in raw_results}
-                        for extra_name, fn, style in (
-                            ("Arm-oracle", _arm_oracle_decisions, "--"),
-                            ("Arm-bandit", _arm_bandit_decisions, ":"),
-                        ):
-                            extra_decisions = fn(raw_sampled, tasks, gamma)
-                            cumreg = _compute_per_task_regret(
-                                extra_decisions, oracle_decisions, gamma, oracle_unscorable
-                            )
-                            if not len(cumreg):
-                                continue
-                            label = f"{extra_name} (total={cumreg[-1]:.2f})"
-                            ax.plot(
-                                range(1, len(cumreg) + 1),
-                                cumreg,
-                                label=label,
-                                lw=1.5,
-                                linestyle=style,
-                            )
-                            finals[extra_name] = float(cumreg[-1])
 
-                    single_arm = raw_results is not None and plot_style.is_single_arm(raw_results)
-                    caveat = f" — {plot_style.ARM_SWEEP_PENDING_NOTE}" if single_arm else ""
-                    ax.set_xlabel("Task (evaluation order)")
-                    ax.set_ylabel(f"Cumulative regret vs Oracle-reward (γ={gamma}, reward units)")
-                    # Headline the best deployable ROUTER, never an oracle.
-                    # "Oracle" is measured against the near-identical Oracle-reward
-                    # baseline (tautological ~0 regret), and "Arm-oracle" picks the
-                    # best REALIZED arm per task in hindsight — both peek at outcomes
-                    # a live router cannot see, so both are excluded from the pick
-                    # regardless of arm count (they still show as reference lines).
-                    excluded = {"Oracle", "Arm-oracle"}
-                    candidates = {k: v for k, v in finals.items() if k not in excluded}
-                    if candidates:
-                        best_name, best_val = min(candidates.items(), key=lambda kv: kv[1])
-                        ax.set_title(
-                            f"{best_name} tracks the oracle closest among routers "
-                            f"(regret={best_val:.2f} over {len(tasks)} tasks){caveat}"
-                        )
-                    else:
-                        ax.set_title(f"Cumulative Regret vs Oracle (Per-Task){caveat}")
-                    ax.legend(fontsize=8)
-                    ax.grid(True, alpha=0.3)
+class _PathRecorder:
+    """Wraps a strategy so ``summary.evaluate`` also yields each task's billed path."""
 
-                    if excluded_union:
-                        fig.text(
-                            0.5,
-                            0.005,
-                            f"Coverage-gap decisions excluded (chosen model unmeasured on the "
-                            f"task): {len(excluded_union)} of {len(tasks)} sampled task(s) "
-                            "dropped from ≥1 series — never scored fail@$0.",
-                            ha="center",
-                            va="bottom",
-                            fontsize=8,
-                            color="#B71C1C",
-                            style="italic",
-                        )
-                        fig.subplots_adjust(bottom=0.13)
+    # A cascade's reported cost sums every model it tried, but only the model it RETURNED
+    # is visible in the decision tuple. Reading the imputed flag off that final cell alone
+    # let projected dollars enter a panel labelled "no imputed cell on either side".
+    # Recording the path during the one evaluate pass keeps that single-producer property
+    # (no second, re-embedding evaluation) while making the flag cover what was billed.
 
-                    path = out_dir / "cumulative_regret.png"
-                    fig.savefig(path, dpi=150, bbox_inches="tight")
-                    plt.close(fig)
-                    return path
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+        self.paths: dict[str, list[str]] = {}
 
-    # Fallback: bar chart from aggregate CumReg
-    names = [r["strategy"] for r in results]
-    cumregs = [float(r["CumReg"]) for r in results]
+    @property
+    def name(self) -> str:
+        return str(self._inner.name)  # type: ignore[attr-defined]
 
-    color_map = {
-        "Oracle": "#4CAF50",
-        "Oracle-reward": "#4CAF50",
-        "Always-Frontier": "#F44336",
-        "Random": "#FF9800",
-        "Always-Cheap": "#2196F3",
+    def select(self, task_id: str, task_meta: dict, matrix: dict) -> str:
+        model: str = self._inner.select(task_id, task_meta, matrix)  # type: ignore[attr-defined]
+        tried = getattr(self._inner, "cascade_tried_models", None)
+        self.paths[task_id] = list(tried) if tried else [model]
+        return model
+
+    def __getattr__(self, item: str) -> object:
+        # Forwards `cascade_total_cost` (set per select) to evaluate; absent on
+        # single-shot strategies, where evaluate's getattr default takes over.
+        return getattr(self._inner, item)
+
+
+def strategy_cells(
+    matrix: dict, tasks: list[str], strategies: Iterable[object]
+) -> dict[str, tuple[StrategyCells, set[str]]]:
+    """Per strategy: the chosen cell's (pass, cost, imputed) per task, plus its unscorable set."""
+    # Cost is read from `real_cost` for a single-shot pick; a cascade keeps
+    # summary.evaluate's cascade total so these numbers reconcile with
+    # strategy_summary.csv rather than quietly forming a second accounting path.
+    # `imputed` is PATH-AWARE: true when ANY cell the decision billed was projected.
+    out: dict[str, tuple[StrategyCells, set[str]]] = {}
+    for strategy in strategies:
+        recorder = _PathRecorder(strategy)
+        decisions, unscorable = summary.evaluate(recorder, matrix, tasks)
+        is_cascade = getattr(strategy, "cascade_total_cost", None) is not None
+        cells: StrategyCells = {}
+        for tid, model, passed, cost in decisions:
+            per_task = matrix.get("results", {}).get(tid, {})
+            spend = float(cost) if is_cascade else row_real_cost(per_task.get(model, {}))
+            path = recorder.paths.get(tid) or [model]
+            imputed = any(bool(per_task.get(m, {}).get("imputed", False)) for m in path)
+            cells[tid] = (bool(passed), spend, imputed)
+        out[strategy.name] = (cells, unscorable)  # type: ignore[attr-defined]
+    return out
+
+
+def _split_measured(cells: StrategyCells, unscorable: set[str]) -> dict[str, float]:
+    """Measured vs imputed dollars and passes for one strategy's scored selections."""
+    scored = [(p, c, i) for tid, (p, c, i) in cells.items() if tid not in unscorable]
+    return {
+        "measured_cost": sum(c for _p, c, i in scored if not i),
+        "imputed_cost": sum(c for _p, c, i in scored if i),
+        "measured_cells": float(sum(1 for _p, _c, i in scored if not i)),
+        "imputed_cells": float(sum(1 for _p, _c, i in scored if i)),
+        "measured_pass": float(sum(1 for p, _c, i in scored if p and not i)),
+        "imputed_pass": float(sum(1 for p, _c, i in scored if p and i)),
     }
-    colors = [color_map.get(n, "#9E9E9E") for n in names]
-
-    bars = ax.bar(names, cumregs, color=colors, edgecolor="white")
-    for bar, val in zip(bars, cumregs, strict=True):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + 0.2,
-            f"{val:.2f}",
-            ha="center",
-            va="bottom",
-            fontsize=8,
-        )
-
-    ax.set_xlabel("Strategy")
-    ax.set_ylabel(f"Cumulative regret vs oracle (γ={gamma}, reward units)")
-    ax.set_title("Cumulative Regret vs Oracle (Aggregate)")
-    ax.grid(True, axis="y", alpha=0.3)
-
-    path = out_dir / "cumulative_regret.png"
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return path
 
 
-def _frontier_coverage(matrix: dict | None) -> tuple[str, int, int] | None:
-    """(frontier_model, tasks_with_data, total_tasks) for the most expensive
-    evaluated model — the Always-Frontier / kill-gate baseline. ``None`` if no
-    matrix. Exposes the sparse-frontier artifact that makes that baseline invalid.
+def paired_measured(
+    router: str, baseline: str, by_strategy: dict[str, tuple[StrategyCells, set[str]]]
+) -> dict[str, float] | None:
+    """Router vs baseline on the tasks where NEITHER side billed a projected cell.
+
+    This is the kill gate with the projection taken out. ``None`` when either side
+    is absent or the overlap is empty.
     """
-    if not matrix or not matrix.get("models"):
+    # The imputed flag is path-aware (see strategy_cells), so a cascade that probed an
+    # imputed cell on its way to a measured final pick is excluded here — the panel's
+    # "no imputed cell on either side" title is then literally true of every dollar shown.
+    if router not in by_strategy or baseline not in by_strategy:
         return None
-    results_data = matrix.get("results", {})
-    total = len(results_data)
-    if total == 0:
+    r_cells, r_un = by_strategy[router]
+    b_cells, b_un = by_strategy[baseline]
+    shared = [
+        tid
+        for tid in r_cells
+        if tid in b_cells
+        and tid not in r_un
+        and tid not in b_un
+        and not r_cells[tid][2]
+        and not b_cells[tid][2]
+    ]
+    if not shared:
         return None
-    frontier = max(matrix["models"], key=lambda m: _model_total_price(matrix["models"], m))
-    covered = sum(1 for tr in results_data.values() if frontier in tr)
-    return frontier, covered, total
-
-
-def plot_cost_savings(
-    results: list[dict[str, str]], out_dir: Path, matrix: dict | None = None
-) -> Path:
-    names = [r["strategy"] for r in results]
-    costs = [float(r["TotalCost"]) for r in results]
-    perfs = [float(r["AvgPerf%"]) for r in results]
-    ns = [int(float(r.get("n_tasks", 0) or 0)) for r in results]
-    n_pass = [int(float(r.get("n_pass", 0) or 0)) for r in results]
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    color_map = {
-        "Oracle": "#4CAF50",
-        "Oracle-reward": "#4CAF50",
-        "Always-Frontier": "#F44336",
-        "Always-Cheap": "#2196F3",
-        "Random": "#FF9800",
+    r_pass = sum(1 for t in shared if r_cells[t][0])
+    b_pass = sum(1 for t in shared if b_cells[t][0])
+    only_b = sum(1 for t in shared if b_cells[t][0] and not r_cells[t][0])
+    only_r = sum(1 for t in shared if r_cells[t][0] and not b_cells[t][0])
+    return {
+        "n": float(len(shared)),
+        "router_cost": sum(r_cells[t][1] for t in shared),
+        "baseline_cost": sum(b_cells[t][1] for t in shared),
+        "router_pass": float(r_pass),
+        "baseline_pass": float(b_pass),
+        "baseline_only": float(only_b),
+        "router_only": float(only_r),
+        "mcnemar_p": metrics.mcnemar_exact_p(only_b, only_r),
     }
-    colors = [color_map.get(n, "#9E9E9E") for n in names]
-
-    bars = ax.bar(names, costs, color=colors, edgecolor="white")
-    for bar, cost, perf, n, p in zip(bars, costs, perfs, ns, n_pass, strict=True):
-        ci_str = ""
-        if n > 0:
-            lo, hi = plot_style.wilson_interval(p, n)
-            ci_str = f"[{lo * 100:.0f}-{hi * 100:.0f}]"
-        # Two lines, not one: bars with an identical cost (a real tie in this
-        # data) sit adjacent, and a single wide line would bleed into the
-        # neighbor's label — stacking keeps each bar's own text narrow.
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + max(costs) * 0.01,
-            f"${cost:.4f}\n{perf:.0f}% {ci_str}",
-            ha="center",
-            va="bottom",
-            fontsize=7.5,
-        )
-
-    ax.set_xlabel("Strategy (routing rule — bars are what each router SELECTS, not per-model data)")
-    ax.set_ylabel("Total cost over all tasks ($)")
-    ax.set_title(
-        "Total cost by routing strategy — equal-quality framing\n"
-        f"(pass rate bracketed above each bar; {plot_style.ci_footer()})",
-        fontsize=11,
-    )
-    ax.grid(True, axis="y", alpha=0.3)
-
-    cov = _frontier_coverage(matrix)
-    phantom = cov is not None and cov[1] < cov[2]
-    if len(names) >= 2 and not phantom:
-        # Only draw the frontier reference line when the frontier baseline is
-        # actually measured on every task — otherwise it is not a valid reference.
-        ref_cost = next(
-            (float(r["TotalCost"]) for r in results if r["strategy"] == "Always-Frontier"), None
-        )
-        if ref_cost is not None:
-            ax.axhline(
-                y=ref_cost,
-                color="#F44336",
-                linestyle=":",
-                linewidth=1,
-                alpha=0.7,
-                label=f"Always-Frontier cost = ${ref_cost:.4f}",
-            )
-            ax.legend()
-
-    if phantom:
-        assert cov is not None
-        frontier, covered, total = cov
-        if "Always-Frontier" in names:
-            i = names.index("Always-Frontier")
-            # Anchored in the top margin (axes-fraction y > 1, clip disabled) so
-            # the box never overlaps a bar or its value label regardless of
-            # which bar happens to be tallest.
-            ax.annotate(
-                f"⚠ PHANTOM BASELINE — {frontier} evaluated on {covered}/{total} tasks; "
-                f"the other {total - covered} count as free $0 failures. Not comparable.",
-                xy=(i, costs[i]),
-                xytext=(0.5, 1.14),
-                textcoords="axes fraction",
-                ha="center",
-                fontsize=8,
-                color="#B71C1C",
-                annotation_clip=False,
-                arrowprops=dict(arrowstyle="->", color="#B71C1C", lw=1.0),
-                bbox=dict(boxstyle="round,pad=0.35", fc="#FFEBEE", ec="#B71C1C", alpha=0.95),
-            )
-
-    path = out_dir / "cost_savings.png"
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return path
-
-
-def plot_cost_quality_equal(
-    results: list[dict[str, str]], out_dir: Path, matrix: dict | None = None
-) -> Path:
-    """N1 (highest priority) — the kill-gate plot: pass% (Wilson CI) vs cost,
-    Always-Frontier's CI as a horizontal band, annotating the cost cut at the
-    cheapest CI-overlapping-quality strategy. Reuses the phantom-baseline guard.
-    """
-    names = [r["strategy"] for r in results]
-    costs = np.array([float(r["TotalCost"]) for r in results], dtype=float)
-    perfs = np.array([float(r["AvgPerf%"]) for r in results], dtype=float)
-    ns = [int(float(r.get("n_tasks", 0) or 0)) for r in results]
-    n_pass = [int(float(r.get("n_pass", 0) or 0)) for r in results]
-
-    fig, ax = plt.subplots(figsize=(10, 6.5))
-
-    cov = _frontier_coverage(matrix)
-    phantom = cov is not None and cov[1] < cov[2]
-    frontier_idx = names.index("Always-Frontier") if "Always-Frontier" in names else None
-    band: tuple[float, float] | None = None
-    if frontier_idx is not None and not phantom and ns[frontier_idx] > 0:
-        lo, hi = plot_style.wilson_interval(n_pass[frontier_idx], ns[frontier_idx])
-        band = (lo * 100, hi * 100)
-        ax.axhspan(
-            band[0],
-            band[1],
-            color="#D55E00",
-            alpha=0.12,
-            zorder=0,
-            label=f"Always-Frontier 95% Wilson CI [{band[0]:.0f}%, {band[1]:.0f}%]",
-        )
-
-    best_cut: tuple[str, float, float, float] | None = None
-    label_points: list[tuple[float, float, str]] = []
-    for i, name in enumerate(names):
-        overlaps = False
-        if ns[i] > 0:
-            lo, hi = plot_style.wilson_interval(n_pass[i], ns[i])
-            lo, hi = lo * 100, hi * 100
-            down, up = plot_style.ci_yerr(perfs[i], lo, hi)
-            ax.errorbar(
-                costs[i],
-                perfs[i],
-                yerr=[[down], [up]],
-                fmt="none",
-                ecolor="#555555",
-                elinewidth=1,
-                capsize=3,
-                zorder=4,
-            )
-            overlaps = band is not None and hi >= band[0] and lo <= band[1]
-        is_frontier = name == "Always-Frontier"
-        color = "#D55E00" if is_frontier else ("#0072B2" if overlaps else "#9E9E9E")
-        marker = "D" if is_frontier else "o"
-        ax.scatter(
-            costs[i],
-            perfs[i],
-            c=color,
-            s=140 if is_frontier else 110,
-            marker=marker,
-            zorder=5,
-            edgecolors="white",
-            linewidth=0.6,
-        )
-        label_points.append((float(costs[i]), float(perfs[i]), name))
-        if overlaps and frontier_idx is not None and not is_frontier and costs[frontier_idx] > 0:
-            cut = (1 - costs[i] / costs[frontier_idx]) * 100
-            if best_cut is None or cut > best_cut[1]:
-                best_cut = (name, cut, float(perfs[i]), float(perfs[frontier_idx]))
-    plot_style.label_points_with_leaders(ax, label_points)
-
-    ax.set_xlabel("Total cost ($)")
-    ax.set_ylabel("Pass rate (%)")
-
-    if phantom:
-        assert cov is not None
-        frontier, covered, total = cov
-        title = (
-            f"Always-Frontier ({frontier}) evaluated on only {covered}/{total} tasks — "
-            "equal-quality comparison unmeasurable here"
-        )
-    elif best_cut is not None:
-        name, cut, perf, fperf = best_cut
-        title = (
-            f"{name} matches Always-Frontier quality ({perf:.0f}% vs {fperf:.0f}%, "
-            f"CIs overlap) at {max(cut, 0.0):.0f}% less cost"
-        )
-    else:
-        title = (
-            "No strategy's quality CI overlaps Always-Frontier's yet — "
-            "no cost-equal-quality win to report"
-        )
-    ax.set_title(f"{title}\n({plot_style.ci_footer()})", fontsize=10)
-    if band is not None:
-        ax.legend(fontsize=8, loc="lower right")
-    ax.grid(True, alpha=0.3)
-
-    path = out_dir / "cost_quality_equal.png"
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return path
-
-
-def _cap_names(names: list[str], k: int = 6) -> str:
-    """Join names, capping the list so titles can't explode at 500 tasks."""
-    if not names:
-        return "none"
-    if len(names) <= k:
-        return ", ".join(names)
-    return ", ".join(names[:k]) + f" (+{len(names) - k} more)"
 
 
 def _model_total_price(models: dict, name: str) -> float:
@@ -831,527 +520,409 @@ def _sorted_arm_columns(
     )
 
 
-def plot_heatmap(matrix_path: Path, out_dir: Path, raw_results: RawResults | None = None) -> Path:
-    """K4 / N3 — task x (model, arm) tri-state heatmap, columns per-column n/N —
-    doubles as the coverage audit proving sampling is uneven-by-design.
-    Degrades to (model, "default") columns with no true per-arm cache given.
+def arm_pair_contrasts(raw: RawResults, arm_ranks: dict[tuple[str, str], int]) -> list[dict]:
+    """Every within-model (lower-rank, higher-rank) arm pair, on CO-MEASURED tasks only.
+
+    The metamorphic check this replaces an unpaired marginal with: a within-model
+    effect estimate must not change sign under restriction to the co-measured subset.
     """
-    matrix = load_matrix(matrix_path)
-    if matrix is None:
-        raise FileNotFoundError(f"Cannot load matrix from {matrix_path}")
+    by_model: dict[str, list[str]] = {}
+    for model, arm in plot_style.arm_columns(raw):
+        by_model.setdefault(model, []).append(arm)
+    out: list[dict] = []
+    for model in sorted(by_model):
+        arms = sorted(by_model[model], key=lambda a: arm_ranks.get((model, a), 0))
+        for i, low in enumerate(arms):
+            for high in arms[i + 1 :]:
+                out.append(_arm_pair(raw, model, low, high))
+    return [p for p in out if p["n"] > 0]
 
-    models_meta = matrix["models"]
-    results_data = matrix.get("results", {})
-    tasks = sorted(results_data.keys())
-    raw = raw_results if raw_results is not None else _synthesize_raw(results_data)
-    columns = _sorted_arm_columns(plot_style.arm_columns(raw), models_meta, _arm_ranks())
-    if not columns or not tasks:
-        raise ValueError("No (model, arm) columns or tasks found in matrix")
 
-    # 1 = pass, 0 = fail, NaN = not evaluated (distinct from a real failure).
-    grid = np.full((len(tasks), len(columns)), np.nan, dtype=float)
-    for i, tid in enumerate(tasks):
-        per_model = raw.get(tid, {})
-        for j, (model, arm) in enumerate(columns):
-            row = per_model.get(model, {}).get(arm)
-            if row is not None:
-                grid[i, j] = 1.0 if row.get("pass") else 0.0
-
-    from matplotlib.colors import ListedColormap
-    from matplotlib.patches import Patch
-
-    n_tasks, n_cols = len(tasks), len(columns)
-    # Dynamic canvas: grows with the matrix but capped so it stays a usable image
-    # at 500+ tasks / many (model,arm) columns rather than a fixed size that
-    # crushes everything.
-    fig_w = min(26.0, max(8.0, 1.15 * n_cols + 3.0))
-    fig_h = min(32.0, max(5.0, 0.32 * n_tasks + 2.0))
-
-    cmap = ListedColormap([plot_style.TRISTATE_FAIL, plot_style.TRISTATE_PASS]).with_extremes(
-        bad=plot_style.TRISTATE_UNSAMPLED
-    )
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    ax.imshow(grid, cmap=cmap, aspect="auto", vmin=0, vmax=1)
-
-    coverage = np.sum(~np.isnan(grid), axis=0)
-    passes = np.nansum(grid, axis=0)
-    col_labels = [
-        f"{m}\n{a}  {int(passes[j])}/{int(coverage[j])}" for j, (m, a) in enumerate(columns)
+def _arm_pair(raw: RawResults, model: str, low: str, high: str) -> dict:
+    """One paired arm contrast over the tasks where both arms ran."""
+    # A CENSORED cell (step/wall/abandon stop) has an UNKNOWN true outcome, so scoring it
+    # as a clean fail turns a resource limit into a capability claim — and on a paired
+    # contrast it does so asymmetrically, because the higher arm runs longer and is
+    # therefore censored more often. Dropping the pair is the only honest option here:
+    # `censoring.is_censored` is the same predicate the kill gate and the strategy
+    # evaluator use, so all three exclude the same cells.
+    shared = [
+        (per_model[model][low], per_model[model][high])
+        for per_model in raw.values()
+        if low in per_model.get(model, {})
+        and high in per_model.get(model, {})
+        and not censoring.is_censored(per_model[model][low])
+        and not censoring.is_censored(per_model[model][high])
     ]
-    ax.set_xticks(range(n_cols))
-    ax.set_xticklabels(col_labels, fontsize=7, rotation=35, ha="right")
+    n = len(shared)
+    lost = sum(1 for lo, hi in shared if lo.get("pass") and not hi.get("pass"))
+    won = sum(1 for lo, hi in shared if hi.get("pass") and not lo.get("pass"))
+    low_pass = sum(1 for lo, _hi in shared if lo.get("pass"))
+    high_pass = sum(1 for _lo, hi in shared if hi.get("pass"))
+    delta = (high_pass - low_pass) / n * 100 if n else 0.0
+    # Wald interval for the difference of CORRELATED proportions (the paired form —
+    # an independent-samples interval would be far too narrow here).
+    var = (lost + won - (won - lost) ** 2 / n) if n else 0.0
+    half = 1.96 * math.sqrt(max(0.0, var)) / n * 100 if n else 0.0
+    cost_delta = sum(row_real_cost(hi) - row_real_cost(lo) for lo, hi in shared) / n if n else 0.0
+    return {
+        "model": model,
+        "low": low,
+        "high": high,
+        "n": n,
+        "low_rate": low_pass / n * 100 if n else 0.0,
+        "high_rate": high_pass / n * 100 if n else 0.0,
+        "delta_pp": delta,
+        "ci": (delta - half, delta + half),
+        "violations": lost,
+        "gains": won,
+        "p": metrics.mcnemar_exact_p(lost, won),
+        "cost_delta": cost_delta,
+    }
 
-    # Thin task labels when there are too many to read; show ~40 evenly spaced.
-    ystep = max(1, int(np.ceil(n_tasks / 40)))
-    yticks = list(range(0, n_tasks, ystep))
-    ax.set_yticks(yticks)
-    ax.set_yticklabels([tasks[i].split("__")[-1] for i in yticks], fontsize=7)
 
-    # Per-cell glyphs only when cells are big enough to read; else colour-only + legend.
-    glyphs = n_tasks <= 40 and n_cols <= 20
-    if glyphs:
-        for i in range(n_tasks):
-            for j in range(n_cols):
-                if np.isnan(grid[i, j]):
-                    ax.text(j, i, "n/a", ha="center", va="center", fontsize=7, color="#616161")
-                else:
-                    mark = "✓" if grid[i, j] == 1.0 else "✗"
-                    ax.text(j, i, mark, ha="center", va="center", fontsize=10, color="white")
+def arm_pair_totals(pairs: list[dict]) -> dict[str, float]:
+    """Pooled paired effect over every arm pair: net pp, violation rate, exact McNemar p."""
+    n = sum(p["n"] for p in pairs)
+    lost = sum(p["violations"] for p in pairs)
+    won = sum(p["gains"] for p in pairs)
+    return {
+        "n": float(n),
+        "violations": float(lost),
+        "gains": float(won),
+        "net_pp": (won - lost) / n * 100 if n else 0.0,
+        "violation_rate": lost / n if n else 0.0,
+        "p": metrics.mcnemar_exact_p(lost, won),
+    }
+
+
+def _monotonicity_annotations(pairs: list[dict]) -> Annotations:
+    """The dataset-wide paired result — the honest headline this figure exists to state."""
+    t = arm_pair_totals(pairs)
+    n = int(t["n"])
+    if not n:
+        return Annotations(
+            limitations=("No arm pair has a single co-measured task, so nothing here is paired.",)
+        )
+    verdict = (
+        "indistinguishable from zero"
+        if t["p"] > 0.05
+        else ("positive" if t["net_pp"] > 0 else "negative")
+    )
+    notes = [
+        f"DATASET-WIDE PAIRED RESULT: over {n} co-measured within-model arm pair-observations, "
+        f"the net effect of more reasoning effort is {t['net_pp']:+.1f}pp "
+        f"({int(t['gains'])} gains vs {int(t['violations'])} losses), exact McNemar two-sided "
+        f"p={t['p']:.3f} — {verdict}.",
+        f"Monotonicity is VIOLATED on {t['violation_rate'] * 100:.1f}% of co-measured pairs "
+        f"({int(t['violations'])} of {n}): the higher-effort arm failed a task the lower-effort "
+        "arm passed.",
+        f"{len(pairs)} arm pair(s) plotted; co-measured n runs "
+        f"{min(p['n'] for p in pairs)}-{max(p['n'] for p in pairs)}.",
+    ]
+    straddling = sum(1 for p in pairs if p["ci"][0] <= 0.0 <= p["ci"][1])
+    limits: list[str] = []
+    if straddling:
+        limits.append(
+            f"{straddling} of {len(pairs)} pair interval(s) straddle zero — on this data the "
+            "arm dimension is not something to route on."
+        )
+    thin = [p for p in pairs if p["n"] < MIN_N_RELIABLE]
+    if thin:
+        limits.append(
+            f"{len(thin)} of {len(pairs)} pair(s) rest on fewer than {MIN_N_RELIABLE} "
+            "co-measured tasks (marked provisional) — their interval is wide enough to contain "
+            "almost anything."
+        )
+    return Annotations(notes=tuple(notes), limitations=tuple(limits))
+
+
+# ---------------------------------------------------------------------------
+# Equal-coverage imputation reporting — capability distribution,
+# coverage audit, violation rate, cascade overhead-leak, per-stratum win-rates,
+# and the disclosure banner that replaces the removed sparse-frontier (phantom) machinery.
+# ---------------------------------------------------------------------------
+
+
+# Report-time capability BANDS — an ordinal, metadata-described grouping of the measured
+# capability rank (band 1 = weakest ... band N = strongest), NOT stored and NOT the routing
+# unit. Bands carry NO semantic names: each is described only by its member models, price
+# range, marginal-pass-rate range (+CI), n_models, and the share of tasks it is the weakest
+# to solve. The band COUNT is data-driven — adjacent models whose capability CIs overlap
+# merge into one band — never a fixed cap.
+
+
+def capability_bands(rank: config.CapabilityRank) -> dict[str, int]:
+    """Ordinal band index per model (1 = weakest ... N = strongest), merged on PAIRWISE
+    CI overlap: every member of a band overlaps every other member."""
+    # A set of intervals overlaps pairwise iff max(lo) <= min(hi), so the band carries a
+    # running envelope and cuts when a candidate falls outside it. The previous rule
+    # compared each model only with its predecessor, which chains: it put deepseek
+    # [0.613, 0.745] and qwen [0.337, 0.547] — disjoint — in one band while the legend
+    # told the reader a band means overlapping CIs.
+    bands: dict[str, int] = {}
+    band = 1
+    envelope: tuple[float, float] | None = None
+    for rm in rank.ordered:
+        ev = rank.evidence.get(rm.model)
+        if ev is not None:
+            if envelope is None:
+                envelope = (ev.ci_lo, ev.ci_hi)
+            else:
+                lo, hi = max(envelope[0], ev.ci_lo), min(envelope[1], ev.ci_hi)
+                if lo > hi:
+                    band += 1
+                    lo, hi = ev.ci_lo, ev.ci_hi
+                envelope = (lo, hi)
+        bands[rm.model] = band
+    return bands
+
+
+def _band_order(bands: dict[str, int]) -> list[int]:
+    """Unique band indices in weakest -> strongest order."""
+    return sorted(set(bands.values()))
+
+
+def band_metadata(
+    rank: config.CapabilityRank,
+    bands: dict[str, int],
+    im: ImputedMatrix | None = None,
+) -> dict[int, dict]:
+    """Per-band metadata: member models (rank order), n_models, price_range [min,max],
+    capability_range (marginal pass-rate min/max + CI envelope), and pct_tasks_min_solved
+    (share of tasks whose crossover model τ falls in the band, when a matrix is given)."""
+    members: dict[int, list[str]] = {}
+    for rm in rank.ordered:
+        b = bands.get(rm.model)
+        if b is not None:
+            members.setdefault(b, []).append(rm.model)
+    tau_total = len(im.tau) if im is not None else 0
+    tau_counts: dict[int, int] = {}
+    if im is not None:
+        for model in im.tau.values():
+            b = bands.get(model) if model is not None else None
+            if b is not None:
+                tau_counts[b] = tau_counts.get(b, 0) + 1
+    meta: dict[int, dict] = {}
+    for b in _band_order(bands):
+        models = members.get(b, [])
+        evs = [rank.evidence[m] for m in models if m in rank.evidence]
+        prices = [e.price for e in evs]
+        rates = [e.pass_rate for e in evs]
+        meta[b] = {
+            "band": b,
+            "models": models,
+            "n_models": len(models),
+            "price_range": [min(prices), max(prices)] if prices else None,
+            "capability_range": {
+                "pass_rate_min": round(min(rates), 4),
+                "pass_rate_max": round(max(rates), 4),
+                "ci_lo": round(min(e.ci_lo for e in evs), 4),
+                "ci_hi": round(max(e.ci_hi for e in evs), 4),
+            }
+            if evs
+            else None,
+            "pct_tasks_min_solved": (
+                round(tau_counts.get(b, 0) / tau_total, 4) if tau_total else None
+            ),
+        }
+    return meta
+
+
+def _band_label(b: int, meta: dict[int, dict]) -> str:
+    """Compact axis label: the ordinal index plus the band's defining metadata (member
+    models, price range, marginal pass-rate range) — never a semantic name."""
+    m = meta.get(b, {})
+    who = "\n".join(m.get("models") or ["?"])  # one per line: names collided at fontsize 7
+    pr = m.get("price_range")
+    # Escaped: an unescaped pair of `$` in one tick label is parsed as mathtext and
+    # both currency markers are deleted, so the shipped axis read "2-4" not "$2-$4".
+    price = f"{usd(pr[0], 2)}-{usd(pr[1], 2)}/Mtok" if pr else "price ?"
+    cr = m.get("capability_range")
+    rate = (
+        f"marginal pass {cr['pass_rate_min'] * 100:.0f}-{cr['pass_rate_max'] * 100:.0f}%"
+        if cr
+        else "?"
+    )
+    return f"band {b}\n{who}\n{price}\n{rate}"
+
+
+def _rank_bands() -> tuple[config.CapabilityRank, dict[str, int], list[int]]:
+    """The live capability rank, its ordinal display bands, and their weak->strong order."""
+    rank = config.capability_rank()
+    bands = capability_bands(rank)
+    return rank, bands, _band_order(bands)
+
+
+def coverage_rows(im: ImputedMatrix, bands: dict[str, int], band_order: list[int]) -> list[dict]:
+    """Per-band real / imputed / UNKNOWN cell counts — the audit that coverage is
+    now equal and how much rests on imputation."""
+    n_tasks = len(im.matrix)
+    models_per_band: dict[int, int] = {}
+    for b in bands.values():
+        models_per_band[b] = models_per_band.get(b, 0) + 1
+    real: dict[int, int] = {}
+    imputed: dict[int, int] = {}
+    for cells in im.matrix.values():
+        for model, cell in cells.items():
+            mb = bands.get(model)
+            if mb is None:
+                continue
+            bucket = imputed if cell.get("imputed") else real
+            bucket[mb] = bucket.get(mb, 0) + 1
+    rows: list[dict] = []
+    for b in band_order:
+        if b not in models_per_band:
+            continue
+        r, i = real.get(b, 0), imputed.get(b, 0)
+        expected = n_tasks * models_per_band[b]
+        rows.append({"band": b, "real": r, "imputed": i, "unknown": max(0, expected - r - i)})
+    return rows
+
+
+def write_coverage_table(im: ImputedMatrix, out_dir: Path) -> Path:
+    """Write the per-band coverage audit CSV (regenerable, gitignored)."""
+    _rank, bands, order = _rank_bands()
+    rows = coverage_rows(im, bands, order)
+    path = out_dir / "coverage_table.csv"
+    with path.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["band", "real", "imputed", "unknown"])
+        w.writeheader()
+        for row in rows:
+            w.writerow(row)
+    return path
+
+
+def write_capability_evidence(out_dir: Path, im: ImputedMatrix | None = None) -> Path:
+    """Write the per-model capability-rank evidence + ordinal-band grouping artifact (rank,
+    price, pass-rate, CI, source, band metadata; regenerable, gitignored). Prints a loud
+    finding if the derived strongest model is not the configured control."""
+    rank, bands, _order = _rank_bands()
+    knobs = config.capability_rank_config()
+    control = config.frontier_model()
+    if rank.ordered and rank.strongest() != control:
+        print(
+            f"  ⚠ FINDING: derived strongest model {rank.strongest()!r} != control_model "
+            f"{control!r} — the kill-gate baseline may be mis-chosen (investigate, do not ignore)."
+        )
+    csv_path = config.results_csv_path()
+    digest = hashlib.sha256(csv_path.read_bytes()).hexdigest() if csv_path.exists() else "absent"
+    models = [
+        {
+            "model": rm.model,
+            "n": rank.evidence[rm.model].n,
+            "pass_rate": round(rank.evidence[rm.model].pass_rate, 4),
+            "ci_lo": round(rank.evidence[rm.model].ci_lo, 4),
+            "ci_hi": round(rank.evidence[rm.model].ci_hi, 4),
+            "rank": rm.rank,
+            "source": rm.source,
+            "price": rank.evidence[rm.model].price,
+            "band": bands.get(rm.model),
+        }
+        for rm in rank.ordered
+    ]
+    payload = {
+        "generated_from": f"results.csv@{digest}",
+        "knobs": {k: knobs[k] for k in ("K", "W", "min_pairs")},
+        "control_model": control,
+        "bands": list(band_metadata(rank, bands, im).values()),
+        "models": models,
+    }
+    path = out_dir / "capability_evidence.json"
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+    return path
+
+
+def _violation_line(im: ImputedMatrix) -> str:
+    """One-line monotonicity violation rate with a Wilson CI — 'measured' only when it was."""
+    # violation_ci returns (0, 0, 0) at n=0; rendering that as v̂=0 [0,0] sells a
+    # vacuous denominator as a perfect measurement.
+    if im.n_multi_observed <= 0:
+        return (
+            "Monotonicity violation rate UNMEASURED — no task has two or more observed "
+            "ranked models, so the axiom is assumed here, not verified"
+        )
+    v, lo, hi = impute.violation_ci(len(im.violations), im.n_multi_observed)
+    return (
+        f"Monotonicity violation rate v̂={v:.3f} 95% CI [{lo:.3f}, {hi:.3f}] "
+        f"({len(im.violations)} of {im.n_multi_observed} multi-observed tasks) — "
+        "measured, not assumed"
+    )
+
+
+def _disclosure_banner(im: ImputedMatrix | None, rows: list[dict] | None) -> str | None:
+    """Coverage disclosure for the Pareto / cost=quality planes.
+
+    Downgrades 'equal-coverage' to 'coverage-completed' with the residual UNKNOWN
+    frontier count whenever per-strategy n_tasks are not actually equal (FIX B).
+    """
+    if im is None:
+        return None
+    _rank, bands, order = _rank_bands()
+    strongest = order[-1] if order else None
+    fr = next(
+        (r for r in coverage_rows(im, bands, order) if r["band"] == strongest),
+        None,
+    )
+    covered = (fr["real"] + fr["imputed"]) if fr else 0
+    unknown = fr["unknown"] if fr else 0
+    frac = (fr["imputed"] / covered * 100) if fr and covered else 0.0
+    ns = [int(r.get("n_tasks", 0) or 0) for r in rows] if rows else []
+    equal = bool(ns) and len(set(ns)) == 1
+    if equal:
+        head = (
+            f"equal-coverage via monotone imputation — {frac:.0f}% of frontier cells "
+            f"imputed (every strategy scored on n={ns[0]})."
+        )
     else:
-        ax.legend(
-            handles=[
-                Patch(color=plot_style.TRISTATE_PASS, label="pass"),
-                Patch(color=plot_style.TRISTATE_FAIL, label="fail"),
-                Patch(color=plot_style.TRISTATE_UNSAMPLED, label="not sampled"),
-            ],
-            loc="upper left",
-            bbox_to_anchor=(1.005, 1.0),
-            fontsize=8,
-            frameon=False,
+        rng = f"{min(ns)}–{max(ns)}" if ns else "?"
+        head = (
+            f"coverage-completed via monotone imputation — {frac:.0f}% of frontier cells "
+            f"imputed, {unknown} still unmeasured (per-strategy n={rng}); true equal-coverage "
+            "requires ladder collection."
         )
-
-    # Data-driven subtitle so it stays correct on every regen: which tasks split the
-    # field (columns disagree), which none solve, and the frontier column's coverage.
-    split, none_solve = [], []
-    for i, tid in enumerate(tasks):
-        seen = grid[i, ~np.isnan(grid[i])]
-        if seen.size and seen.min() != seen.max():
-            split.append(tid.split("__")[-1])
-        elif seen.size and seen.max() == 0.0:
-            none_solve.append(tid.split("__")[-1])
-    frontier_model, frontier_arm = columns[-1]  # priciest model, its highest-ranked sampled arm
-    frontier_n = int(coverage[-1])
-    single_arm_note = (
-        f"  ({plot_style.ARM_SWEEP_PENDING_NOTE})"
-        if plot_style.is_single_arm(raw)
-        else f"  ({plot_style.UNEVEN_COVERAGE_NOTE})"
+    if im.n_multi_observed > 0:
+        v, _lo, _hi = impute.violation_ci(len(im.violations), im.n_multi_observed)
+        axiom = (
+            f" Monotonicity holds on {(1 - v) * 100:.0f}% of "
+            f"{im.n_multi_observed} multi-observed task(s) (measured, not assumed)."
+        )
+    else:
+        axiom = (
+            " Monotonicity is UNVERIFIED here — no task has two or more observed ranked "
+            "models, so the axiom is assumed."
+        )
+    # No directional claim here. The shipped banner asserted "imputation is
+    # conservative, so a broken axiom only widens the router's lead"; that is not
+    # demonstrated — the router takes free imputed passes too, and on the measured-only
+    # overlap its lead is zero (kill_gate.png's measured-only row).
+    return (
+        head + axiom + " NEARLY every imputed cell is filled pass=True at a median measured "
+        "price (the monotone ladder has a fail branch, and 1 of 398 filled cells took it), "
+        "for the router as well as for the baseline — see evidence_basis.png for how much of "
+        "each strategy's number that is, and kill_gate.png's measured-only row for what "
+        "survives when the projection is removed."
     )
-    glyph_note = "" if glyphs else "  (colour-only at scale — see legend)"
-    ax.set_title(
-        f"Task × (model, arm) outcomes — ✓ pass · ✗ fail · gray = not sampled{glyph_note}\n"
-        f"columns disagree on {len(split)} task(s): {_cap_names(split)} · "
-        f"solved by none: {_cap_names(none_solve)} · "
-        f"{frontier_model}/{frontier_arm} sampled on {frontier_n}/{n_tasks}{single_arm_note}",
-        fontsize=9,
-    )
-    fig.tight_layout()
-
-    path = out_dir / "model_complementarity_heatmap.png"
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return path
 
 
-def plot_arm_monotonicity(
-    raw_results: RawResults,
-    out_dir: Path,
-    model_colors: dict[str, str],
-    arm_ranks: dict[tuple[str, str], int],
-) -> Path | None:
-    """N2 — small multiples, one facet per model, arms connected in rank order
-    ("-> more effort"). The facet boundary structurally forbids a shared
-    none/low/med/high axis across models (arms are ordinal within one model only).
-    """
-    columns = plot_style.arm_columns(raw_results)
-    if not columns:
-        return None
-    ordered_models = [m for m in model_colors if any(c[0] == m for c in columns)]
-    if not ordered_models:
-        return None
-    ncols = min(3, len(ordered_models))
-    nrows = math.ceil(len(ordered_models) / ncols)
-    fig, axes = plt.subplots(nrows, ncols, figsize=(4.6 * ncols, 4.0 * nrows), squeeze=False)
-    single_arm = plot_style.is_single_arm(raw_results)
-
-    for idx, model in enumerate(ordered_models):
-        ax = axes[idx // ncols][idx % ncols]
-        _draw_arm_monotonicity_facet(ax, raw_results, model, model_colors, arm_ranks, columns)
-
-    for idx in range(len(ordered_models), nrows * ncols):
-        axes[idx // ncols][idx % ncols].axis("off")
-
-    subtitle = f" — {plot_style.ARM_SWEEP_PENDING_NOTE}" if single_arm else ""
-    fig.suptitle(f"Arm monotonicity by model{subtitle} ({plot_style.ci_footer()})", fontsize=11)
-    fig.tight_layout()
-    path = out_dir / "arm_monotonicity.png"
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return path
-
-
-def _draw_arm_monotonicity_facet(
-    ax,  # noqa: ANN001 (matplotlib Axes; benchmark harness relaxed rung)
-    raw_results: RawResults,
-    model: str,
-    model_colors: dict[str, str],
-    arm_ranks: dict[tuple[str, str], int],
-    columns: list[tuple[str, str]],
-) -> None:
-    arms = sorted((a for m, a in columns if m == model), key=lambda a: arm_ranks.get((model, a), 0))
-    color = model_colors.get(model, "#9E9E9E")
-    xs, ys, downs, ups, ns = [], [], [], [], []
-    for arm in arms:
-        st = plot_style.arm_stats(raw_results, model, arm)
-        lo, hi = st.wilson
-        xs.append(st.avg_cost)
-        ys.append(st.pass_rate * 100)
-        down, up = plot_style.ci_yerr(st.pass_rate, lo, hi)
-        downs.append(down * 100)
-        ups.append(up * 100)
-        ns.append(st.n)
-    if xs:
-        ax.errorbar(
-            xs,
-            ys,
-            yerr=[downs, ups],
-            fmt="o-",
-            color=color,
-            ecolor="#555555",
-            capsize=3,
-            markersize=7,
-            zorder=3,
-        )
-        n_pts = len(xs)
-        for i, (x, y, arm, n) in enumerate(zip(xs, ys, arms, ns, strict=True)):
-            # Label toward the facet centre (leftmost point labels right, the
-            # rightmost labels left) so text never runs off the facet edge; a
-            # two-line label keeps it narrow and a translucent box lifts it off
-            # the marker + error-bar cap it would otherwise sit on.
-            last = n_pts > 1 and i == n_pts - 1
-            ha = "right" if last else "left"
-            dx = -7 if last else 7
-            dy, va = (12, "bottom") if y < 82 else (-12, "top")
-            ax.annotate(
-                f"{arm}\n(n={n})",
-                (x, y),
-                fontsize=7,
-                xytext=(dx, dy),
-                textcoords="offset points",
-                ha=ha,
-                va=va,
-                zorder=6,
-                bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.7),
-            )
-        if len(xs) >= 2:
-            ax.annotate(
-                "",
-                xy=(xs[-1], ys[-1]),
-                xytext=(xs[0], ys[0]),
-                arrowprops=dict(arrowstyle="->", color=color, alpha=0.4, lw=1.2),
-                zorder=2,
-            )
-            ax.text(
-                0.5,
-                -0.22,
-                "→ more effort",
-                transform=ax.transAxes,
-                ha="center",
-                fontsize=7,
-                color="#666666",
-            )
-    ax.set_title(model, fontsize=9)
-    ax.set_xlabel("avg cost/task ($)", fontsize=8)
-    ax.set_ylabel("pass rate (%)", fontsize=8)
-    ax.set_ylim(-5, 112)
-    ax.margins(x=0.18)
-    # Few, plain, rotated x-ticks: arm costs can be near-identical (e.g. the two
-    # kimi-k2.5 arms differ by <$0.001), and the default locator then jams six
-    # 6-digit labels into a collision — cap the count and rotate instead.
-    ax.xaxis.set_major_locator(MaxNLocator(nbins=4, prune="both"))
-    ax.ticklabel_format(axis="x", style="plain", useOffset=False)
-    for lbl in ax.get_xticklabels():
-        lbl.set_rotation(30)
-        lbl.set_ha("right")
-        lbl.set_fontsize(7)
-    ax.grid(True, alpha=0.3)
-
-
-def _arm_size_legend_handles(max_rank: int) -> list[Line2D]:
-    """Grey marker-size proxies explaining the size=arm-rank channel."""
-    # Endpoints only (min/max effort, plus a midpoint when the bracket has
-    # one) so the legend stays small regardless of how many ranks a model's
-    # bracket has. Ranks are within-model only (see
-    # plot_style.arm_marker_size), so this reads as an ordinal "less -> more
-    # effort" scale, never a cross-model rank comparison.
-    values = dict(plot_style.arm_size_legend_values(max_rank))
-    picks = {0, max_rank} if max_rank > 0 else {0}
-    if max_rank > 1:
-        picks.add(max_rank // 2)
-    handles = []
-    for rank in sorted(picks):
-        size = values[rank]
-        if rank == 0:
-            label = "arm rank 0 (less effort)"
-        elif rank == max_rank:
-            label = f"arm rank {rank} (more effort)"
-        else:
-            label = f"arm rank {rank}"
-        handles.append(
-            Line2D(
-                [0],
-                [0],
-                marker="o",
-                color="w",
-                markerfacecolor="none",
-                markeredgecolor="#666666",
-                markersize=math.sqrt(size) / 2,
-                label=label,
-            )
-        )
-    return handles
-
-
-def plot_arm_cloud(
-    raw_results: RawResults,
-    out_dir: Path,
-    model_colors: dict[str, str],
-    arm_ranks: dict[tuple[str, str], int],
-) -> Path | None:
-    """N4 — single-panel (model, arm) cost-quality cloud: hue=model, size=arm
-    rank, Wilson CIs, convex-hull frontier + AIQ.
-    """
-    points = _arm_cloud_points(raw_results, model_colors, arm_ranks)
-    if not points:
-        return None
-    fig, ax = plt.subplots(figsize=(10, 7))
-    label_points: list[tuple[float, float, str]] = []
-    for pt in points:
-        lo, hi = pt["wilson"]
-        down, up = plot_style.ci_yerr(pt["pass_rate"] / 100.0, lo, hi)
-        face = pt["color"] if not pt["provisional"] else "none"
-        ax.errorbar(
-            pt["cost"],
-            pt["pass_rate"],
-            yerr=[[down * 100], [up * 100]],
-            fmt="none",
-            ecolor=pt["color"],
-            alpha=0.5,
-            elinewidth=1,
-            capsize=2,
-            zorder=3,
-        )
-        ax.scatter(
-            pt["cost"],
-            pt["pass_rate"],
-            s=pt["size"],
-            facecolors=face,
-            edgecolors=pt["color"],
-            linewidth=1.1,
-            alpha=0.9,
-            zorder=4,
-        )
-        label_points.append((pt["cost"], pt["pass_rate"], f"{pt['model']}·{pt['arm']}"))
-    plot_style.label_points_with_leaders(ax, label_points, fontsize=6.5)
-
-    pareto_pts = plot_style.pareto_prune([(p["cost"], p["pass_rate"]) for p in points])
-    hull = plot_style.upper_hull(pareto_pts)
-    aiq = plot_style.area_under_frontier(hull)
-    if hull:
-        fx = [p[0] for p in hull]
-        fy = [p[1] for p in hull]
-        if fx[0] > 0:
-            fx = [0.0, *fx]
-            fy = [fy[0], *fy]
-        ax.plot(
-            fx,
-            fy,
-            color="#333333",
-            lw=1.6,
-            linestyle="--",
-            label=f"convex-hull frontier (AIQ={aiq:.2f})",
-        )
-
-    single_arm = plot_style.is_single_arm(raw_results)
-    subtitle = f" — {plot_style.ARM_SWEEP_PENDING_NOTE}" if single_arm else ""
-    ax.set_xlabel("avg cost per task ($)")
-    ax.set_ylabel("pass rate (%)")
-    ax.set_title(
-        f"(model, arm) cost-quality cloud{subtitle} — hue=model, size=arm rank (AIQ={aiq:.2f})\n"
-        f"({plot_style.ci_footer()})",
-        fontsize=10,
-    )
-    seen_models = {p["model"] for p in points}
-    handles = [
-        Line2D([0], [0], marker="o", color="w", markerfacecolor=c, markersize=9, label=m)
-        for m, c in model_colors.items()
-        if m in seen_models
-    ]
-    plotted_max_rank = max((arm_ranks.get((p["model"], p["arm"]), 0) for p in points), default=0)
-    size_handles = _arm_size_legend_handles(plotted_max_rank)
-    if handles:
-        # Opaque frame at lower-right, drawn on top: the right margin is taken by
-        # the per-point leader labels, so the model key stays inside the axes and
-        # its solid box masks the leader lines that would otherwise cross it.
-        model_legend = ax.legend(
-            handles=handles, fontsize=7, loc="lower right", title="model (hue)", framealpha=1.0
-        )
-        model_legend.set_zorder(20)
-        ax.add_artist(model_legend)
-    if size_handles:
-        size_legend = ax.legend(
-            handles=size_handles,
-            fontsize=6.5,
-            loc="upper left",
-            title="size = arm rank",
-            framealpha=1.0,
-        )
-        size_legend.set_zorder(20)
-    ax.grid(True, alpha=0.3)
-
-    path = out_dir / "arm_cost_quality_cloud.png"
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return path
-
-
-def plot_chosen_arm_vs_difficulty(
-    raw_results: RawResults,
-    matrix: dict,
-    tasks: list[str],
-    out_dir: Path,
-    model_colors: dict[str, str],
-    arm_ranks: dict[tuple[str, str], int],
-) -> Path | None:
-    """N5 — chosen (model, arm) cost vs solve-breadth (# sampled combos that
-    passed; higher = easier). Arm choice is always the default arm until the
-    live executor wires per-arm routing — stated in the title, not hidden.
-    """
-    try:
-        from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
-    except ImportError:
-        return None
-    strat_cfg = config.strategies()
-    cascade_p = dict(strat_cfg.get("knn", {}))
-    cascade_p.update(strat_cfg.get("knn_cascade", {}))
-    try:
-        strategy = kNNCascadeStrategy(**cascade_p)
-    except (TypeError, ValueError):
-        return None
-
-    xs, ys, colors, sizes = [], [], [], []
-    chosen_models: set[str] = set()
-    for tid in tasks:
-        per_model = raw_results.get(tid, {})
-        sampled = [(m, a) for m, per_arm in per_model.items() for a in per_arm]
-        if not sampled:
-            continue
-        solved = sum(1 for m, a in sampled if per_model[m][a].get("pass"))
-        # Deterministic jitter (crc32 of the task id) so identical solve-counts
-        # don't silently overplot into a single dot — the same input always
-        # renders the same jitter, so the PNG stays byte-stable on a re-run.
-        jitter = (zlib.crc32(tid.encode()) % 1000) / 1000 * 0.5 - 0.25
-        model = strategy.select(tid, matrix.get("tasks", {}).get(tid, {}), matrix)
-        default_arm = config.default_arm_ids([model]).get(model, "default")
-        row = per_model.get(model, {}).get(default_arm)
-        if row is None:
-            continue
-        xs.append(solved + jitter)
-        ys.append(float(row.get("cost", 0.0)))
-        colors.append(model_colors.get(model, "#9E9E9E"))
-        chosen_models.add(model)
-        max_rank = max(
-            (arm_ranks.get((model, a), 0) for m2, a in sampled if m2 == model), default=0
-        )
-        sizes.append(plot_style.arm_marker_size(arm_ranks.get((model, default_arm), 0), max_rank))
-    if not xs:
-        return None
-
-    fig, ax = plt.subplots(figsize=(9, 6))
-    ax.scatter(xs, ys, c=colors, s=sizes, alpha=0.7, edgecolors="white", linewidth=0.5)
-    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-    ax.set_xlabel(
-        "solve-breadth: # sampled (model, arm) combos that passed\n"
-        "(higher = easier; jittered to reveal ties; coverage is uneven by design,\n"
-        "p(arm|model) sampling)",
-        fontsize=9,
-    )
-    ax.set_ylabel("chosen (model, default-arm) cost ($/task)")
-    ax.set_title(
-        "What kNN-cascade SELECTS: chosen model cost vs task solve-breadth\n"
-        "(strategy-conditioned — one routed model per task, not per-model data; "
-        "arm is always the default — live per-arm routing isn't wired up yet)",
-        fontsize=9,
-    )
-    # Legend covers only the models this strategy actually routed to; models in the
-    # palette it never selected are omitted (noted) rather than shown as dead keys.
-    handles = [
-        Line2D([0], [0], marker="o", color="w", markerfacecolor=c, markersize=9, label=m)
-        for m, c in model_colors.items()
-        if m in chosen_models
-    ]
-    omitted = [m for m in model_colors if m not in chosen_models]
-    title = "model routed to (hue)"
-    if omitted:
-        title += f"\nnever selected: {_cap_names(omitted, 3)}"
-    ax.legend(handles=handles, fontsize=7, loc="upper right", title=title)
-    ax.grid(True, alpha=0.3)
-
-    path = out_dir / "chosen_arm_vs_difficulty.png"
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return path
-
-
-def plot_embedding_routing_map(
-    matrix: dict, out_dir: Path, model_colors: dict[str, str], k: int = 10
-) -> Path | None:
-    """N6 — PCA of the REAL jina prompt embeddings, coloured by each task's measured
-    p_solve: does task difficulty cluster in the shipped embedding space? (~no here).
-    """
-    _ = (model_colors, k)  # coloured by continuous p_solve now, not per-model arms
-    try:
-        from sklearn.decomposition import PCA
-
-        from benchmark.routing.strategies.knn import _embed_texts
-    except ImportError:
-        return None
-
+def cascade_overhead(
+    matrix: dict, im: ImputedMatrix, tasks: list[str], strategy: Strategy
+) -> float:
+    """Mean ``cascade_total_cost − single_shot_cost(τ)`` over solvable tasks — dollars a
+    cascade burns on failed cheaper probes before the passing model."""
     results = matrix.get("results", {})
-    tasks = matrix.get("tasks", {})
-    task_ids = [t for t in sorted(results.keys()) if t in tasks and tasks[t].get("description")]
-    if len(task_ids) < 3:
-        return None
-
-    # p_solve = fraction of MEASURED models that passed (real outcomes only, no imputation).
-    p_solve = []
-    for tid in task_ids:
-        cells = [c for c in results[tid].values() if isinstance(c, dict)]
-        passes = [1.0 if c.get("pass") else 0.0 for c in cells]
-        p_solve.append(float(np.mean(passes)) if passes else 0.0)
-
-    embeddings = np.asarray(_embed_texts([tasks[tid]["description"] for tid in task_ids]))
-    pca = PCA(n_components=2)
-    coords = pca.fit_transform(embeddings)
-    explained = pca.explained_variance_ratio_
-
-    fig, ax = plt.subplots(figsize=(9, 7))
-    sc = ax.scatter(
-        coords[:, 0],
-        coords[:, 1],
-        c=p_solve,
-        cmap="viridis",
-        vmin=0.0,
-        vmax=1.0,
-        s=48,
-        alpha=0.9,
-        edgecolors="black",
-        linewidth=0.3,
-    )
-    fig.colorbar(sc, ax=ax, label="own p_solve  (fraction of models that passed)")
-    ax.set_xlabel(f"PC1 ({explained[0] * 100:.1f}% variance)")
-    ax.set_ylabel(f"PC2 ({explained[1] * 100:.1f}% variance)")
-    ax.set_title(
-        "Does task difficulty cluster in the REAL jina embedding space?\n"
-        "PCA of the shipped jina-embeddings-v2-base-code vectors, coloured by measured p_solve\n"
-        "— hard (dark) and easy (bright) tasks intermix ⇒ difficulty is ~not embedding-separable",
-        fontsize=9,
-    )
-    fig.tight_layout()
-
-    path = out_dir / "embedding_routing_map.png"
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return path
+    overheads: list[float] = []
+    for tid in tasks:
+        tau = im.tau.get(tid)  # the crossover MODEL (weakest that solves the task), or None
+        if tau is None:
+            continue
+        strategy.select(tid, matrix.get("tasks", {}).get(tid, {}), matrix)
+        cascade_cost = getattr(strategy, "cascade_total_cost", None)
+        if cascade_cost is None:
+            continue
+        single = row_real_cost(results.get(tid, {}).get(tau, {}))
+        overheads.append(float(cascade_cost) - single)
+    return sum(overheads) / len(overheads) if overheads else 0.0
 
 
 def derive_tasks(matrix: dict, seed: int) -> list[str]:
@@ -1362,15 +933,19 @@ def derive_tasks(matrix: dict, seed: int) -> list[str]:
     return config.sample_tasks(sorted(matrix.get("results", {}).keys()), seed=seed)
 
 
-def derive_rows(matrix: dict, tasks: list[str]) -> list[dict]:
-    """Compute per-strategy summary rows in-memory from the results.csv cache —
-    the single source of truth. Mirrors run_matrix.refresh_summary exactly (same
-    strategies, gamma, bootstrap, seed, and task set — see derive_tasks).
-    """
+def derive_rows(
+    matrix: dict, tasks: list[str], strategies: list[object] | None = None
+) -> list[dict]:
+    """Per-strategy summary rows derived in-memory from the results.csv cache."""
+    # The single source of truth. Mirrors run_matrix.refresh_summary exactly (same
+    # strategies, gamma, bootstrap, seed, and task set — see derive_tasks). Pass
+    # `strategies` to reuse an already-built set: each kNN-family strategy embeds every
+    # task description and builds its own HNSW index on first select, so building a
+    # second set costs GBs of RSS for no new information.
     from benchmark.routing import run_eval
 
     bm = config.benchmark_params()
-    strategies = run_eval.get_strategies()
+    strategies = strategies if strategies is not None else run_eval.get_strategies()
     return summary.compute_strategy_rows(
         matrix,
         tasks,
@@ -1392,47 +967,136 @@ def _load_raw_results() -> RawResults | None:
     return raw or None
 
 
-def _run_arm_plots(
-    out_dir: Path,
-    matrix: dict | None,
-    matrix_path: Path,
+def _report_imputation_outputs(
+    im: ImputedMatrix,
+    matrix: dict,
     tasks: list[str],
-    raw_results: RawResults | None,
+    out_dir: Path,
+    strategies: list[object] | None = None,
 ) -> None:
-    """N2/N4/N5/N6 — best-effort; each prints its own skip reason rather than
-    aborting the whole report on one plot's failure.
-    """
-    if raw_results is None or matrix is None:
-        print("  arm plots  : skipped (no results.csv cache available)")
-        return
-    raw_sampled = {cid: raw_results[cid] for cid in tasks if cid in raw_results}
-    model_colors = _model_colors()
-    arm_ranks = _arm_ranks()
+    """Emit the equal-coverage outputs: violation rate, coverage table, capability
+    evidence, cascade overhead-leak. The per-band split is drawn by evidence_basis.png
+    and the band histogram by task_difficulty.png, so neither is written twice."""
+    from benchmark.routing import run_eval
+    from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
 
-    for label, fn, args in (
-        (
-            "Arm monotonicity",
-            plot_arm_monotonicity,
-            (raw_sampled, out_dir, model_colors, arm_ranks),
-        ),
-        ("Arm cost cloud  ", plot_arm_cloud, (raw_sampled, out_dir, model_colors, arm_ranks)),
-        (
-            "Chosen vs diff.  ",
-            plot_chosen_arm_vs_difficulty,
-            (raw_sampled, matrix, tasks, out_dir, model_colors, arm_ranks),
-        ),
-        ("Embedding map    ", plot_embedding_routing_map, (matrix, out_dir, model_colors)),
-    ):
-        try:
-            result_path = fn(*args)
-        except Exception as exc:  # noqa: BLE001 (each N-plot is independently optional)
-            print(f"  {label}: skipped ({type(exc).__name__}: {exc})")
+    strategies = strategies if strategies is not None else run_eval.get_strategies()
+    print(f"  {_violation_line(im)}")
+    _rank, bands, order = _rank_bands()
+    unknown_by_band = {r["band"]: r["unknown"] for r in coverage_rows(im, bands, order)}
+    total_unknown = sum(unknown_by_band.values())
+    print(
+        f"  Residual UNKNOWN cells (excluded from scoring, NOT equal coverage yet): "
+        f"{total_unknown} total; by band {unknown_by_band}"
+    )
+    print(f"  Coverage tbl : {write_coverage_table(im, out_dir)}")
+    print(f"  Capab. evid. : {write_capability_evidence(out_dir, im)}")
+
+    completed, _im = summary.complete_scored_matrix(matrix)
+    overhead = cascade_overhead(completed, im, tasks, kNNCascadeStrategy(**config.knn_params()))
+    print(f"  Cascade overhead-leak: USD {overhead:.4f}/task (failed cheaper probes before tau)")
+
+
+def strategy_choices(
+    matrix: dict, tasks: list[str], strategies: Iterable[object]
+) -> dict[str, dict[str, str]]:
+    """Per strategy: the model it chose per scorable task. The decision, not its outcome."""
+    # `strategy_cells` records what a decision COST and whether it passed; the audit figure
+    # needs what it PICKED, and re-running the strategies to get it would re-pay the
+    # embedding peak. Both read the same single `summary.evaluate` pass per strategy.
+    out: dict[str, dict[str, str]] = {}
+    for strategy in strategies:
+        decisions, unscorable = summary.evaluate(strategy, matrix, tasks)
+        out[strategy.name] = {  # type: ignore[attr-defined]
+            tid: model for tid, model, _passed, _cost in decisions if tid not in unscorable
+        }
+    return out
+
+
+def _render_oracle_gap(
+    ctx: figures.RoutingContext,
+    matrix: dict | None,
+    tasks: list[str],
+    raw: RawResults | None,
+    gamma: float,
+) -> object:
+    """Assemble the cost decomposition and the regret series, then draw oracle_gap.png."""
+    from benchmark.runner import kill_gate as gate
+
+    if matrix is None or not tasks:
+        return "skipped (no matrix)"
+    completed = ctx.completed or matrix
+    control = gate.evaluate_control(completed, tasks, config.frontier_model() or "")
+    router = gate.evaluate_router(completed, tasks)
+    decomposition = compute_cost_decomposition(control, router)
+
+    evaluated = _evaluate_strategies(_build_strategy_factories(gamma), completed, tasks)
+    oracle_pair = evaluated.get("Oracle-reward")
+    if oracle_pair is None:
+        return "skipped (no oracle reference)"
+    oracle, excluded = oracle_pair[0], set(oracle_pair[1])
+    series: dict[str, list[tuple[str, str, bool, float]]] = {}
+    for name, (decisions, unscorable) in evaluated.items():
+        if name == "Oracle-reward":
             continue
-        print(f"  {label}: {result_path}" if result_path else f"  {label}: skipped (no data)")
-    _ = matrix_path  # kept for signature symmetry with the other plot entry points
+        series[name] = decisions
+        excluded |= set(unscorable)
+    if raw:
+        series["Arm-oracle"] = _arm_oracle_decisions(raw, tasks, gamma)
+        series["Arm-bandit"] = _arm_bandit_decisions(raw, tasks, gamma)
+    return (
+        fig_oracle.render(ctx, decomposition, series, oracle, excluded, gamma)
+        or "skipped (no equal-quality pair)"
+    )
+
+
+def paired_quality_contrast() -> str:
+    """The Price-Cascade vs fixed-frontier paired quality headline (docs/benchmark.md)."""
+    # Emits the exact sentence fragment for the "cheapest strategy that matches fixed-frontier
+    # quality" claim from the committed corpus, regenerable byte-for-byte. Uses ONLY fixed
+    # strategies (Price-Cascade, Always-Frontier) — no embeddings — so it runs offline and
+    # deterministically: paired pass-rate delta + paired bootstrap CI (seed 42, 1000 draws,
+    # the convention run_eval._paired_bootstrap_ci uses).
+    import random
+
+    from benchmark.routing.strategies.fixed import AlwaysFrontier
+    from benchmark.routing.strategies.price_cascade import PriceCascade
+
+    matrix = config.load_matrix()
+    completed, _ = summary.complete_scored_matrix(matrix)
+    tasks = sorted(completed["results"].keys())
+    pc = PriceCascade(max_tries=3)
+    af = AlwaysFrontier()
+    pc_dec, pc_un = summary.evaluate(pc, completed, tasks)
+    af_dec, af_un = summary.evaluate(af, completed, tasks)
+    pc_pass = {d[0]: bool(d[2]) for d in pc_dec}
+    af_pass = {d[0]: bool(d[2]) for d in af_dec}
+    shared = [t for t in tasks if t not in pc_un and t not in af_un]
+    diffs = [int(pc_pass[t]) - int(af_pass[t]) for t in shared]
+    n = len(shared)
+    delta = 100.0 * sum(diffs) / n
+    rng = random.Random(42)
+    n_boot = 1000
+    means = sorted(
+        100.0 * sum(diffs[rng.randrange(n)] for _ in range(n)) / n for _ in range(n_boot)
+    )
+    a = int(0.025 * n_boot)
+    lo, hi = means[a], means[n_boot - 1 - a]
+    crosses_zero = lo <= 0 <= hi
+    pc_cost = sum(r[3] for r in pc_dec if r[0] in shared)
+    af_cost = sum(r[3] for r in af_dec if r[0] in shared)
+    cheaper_pct = round((1 - pc_cost / af_cost) * 100) if af_cost else 0
+    reading = "statistically equal" if crosses_zero else "not statistically equal"
+    return (
+        f"{delta:+.1f} pp, CI crosses zero → {reading}, at roughly "
+        f"{cheaper_pct}% lower cost on the shared measurable set"
+    )
 
 
 def main(config_path: str = "benchmark/benchmark.yaml") -> None:
+    # Line-buffered: a piped stdout otherwise buffers 8 KB, and an OOM SIGKILL
+    # discards it — the first observed failure of this report printed NOTHING.
+    sys.stdout.reconfigure(line_buffering=True)  # type: ignore[union-attr]
     config.load(config_path)
 
     ap = argparse.ArgumentParser(
@@ -1448,7 +1112,15 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     ap.add_argument(
         "--out-dir",
         default="benchmark/routing/reports",
-        help="Output directory for reports (default: benchmark/routing/reports/)",
+        help="Output directory for the derived CSV/JSON artifacts "
+        "(default: benchmark/routing/reports/)",
+    )
+    ap.add_argument(
+        "--figures-dir",
+        default="docs/assets/figures/routing",
+        help="Output directory for the PNGs. They live inside the published docs tree, one "
+        "subdirectory per half, so the docs can link them relatively "
+        "(default: docs/assets/figures/routing/)",
     )
     ap.add_argument(
         "--matrix",
@@ -1463,13 +1135,26 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     matrix_path = Path(args.matrix) if args.matrix else config.challenges_path()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir = Path(args.figures_dir)
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    _memory_preflight()
+
+    # ONE strategy set for the whole run. Each kNN-family strategy embeds every task
+    # description and builds its own HNSW index on first select, so re-instantiating
+    # the set per consumer cost GBs of RSS and OOM-killed the report.
+    from benchmark.routing import run_eval
+
+    strategies = run_eval.get_strategies()
+
+    # ONE load of the matrix for the whole run: it was loaded twice (once to derive the
+    # rows, once for the plots), holding two full copies alongside the embedders.
+    matrix = load_matrix(matrix_path) if matrix_path and matrix_path.exists() else None
 
     if args.results:
         results = load_results(Path(args.results))
         source = args.results
         tasks: list[str] = []
     else:
-        matrix = load_matrix(matrix_path)
         if matrix is None or not matrix.get("results"):
             print(
                 "No results yet — results.csv holds no rows. "
@@ -1477,15 +1162,19 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
             )
             return
         tasks = derive_tasks(matrix, config.benchmark_params().get("seed", 42))
-        results = derive_rows(matrix, tasks)
+        results = derive_rows(matrix, tasks, strategies)
         # Validate BEFORE writing: a degenerate matrix must not leave a misleading
         # summary CSV behind on its way to a crash in the first plot.
         problem = _validate_rows(results) if results else None
         if problem:
             print(f"Refusing to report: {problem}", file=sys.stderr)
             return
-        # Write a human-readable copy to reports/ (gitignored) — never committed.
-        summary.write_summary_csv(results, out_dir / "strategy_summary.csv")
+        # Write a human-readable copy to reports/ (gitignored) — never committed. Every row is
+        # stamped with the SHIPPED selection path's instrument verdict; the figures' gate
+        # certifies `select_from_rates`, which is a different rule.
+        table = summary.certified_table(results)
+        print(table.admissibility.reason)
+        summary.write_summary_csv(table, out_dir / "strategy_summary.csv")
         source = "results.csv (derived in-memory)"
 
     if not results:
@@ -1505,42 +1194,73 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     print()
 
     raw_results = _load_raw_results()
-    matrix_for_plots = load_matrix(matrix_path) if matrix_path and matrix_path.exists() else None
+    matrix_for_plots = matrix
 
-    p1 = plot_pareto(results, out_dir, raw_results, len(tasks), matrix_for_plots)
-    print(f"  Pareto       : {p1}")
+    # Complete the matrix ONCE and keep the completed copy: the measured-vs-projected
+    # cells below used to re-run the same completion, doubling the work and the peak.
+    imputed: ImputedMatrix | None = None
+    completed: dict | None = None
+    if matrix_for_plots is not None:
+        completed, imputed = summary.complete_scored_matrix(matrix_for_plots)
+    banner = _disclosure_banner(imputed, results)
+
+    # Per-task selections with the imputed flag, plus the model each strategy chose.
+    # ONE evaluation pass feeds every figure below — a second one costs GBs of RSS.
+    by_strategy: dict[str, tuple[StrategyCells, set[str]]] = {}
+    chosen: dict[str, dict[str, str]] = {}
+    if completed is not None and tasks:
+        by_strategy = strategy_cells(completed, tasks, strategies)
+        chosen = strategy_choices(completed, tasks, strategies)
+
+    ctx = figures.build_context(
+        out_dir=figures_dir,
+        matrix=matrix_for_plots or {},
+        completed=completed or {},
+        imputed=imputed,
+        tasks=tasks,
+        rows=results,
+        raw=raw_results,
+        banner=banner,
+        by_strategy=by_strategy,
+    )
+
+    _step("Kill gate", fig_kill_gate.render(ctx) or "skipped (no paired arm)")
+    _step("Ladder rungs", fig_ladder.render(ctx) or "skipped (no priced target)")
+    _step("Cost/quality", fig_frontier.render(ctx) or "skipped (no cost)")
+    _step("Live gap", fig_live_gap.render(ctx) or "skipped (no bound row)")
+    _step("Cache econ", fig_cache.render(ctx) or "skipped (no priced row)")
 
     g = config.gamma()
-    factories = _build_strategy_factories(g)
-    p2 = plot_cumulative_regret(
-        results,
-        out_dir,
-        matrix_path,
-        gamma=g,
-        strategy_factories=factories,
-        raw_results=raw_results,
-    )
-    print(f"  Regret       : {p2}")
+    _step("Oracle gap", _render_oracle_gap(ctx, matrix_for_plots, tasks, raw_results, g))
 
-    p3 = plot_cost_savings(results, out_dir, matrix_for_plots)
-    print(f"  Cost savings : {p3}")
+    router_picks = chosen.get(figures.ROUTER_STRATEGY, {})
+    _step("Decision audit", fig_audit.render(ctx, router_picks) or "skipped (no picks)")
 
-    p1n = plot_cost_quality_equal(results, out_dir, matrix_for_plots)
-    print(f"  Cost=quality : {p1n}")
+    if imputed is not None and matrix_for_plots is not None:
+        _report_imputation_outputs(imputed, matrix_for_plots, tasks, out_dir, strategies)
+        _rank, bands, order = _rank_bands()
+        _step(
+            "Evidence basis",
+            fig_evidence.render(ctx, coverage_rows(imputed, bands, order)) or "skipped",
+        )
+        _step("Task difficulty", fig_difficulty.render(ctx, bands, router_picks) or "skipped")
 
-    if matrix_path is not None:
-        if matrix_path.exists():
-            try:
-                p4 = plot_heatmap(matrix_path, out_dir, raw_results)
-                print(f"  Heatmap      : {p4}")
-            except (FileNotFoundError, ValueError, KeyError) as exc:
-                print(f"  Heatmap      : skipped ({exc})")
-        else:
-            print(f"  Heatmap      : matrix file {matrix_path} not found, skipping")
-
-    _run_arm_plots(out_dir, matrix_for_plots, matrix_path, tasks, raw_results)
+    if raw_results is not None:
+        arm_ranks = _arm_ranks()
+        columns = _sorted_arm_columns(
+            plot_style.arm_columns(raw_results),
+            (matrix_for_plots or {}).get("models", {}),
+            arm_ranks,
+        )
+        _step("Complementarity", fig_complementarity.render(ctx, columns) or "skipped")
+        contrasts = arm_pair_contrasts(raw_results, arm_ranks)
+        _step(
+            "Arm manipulation",
+            fig_arms.render(ctx, contrasts, arm_pair_totals(contrasts)) or "skipped (no arm pairs)",
+        )
 
     plt.close("all")
+    print(f"Done. Peak RSS {_peak_rss_mb():,.0f} MB.")
 
 
 if __name__ == "__main__":

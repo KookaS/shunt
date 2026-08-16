@@ -1,0 +1,4937 @@
+{
+  "schema_version": "1",
+  "trajectories": {
+    "astropy__astropy-12907__deepseek-v4-flash__high": {
+      "content_sha256": "f949fe056da48131622a397bf2ab3f602058648ec1e5d23af23f8c18d5502469",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-12907__gpt-5-mini__medium": {
+      "content_sha256": "e4822abdd185f4ac2b658fef14585d90207f534c0924c633c30b46a22e05a07b",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-13033__deepseek-v4-flash__high": {
+      "content_sha256": "7bf0bd28065f1bb3349616bc25d850eea9fa3d275e69bd568c5bc08c1e3e79cb",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13033__deepseek-v4-flash__nothink": {
+      "content_sha256": "ca041a62ccca02f679e9b30e553d8966e862364495264170307af65add970430",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13033__gpt-5-mini__high": {
+      "content_sha256": "4651bb0ea31f1049321096de759ad95865c0ba2974b5cce75cc1f2a86df87e2f",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13033__gpt-5-mini__medium": {
+      "content_sha256": "323b653a0cb976c41cb6297d2cb360bbfd962c81d7e95c6989f5ed3e6040e1fe",
+      "n_steps": 12,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13033__kimi-k2.5__think": {
+      "content_sha256": "1347cb54191eab151f75e99f12db4bb29e2ca296d8640553c33aed56213c53b5",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13033__kimi-k3__max": {
+      "content_sha256": "071c78ad95701599514b7aec147170a5a7499a5f4a851d6d230f8541cc8b0f05",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-13033__qwen3.7-plus__nothink": {
+      "content_sha256": "91d17e5c02cec0ab8f8c5ffa7ee07f5cdb331eb6cdde6487dacbc86bbf76a41f",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13033__qwen3.7-plus__think": {
+      "content_sha256": "45a50178b0428ce039f20e79fbec851d37f8071160a7e216aef340a4e871c19a",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13033__zai-glm-5.2__think": {
+      "content_sha256": "c70f32cb9832fbf60d441ef9e3d699312301fd31c36fdb96af1965eff0459ceb",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13236__deepseek-v4-flash__high": {
+      "content_sha256": "583dc9e2a261a2f50dc3f394fe521828e1ce3d7cd1db6984efed9818cc6fb3fd",
+      "n_steps": 48,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-13236__deepseek-v4-flash__max": {
+      "content_sha256": "e82877a08df97d25c4daa0eaf45f49e670f680c1ce3d0c968b28c51f6c26288a",
+      "n_steps": 52,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-13236__deepseek-v4-flash__nothink": {
+      "content_sha256": "98d57e3565bf7bedd8f3c153b5d43dfd8519f59bc83740320399c9a53ea190c9",
+      "n_steps": 93,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-13236__gpt-5-mini__medium": {
+      "content_sha256": "abb65d898a0d6cd0e69c4b53acc5649ab4ec4812a9ec9e555dee7f0f7e03bcd3",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13236__kimi-k2.5__think": {
+      "content_sha256": "8e339f31d5eda257370cf611cd9ff1fed760b0b06d7b56e37e4fd5ca1430034b",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13236__kimi-k3__max": {
+      "content_sha256": "1d0a288916400bd5abd944f8ad2583470e4c3c6487d026917b7e08cf0e1481b4",
+      "n_steps": 60,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-13398__deepseek-v4-flash__high": {
+      "content_sha256": "56ebc25eb0ceec8e1fcbc4d1c468b21dc6166860c95332744740b437513b4408",
+      "n_steps": 61,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13398__deepseek-v4-flash__nothink": {
+      "content_sha256": "18ea14609abce59c3ac7fdecb9b447beec49677934b8697557fb5fff6d493304",
+      "n_steps": 50,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13398__gpt-5-mini__medium": {
+      "content_sha256": "6f82cfeaee64bd29703b2445a241e744d4185badb4f31e6443504c6056daf65f",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13398__gpt-5-mini__minimal": {
+      "content_sha256": "1f5029143066803a10333d8bdec3850c8b1d1c61724bab1140ab9ed0a2d3e47f",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13398__kimi-k2.5__think": {
+      "content_sha256": "66cd97d518ac1bb487b3a27d1391a6fc541bf249807ae018d865ac8c5191d432",
+      "n_steps": 53,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13398__qwen3.7-plus__nothink": {
+      "content_sha256": "a1144a591279344a4efe35148644ea970dd05ea998f22901a18bee48ddd3a7f0",
+      "n_steps": 49,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13398__qwen3.7-plus__think": {
+      "content_sha256": "fb9e593e2ecdbe569c33894d6f584a2f8d371af2a3c183b7b483f325aae1afba",
+      "n_steps": 51,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13977__deepseek-v4-flash__high": {
+      "content_sha256": "ab93b07b2d1db7c0a2a8ff199159e15b5911d6e276b0c02f50f121b2e282ae93",
+      "n_steps": 47,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13977__deepseek-v4-flash__nothink": {
+      "content_sha256": "1059f9b1270133053561a7311402619b97b3334a59ea022ddb7f3d4917f18503",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13977__gpt-5-mini__medium": {
+      "content_sha256": "203621d7a2502546782fd25b03bd0a7cc2067f8d7c2b23b43d3a48c93e4fb66c",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13977__gpt-5-mini__minimal": {
+      "content_sha256": "bbb99316dac143317dfa5e385f92e6c5cc111f49129e42281863dcb05943d332",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13977__kimi-k2.5__think": {
+      "content_sha256": "f1cd1fcd92405ee769bec66de57f179ed3b18a13742a22a761947e020af42624",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13977__qwen3.7-plus__nothink": {
+      "content_sha256": "dff04909b6e6b6990330afb6094a01ffe05616d545a85ea6e897c0364b2e00d4",
+      "n_steps": 47,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-13977__qwen3.7-plus__think": {
+      "content_sha256": "0dcc2e82d27d7fd74e2b480420168673d67325476427773d6a24d38511151d18",
+      "n_steps": 49,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14096__deepseek-v4-flash__high": {
+      "content_sha256": "969cdd6bad2bd9f3e99e6a29c8cdb7d81b735209712ad7045801263abecab283",
+      "n_steps": 69,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14096__deepseek-v4-flash__max": {
+      "content_sha256": "62debf2927cd8db461af29eb7e74dfe945a165f744a4075ff6197205173c1275",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14096__gpt-5-mini__medium": {
+      "content_sha256": "2848146a345a92d5ce7c7432b9b03c834093fadd5a076d5210083a3808cf3e88",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14096__gpt-5-mini__minimal": {
+      "content_sha256": "eab74d700f07a3ea6b4e8c941fb11e7c24c59ac27beaf0f2b44b79d96cd9c36d",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14182__deepseek-v4-flash__high": {
+      "content_sha256": "4ac2fbfbc68e8292901b3a2c463ad59b6c8a7fab3660ec714604a3f8c716cea2",
+      "n_steps": 42,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14182__deepseek-v4-flash__nothink": {
+      "content_sha256": "6248047de99b0055582435df5b5f09ed1fea760d6df387806df53f9b90c4192c",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14182__gpt-5-mini__medium": {
+      "content_sha256": "adcc259943e00c92e36dab743b4b13fbb9d9fdf5522a9f2f2ecddd59da4e6dc8",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14182__gpt-5-mini__minimal": {
+      "content_sha256": "7a1051a836e807703a739e06e957db97e9db1f6262291875ce40d0c65c42a7ca",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14182__kimi-k2.5__nothink": {
+      "content_sha256": "ab26bca167b2cbd81785d5594c3451e6ce45c95d772667580e14409920280350",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14182__kimi-k2.5__think": {
+      "content_sha256": "0ffb5f594164a6dbfd1c78396605fd8ae538384efdb2ccec054de1459aa166f5",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14182__qwen3.7-plus__nothink": {
+      "content_sha256": "cc69a8ac2f912b704ce0fdb96a9c02b695c8e299184023c7122be9922d51286f",
+      "n_steps": 68,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14182__qwen3.7-plus__think": {
+      "content_sha256": "454a57bc9204afb62bddd5750eb2c6b8f7e3abf1998427500a7843d4261ab961",
+      "n_steps": 51,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14309__deepseek-v4-flash__high": {
+      "content_sha256": "83f00c59f5b3dd7c4255892b8f470977f6a304614d4d51c016a7a37a16d4ce03",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14309__deepseek-v4-flash__nothink": {
+      "content_sha256": "83b218514f6ed5893fa32239d16bf2ee48b06a20061c2edae41e5c5345cbca9e",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14309__gpt-5-mini__medium": {
+      "content_sha256": "e6c065a51a0e9e6e649961afedade0ee030b2a90f4fec0fe639e59f4526e319e",
+      "n_steps": 12,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14309__kimi-k3__max": {
+      "content_sha256": "b102efc58362c6f09509ff25abd77cfc8aa55ed6b1b76c19289ad961cbeae408",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14365__deepseek-v4-flash__high": {
+      "content_sha256": "a3bf2191ecd49cca6f132c786e58939e8fcda018009c373793f86cb6ca3d22d9",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14365__gpt-5-mini__medium": {
+      "content_sha256": "dc75260d223a96a625c70b6cd1ef6cc3f4fdde374faefc769c2a1ac1c1117618",
+      "n_steps": 9,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14365__gpt-5-mini__minimal": {
+      "content_sha256": "ae8b5961ebcd4bd0b534e4fa8543bd6b2faa67ff79bf27e62836d1334e1e894d",
+      "n_steps": 9,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14365__kimi-k2.5__think": {
+      "content_sha256": "5a9ef59a64b6ff796257ab4401576ac55002fab3e8322f83975cee656a049d49",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14365__kimi-k3__max": {
+      "content_sha256": "61cc4af8bd483643602410930f78db834501dbb0902aab00de37e382abda11a3",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14365__qwen3.7-plus__think": {
+      "content_sha256": "1744289f0365a45c0a324329a642d71c03c2c4c54c2dcf248b4bfb8d17d4955b",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14365__zai-glm-5.2__think": {
+      "content_sha256": "174c5556fdfe77148b67921b52caa3c7227b9809bf75b37c5fe070f62fff5c94",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14369__deepseek-v4-flash__high": {
+      "content_sha256": "fcc78f20f30b233a6fed19bfa1b5e74ba5a34ced3d6d46066402e95d1fc6d82f",
+      "n_steps": 82,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14369__gpt-5-mini__medium": {
+      "content_sha256": "431c0b9459867ca17b1fd19946984cb16ec8eb2a1292975ed954a800f41dea17",
+      "n_steps": 50,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14369__gpt-5-mini__minimal": {
+      "content_sha256": "7cb444b003a2b0905a4cdf63be5b3dc662df8fc612d42ac312b5964ae3235f50",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14369__kimi-k2.5__nothink": {
+      "content_sha256": "74905b727dd48239d5accabbb452215643834b14ea59890a509122e21fa9d5e4",
+      "n_steps": 40,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14369__qwen3.7-plus__nothink": {
+      "content_sha256": "b9b1fc29611a90890babb2ec9f2ff13d8c497eaf07437d3d69c0915915cca9ea",
+      "n_steps": 63,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14369__qwen3.7-plus__think": {
+      "content_sha256": "50559c51cf8a489a40d0dcdb609d39ef407682d182715cb08734ed293273449c",
+      "n_steps": 37,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14508__deepseek-v4-flash__high": {
+      "content_sha256": "351ec50df74243798ba77390ab92be27374b4323be9b1502c536635655a0be95",
+      "n_steps": 37,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14508__deepseek-v4-flash__nothink": {
+      "content_sha256": "5312230124423caea405b171a7d7e10a675d6c29dd34345dddafd123af2c8c7f",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14508__gpt-5-mini__medium": {
+      "content_sha256": "cbdb729d2a606d4282f4bf862b9455957389f6b64976b9c64fb71752ae1ef253",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14539__deepseek-v4-flash__high": {
+      "content_sha256": "88e7344bb8e34a1df9632b58d6e6b138948be13ec7102c41a2841d83d1ecdaf4",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14539__deepseek-v4-flash__max": {
+      "content_sha256": "2cd1785d6bdff26524edf527f1d271eb297893252dffd25047fd983e9b39a0eb",
+      "n_steps": 57,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14539__gpt-5-mini__medium": {
+      "content_sha256": "ae7b07f0c8220c8e04fae2393ecb0d7fa8002362da776a7e48a797229b37f43a",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14539__gpt-5-mini__minimal": {
+      "content_sha256": "12a9912f0b1f4546978dbfd16b4b30b3696a329d631351876c311e00736067a4",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14539__kimi-k2.5__nothink": {
+      "content_sha256": "b0688b2592698cd4621921fd37a4aeb36d9012b97574ec996249033f83d4ec7b",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14539__kimi-k2.5__think": {
+      "content_sha256": "c646341744f894ee7740401ec203bc730962ec76f0e8045300a5c600621f7796",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14539__kimi-k3__max": {
+      "content_sha256": "de1250685b1e2e7d7ceb43987547326039ecf456bd7fd65d5e2f1b4dd1df2644",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14598__deepseek-v4-flash__high": {
+      "content_sha256": "89f8bfd82548655b05873891f8647ca81d52b8e2c6e13d6e52844cdee4f5fae4",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14598__deepseek-v4-flash__nothink": {
+      "content_sha256": "4dbb0c52bc799e1e76cc4e2bd8900ff148e83429ea8a64cca446308121cbd49a",
+      "n_steps": 37,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14598__gpt-5-mini__medium": {
+      "content_sha256": "c4f62d954ed7f881da8eec7e13340236f526b2613c5a88951f9f6cc568a66699",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14598__gpt-5-mini__minimal": {
+      "content_sha256": "897e3b5a847f755d2fc5040c82994edf6f4b68142397ac8e7754bf5eccb6cd1f",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14598__kimi-k2.5__think": {
+      "content_sha256": "c762329e155b2bf12b1c356b694dbc5e259291d0da8cbd88a0cf51dd273b49a0",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-14598__qwen3.7-plus__nothink": {
+      "content_sha256": "b82c04776b2bbff4df2f5dedeef9fa3a446bb2e00942168d1efbc11cf94643f2",
+      "n_steps": 43,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-7336__deepseek-v4-flash__high": {
+      "content_sha256": "e3e3098d239b6fef90678b12bf562b349f346586c10c583f1e6b9ef8c4d8feb7",
+      "n_steps": 12,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-7336__gpt-5-mini__high": {
+      "content_sha256": "7e5f29852aefd9e8c88e4e2a35d8ffdb12132bbec4d5461b56dee8fe56cfc162",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-7336__gpt-5-mini__medium": {
+      "content_sha256": "393ae788dd8a304257fdc93baf2825646bfe398df595bc84b32950a4e0e6fd6f",
+      "n_steps": 8,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-7336__kimi-k3__max": {
+      "content_sha256": "a9d18534822bc742ad37c18638b488261235d885c71e5c4d6b72a12d2f447450",
+      "n_steps": 11,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-7606__deepseek-v4-flash__high": {
+      "content_sha256": "7d49874fe1b96496a8620320714b0df5572388c81fd1f098d277711fb43c456d",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-7606__deepseek-v4-flash__nothink": {
+      "content_sha256": "8dff8656d1b8fa65153864252477290bffd1d89c0a305d59ad1f11488a03f4a8",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-7606__gpt-5-mini__medium": {
+      "content_sha256": "837983054a6cd739ccd90d37319f850bc246eb6fc5e1ff639d09c1ae4960fd5f",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-7606__gpt-5-mini__minimal": {
+      "content_sha256": "477e7e9c6d7820b67eb799e7669f68f6a2518abc962abd8916dd06d278b7f0d1",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-7606__kimi-k2.5__think": {
+      "content_sha256": "a4f0da1c53a7980687c7e8a4a38cf1418bfe6ebd67950a572950a4900fc2ee15",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-7606__kimi-k3__max": {
+      "content_sha256": "de3e7a7b55735d028c3ea5a6fe982a948fbba2287cb34f5e7946e4e69b163893",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-7606__qwen3.7-plus__nothink": {
+      "content_sha256": "1db293af74a0c7e55fc3300e4796907846b6f585b52f86c5c709e0a6264cc230",
+      "n_steps": 37,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-7606__qwen3.7-plus__think": {
+      "content_sha256": "30405b91bba3afe0a2f9990860c3144d2e8b2eff3b43824d33c5ff695fb5ca06",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-7606__zai-glm-5.2__think": {
+      "content_sha256": "fd82387d90786037f7c61be7e0dd1475ad425fd10221d4cfefa92f43fc130992",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-7671__deepseek-v4-flash__high": {
+      "content_sha256": "f0a11e343b60d871372ae1a8f358650982c6d8ac0539cd947ee5a98c1bb759e4",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-7671__gpt-5-mini__medium": {
+      "content_sha256": "38c6f985cfc66c80863e063ff9ca4c6a3092edfdd9a688039af1bbe91df3114c",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-7671__gpt-5-mini__minimal": {
+      "content_sha256": "cbc3bd5df6c29fc87f612dc22d01e15bf0dfc6473b397de1606b566e45d0270a",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-8707__deepseek-v4-flash__high": {
+      "content_sha256": "89fd9aafb08a36015bc0b1750d11e43690877e3de083eab3aba42d0a30a9a4c8",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8707__gpt-5-mini__medium": {
+      "content_sha256": "a9c1586b292d7541eb8a7b3adeba1064b53236faa78f7cfa8c531fb3f8c63def",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8707__kimi-k2.5__nothink": {
+      "content_sha256": "be3094fda7abf02a4115962b94dcb37b2ad3c11bcf561399e4ae1b0ac4b1676c",
+      "n_steps": 41,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8707__kimi-k2.5__think": {
+      "content_sha256": "047575d3768f3ac1b59be2486cf77f77fc2fb73df5b78e14be9b9e24f85c1d1b",
+      "n_steps": 39,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8707__qwen3.7-plus__nothink": {
+      "content_sha256": "9e14851c8d046d51a50a1b0085381d3b20e71a39ce0f11f82839935d4fd5b06b",
+      "n_steps": 52,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8707__qwen3.7-plus__think": {
+      "content_sha256": "4f83946306b71825b6b6ab2839f3634f252565fafa2a1bdfd5aecaed8ea4b89f",
+      "n_steps": 47,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8872__deepseek-v4-flash__high": {
+      "content_sha256": "e8d4892f40cd494897eee66b348d257e35aa0a621be5168549ce6a605817d9e1",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8872__deepseek-v4-flash__max": {
+      "content_sha256": "5afd5652f0d243ed589b9eb80616590d9e9d61cdb6537f32f901f41c713feba2",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8872__deepseek-v4-flash__nothink": {
+      "content_sha256": "addb06812150ada713c43b232b26a235f970c796267402f9467f64ea2cd7eb6d",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8872__gpt-5-mini__medium": {
+      "content_sha256": "4bb712e62b42229349607dfb24d967e50ac90e3851e05d3a99be47a3e0445f90",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8872__gpt-5-mini__minimal": {
+      "content_sha256": "09142b8291787665653203edea4e759c40da9bd496c0d407295a3cee04c1108f",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8872__kimi-k2.5__nothink": {
+      "content_sha256": "20d98bd078c47784b893aa875f8b45b569fa11bd6dfe1ab1a74569fbb934637e",
+      "n_steps": 45,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8872__kimi-k2.5__think": {
+      "content_sha256": "7feb72fc779684ebce451ef7b81a1d62773a88fbb29b9f6c0cd70a39e49174ae",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8872__qwen3.7-plus__think": {
+      "content_sha256": "3183f8db398dc0f50ca3b6516c2a7f304f381c8e34e9db8fe7bedab13e7a755d",
+      "n_steps": 54,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "astropy__astropy-8872__zai-glm-5.2__think": {
+      "content_sha256": "2903afd233dfbdcd36c69de6f9381f929bca92f6099dd8d3d99845ecaf5da72e",
+      "n_steps": 49,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-10880__deepseek-v4-flash__nothink": {
+      "content_sha256": "f8bf1bd0935c2c0d4a069950cb345be9d123261f9a83324fe302e2ba2bdd09f2",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-11099__deepseek-v4-flash__high": {
+      "content_sha256": "2e39589dbae652d7c2596d64bbfd4efdebd6688b157329c75c1b0e45aade3812",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-11099__deepseek-v4-flash__nothink": {
+      "content_sha256": "89d20f0570bd2c84cd81bd56ec3573556953f210a2183131749488997b448291",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-11099__gpt-5-mini__high": {
+      "content_sha256": "ffa05623988930c628ccc7fe0f626cfcef4877317e0fbfe97005fb7dcfe98378",
+      "n_steps": 11,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-11099__gpt-5-mini__medium": {
+      "content_sha256": "8c9c91736ac739756dbaac316ea871d3523ec0ba70775334de9c865169b0641d",
+      "n_steps": 10,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-11099__gpt-5-mini__minimal": {
+      "content_sha256": "ce71f1fbf3857f27353d40336fe1ff8575177bb67f5d1baf642a11d26573f250",
+      "n_steps": 12,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-11119__deepseek-v4-flash__high": {
+      "content_sha256": "3d436028aee332d7a5df3d01330b36c59f7422c7376fc481134343e054e9bd0e",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-11119__gpt-5-mini__high": {
+      "content_sha256": "53ee26fd7881e180f4b20c01cf60fbd4dec60a62a265fcbcf4cd458a04b310d2",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-11119__gpt-5-mini__medium": {
+      "content_sha256": "c1868b0b7f6b01e1056ecab7566b7db4cffb3246094d86a64f02d0c2ec4ba3c7",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-11119__gpt-5-mini__minimal": {
+      "content_sha256": "69f0cf1e39f4c4a595be7b045a1992ac76098922103806ce70d0b680da854853",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-11119__kimi-k3__max": {
+      "content_sha256": "9c407b9c5f6e36eec927e06389215000b76ed56223fa181902ae28a0b7b54415",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-11885__deepseek-v4-flash__high": {
+      "content_sha256": "2938dd33c06b4654f2f6ad375593b16db86dcff7d29ea6698de2086313d858d7",
+      "n_steps": 112,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-11885__deepseek-v4-flash__nothink": {
+      "content_sha256": "b37e7f81284106f9aaeb1b074fd34f3c4a3e2cd23e24ac7798f726e13dd502e5",
+      "n_steps": 63,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-11885__gpt-5-mini__medium": {
+      "content_sha256": "750f21231c17bdfdb2e36ad037aed8c2e1ce16638a0514ef51f442e6a359f5af",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-11885__gpt-5-mini__minimal": {
+      "content_sha256": "d1b87081b3380957eb1a9f933ff7c2324c29fad6c040d71109ca92fbda9d6750",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-11885__kimi-k2.5__nothink": {
+      "content_sha256": "9e1f0182a6d2bfc5aa89d74cad160269bfa0975b9059b24068c019e772d6b864",
+      "n_steps": 78,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-11885__kimi-k2.5__think": {
+      "content_sha256": "d71d6b9a1ea20aa77f39b58e75ac5704ac692affc27dafee066a929251c7373c",
+      "n_steps": 91,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-11885__kimi-k3__max": {
+      "content_sha256": "98e84d47fc9296bab9454865a886217b1f9ce90f15c15a611e424045a10a3ff2",
+      "n_steps": 47,
+      "snapshot_steps": 46,
+      "terminal_resolved": true
+    },
+    "django__django-11885__qwen3.7-plus__nothink": {
+      "content_sha256": "937540a83a61a7908763eb5f75e2a9d99215cd5e3897e78da13b7bda2bc0ee80",
+      "n_steps": 43,
+      "snapshot_steps": 42,
+      "terminal_resolved": false
+    },
+    "django__django-11885__zai-glm-5.2__nothink": {
+      "content_sha256": "c119f084c8dd6f70f4b1f3b3c89dc6243296984932407a199d72e59517ab8d7f",
+      "n_steps": 70,
+      "snapshot_steps": 70,
+      "terminal_resolved": false
+    },
+    "django__django-12325__deepseek-v4-flash__nothink": {
+      "content_sha256": "83b84de882d683c8bb66c6da5da50ab68cba7667b8a14a8dfe9c9ba52ca0ce48",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-12325__qwen3.7-plus__think": {
+      "content_sha256": "ef16cd096ea6a89e3c6ef79b21468dd64fb8baaab41c838b13ad9aadad807699",
+      "n_steps": 59,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13128__deepseek-v4-flash__high": {
+      "content_sha256": "736fecd112188f2ffd295d16ed08346a961ce3ea6aad523551147c965069f3c4",
+      "n_steps": 47,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13128__deepseek-v4-flash__nothink": {
+      "content_sha256": "aeb1e7e3edbeba87d4125c0994a0ebc778b1b7874e45a83bc08fd506107eb464",
+      "n_steps": 42,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13128__gpt-5-mini__high": {
+      "content_sha256": "ce64a41372715f2ac47d667cc642be1ef9f41e13697bd413d105498c44268ad8",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-13128__gpt-5-mini__medium": {
+      "content_sha256": "0ca951efe97b55a5216a5872a22fda23b4f62f42d89208049d21652f173eff17",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13158__deepseek-v4-flash__high": {
+      "content_sha256": "03b4cedef8398cfe4780bff04f476b32da42822405e87ac7f9722079d5b257b7",
+      "n_steps": 74,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13158__gpt-5-mini__medium": {
+      "content_sha256": "0f891fdbc4f026023d9621ddc5e53a74b28b13e5d2b7639c71614c6dee8aaae4",
+      "n_steps": 39,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13158__gpt-5-mini__minimal": {
+      "content_sha256": "4f0a416e885c4d5cfc3279d2b896c9b314d972bc1b6fe1cbdb37ba8562e7771f",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13449__deepseek-v4-flash__high": {
+      "content_sha256": "9d1044a991b656ab7817010fb219ad6fba45f0430b95ece12bd6177c88c7ad78",
+      "n_steps": 57,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13449__deepseek-v4-flash__max": {
+      "content_sha256": "3c3658e0bd688441033593d443257b59412b2fc62be81d74ce5ca5d60c3e2a58",
+      "n_steps": 43,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13449__gpt-5-mini__medium": {
+      "content_sha256": "78f01787400dee358d75025a3d26f767dba0d6bce12129ff7ffeb850e0c22dce",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13837__deepseek-v4-flash__high": {
+      "content_sha256": "de0640b1a7ebfadc8bf89d6f074e9593d8d6fbc2fe2cb41f1a5fd3d1a6d6b88d",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13837__deepseek-v4-flash__nothink": {
+      "content_sha256": "8cb292519bda0e78d7742da8aaf1568592b7902cb275845e247ed20a708a6f4e",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13837__gpt-5-mini__high": {
+      "content_sha256": "511b219fe14337e2521cae037a496a20cfb13fda23a01aa01cd16b84ce5e878f",
+      "n_steps": 12,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13837__gpt-5-mini__medium": {
+      "content_sha256": "b03dfe9064e97d5ed53336886504b861c9c25806e565860bd6a3ee66f266ebd3",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-13837__gpt-5-mini__minimal": {
+      "content_sha256": "fc1d9101b55b8dd6fbd3d090c91c440c483500f481291609161773c5125366c4",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13837__kimi-k2.5__think": {
+      "content_sha256": "54c874fe565e1be9368a52125818e622727db5e01335a155006752ebf4b8d562",
+      "n_steps": 40,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13837__kimi-k3__max": {
+      "content_sha256": "68f13e5fdf3d832d23d61b595e9fb5a74226c1b0f868e09cc3b34403eb99da27",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13964__deepseek-v4-flash__high": {
+      "content_sha256": "76897dfd9c312a1a75b61a6375c4c09890f13c16d9417d681ac71938b568fe44",
+      "n_steps": 58,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13964__deepseek-v4-flash__max": {
+      "content_sha256": "624ed20d900401419455409ab16dd15a4946a596f9f331531f8489c546f9f385",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13964__gpt-5-mini__medium": {
+      "content_sha256": "df5d02870bcf2d6f82c1870e104e9d782e2160fc410d23bc61db3bde25c796f5",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-13964__gpt-5-mini__minimal": {
+      "content_sha256": "72db2eb9983a67d733499d70a954f4848c86dab8dd6f84f381805e6967a3e603",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-14404__deepseek-v4-flash__high": {
+      "content_sha256": "39196fc3d9e73764635646ebc43e2093c146e10acff497d91c752c78ad1aae85",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-14404__deepseek-v4-flash__max": {
+      "content_sha256": "6f63d75b6bee7dd34002fbdbf61f9a215a106de7bd7ce91f8088a0ce2b19a1ba",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-14404__deepseek-v4-flash__nothink": {
+      "content_sha256": "ba9c16f157ea88d59a0f23980d2744d3e5620055d56893fab7eba60b45b4c4d3",
+      "n_steps": 11,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-14404__gpt-5-mini__medium": {
+      "content_sha256": "1e821a3d774e78d4c52c1b4748bcb00b34ed0b146622fd47d9e87b6b9f8cee10",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-14404__kimi-k2.5__nothink": {
+      "content_sha256": "c8c31fc8b18cd9e06214d086f2880b1913419d16453ecda3cbe2a26d7d656240",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-14404__kimi-k2.5__think": {
+      "content_sha256": "20e301f6a470c1f16b47141f3b67950b19bfc0063af2515ac6426f916511f203",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-14404__qwen3.7-plus__nothink": {
+      "content_sha256": "98b2c88af06c5ed63c9a9e2b37912c300a99260ad115a3ec347a48073100ee4e",
+      "n_steps": 54,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14404__qwen3.7-plus__think": {
+      "content_sha256": "8665f78e620a7dfde0e34d11fc642e489ec1ce1b55cdcc5e2513e0432fdf8a86",
+      "n_steps": 36,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-14404__zai-glm-5.2__think": {
+      "content_sha256": "982322ba747c646c34a8fcedc1f5e62ff5fcd52473015c7ebd0fd59ac512a1a3",
+      "n_steps": 40,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14559__deepseek-v4-flash__high": {
+      "content_sha256": "f8ce76847da935a51786649a0e4ec4f454d84538648f4d5358a874a9ca57b45a",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14559__deepseek-v4-flash__max": {
+      "content_sha256": "88d89552b552f3069506b7d13264df839f51ef2c7d1458683de7dc928640b989",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-14559__deepseek-v4-flash__nothink": {
+      "content_sha256": "36e2f38b4dddff4f98bbaf0acd6f8c97ffda1e5a544cff7deda2bfa15b35a265",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14559__gpt-5-mini__high": {
+      "content_sha256": "f5921d0f748663794302122bf536af553745cb52e3e4481d86e13106cef37a2b",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14559__gpt-5-mini__medium": {
+      "content_sha256": "a6ec067ab6bffeb2945d155bc6317e219e512176a49c5cc59ad1480958099324",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14559__kimi-k3__max": {
+      "content_sha256": "b4941a561dbc6c842b674eccce6e9829f8d6dda7a33542d83a7dad75c6512cf2",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14771__deepseek-v4-flash__high": {
+      "content_sha256": "22d14646ac2e9f0e37ce2783ba730d24fd7d4f41b302a126b7aa73c30f309bd8",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14771__deepseek-v4-flash__nothink": {
+      "content_sha256": "b5597193d7525712e6b8c9bd75d2309230a43b797bf7b9b7099ca4d18483cf45",
+      "n_steps": 37,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14771__gpt-5-mini__medium": {
+      "content_sha256": "af3670c657ae1897ce51bce64bd057d15cb070edbf9eedc49ef6c0012974ab7c",
+      "n_steps": 11,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-14771__gpt-5-mini__minimal": {
+      "content_sha256": "c01eb2bce441acc694f4124716f4fccc0e03b8f7dae53bc34f71e6b2c6c1a078",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14771__kimi-k2.5__nothink": {
+      "content_sha256": "34af53e3747042df0523fd4825b0f6d92b0d70db0eae4b78a84fc6b4cb841537",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14771__kimi-k2.5__think": {
+      "content_sha256": "53d03e13285d91bbaf4f05df95accc64b638dbb2c67bcc5c4d0a07ca9e24bb7e",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14771__kimi-k3__max": {
+      "content_sha256": "9790bd49c94f3f3720b23f26582c585689fffb5f1b3d4f687f86123a90dade36",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14915__deepseek-v4-flash__high": {
+      "content_sha256": "61e767b68b03669ed7dfd906d1a1aa23bfe9eb54f0e47ff149fbd1c43c5d70fc",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14915__deepseek-v4-flash__nothink": {
+      "content_sha256": "c8d6cb0ff190f538c93138204d5a942a3b4d712319f9ea4a8453c41fd407068f",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14915__gpt-5-mini__medium": {
+      "content_sha256": "6e252c87949f7aa8746cee29169d99520545d0b37041f87bbaa5d5c03ce45f86",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14999__deepseek-v4-flash__high": {
+      "content_sha256": "848618de4043e2c7050000bd1bb1059a5c9f624b5cdb7ce4959dfe2ba6cfba7b",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14999__deepseek-v4-flash__nothink": {
+      "content_sha256": "52548f1d02e81f6119503ecf9883338bef08b4595645eab03842ff6a4fa13f90",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-14999__gpt-5-mini__medium": {
+      "content_sha256": "37b36f1cce7064aab3d2d5a9d09292e8db99afc53cf28e1e9d09026bf0752c7e",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-15098__deepseek-v4-flash__high": {
+      "content_sha256": "228d06e08e75841a93d68880ccb780ee56ec9f562f71cae8e3b1df938676d728",
+      "n_steps": 86,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-15098__gpt-5-mini__medium": {
+      "content_sha256": "c56a2e21a9009b4fad19d3f819a788a9bfce4d4fd7f4ab196c0a70d0a9ff7eb1",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-15098__gpt-5-mini__minimal": {
+      "content_sha256": "3d744b5ecca278868e97c900f4e623741dd1af209ea4a3d27914f466696ce765",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-15098__kimi-k2.5__think": {
+      "content_sha256": "f447e287debd3244e07f3db468a3df4d03927b4c33fdc7dc2d92e12562b85358",
+      "n_steps": 79,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-15098__kimi-k3__max": {
+      "content_sha256": "b907af90ff6f4136441767990277b40feb01f9d5fddca1fbe7455807662b7d3e",
+      "n_steps": 44,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-15268__deepseek-v4-flash__high": {
+      "content_sha256": "f1c0cca6538607d2bf6368d0a763f67429bc264bdd3b122125c08dcaf9a4a469",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-15268__gpt-5-mini__medium": {
+      "content_sha256": "3b751954b5185a84a8f44dbf5d0096281407cb7ea2d3aa85943552ad4b1bbfea",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-15268__gpt-5-mini__minimal": {
+      "content_sha256": "ac180e37eb102ee4ad1197ce80060ecba4d75eb0edf7cdb9aaec8ed0e7972245",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-15268__kimi-k2.5__think": {
+      "content_sha256": "7a4b89198607759016e2c387467549cf63e556516b5aa4aa1d9da28ba96ca23e",
+      "n_steps": 66,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-15268__kimi-k3__max": {
+      "content_sha256": "164bc93362d7c347b7f7add7b101db96938c2ddda855113abd1fa1aa98019450",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-15525__deepseek-v4-flash__high": {
+      "content_sha256": "5669ad3569837738b21d3da41df0f2ab0b816d051395fd2e2c8fa7a1921c11db",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-15525__deepseek-v4-flash__nothink": {
+      "content_sha256": "3455362ab12c1b56085fe39186be2144bbda4ec1d663ca705b17fbc45e1a5e5a",
+      "n_steps": 64,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-15525__gpt-5-mini__medium": {
+      "content_sha256": "f996e509a8ed94147d6584492dd3362f170c467f98beba32b2a0772dc3129379",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-15563__deepseek-v4-flash__nothink": {
+      "content_sha256": "a6ba9d9be13692522bcf20be5af351c06afe3abd251acca06fec48d8cb6a636d",
+      "n_steps": 77,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-15629__deepseek-v4-flash__high": {
+      "content_sha256": "436dff696f8e4cf678aae54af08052e9b056ea824f5f4bb98762323812073c3b",
+      "n_steps": 72,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-15629__deepseek-v4-flash__nothink": {
+      "content_sha256": "f422b8f2ca75bf50f92471d95a8baab701ebb3856bf79c06c2c26eed281b3c2c",
+      "n_steps": 94,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-15629__gpt-5-mini__high": {
+      "content_sha256": "ce39a311eb708f5a22a111c4aaeb8f401419eed00bd0de8f1c026629124902f4",
+      "n_steps": 36,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-15629__gpt-5-mini__medium": {
+      "content_sha256": "ab711ce547fa10150a6f8425c5a8331490811993242d2fba6a927d9212ec4d3a",
+      "n_steps": 44,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-15629__gpt-5-mini__minimal": {
+      "content_sha256": "a3686d9298a97307a0582784458459ecf20f491d2309e0b552f96bd802c0b7a0",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-15629__kimi-k2.5__nothink": {
+      "content_sha256": "ea2ee0c794d286b9bb1bf3b8df1f40d730c0e65b21a5e3658cbef2122a62aad0",
+      "n_steps": 65,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-15629__kimi-k2.5__think": {
+      "content_sha256": "0f88b30d6c99f77db026a7eabca31bf0fabf36ed4ed12bff561863dd502eacc9",
+      "n_steps": 64,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-15629__qwen3.7-plus__think": {
+      "content_sha256": "d767e5202c006f718b92ac8216044ba16984bf92dd8871b3e06f2a98ee11a3a6",
+      "n_steps": 53,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-16145__deepseek-v4-flash__high": {
+      "content_sha256": "99e6518235b9ede28c98569b692f29f4120f1d57b885ca915d356b553a209741",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-16145__deepseek-v4-flash__max": {
+      "content_sha256": "9120d03371d45d06c40ebb7aaca79c450d20a62cfa35ef7bad94e1fb4b9cf32c",
+      "n_steps": 37,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-16145__gpt-5-mini__medium": {
+      "content_sha256": "5fb28b2970ed229962a05c1bc937ec2bbda485cf8dcf34227e87c6721168d719",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-16145__kimi-k3__max": {
+      "content_sha256": "691f234eab2f3d5e0e1f14c49a59d4e055933ad5e45330d8af8b6589f9dca9ec",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-16612__deepseek-v4-flash__high": {
+      "content_sha256": "9316232ce36643201c1546490638251526530eb2783e4c3f6d7bfbde8296cdb5",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-16612__deepseek-v4-flash__nothink": {
+      "content_sha256": "a046ffe609bd46f0b130ef05880efb13874d3e066d9c158f521adb925fbd734c",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-16612__gpt-5-mini__medium": {
+      "content_sha256": "a66eea0021de29066d07758b99748cbd33c27671f9b0567e114125b1de41d97e",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-16612__gpt-5-mini__minimal": {
+      "content_sha256": "226ad276b6d116a65ee907035bbe5bdc8bac761ae24f4dbacc3e9c866d5d8c37",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-16631__deepseek-v4-flash__high": {
+      "content_sha256": "6429a8ec8861c3247dac2fcd4768dc9f412c095069936ae756c97ad1f826ccb1",
+      "n_steps": 47,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-16631__deepseek-v4-flash__nothink": {
+      "content_sha256": "9986de9fdc8d66200056c3b6c88e58c403efe5a91cf686a6b22a054463723a8e",
+      "n_steps": 40,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-16631__gpt-5-mini__medium": {
+      "content_sha256": "78e4b57d0e1b7cd52a82ab9467fcbcc1ac815dca9e1b0bc30546f41951e14c50",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-16631__gpt-5-mini__minimal": {
+      "content_sha256": "58d4ce8f2bf59aa45093f3a5a6113929a5890a83e90ac06f0310694dc3ba7220",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-16631__kimi-k2.5__nothink": {
+      "content_sha256": "bdf9c1de6d452439958a7c66c1a98f7d771d36615cf3cc7e4b59ab42c02ab604",
+      "n_steps": 46,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-16631__kimi-k2.5__think": {
+      "content_sha256": "d769f0cef8a411cf22c6d9b9f247b53b28a7fa6c1c2f29abc7176e3711b60802",
+      "n_steps": 39,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "django__django-16631__kimi-k3__max": {
+      "content_sha256": "62be4cfab3172efd033b7d2e6de4a4c30a04f47bb18c6efe99077f396169546d",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "django__django-16631__qwen3.7-plus__think": {
+      "content_sha256": "45cf1b4bb2767e680d28b410e362216f490730dab26360591238345076543e05",
+      "n_steps": 45,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-20676__deepseek-v4-flash__high": {
+      "content_sha256": "b065c296c073cfc1165f47a42acee3d1a89203381238aa89e44970f3e8c7fd9b",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-20676__gpt-5-mini__high": {
+      "content_sha256": "e7e53aba93cce7b3dccec8ce11a7ea1b929152cccd50c6cbc8e48c7883527b41",
+      "n_steps": 55,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-20676__gpt-5-mini__medium": {
+      "content_sha256": "83204c0431b37536682df7e36feb8e2ecb1c1271da901576dc45f6b9f11b3470",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-20676__gpt-5-mini__minimal": {
+      "content_sha256": "5ddcb496e11f3083932a325e9c4887da2346bf355b666ef59e21388960317491",
+      "n_steps": 45,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-20676__kimi-k2.5__think": {
+      "content_sha256": "7474a1ace26e33371f45ece1928e5d71a13d6ede3e052cfbf703b4cc418fb7c3",
+      "n_steps": 68,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-20676__qwen3.7-plus__think": {
+      "content_sha256": "98b849453e3dbdd636c7ae10884419d2b0e96ff63b3bf6e8587ce986c301a43d",
+      "n_steps": 36,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-20676__zai-glm-5.2__think": {
+      "content_sha256": "7426b1557341160bd2fbdb0afc4e8557afa3285a449c41d00625b8c7c68a17f3",
+      "n_steps": 45,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-20859__deepseek-v4-flash__high": {
+      "content_sha256": "9cc15f599f793edd1ce1ecb02967cd0aeb1859e4bc4fbafaecedcf31084748f1",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-20859__deepseek-v4-flash__max": {
+      "content_sha256": "d2d83064279d27c4ff0e0efb7df5a27587429dbafc82b83354d2393579155937",
+      "n_steps": 42,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-20859__deepseek-v4-flash__nothink": {
+      "content_sha256": "91b9def814060fba9482be352204ba1072b92c38dbd5308a712f7a5bd10002e0",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-20859__gpt-5-mini__medium": {
+      "content_sha256": "131b57b0a7d0eb0d86201d88ca8bb4bfca342d135a86d2cc77787048696792f3",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-20859__gpt-5-mini__minimal": {
+      "content_sha256": "7fa6c49f71a391f924a8da1ef34a5b267acb7091ee3965ffc949296e7f9e00a9",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-22719__gpt-5-mini__medium": {
+      "content_sha256": "fc541cd3aad46620576e11ee820d2c85850af725409811e0e00df22c35180944",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-22865__gpt-5-mini__medium": {
+      "content_sha256": "e955f9e43f1f2526f0ff87106ebe7ef7d0c6e89dca9d82179d8de03e1024aea2",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-22865__gpt-5-mini__minimal": {
+      "content_sha256": "363e14f4a5dcf55f75602b9194d4a03a073182273d2eb943bf3ec45481ac02ea",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-23299__deepseek-v4-flash__high": {
+      "content_sha256": "9363c6feb32fd8546037c797a4c1089c109ba9c63c940e8d908bf065244397fa",
+      "n_steps": 57,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-23299__deepseek-v4-flash__max": {
+      "content_sha256": "bc8681dc4e328385f7fe1f8e7585c8b112b3ebde406cdbfd1220cba568f7dac9",
+      "n_steps": 83,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-23299__deepseek-v4-flash__nothink": {
+      "content_sha256": "c550a78d9d75aab2d3595262a31c5bb9b98ce4087b4a5a74f53c0e6abfeeec14",
+      "n_steps": 56,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-23299__gpt-5-mini__medium": {
+      "content_sha256": "a48a1275399bd44153e27a022db7c1da4e7414f4778e5fa0781f235318406c51",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-23299__gpt-5-mini__minimal": {
+      "content_sha256": "c34ba1022ff4f071dbffe936a21379cf60d7eb6bcf840e7693f817a0c7fdc057",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-23299__kimi-k2.5__nothink": {
+      "content_sha256": "349bd899ea7d499cdbcd0808cc401bd8f2786089165d1aadf2731a20a694a5ef",
+      "n_steps": 58,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-23299__kimi-k2.5__think": {
+      "content_sha256": "3f5b9085fdb44e430c4811960ef54ea912106ead52d229e8f9be8bdedaa5af7e",
+      "n_steps": 46,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-23299__kimi-k3__max": {
+      "content_sha256": "16693784e6cbe77ee662f9a6d9cae4458413c4becfc1ba99c5d5ca0bc6ad9039",
+      "n_steps": 37,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-23299__qwen3.7-plus__nothink": {
+      "content_sha256": "41243455665c21157529fbc00f1610cba4e8ba01d68196a9f9ac0ca432d4f297",
+      "n_steps": 51,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-23299__qwen3.7-plus__think": {
+      "content_sha256": "8ab5981debbbf1eda158108b1fc3635049bbae6bdcf5298845a8578ae27a1ff3",
+      "n_steps": 70,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-23299__zai-glm-5.2__think": {
+      "content_sha256": "ea80eb29689a12b38870ba278f6e9d93598adb9bbfac8022b2e3bdfce4e20ff3",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-24026__deepseek-v4-flash__high": {
+      "content_sha256": "5ede06445d5cf3dff6aba0a1e49e1e52e48167212f41f1947ab29d1b2a129e1f",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24026__deepseek-v4-flash__nothink": {
+      "content_sha256": "86bb1812e4fa4284342311eb252e2e1a7b2bd38ccfd526542beed9d0240607da",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24026__gpt-5-mini__medium": {
+      "content_sha256": "65fb794ffcd7b579c642bf05dd7f08c4bd6fd164701e5f9ca2a43533922158ac",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24026__kimi-k3__max": {
+      "content_sha256": "754b016bfbfcc03d3a36273d45eba17e6f8effff1975d7237cec913fe6a81441",
+      "n_steps": 37,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24177__deepseek-v4-flash__high": {
+      "content_sha256": "6b73100d324cc9cc783f846b5221f4fdb2e6a5e9665d0677680c172c398fd10b",
+      "n_steps": 49,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24177__deepseek-v4-flash__nothink": {
+      "content_sha256": "78559b0caf9f8b5dd6b7a1792f9190c2b018087e19ad3ccbe7b0492679c93b5c",
+      "n_steps": 69,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24177__gpt-5-mini__medium": {
+      "content_sha256": "45824d6e609c65a5e0ad91d55422d840b554d2685225074bde0b3cfa0edd984a",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-24177__kimi-k2.5__nothink": {
+      "content_sha256": "edd4b4c1e9911b5c2d4d347d39ffbbe75fdb8f3541bddb532f3ff6806ebf3ed2",
+      "n_steps": 57,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24177__kimi-k2.5__think": {
+      "content_sha256": "1b8d4144a1a83b95f938c1a132daefef1de90fb408ca9338ece9903df44a80d0",
+      "n_steps": 40,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24177__kimi-k3__max": {
+      "content_sha256": "bf7bc294322bff5633dfc642e1a13b733a289697228f5d1427dc9e6e11f2dd93",
+      "n_steps": 36,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24570__deepseek-v4-flash__high": {
+      "content_sha256": "3eb8b239d555e6805e9fed31a329b43dc01406d56aea3bd1f9529ff5bc2a5a71",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24570__deepseek-v4-flash__nothink": {
+      "content_sha256": "7b5e990299c1826cd6c6ec8fd9d4eda5d396ce21b42d43d136f06cc45935ba98",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24570__gpt-5-mini__high": {
+      "content_sha256": "b1fa264bd7db50c08940e4b93edfd32b7e6ebfc7193d02703f0ba9c845a5bf0e",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24570__gpt-5-mini__medium": {
+      "content_sha256": "9ac9084f700ac6f1e60d0f19a4ea58d1df6b04f1507e018f89646634aafa8fbf",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-24570__gpt-5-mini__minimal": {
+      "content_sha256": "5428b22f1d3f96ed77487012f4fe92501b85202c8cc61ffb4df027aed9ca1953",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24570__kimi-k2.5__think": {
+      "content_sha256": "784e46b2bb800cf3175f08e9a97c4a640dd391909a1d9fc89366f85e1fcebbbe",
+      "n_steps": 37,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24570__kimi-k3__max": {
+      "content_sha256": "65d1491172e55d2b77289270461d7b7751a71acb6478aef0cdad713b20f99b32",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24627__gpt-5-mini__medium": {
+      "content_sha256": "2f7260f3872f2adf5b1429be6896b539cb3b26bd578ec87e213084c275a8b46f",
+      "n_steps": 37,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24627__gpt-5-mini__minimal": {
+      "content_sha256": "f2d155bdb841786196ae26564307904b1ea1dc98962f92e5968b7f085b6a3f9f",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24637__deepseek-v4-flash__high": {
+      "content_sha256": "a9ff3c881e76d8c63d4f083711612df3c900255c1df24d8ec59d6acb026c04ea",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24637__deepseek-v4-flash__nothink": {
+      "content_sha256": "b2725980c97b9129688bb85f58926ba6126221b80a6fa66b29cf2eefdfb80349",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24637__gpt-5-mini__medium": {
+      "content_sha256": "6adfaaf525b608efde9da11935293f73479396f21cb7ef22fd843c7136e8fda4",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24637__kimi-k3__max": {
+      "content_sha256": "913cdd760149c6cdc81003a6df66788f8b35fecc05bbb3e2e7ef5ce5f763ff7f",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-24870__deepseek-v4-flash__high": {
+      "content_sha256": "45122cdaa3df2c0a208066d962153ea1407ba8f889515b5b1def01466db91d38",
+      "n_steps": 55,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-24870__deepseek-v4-flash__max": {
+      "content_sha256": "e160da48c339585b6d74513d4a7cf05a5eec57bd551a0f138a1bc1f7fa3dc1a4",
+      "n_steps": 42,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-24870__gpt-5-mini__medium": {
+      "content_sha256": "2a5f1b8d1655da2dab16065e6ed8d5b023e164a5a7771fc374ea2bb1af773167",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-24870__gpt-5-mini__minimal": {
+      "content_sha256": "7750cafa32d91a872723fae35cacf5b936cd9e2c823f8a65c4002edb89d76ac1",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-24870__kimi-k2.5__nothink": {
+      "content_sha256": "b545c2f825ec53d12a4becc311c457dea311d50d6488bd1991b9cff434cfdd30",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-24870__kimi-k2.5__think": {
+      "content_sha256": "7cd6b926981acb7a8307a7521252ce866f9a34e35227937260ca0bca619fd2de",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-24870__qwen3.7-plus__nothink": {
+      "content_sha256": "84a0a27936d2e48190ff859c5d372b1d2f5f64638eddc3d52b1725395054df65",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-24870__qwen3.7-plus__think": {
+      "content_sha256": "7b5c800170847047efaa3078a2c3d1ee4568c3d05b131a3af741d219eabe66d2",
+      "n_steps": 53,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-24870__zai-glm-5.2__think": {
+      "content_sha256": "37fc591f67aab1545b7b72d64615a88d85d7a2dde29bc38734c4c956768081b1",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-25287__deepseek-v4-flash__high": {
+      "content_sha256": "159d7f4a25f4c41c50917070084e78797713fa08aed6cb712dd41588129b815b",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-25287__deepseek-v4-flash__nothink": {
+      "content_sha256": "58b2eec89a2ad22684df7b02fc266ee652c0b50adae9fa3e7690d4ee5fbb0f27",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-25287__gpt-5-mini__medium": {
+      "content_sha256": "269bb7a01615c3b9eb6fa3d0d0f05d091f3868bbf6928463a02d2152fec2698d",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-25287__gpt-5-mini__minimal": {
+      "content_sha256": "3bbe2df4b011f5a3b183de263bffd3799b2f20b598339b6718cb4a245c9abaf5",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-25287__kimi-k3__max": {
+      "content_sha256": "58684298af8258ea6a2c75929a3d2ef5fb0cec296541a4e3495c7ae24b071ac4",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-25311__gpt-5-mini__high": {
+      "content_sha256": "a7f372dae3e9e0fc0065768d0ca20c0307c5fabbf5c110cadff8faadeebd4664",
+      "n_steps": 57,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-25311__gpt-5-mini__medium": {
+      "content_sha256": "a3d5605367c5dff2e5eda993ba1b233821b3963241fb29d27ab1d74d417f0498",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-25479__deepseek-v4-flash__high": {
+      "content_sha256": "34081dd4107e3fbf98217157bb42a874f35aff4f7fff0af15375f46c233c1d45",
+      "n_steps": 36,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-25479__gpt-5-mini__medium": {
+      "content_sha256": "e93fa32ddb017e80c03aa0aed952d7413c7136cd9ac08dfa8198305fabc974f6",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-25479__kimi-k2.5__nothink": {
+      "content_sha256": "0d209c92ada0dcaf88676c5cdd3891399c95fd4de6880bb2d83b7c6d59c43bb5",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-25479__kimi-k2.5__think": {
+      "content_sha256": "b11dfe64fdce5a6fd3a873a9b751ea36bdc76fc8d69bd50aee3ca1f15ee2f90a",
+      "n_steps": 50,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-25479__qwen3.7-plus__think": {
+      "content_sha256": "a6d0e43f2a6354295788958795b7bcc61ce2b35fee92af5eba0530104078cf80",
+      "n_steps": 51,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-25775__deepseek-v4-flash__high": {
+      "content_sha256": "cfb0ae8d290dbc6bd22397088a5a7dc53fef954bf04c858b2ede9e38779772f1",
+      "n_steps": 43,
+      "snapshot_steps": 42,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-25775__gpt-5-mini__medium": {
+      "content_sha256": "a805ef86dd7a3282cfc8ddbd7a7bc0f45ec12224333b1793e6dad40172a06c8c",
+      "n_steps": 81,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-25775__gpt-5-mini__minimal": {
+      "content_sha256": "934acba5836d39279b440351eabf8f9b18f0e5b09bd3e3937ccba0b701a2a55d",
+      "n_steps": 36,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-25775__kimi-k2.5__nothink": {
+      "content_sha256": "8dbcb543cb7985ef98167d4740571a2f2277e6e5a0b9478cbef704b3a2716856",
+      "n_steps": 85,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-26113__gpt-5-mini__high": {
+      "content_sha256": "7fa64df974d4029cb80fc61e60b461ebe197de5146ca1c67cf2f1855906d3736",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-26113__gpt-5-mini__medium": {
+      "content_sha256": "ef6bd3cf59ae942f0d99ffbd8e0f637f7377da64f40907b605c4db5efe98318b",
+      "n_steps": 10,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-26113__gpt-5-mini__minimal": {
+      "content_sha256": "c9f690335f9d305c4478f6364373316c4db7ee6cf3a3ed9f26d0d1de653554a2",
+      "n_steps": 11,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-26208__deepseek-v4-flash__high": {
+      "content_sha256": "d15a0fbfb08b2e1fad0f7e2c532d950cfe5e3a48183f354ab80940f75fae4cca",
+      "n_steps": 64,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-26208__gpt-5-mini__medium": {
+      "content_sha256": "dc582544178df322f7d74fef964e1b35d8ca84801daca2b59443019cf3e4263e",
+      "n_steps": 63,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-26208__kimi-k2.5__think": {
+      "content_sha256": "71f182c54f4b1347078b523dc6ac96ef99a69487a02c14d8b28a87f4b7d33452",
+      "n_steps": 93,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-26208__kimi-k3__max": {
+      "content_sha256": "3cfe210f23127b112cbb3a0575607dda90c7151ae234648c881fdc72b9be3741",
+      "n_steps": 48,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-26208__qwen3.7-plus__nothink": {
+      "content_sha256": "8c9c585791f6b5a93ca09c6d76ac58dd03dd02601024d527277343daf28fe6bc",
+      "n_steps": 70,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-26208__qwen3.7-plus__think": {
+      "content_sha256": "494a509ee30ee9ad5ce143defa08b4a40d06cbba65280b9543d64018710a17c1",
+      "n_steps": 70,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-26208__zai-glm-5.2__think": {
+      "content_sha256": "4c561a28e40b266d4cc54b19575e47241e9fdf71b83a9848f27a870d8ac92dbc",
+      "n_steps": 58,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-26342__gpt-5-mini__medium": {
+      "content_sha256": "fd975ab43517d395f0a876da7afa311d82382b4b353a7a936d5e3514c72bfcd3",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-26466__deepseek-v4-flash__high": {
+      "content_sha256": "f95466f756500cb45b0c06380456b855dff0c853edf2bd453d690ce9c030fa6e",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-26466__gpt-5-mini__medium": {
+      "content_sha256": "f041f153048ed4a6a81f69772f81abde2eae8d05aff30f9457dfd60fe6312c43",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-26466__kimi-k2.5__nothink": {
+      "content_sha256": "71783923fbf18ec9a9f6f45f9067d6c3ed4e0122e30c31dee37761087ed25bd6",
+      "n_steps": 37,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-26466__kimi-k2.5__think": {
+      "content_sha256": "d811f7dc786a9661e343b31a7c1b28e243f84d2d73cbce5e08b3572503a81c27",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-26466__kimi-k3__max": {
+      "content_sha256": "e8e212ac72d39c029b651e7d88938446866a9d4b9aa5c52dcb4b128ef92a162c",
+      "n_steps": 39,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-26466__qwen3.7-plus__think": {
+      "content_sha256": "de472c8de0fd389410c04c332a46cb2bfd0fdf1223c9284685800a9fb9e1ac82",
+      "n_steps": 50,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "matplotlib__matplotlib-26466__zai-glm-5.2__think": {
+      "content_sha256": "5a88757a30de7c6628b1acbdf13b59897f24d6181c532fbbc78b6b61ff9d0ed4",
+      "n_steps": 55,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1724__deepseek-v4-flash__high": {
+      "content_sha256": "625c3a375b9cae25d3bf388903441744b87106eacd7ce57f427fe1478c4af5f2",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1724__deepseek-v4-flash__nothink": {
+      "content_sha256": "7e840027635ab4fc49451a333c7d2d45db9f324fd330a717a6ea3a2bb9a02cc8",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1724__gpt-5-mini__high": {
+      "content_sha256": "b98423afda11ae1e72efde70bd1f659f6c443a7139a20b1eb60bb55c0c40d781",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1724__gpt-5-mini__medium": {
+      "content_sha256": "9a014eeea004ba32bdf56f8c6cbc9ae0fb281f635836d764d0bad23594fd53b3",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1724__gpt-5-mini__minimal": {
+      "content_sha256": "4be34cb92ec381f7b2529a5973258e7c7dd1926196445c0f9b12ab49a2f76fe2",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1724__kimi-k2.5__nothink": {
+      "content_sha256": "d590902d0fa9724852fe2c3cde345a4d78a84ac6fa8e7d5606193a8830d3493a",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "psf__requests-1724__kimi-k2.5__think": {
+      "content_sha256": "fd29150c6fbade8f39f31a1afbf4af767f5288d9d523f643972f2cda00eda6c5",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1724__qwen3.7-plus__nothink": {
+      "content_sha256": "0657d57025c5d5882c6f18a53c603357b7f1b0eaf722f8311abaeb79dcb92a44",
+      "n_steps": 43,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1724__qwen3.7-plus__think": {
+      "content_sha256": "dd56d1db2645bdad0c44232cea2793befe067bb303836a00a5a58bd3545f548d",
+      "n_steps": 47,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1724__zai-glm-5.2__think": {
+      "content_sha256": "79675f7c11b5496ef9fae1f925c11eb8127f0b8acb39f76db90770e9c8a9f6fa",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "psf__requests-1766__deepseek-v4-flash__high": {
+      "content_sha256": "29732f4c099e0e3703445e12c7d7b14bb7029c9f126a5ec078d8831a18a401f4",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1766__deepseek-v4-flash__nothink": {
+      "content_sha256": "fcfa73f76c513a37fb391c10de7114c1e6a79aa559e19b898edd17b571e7609c",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1766__gpt-5-mini__medium": {
+      "content_sha256": "080057eff36d0f8c73f3eb322495957e75ca49057c849711a89d91c96a0e0edd",
+      "n_steps": 9,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1766__gpt-5-mini__minimal": {
+      "content_sha256": "2de2dc9ba66000c780f14804536080584f3266528ba64de38de0518a23612d44",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1766__kimi-k2.5__think": {
+      "content_sha256": "9a88c5525f318d4a4591494d98d265fe1ba8cfc25d41afd09381cc87c7f970d5",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "psf__requests-1921__deepseek-v4-flash__high": {
+      "content_sha256": "3cc09d4a1f47031736f5c402855dae0b93d0746e16862c2eeb0d14db7fbd67fb",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1921__gpt-5-mini__medium": {
+      "content_sha256": "384934d11abd1bb593f6d796d6e020211fab140b3d0fd78c4b3ada4b497081f1",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1921__gpt-5-mini__minimal": {
+      "content_sha256": "7dba0f3600cf9c71a36651b12407cdb5eda61a8185bea6352eccebba677a8565",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-1921__kimi-k2.5__nothink": {
+      "content_sha256": "020118a69b51f472c986210e9409e2b43bc7d792c13aaf366cce159caf3e5374",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "psf__requests-1921__kimi-k2.5__think": {
+      "content_sha256": "219112426354a5e95e82acf29debff80e585c6c7f978923bad47cd00034127ff",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "psf__requests-2317__deepseek-v4-flash__high": {
+      "content_sha256": "d129371f7cfbc185181a67991114e7278ddbdae91a47802c9299ab3954e5d597",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-2317__deepseek-v4-flash__nothink": {
+      "content_sha256": "69977feaae0a4259110a76ffc1c75860fabf171a52522ca5215fa86fe80cae8d",
+      "n_steps": 42,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-2317__gpt-5-mini__medium": {
+      "content_sha256": "ec8422b06b3f9cd288fbcf4ab867c90af53d2cdd13ab1a88d830bff452086f45",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-2317__kimi-k2.5__think": {
+      "content_sha256": "587b7cbeb655a2c61c0b041d54ec362e65d109492aa61adb1fddf3d35ca00363",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-2317__qwen3.7-plus__nothink": {
+      "content_sha256": "3009b934e208867937db55e0fac711bc5e0a6c37843bf1e972ac2c2e0c1c09cf",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-2317__qwen3.7-plus__think": {
+      "content_sha256": "a927317820058739b0d1afea0f8844c9c47120bee0088c7814cb9c1c3be93c53",
+      "n_steps": 42,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "psf__requests-2317__zai-glm-5.2__think": {
+      "content_sha256": "17acf2e80665ff5d9f589b2ad683b6636e76139f4363313b3d255d0af768b55b",
+      "n_steps": 39,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "psf__requests-5414__gpt-5-mini__minimal": {
+      "content_sha256": "52b45a5d13f0cf24b52af42eda551cdc8eb4b437e73cf03144b77249884c4a5a",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-2905__deepseek-v4-flash__high": {
+      "content_sha256": "df24a8279e946bdf0624bc364f911e42ec85a4ed7448341ab49031f145d4c6bd",
+      "n_steps": 36,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-2905__deepseek-v4-flash__max": {
+      "content_sha256": "f535a80751d1dcb729a15739fb59e432ee222a3731108387aa592e124963b712",
+      "n_steps": 51,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-2905__deepseek-v4-flash__nothink": {
+      "content_sha256": "9ce6192ee9ab9045e923bdbd39bb651971a7b4477516930dbf8afec6277dd82f",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-2905__gpt-5-mini__medium": {
+      "content_sha256": "8df55ff59925fde3696781e2b46726524024ccbabd4607bea73f44567c8d3b93",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-2905__gpt-5-mini__minimal": {
+      "content_sha256": "e82c53022c033eaef1d0492a44d42bd1509658bbc09b0ad8be2f45ebd12acc44",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-3095__deepseek-v4-flash__high": {
+      "content_sha256": "eb2284ee2a367619268d239b7a682238e0f6a93583d8ed951de8e95c4be4c1bc",
+      "n_steps": 51,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3095__deepseek-v4-flash__nothink": {
+      "content_sha256": "8c46c00fe7d9e006e3d73679f8e8d235c283ecec6c643f7f93ed8b75d7dd8ecd",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3095__gpt-5-mini__medium": {
+      "content_sha256": "f31fbfeed0da43a91bffdbb1957edb2fe62cb11835cec8dbffed0c5823e0c956",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3305__deepseek-v4-flash__high": {
+      "content_sha256": "bce3f604677820d3c4c4868e144a7d0989a37e851e4e11e6c45a13183d8be91a",
+      "n_steps": 57,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3305__deepseek-v4-flash__nothink": {
+      "content_sha256": "892c6d1f006a6c596662251636599e45fa2fa505ef5bfe10550915920c06b0b8",
+      "n_steps": 65,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3305__gpt-5-mini__high": {
+      "content_sha256": "74f9552d9cc83e19e9e7877f14f95db83216d50ac4d8dd7403621ec4ebbad59b",
+      "n_steps": 58,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3305__gpt-5-mini__medium": {
+      "content_sha256": "68d94874d3f1abe7d5f7ce404ab6eb277c72ce32f823eac92a42f2ccc293b57f",
+      "n_steps": 45,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3677__gpt-5-mini__minimal": {
+      "content_sha256": "d4afeab63e9902b86fb6ae50fe58b989b2cb8132d57d7ced810ad9a1fff27fa1",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3993__deepseek-v4-flash__high": {
+      "content_sha256": "51e4eea6a157841204c6268785c1b03eaeb1482932c8cedd770370b97fd93912",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3993__deepseek-v4-flash__max": {
+      "content_sha256": "ccd899212ea63f2eb9aa4526f8b30579a2251488afbfc14c2aa14e861c8bafab",
+      "n_steps": 46,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3993__deepseek-v4-flash__nothink": {
+      "content_sha256": "681faca3aa8dc55a6fad47e0b71bd5224c929b9afe522e58a73fbab84c0d6cbb",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-3993__gpt-5-mini__medium": {
+      "content_sha256": "4afbb41e83297261028fb83a36d2bdc7597c0097bcb3864caa564c204a4e3b98",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-3993__gpt-5-mini__minimal": {
+      "content_sha256": "55a838170e023f10cdcc28001d55b2ec37382fa8071e36f4e3662e26478672eb",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-3993__kimi-k2.5__nothink": {
+      "content_sha256": "b8cd8abd5f2c08e1f6d33fb02864edd630a1b7eafb8dca53042d084625834de1",
+      "n_steps": 59,
+      "snapshot_steps": 58,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3993__kimi-k2.5__think": {
+      "content_sha256": "fae00a366265892bb74ef3a96d5c40a8cf4116250e52c5ce5837b654d7507480",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3993__kimi-k3__max": {
+      "content_sha256": "1fb6f2b5c6b7a4e906878e0d6efd35d169dae25485d1ac9af4f153197bcc388e",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-3993__qwen3.7-plus__nothink": {
+      "content_sha256": "ce7ec0e993dfbb80209455a4f003bf8f0f4eb20c9460dc066692eb9811f56ef8",
+      "n_steps": 55,
+      "snapshot_steps": 54,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3993__zai-glm-5.2__nothink": {
+      "content_sha256": "3c78ccdb68dfe3945bdbee50f8f69d95ee1dcd12779c0ec2d0fc350576643a8d",
+      "n_steps": 48,
+      "snapshot_steps": 47,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4075__deepseek-v4-flash__high": {
+      "content_sha256": "ce694c7e087171eb23e7e7d331059ad6a2c95d636e9ebfbdaf14a9b7d6d73490",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4075__gpt-5-mini__medium": {
+      "content_sha256": "ade4a3203862148623278935d6291ca0ea60950826133ddb83eb19500efe516a",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4075__kimi-k3__max": {
+      "content_sha256": "28ba9828a6675be7f59d8bd779e7383ac7e7d661734b0fc3c1c4f2a3ccf225de",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4094__deepseek-v4-flash__high": {
+      "content_sha256": "e3e87569d572e267fe42b73004b35f7cdda6fa2130423f03368747ed3835530d",
+      "n_steps": 43,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4094__deepseek-v4-flash__nothink": {
+      "content_sha256": "133be49e4be41fcab561d4ceb74d5dababa475a44b20e16b45fb2ac8e01772d5",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4094__gpt-5-mini__medium": {
+      "content_sha256": "71b04f54b79a9badf6bf343ab705be7193b7dbcf162e873369224ddadd7a862b",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4687__deepseek-v4-flash__high": {
+      "content_sha256": "db52b34e8c011e6198d866bcca03eb19d88e6ce99473e94e3f49c721bddce842",
+      "n_steps": 69,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4687__deepseek-v4-flash__nothink": {
+      "content_sha256": "501a12fd7c3679d5c4878cde3bedc2350eb7c41f2d785ef8aee27c14e7c50c79",
+      "n_steps": 59,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-4687__gpt-5-mini__high": {
+      "content_sha256": "5cf4e655d9a62181c3285cd9bcb5ad6752932e8f2be588f8720f4a4c97e80bf6",
+      "n_steps": 57,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-4687__gpt-5-mini__medium": {
+      "content_sha256": "31b190bf22d3a27cbc916448129440918a412c3dfe4645a443f82d6bc9fe918e",
+      "n_steps": 77,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-4687__gpt-5-mini__minimal": {
+      "content_sha256": "5c429cceb5f7fbf8fcc6c014bc20293ca68d7af58ec8087f802f3d2438914858",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-4687__kimi-k2.5__nothink": {
+      "content_sha256": "ae13159e4540f856138d0081da6c901aa972a6c04718c9868a46f8f49b20d567",
+      "n_steps": 47,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4687__kimi-k2.5__think": {
+      "content_sha256": "92e38c51b82f2fe9f41245271a06621930f68e0f0b010d0894f4a12a6589a249",
+      "n_steps": 66,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-4695__deepseek-v4-flash__high": {
+      "content_sha256": "bf23c6485a5529a575f79c4db9c972fa849b14ae9a2b0ac05fe3327b8fb0723a",
+      "n_steps": 26,
+      "snapshot_steps": 25,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4695__gpt-5-mini__medium": {
+      "content_sha256": "5841b8d6cb93520cd6da20ad3d9e6518de805b79fbac62830ec77011220fc183",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-4695__kimi-k2.5__think": {
+      "content_sha256": "e56abaa2ea8313400cbfac1adf6553bcb5b7813ba82f36124bdf1f3d87f04140",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4966__gpt-5-mini__medium": {
+      "content_sha256": "c5bf5032121df01bfb79cda6c28c7be179d3a2a58c54edd2ecd9d08ba2baa02a",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4966__gpt-5-mini__minimal": {
+      "content_sha256": "72bb61f97c8ebaf3f9a8db4f88a5c3b35db399f9ab3f5168b76685745410ab55",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6461__deepseek-v4-flash__high": {
+      "content_sha256": "b6ff8e8d4a6c275d819bd5c8bd40078b5cdcc4f4b636e0f05a3b2d7e04fe2773",
+      "n_steps": 49,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6461__deepseek-v4-flash__nothink": {
+      "content_sha256": "826d07d320ecc61d368748546507bd3be7e187e30f59b8dfdfb246bf37e1f393",
+      "n_steps": 42,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-6461__gpt-5-mini__medium": {
+      "content_sha256": "314e634ccee351c2bc4cd1fdf3eea7a2993a8cb46007d7a535c16d5c5a8292ec",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-6461__gpt-5-mini__minimal": {
+      "content_sha256": "a5ca02d7ea5f01ce1e8dddd515982c7fe88b79438cf02054e61d613a536139c1",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-6461__kimi-k2.5__nothink": {
+      "content_sha256": "e151454f9bd855089d839ffe15aab909003e058840e61497813938a8689e746a",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6461__kimi-k2.5__think": {
+      "content_sha256": "615e1d9ff21f010c63260b826cc7b3090166f981479a5fc89943fcba92a387b5",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6461__kimi-k3__max": {
+      "content_sha256": "960446e9269cbc761027d8efa72b28c8384f9ee3e53f1e077ff9f6dd2eacc3d3",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6599__deepseek-v4-flash__high": {
+      "content_sha256": "045eaf06b0bb0a23ad099b287556bc7d05afb45e034c77e6fb86ea526368741d",
+      "n_steps": 58,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-6599__deepseek-v4-flash__nothink": {
+      "content_sha256": "c079fdb8f27b6a10d0f8e22dc406f93c26a55ac5f5bd0d9bd387fd607e5e6e5a",
+      "n_steps": 54,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6599__gpt-5-mini__medium": {
+      "content_sha256": "35a9c4debb28d7734dafbda1552ac83eac1dec65e0d8097aafd940506135ac55",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6599__kimi-k2.5__nothink": {
+      "content_sha256": "1366ba0ad7d794aa9c95ddb44bc8fd806ffed1e8d50fd62fda1d5a990e8c934d",
+      "n_steps": 56,
+      "snapshot_steps": 55,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6599__kimi-k3__max": {
+      "content_sha256": "ac3895bf5deaa9413c9294d32a4ecd77d6f6433d06a1f982f5b918855392c58f",
+      "n_steps": 63,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6721__gpt-5-mini__medium": {
+      "content_sha256": "cd96d912e31ec3e1fa6a90a3128172fac3f557832a7782921881277017b5ed8f",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6744__deepseek-v4-flash__high": {
+      "content_sha256": "dc6a6c9285b4ada9cae398ebd102d2aa303a8d31418e5eff37cf87b37c746574",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6744__gpt-5-mini__high": {
+      "content_sha256": "1936c81f9e3e9d5e2ad21f497191d928386909f2c21f6f4c465441d9f98fca93",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6744__gpt-5-mini__medium": {
+      "content_sha256": "aa73b278fffa279f94a894ce7ccaa6e223e2e88a1b24fc448868737ab6c27795",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-6744__gpt-5-mini__minimal": {
+      "content_sha256": "042387840db36e5a8a708877d52a4a1e8923d4b76753427ece50f2840a6e6594",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-6744__kimi-k2.5__nothink": {
+      "content_sha256": "e99bc11426d60052fac694c8ca9a5f7acb13a3876cf67fce8f6bb9dfc2cb2074",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6744__kimi-k2.5__think": {
+      "content_sha256": "399076c19f75ed85b870a2f9d9337f7f2c5bc1a84c2619ee8ee1b639ce6147d9",
+      "n_steps": 42,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6744__kimi-k3__max": {
+      "content_sha256": "860d7ecffc43749655d9151f72e2f4592bac39d17a9439cfde7484620200ed86",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6938__deepseek-v4-flash__high": {
+      "content_sha256": "aedede69ba92eea76e2f4f001e6b51c84cd2e099ac2d266cbf9362f65f5a0d0b",
+      "n_steps": 47,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-6938__deepseek-v4-flash__nothink": {
+      "content_sha256": "39e1471bde93aae4bdb909b642d5ee87bbb47296aaa3089fbc40f97639286dcb",
+      "n_steps": 50,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-6938__gpt-5-mini__high": {
+      "content_sha256": "3b63b54440f584089d536a7651bbc2f7a5dd5c5444dec64146371760bdca9fa8",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-6938__gpt-5-mini__medium": {
+      "content_sha256": "fc583d6a58c2e3dd709d0dc26824f679e8e6fe6456535a7277fd99d7470d7f03",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-6938__gpt-5-mini__minimal": {
+      "content_sha256": "738eac4a4b270634f0f67bded7a95fbf49e85f519062a0ff650e99ffc985409a",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-6938__kimi-k2.5__think": {
+      "content_sha256": "b52ee41f25c9cb4b9c0336db4cdae2017c4cfb0a6745629e20aef36212e4b17b",
+      "n_steps": 72,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6992__kimi-k2.5__nothink": {
+      "content_sha256": "b7394a884d0c9c515ab8db4489ae60c9feb31ba97a1dbcabdf549804a470a25b",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-7229__deepseek-v4-flash__high": {
+      "content_sha256": "810486d2ff2411f71a49070be761e7a74a9355c788ca2a52b85ab0588d545c1f",
+      "n_steps": 65,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-7229__deepseek-v4-flash__nothink": {
+      "content_sha256": "f189fab4edf7c1efc23a38db5cf4367a798ab0280bfff3842b704254df605d6f",
+      "n_steps": 70,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-7229__gpt-5-mini__medium": {
+      "content_sha256": "d94f82803fd38f709647930b5b396654a3dd582285e104df98deb06c1e6c322a",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-7229__kimi-k2.5__think": {
+      "content_sha256": "2850e29affadcd684ab457c173d6aa359b1d23de1f51c4a3262a38fc1d3969dc",
+      "n_steps": 89,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-7229__kimi-k3__max": {
+      "content_sha256": "f8ef236bb9f02c59642a28440fca6aab9b72258629873c9892ef4fabc13056e3",
+      "n_steps": 49,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-7229__qwen3.7-plus__think": {
+      "content_sha256": "88250a7ea0f4961fbeade1e03bc9a37a73e970e6db2cd7f7583d64dae4a6967c",
+      "n_steps": 59,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pydata__xarray-7229__zai-glm-5.2__think": {
+      "content_sha256": "d468276ecbca1d177eeb3cac8e159cf5679bc3ce9d45f165020e16c290f2b10a",
+      "n_steps": 56,
+      "snapshot_steps": 55,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-7233__deepseek-v4-flash__high": {
+      "content_sha256": "525e651e5c51f3297c5a12205624790205f0ac0baf0337382702105b6638c5b9",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-7233__deepseek-v4-flash__nothink": {
+      "content_sha256": "7b81454230b5b2e8d36cd67e22a6f72df62d332c11b7e9ac2a5e2e18b92dc9f9",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-7233__gpt-5-mini__high": {
+      "content_sha256": "3e14374c1498fc372ef55aa274a1071220143dfd5a797637bef0fb6d8c838e22",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-7233__gpt-5-mini__medium": {
+      "content_sha256": "d4b934b7de0dfb8a603a837ac422200d4939f885b7bfad301f6cc9ce55bf7a00",
+      "n_steps": 11,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-7233__gpt-5-mini__minimal": {
+      "content_sha256": "3ba5cef6d2395977d8e142375eaea83ecfb2730edbe93bba195e679762001d70",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-7393__gpt-5-mini__minimal": {
+      "content_sha256": "08cbb477e74efc5c34aced4995b2066ba3f0fdf85c767109d50e673312eae3cd",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-4661__deepseek-v4-flash__high": {
+      "content_sha256": "6a600d0b6bdd71e10ac14ded103ab99927c156763d771dcd2fe2e08f1c03d94f",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-4661__gpt-5-mini__medium": {
+      "content_sha256": "f1abbbceb9f207eae008230a997109484dd524a63cac5021461ba79070d58f15",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-4661__gpt-5-mini__minimal": {
+      "content_sha256": "80404cc601ba353d4c0f257c2c2414e4d105c4f578999342c05772c0cdc236ab",
+      "n_steps": 12,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-4661__kimi-k2.5__think": {
+      "content_sha256": "493433b19536d8f597290482999becc2f9ee80677b4bbad997ad14ed626277df",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-4661__kimi-k3__max": {
+      "content_sha256": "c101b0efcc18abd37789f43b1d3635a64a84f80ea8b6e99a2a0ab96ea74748b2",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-4661__qwen3.7-plus__nothink": {
+      "content_sha256": "ab1bad66263968d475f742c6a0030840dd6fc1ac2000d72f0a2ec9d653d89c4d",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-4661__qwen3.7-plus__think": {
+      "content_sha256": "ee80f155d6fb6ba4cdd25fd0ea2459da044f1b194c73853b0738ecc5fd76306c",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-4661__zai-glm-5.2__think": {
+      "content_sha256": "81f8c00b6dfa37bcec45312e0092ef905fe81225157f29289e7246972b24cbcb",
+      "n_steps": 41,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-6386__deepseek-v4-flash__high": {
+      "content_sha256": "05b26f0f7ea68df8f864d0594696eff1095d7439abb922de9663db881f36ad9a",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-6386__deepseek-v4-flash__max": {
+      "content_sha256": "53cddc434c50551997ab26d6e2ad665c2ef9ea919889cd0c7c064f266c5301d5",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-6386__deepseek-v4-flash__nothink": {
+      "content_sha256": "dbf78632ec9f44183ceba43f1f9faa436c1aab88a80723174a6fca958a755475",
+      "n_steps": 36,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-6386__gpt-5-mini__medium": {
+      "content_sha256": "ff101eaded81a4681c95f81d69b541e015cc2a1406bb7c3c1b3ba0701b60897c",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-6386__gpt-5-mini__minimal": {
+      "content_sha256": "f2e9f72ccd9992fa0e24768d485bc83e0374b070dc0a1162f264e736e086b4fd",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-6386__kimi-k2.5__nothink": {
+      "content_sha256": "b476a35899f54c42a6660ff92db20d2aebab7efbee7cc4c9842ee5a6172f81b7",
+      "n_steps": 47,
+      "snapshot_steps": 46,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-6386__kimi-k3__max": {
+      "content_sha256": "26d63c7580add8459f1a29101e1df518eb6cdcf40f9cdb7d8de5f8782a4a7fbe",
+      "n_steps": 42,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-6528__deepseek-v4-flash__high": {
+      "content_sha256": "dd6ac9a62d8faa60c58972c64ea032e9ce9a8662cd8240e776243e4a5d156a42",
+      "n_steps": 135,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-6528__deepseek-v4-flash__nothink": {
+      "content_sha256": "9441ed15d49455be77c4c88bc3b19e7f695e390339f3c649a1a99391b334d5b0",
+      "n_steps": 107,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-6528__gpt-5-mini__medium": {
+      "content_sha256": "819e6615c062b1b6df116547a144cec84a1e386dfabf8353931b675af50f746f",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-6903__deepseek-v4-flash__nothink": {
+      "content_sha256": "0118c9d06c531f68077df6a61aa6b8034f9765cdc6d259165c7020a65125f939",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-7080__deepseek-v4-flash__high": {
+      "content_sha256": "18f30094860276a9daa0bcd28d82e2832387f17530700892f7c596df1c2c2a5f",
+      "n_steps": 132,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-7080__gpt-5-mini__medium": {
+      "content_sha256": "cf116c23d9cfa4d607719fcc880f2b2e3a68d2701f684f0fcfd7337493b803b4",
+      "n_steps": 48,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-7080__gpt-5-mini__minimal": {
+      "content_sha256": "e559a86e8c6460ca363011d86b2ab9edbb26e6c0d9fa0191d8a8704a6aed0afd",
+      "n_steps": 36,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-7080__kimi-k2.5__nothink": {
+      "content_sha256": "09b04172f65f359732bd5918781727264a93cb2a78b2969616a6c697732b2510",
+      "n_steps": 70,
+      "snapshot_steps": 70,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-7080__kimi-k3__max": {
+      "content_sha256": "f53600a2d3d519442bb95ce0e05c0d472b1454bbe941fcabe976726b32905126",
+      "n_steps": 50,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-7277__deepseek-v4-flash__high": {
+      "content_sha256": "0f088b8dc916348ef880f218ec215257fc6c2df2adf2a7db597daab1dd8d5f24",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-7277__gpt-5-mini__high": {
+      "content_sha256": "a297136344ab686b0086411fd0f708a522665533f8468947e95beb3d4d2453a5",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-7277__gpt-5-mini__medium": {
+      "content_sha256": "08af2e8f36a5f95e0a8987e7293312cc0e8df49489c57b886658ef8d7d33dc68",
+      "n_steps": 12,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-8898__deepseek-v4-flash__high": {
+      "content_sha256": "ebf54a7469e253aac7c494168bb8183a768350750eb19c08d93f48f11751d27f",
+      "n_steps": 41,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-8898__deepseek-v4-flash__nothink": {
+      "content_sha256": "6946bf23bd13c3098253194e8ee162b867c194bee9212392ab7f8095c55b151f",
+      "n_steps": 64,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-8898__gpt-5-mini__medium": {
+      "content_sha256": "f08bbe08c5584fdadab2b454b26e69ebc4da4b81e998e136e237335c1c1786a8",
+      "n_steps": 39,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-8898__gpt-5-mini__minimal": {
+      "content_sha256": "a0454156de92ea82657c886d6e3bf284c357d114411a8afbe708a2a354632318",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-8898__kimi-k2.5__think": {
+      "content_sha256": "799424005e1f91f1464fbb740f0db46828d28fe564262e0fe49a53782188c957",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-8898__kimi-k3__max": {
+      "content_sha256": "e80c95ae0e56a5ac85566c2413cb19fb09f22d0e96c2758a8498ff4dc4ae31c7",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-8898__qwen3.7-plus__think": {
+      "content_sha256": "914e52bd1b229b6b960dd8115bfd11b5c42669869fc94566688e831151b2b283",
+      "n_steps": 83,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-8898__zai-glm-5.2__think": {
+      "content_sha256": "2532f97ec95624f9f5af3e74d67dec8cd0df78f2e6a725029fc8cac0134ef75f",
+      "n_steps": 68,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-10051__deepseek-v4-flash__high": {
+      "content_sha256": "7e1657c5f38575e76dc48c7e56ffaf08cc1246c6f8c983119172690a0a40183d",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-10051__gpt-5-mini__medium": {
+      "content_sha256": "db70b0dcd4da46b1188fc219c89ff700012234d1db22dd1e4ed3175118e4c827",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-10051__gpt-5-mini__minimal": {
+      "content_sha256": "1061f40a46213e87a64054a3124cb1a47fd8120e312f6fe87eebf82df80d04c4",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-10051__kimi-k2.5__nothink": {
+      "content_sha256": "7d36da59d8c2e2a0bb73dc3a7481d7919158dc8e89abfaf8eb0179671f075024",
+      "n_steps": 42,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-10051__kimi-k2.5__think": {
+      "content_sha256": "34d486747e791fdf2fc585e68b0b7e73bbc1c0033f44076178c620076002cc8a",
+      "n_steps": 41,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-10081__deepseek-v4-flash__high": {
+      "content_sha256": "b532cad82c3cf4ebd1fbcfbc265848081e11d0a008fb9a276501fa87c3ed6a4e",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-10081__deepseek-v4-flash__max": {
+      "content_sha256": "abb94993ad192cc45b9cd75bf394f877d6d92f6dbd5b4285d66e83985e92c8d0",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-10081__gpt-5-mini__high": {
+      "content_sha256": "8da83e58a354ccb24bfc577132f28c7caa0d633d7f05eff911aacae1e2b570f2",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-10081__gpt-5-mini__medium": {
+      "content_sha256": "3e0ddd787cf34af136edcba294e6daf6d8dd08323fc7909e6d9fbac4ae036d10",
+      "n_steps": 10,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-10081__gpt-5-mini__minimal": {
+      "content_sha256": "e6ba1a7b82058301b19a51ecf014713acff3a42563ab75cb85cfc6bce833f23b",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-10356__deepseek-v4-flash__high": {
+      "content_sha256": "efde10c163f40f18da683bec09d45874a773bb6b68f08bbaa2c1399ee0c60962",
+      "n_steps": 60,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-10356__deepseek-v4-flash__nothink": {
+      "content_sha256": "fc5cfc9c9716e52b85d5dc2065c364e8c8e5a03c1437dfb425b7236299db1ff2",
+      "n_steps": 52,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-10356__gpt-5-mini__high": {
+      "content_sha256": "46742bcdd5743ac3de9a8633a7c494484d1c9f92ff9c1a5d3cf1aeda83d386b9",
+      "n_steps": 43,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-10356__gpt-5-mini__medium": {
+      "content_sha256": "21853634f5fb888f1784c86672d8e126d4d9a178e71197da459f3e622a89f9d1",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-10356__gpt-5-mini__minimal": {
+      "content_sha256": "871c5a19f3626809728d5d908dd932f42ddd62e4be5a156448d74c3451eb34f5",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-10356__kimi-k2.5__nothink": {
+      "content_sha256": "70a948202d101e8496b832986b43a7c68650bf9df44cec97ed8f8480ca9275f8",
+      "n_steps": 63,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-10356__kimi-k2.5__think": {
+      "content_sha256": "964c54ca1c2aa47157545fef528a7fa25c00efe168ecf927f3a313e512ee0478",
+      "n_steps": 44,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-10356__qwen3.7-plus__think": {
+      "content_sha256": "4c38decb77228039eadd8b17e65f392e3ff1c94de695f3d9812b33959a9fbe0c",
+      "n_steps": 56,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-10356__zai-glm-5.2__think": {
+      "content_sha256": "4ba3682786bd56ac6a89bcf44db458368ea83f465749f3b64b7978864f4cb941",
+      "n_steps": 49,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5262__deepseek-v4-flash__high": {
+      "content_sha256": "64a94318eceafb935b5ce660995f91d28b0883d962fd5a82de6bdf7ea41c4666",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5262__deepseek-v4-flash__max": {
+      "content_sha256": "24c4dfa4b4d57c01384e8f57757e4e281195a9e4fee88fbaa2a47533ef1ae2ac",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5262__gpt-5-mini__high": {
+      "content_sha256": "8ceddfe635856f3362b313f31f30fda9ec5eee24f98e71dce7f3d1b7be766f3a",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5262__gpt-5-mini__medium": {
+      "content_sha256": "8f451d510cbeef5887f3adfb7f0b5fb0f8aab7fc53455a2e360f3dab78837f1a",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5631__deepseek-v4-flash__high": {
+      "content_sha256": "07936451e4e972596832de90d207e256141ec138c75a69c7ee0072e3c1562dc5",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5631__deepseek-v4-flash__nothink": {
+      "content_sha256": "43b04f0a20da8cc26fc2effe08a8b060050b6e4a9ce5187dc0e4892afc408784",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5631__gpt-5-mini__medium": {
+      "content_sha256": "19d47bf13f5c737584f20799d65edce6b19f7c97ad9a1bd3fa7e2a3dd2814bb3",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5631__gpt-5-mini__minimal": {
+      "content_sha256": "63e44a7a510e21a1bb293b22af74c3358664c6ff3c43c950ebbb4d8eed967681",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5787__deepseek-v4-flash__high": {
+      "content_sha256": "ffe8da541ee58e4e17fd255034ba04126ff448bcb3977ce55186afa699095692",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5787__deepseek-v4-flash__nothink": {
+      "content_sha256": "cb8ab0101b6a99591454a007115dd6f69f7e3cf97c453df2629d31488aabf4bb",
+      "n_steps": 54,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5787__gpt-5-mini__high": {
+      "content_sha256": "16e57c37d4c408caffc8d8ffe7c4a2ec0f0f932a83cdbc0418ceb353050f7d59",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5787__gpt-5-mini__medium": {
+      "content_sha256": "fe46df583bd963c807c439008036235c0b40b00b43ec9d4879161dc79088ff7a",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-5787__kimi-k2.5__nothink": {
+      "content_sha256": "2ea005719f4ad965a8cc15e84a6e995681140217ba056471645e2627b17076e8",
+      "n_steps": 53,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5787__kimi-k2.5__think": {
+      "content_sha256": "a2381d7d480867dbf88d75720a9ded36fce1bfb3b2b96739450cd8a070ac957d",
+      "n_steps": 45,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5787__kimi-k3__max": {
+      "content_sha256": "ac4390993f913b8ce392f0332bc22e0483a46d0eb54a9dba4651537ef75010e6",
+      "n_steps": 55,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5809__gpt-5-mini__high": {
+      "content_sha256": "5e4db4813387109ac1c9f16e4e9912126bf385b779df68dec5ca9cc61e41e672",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-5840__deepseek-v4-flash__high": {
+      "content_sha256": "2a96f9b0ea6685d9631595de19683ec4ce61c05b5ff9adc0d2e05e9b15c60631",
+      "n_steps": 55,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-5840__deepseek-v4-flash__nothink": {
+      "content_sha256": "b660c60e9a9e7d3065acb62784c26a88de64fed00b1206af2cfa8b9408eb7a2b",
+      "n_steps": 78,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-5840__gpt-5-mini__medium": {
+      "content_sha256": "d4128940b6049e38063ab614438cd73c47dc9f1abbbb154c0eee4c93a54a50fe",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-5840__gpt-5-mini__minimal": {
+      "content_sha256": "201063bc38431b38bbc85d7fe11948d35350acd098d8457b2c5c0317fc8d7e51",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-5840__kimi-k2.5__nothink": {
+      "content_sha256": "84438fe53854ac611cd2910bcee6f335e2bb058d98189deadd02505cc24a44ee",
+      "n_steps": 80,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-5840__kimi-k2.5__think": {
+      "content_sha256": "98d22642a1b63c3bb87638cc830317f7e8f1db951b26806ca900c0ec0c509977",
+      "n_steps": 52,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-5840__qwen3.7-plus__nothink": {
+      "content_sha256": "daf66c267b6446fcdaef895a039c38bbe82a1958df6334cfaab13734062ed7e9",
+      "n_steps": 62,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-5840__qwen3.7-plus__think": {
+      "content_sha256": "1dbeb23b9b596fd16a89e53a0c4ad6f99ba5549c340f6dfa222fb3b4c748de2c",
+      "n_steps": 54,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-6202__deepseek-v4-flash__high": {
+      "content_sha256": "f1a909f3be6130d6226504afa1401283e394fde2cde5ea3d092d49b7ab05f6be",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-6202__gpt-5-mini__medium": {
+      "content_sha256": "a8ba82d1cbdc6f6b3490689e939ba8ae969e9b7f512dfd11cf959411f9e435a1",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7236__deepseek-v4-flash__high": {
+      "content_sha256": "4886967170d43451038672d02e5da28e85a49a2efb850f45d41342d9775e3814",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7236__deepseek-v4-flash__nothink": {
+      "content_sha256": "cc6548e55f69d05316ddb97696e967f423816bed0d04758ee9f4dd62b0f48ae5",
+      "n_steps": 48,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7236__gpt-5-mini__high": {
+      "content_sha256": "2c5b92daae80e81b592de4343e77908f9bd3774faa11be8faaea42b232d76702",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7236__gpt-5-mini__medium": {
+      "content_sha256": "301bfb63e5ac4cca70c6e8bd61770b842113af9d5f364e9eb06ba095892145ab",
+      "n_steps": 10,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7432__deepseek-v4-flash__high": {
+      "content_sha256": "6a8a07a51a52638276a5e5aefe87dade04afb4bd30a19e620d13e4a671ace512",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7432__deepseek-v4-flash__nothink": {
+      "content_sha256": "046ef1fcf2e7faa548ce53708e9889740902d0f13b44638921427c9c3b080626",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7432__gpt-5-mini__medium": {
+      "content_sha256": "27a775681dc37e93fb2cd7654e1f222ab38c0770287783050409472063c451f0",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-7432__gpt-5-mini__minimal": {
+      "content_sha256": "364eea87b6ac117c0860ea32ac95183f03239e343bf140d3bb1004c80b30d2ca",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7432__kimi-k2.5__nothink": {
+      "content_sha256": "b471d554b73b6ff810af0212b651c603ed41c0eb14a0b2998ff88b4de9bb3d5b",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7432__kimi-k2.5__think": {
+      "content_sha256": "43b77a2fc7fdc9e69b37c69e5b9c035b99bfd61e4c96e3906c3bf4fa238127b6",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7432__kimi-k3__max": {
+      "content_sha256": "b470bc439c4f796be0b30a111547620a390649708cdadf4546892b6656661b99",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7490__deepseek-v4-flash__high": {
+      "content_sha256": "035726199e67253359119a32497f4f854a623459a62eb72a69486a3cad02c688",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7490__gpt-5-mini__medium": {
+      "content_sha256": "a95b3bd0bf7fe0ba1dbf3de278d418702315852fb0eb37d3312eec71bd54c720",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-7490__gpt-5-mini__minimal": {
+      "content_sha256": "530ecd6a05281f94588e0165b6a82ab75221d6a2261eaac3bcbb5800577bc1e4",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "pytest-dev__pytest-7490__kimi-k2.5__nothink": {
+      "content_sha256": "bb59a7492531d65d06f34f5efe5e2cd6637800431ffb711250c9f91ffef1008e",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7490__kimi-k2.5__think": {
+      "content_sha256": "118d2de216fcde559ec6d680f4f1b405f3e5bb0189f93026da9c6d8413cf458d",
+      "n_steps": 36,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7490__kimi-k3__max": {
+      "content_sha256": "eaf33f43c498792b9c7a5cf63661875562975c2c58f82310a062228e16b8a0d6",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7571__deepseek-v4-flash__high": {
+      "content_sha256": "fc7adc19af08c1d61a664838d9f14e93be93eb3a2fc4c893e406b655431ac2b6",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7571__deepseek-v4-flash__max": {
+      "content_sha256": "1c7d48c12e24058bd38a81d35c318da5531f684433dcfa2f4bdb3abaaeb02b84",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7571__deepseek-v4-flash__nothink": {
+      "content_sha256": "00d80e01a3686a2afae08eed86734c268f7c15cc0bdf0d05e860fbd04ff55953",
+      "n_steps": 47,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7571__gpt-5-mini__medium": {
+      "content_sha256": "1261f0cd342bd38e733239bdb7467ec38cf926e4a11988144ab74534b45274f2",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7982__deepseek-v4-flash__high": {
+      "content_sha256": "7ee86d841ee99fc35e1e72976090bc064b2309102d01a3f8d5a404c7b66195d9",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7982__deepseek-v4-flash__nothink": {
+      "content_sha256": "6f16b37ef70395cef36c618e5009cde9641a87212fc72b9fccfb422d7d0365e0",
+      "n_steps": 36,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7982__gpt-5-mini__medium": {
+      "content_sha256": "c5e67535ee912d3e0245b0ff23224cc5c0a7d90d0c643c463045bd2a91a44f8c",
+      "n_steps": 9,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7982__gpt-5-mini__minimal": {
+      "content_sha256": "9a2e45bef3e37eba3c2491f3ba353b32576fd84012ca28fce74ba800527a80d7",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-8399__deepseek-v4-flash__high": {
+      "content_sha256": "feb63ee596fcaef898a6ae297e5422894eeb0a33e23bb949c09e377a8271e241",
+      "n_steps": 39,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-8399__gpt-5-mini__high": {
+      "content_sha256": "c44a2f7004b65f68d0790bdb666005bcb49855acf3f38fc630606b53750ba08f",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-8399__gpt-5-mini__medium": {
+      "content_sha256": "5026510c02be2bc00bf032012c1caaab2b5b08d17058464497a3a31997ac23e3",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-10297__deepseek-v4-flash__high": {
+      "content_sha256": "2b46df83d6a6d144ca86d39a5c71a4297066975776cfc473f4cd0262ae4964c0",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-10297__deepseek-v4-flash__max": {
+      "content_sha256": "5c1a999c675f7977893887bea645b58c68f3314e1529feac7660b6b9477e5b1a",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-10297__deepseek-v4-flash__nothink": {
+      "content_sha256": "c0a4a13f8e89ca7a90cb208bf759cab3a18830421dc2470e6aad3f9a667ddc59",
+      "n_steps": 76,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-10297__gpt-5-mini__medium": {
+      "content_sha256": "aadcf965627aebab31e67ae0f999bda7e6d8abd353332ab24c22f312b09eeb25",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-10297__kimi-k3__max": {
+      "content_sha256": "ca6b938d2120fac7ef1789f75f130e4c09646e651f38953098b05d8f70e4e42a",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-10908__deepseek-v4-flash__nothink": {
+      "content_sha256": "96b9bb761f003197372af9a0efe4db8d333a443af51fb6b976ca4aed784b1dc5",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-12682__deepseek-v4-flash__high": {
+      "content_sha256": "8b8e587793e889073a2441b1a55eb774a9e136c7a1cbc2053a398327c7bd68c4",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-12682__deepseek-v4-flash__nothink": {
+      "content_sha256": "f097966839350efa7bfcf3daac5cd57ba7ba296c7e1185dd182cc103b28d1690",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-12682__gpt-5-mini__medium": {
+      "content_sha256": "a254346bb8ac97cd6ece42b55b6db796fd861665deb9e910e3c417ea4fd47bbb",
+      "n_steps": 51,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-12682__gpt-5-mini__minimal": {
+      "content_sha256": "eeab08e3983268145ecbcea30cebfb536b3fb80931b34aea0114421c004f62f4",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-12973__gpt-5-mini__minimal": {
+      "content_sha256": "1680a1f754f77c343cf6ea340e832427c38f1cd1fd1fd474f9f8c2c3db4315a3",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13135__deepseek-v4-flash__high": {
+      "content_sha256": "61a27f8b843a3933ec3815842a469135861ed169c0ffd541e9b686c2ef1a97fa",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13135__deepseek-v4-flash__max": {
+      "content_sha256": "9d5b7995755d1f529715359c5384645dc1660fbf17c58859f3c6970480c05d53",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13135__deepseek-v4-flash__nothink": {
+      "content_sha256": "5720e61a10686e4156855c6922316b246172dcac55e8f51dcd8d636a81c4affb",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13135__gpt-5-mini__high": {
+      "content_sha256": "028b895421aeb3d9d4f58e11718d7c69577c5fdc127f8725035e04d22826a978",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13135__gpt-5-mini__medium": {
+      "content_sha256": "9be4bddbebf557a6ebf1fbd32d9bf20493b2058b87dedca7ebf798d8c89f6f7b",
+      "n_steps": 12,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13142__deepseek-v4-flash__high": {
+      "content_sha256": "775a5556867bfdb1c15d22c3acbcc36d9c6d9da03a0c74d30ed44eed52faeab5",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13142__deepseek-v4-flash__nothink": {
+      "content_sha256": "0a9c75b2ffadba42008e0af020a595aeae628548541aad15a8ec5fee3579de0c",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13142__gpt-5-mini__medium": {
+      "content_sha256": "2ad6d0c6ac1696d62328a084623088600eb3065e2e3dde81129a750244b310d3",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13142__gpt-5-mini__minimal": {
+      "content_sha256": "09bce12cb00da99e5bc4f5accc928b598300416d1cf154343d7e80abb683f53e",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13328__deepseek-v4-flash__high": {
+      "content_sha256": "cce0bc610305a976b9620ed31ce1d5db332d32accc6e899f1ee219e3684386bb",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13328__gpt-5-mini__high": {
+      "content_sha256": "6f1efeaf29b3bf1c091d25689605d0dd95a4b34cda512c56570e001f74636143",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13328__gpt-5-mini__medium": {
+      "content_sha256": "7be4ff6a59324e11bb14306473275186d8752a6e3f02a0a273bb6e454ed20196",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13328__gpt-5-mini__minimal": {
+      "content_sha256": "7c3846742b5614b55d3a8e907cf74779726c2fec921e939127ed07906e41a901",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13439__deepseek-v4-flash__high": {
+      "content_sha256": "dde35a5caddcdd2f011908cb78b0282a7d4ea18d6238068c7d8da36a68f858af",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13439__deepseek-v4-flash__nothink": {
+      "content_sha256": "0ae64d19e01ec662a4a7f5ec6e2731f4e33cfc7cdd4a19cba2e53c9840393c73",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13439__gpt-5-mini__medium": {
+      "content_sha256": "d0d743b2e61700a336d41da23b58368e9695afa034931e376621f297b5d1cd9d",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13779__deepseek-v4-flash__high": {
+      "content_sha256": "d60ced555baf7f6d86e7736949ef9727585f9b36d7b765318287fe24bc7ff9b5",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13779__gpt-5-mini__medium": {
+      "content_sha256": "d705e5918603cd343a36411e996aea937491b8733040e478e7457b1870a10e2b",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14053__deepseek-v4-flash__high": {
+      "content_sha256": "647f8c1839fed067339f280ca79c5dee5b57605e2a034840b4510098a7272713",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14053__deepseek-v4-flash__nothink": {
+      "content_sha256": "bd4f48e5d740745d0247eca0c2160f784933d7bccf2d0cfe8b2789b67897f897",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14053__gpt-5-mini__medium": {
+      "content_sha256": "0d872316f6326477ab95a3f5a356e85857e007a4cd6ed4d8b117346768d73b01",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14053__gpt-5-mini__minimal": {
+      "content_sha256": "7c9a48e49d5e8b9c7a0594020a035dd3404ba6f10b31014842830e6196dcec6d",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14087__deepseek-v4-flash__high": {
+      "content_sha256": "a3136fc458d7e77d0dc5d28f356c6730d85771927c2cc0e3e98a4a35b6e2fc04",
+      "n_steps": 56,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14087__gpt-5-mini__high": {
+      "content_sha256": "d4b0fb9caffb8242da3eeb2e0ea21cda3f7ca495f4b80c9088202c8d173bbd42",
+      "n_steps": 36,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14087__gpt-5-mini__medium": {
+      "content_sha256": "d53bcafc9477fc28109a0bb7cf441546df4e9a745b4ce25db9cd87578a85191c",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14141__gpt-5-mini__minimal": {
+      "content_sha256": "4e3bd845cb3a7e91c77fec156b33819d5bca8e8abfe056d78ac38c5adb7bbc2d",
+      "n_steps": 10,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14629__deepseek-v4-flash__high": {
+      "content_sha256": "ea6fe4db72b440fe727a15343e6398148a0a45a38128fbdc06ac4dfd42d1f9f1",
+      "n_steps": 21,
+      "snapshot_steps": 20,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14629__gpt-5-mini__medium": {
+      "content_sha256": "02a2adf53451873a4d543629a55342eb812a58eccba42bfd0f0c707f88f78a48",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-14629__gpt-5-mini__minimal": {
+      "content_sha256": "cf3368e4caedb26707a54b78ee9fb924b6f9259c9e09b89f322c17a35cb85e49",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-14629__kimi-k2.5__nothink": {
+      "content_sha256": "54dcbc633efdadbda18aba4676b13bfacb004645dc45462925b3994f8b6f0c37",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-14629__kimi-k2.5__think": {
+      "content_sha256": "eccf6e5379d85010f2def6ddec6ef36c407411d59001be08c95c71459e8dd451",
+      "n_steps": 39,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14710__deepseek-v4-flash__high": {
+      "content_sha256": "5027e820c57c1997e0dae717011233ac9f4bbb59edb531da7f28c7f6d9669bc9",
+      "n_steps": 45,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-14710__deepseek-v4-flash__max": {
+      "content_sha256": "2d16d910961c1bbe156759d26bd32e5cdd1c956fd368c427b3d1792bc82a4ff9",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-14710__deepseek-v4-flash__nothink": {
+      "content_sha256": "50ad89e6ef50a53ca56451fe27b92f45f1e0ed888eab0142be4f18691fc5cc71",
+      "n_steps": 39,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-14710__gpt-5-mini__high": {
+      "content_sha256": "b5e63d29d7f56cfa36581b91a25156a7f530f3c3e75ec3285091caa70f8def8a",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14710__gpt-5-mini__medium": {
+      "content_sha256": "d5aa1ac6b17e5199dab0a83ec99433f8e64c0f78526c1341d68302627b756fbe",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-14710__gpt-5-mini__minimal": {
+      "content_sha256": "ae8231aeee3adfb78c5ddc6692f35fd62c3102e2635f18213848cd0d89d88095",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-14710__kimi-k2.5__think": {
+      "content_sha256": "b3e2df70f9c0c90aa787605f46adcc209c474b62bc1656ddedc0a038fbc2c91d",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-14710__kimi-k3__max": {
+      "content_sha256": "5419102ea19c499bbc38efb57379873c8e338c5ee2787f3a097b243dbeb12e6a",
+      "n_steps": 49,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-14710__qwen3.7-plus__nothink": {
+      "content_sha256": "ef93e77ddb00815e26f77c9043926f7241b92cd23c0d0381f2b6b334a71c056f",
+      "n_steps": 42,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-14710__qwen3.7-plus__think": {
+      "content_sha256": "e9be22c69ce090c72884938eff1e383a19952c05f0b628649d252e0d9345610a",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-14710__zai-glm-5.2__think": {
+      "content_sha256": "4b2afde08c2d44521465dcafe8dfb8f9110a30e4270127cec496ab5ca98ecbcc",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-14983__deepseek-v4-flash__high": {
+      "content_sha256": "2d6f202a5c32d6196f75dd436f609d4fda68b5a5161ee1c66dce94ae71460cb4",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14983__gpt-5-mini__medium": {
+      "content_sha256": "20f6edba9d06f1d53284ac10446e5b2cbcde785366dc5fa9d7b9fb852ef13dd4",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14983__gpt-5-mini__minimal": {
+      "content_sha256": "1a835455cb4cde0054cb3cfe3c629ed5b375cc4e3ba507087557dfc0aeed339e",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-15100__deepseek-v4-flash__high": {
+      "content_sha256": "52db9b3d1e2fddc1d244b68fc475eb477dbf8568eaa5a4d01f37e2764b3d716e",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-15100__deepseek-v4-flash__nothink": {
+      "content_sha256": "219f0bedb41c4b708ce5738120f60a784eef8fcf2814742f7eed13851363c74b",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-15100__gpt-5-mini__medium": {
+      "content_sha256": "9073caf37300722195a05f2cc9641aec0eb795b574a7375869431192fdde6439",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-15100__gpt-5-mini__minimal": {
+      "content_sha256": "5f753521cb9297d2171f7588e60df926682ab6124247fa9dc3b486c93cdcb136",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-25232__deepseek-v4-flash__high": {
+      "content_sha256": "376713776c04b74d114624d87926f5ebe2de366c20483e2456d1a6e02fa9b792",
+      "n_steps": 36,
+      "snapshot_steps": 35,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-25232__gpt-5-mini__medium": {
+      "content_sha256": "08ca3b5785b684bcf3ae727ba8f7606b0466a569d5e3694c23a8d60311460694",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-25232__gpt-5-mini__minimal": {
+      "content_sha256": "97e8ca09d298465d2115a7c2186c7b8651bf0b92b0f8db9cd92fb63589c0731c",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-25232__kimi-k2.5__nothink": {
+      "content_sha256": "738ead8a6e531ccd0c677e1bbb70d6174f09f4dbda1bc3f140aeb6ce90f94333",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-25232__kimi-k2.5__think": {
+      "content_sha256": "cb90debdaa3f4befe1fa98332a415510b0d3ca47b2cf2464024b8119b40c4e4c",
+      "n_steps": 46,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-25747__deepseek-v4-flash__high": {
+      "content_sha256": "a1c9b613eb56ed2c17800039b13624b8ed3448c32576c81b6641856b2804a9fa",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-25747__deepseek-v4-flash__nothink": {
+      "content_sha256": "20cba1a269ffe3bf632d93ac194d002936a3a50b2f87b688509b3f73273a2615",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-25747__gpt-5-mini__medium": {
+      "content_sha256": "8cdf2fc96490046b3b2eaecb7556fe98902b324adf0dda218f5e0c8bc55e5806",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-25747__gpt-5-mini__minimal": {
+      "content_sha256": "a9088673b00b8f070201f74baf0b6fa919fb8e38c7cc260e6e06023ef2a97aaa",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-25747__kimi-k2.5__think": {
+      "content_sha256": "fa7654dbb8fab2a3a780fcf4710e16d5ca3ad47cd31ffddae2dd0003e99879fc",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-25747__kimi-k3__max": {
+      "content_sha256": "107ec36ba54c719af6cff53d052e7702daaace81109834fb89cf80239c2fd3a7",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-25747__qwen3.7-plus__nothink": {
+      "content_sha256": "3f96e8657b766b84b4b90828a6093f293d33284926746466bc3f3e97f3000b45",
+      "n_steps": 44,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-25747__qwen3.7-plus__think": {
+      "content_sha256": "ec2231a5c3f20b76f9af50d3a9bceac7f1d39484cfcfc592285693caf443dd9d",
+      "n_steps": 43,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-25747__zai-glm-5.2__think": {
+      "content_sha256": "1217c40bea4a61a6ff237299f4639b64d3bf2a0133835874d713c542fb51d0c1",
+      "n_steps": 54,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-25973__deepseek-v4-flash__high": {
+      "content_sha256": "1b4cc89085b678aa4570675e63aca326d1817d0765ae995da5132ae641b46540",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-25973__deepseek-v4-flash__nothink": {
+      "content_sha256": "b41ba5d912cb2805192215a42804228b9fd30b8fa562a8edd17bada0fdf6f886",
+      "n_steps": 41,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-25973__gpt-5-mini__medium": {
+      "content_sha256": "bca27a63fe41775159ad5cbb027e9d931e2e1856882bdd332814d1c89c523673",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "scikit-learn__scikit-learn-25973__gpt-5-mini__minimal": {
+      "content_sha256": "41e5803747d669ef33d581ee9c056034f2c5982795a05283c716beb66094142e",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-25973__kimi-k2.5__think": {
+      "content_sha256": "1d6b5de477fd8141ef46f98a5cbdbbf4ca33a3fd4c6a6e778ed2c3a0854cfc9a",
+      "n_steps": 55,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-25973__kimi-k3__max": {
+      "content_sha256": "c26748a7299d3f0b31867b9394d0911a981b8590b32a546de8cb3bcac11d699c",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-9288__deepseek-v4-flash__high": {
+      "content_sha256": "4c9c8fee4770d6ad92ebe42dfab995e42a009e799e4b9db0e45dd227a28e3c91",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-9288__deepseek-v4-flash__nothink": {
+      "content_sha256": "8a1389f8051a96db907d6ac27ad1f94a3b7085c7dd486953580bddc124a4dcb8",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-9288__gpt-5-mini__medium": {
+      "content_sha256": "1e01342e249ff24a556a103cca042ae587d852c50c089a5b0e8067851247c3d5",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-9288__gpt-5-mini__minimal": {
+      "content_sha256": "49df59345a3eeb905ca467af6291b7b5687adcadf1ec1ff44d4ea4c01856de90",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-10323__deepseek-v4-flash__high": {
+      "content_sha256": "9e3116bded3c7292f30b222728b90bb2a78b07481d9fa8fc48d9a7493c56ea00",
+      "n_steps": 55,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-10323__deepseek-v4-flash__nothink": {
+      "content_sha256": "cabae43ecb08be886d9a4781ad7886a0785a1ddf3f105a735f7e17ed7fb56b56",
+      "n_steps": 63,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-10323__gpt-5-mini__medium": {
+      "content_sha256": "f5c3c0e1cf894828986d367c49c30dbb741a022f5d4e3b0ea9c848231020bf9a",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-10323__gpt-5-mini__minimal": {
+      "content_sha256": "1a0027e78c06e4449def6149d6be8a843fa97f6888615ef174ac56e9efd469a4",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-10323__kimi-k3__max": {
+      "content_sha256": "96b8b9367cb2949aa6752dc421343e4ab280dc1042e36096e51459d784b373cf",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-11510__deepseek-v4-flash__high": {
+      "content_sha256": "988ebef074e697a5647cdc75087a8b9d614268ee795c0f3a98023b69b2321805",
+      "n_steps": 88,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-11510__gpt-5-mini__medium": {
+      "content_sha256": "1ff3f331717dc6bf97a8ce1f0f9e84097a566450b1170f07ef34c8343414e1a1",
+      "n_steps": 75,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-11510__kimi-k2.5__nothink": {
+      "content_sha256": "f6ea8711fc22d6ee1ce4ea8fc0d4311603245a6e74e73eb9c2fcd960c184f2a9",
+      "n_steps": 69,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-11510__kimi-k3__max": {
+      "content_sha256": "d025d170271cc380650ec50deeb9262af445b1ca1e2ee8024cefe2c6e230b3ba",
+      "n_steps": 50,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-11510__qwen3.7-plus__nothink": {
+      "content_sha256": "bb47c47a26072e6b19a8da632b1dee122ca1be53b954b297005af74a7ddfc342",
+      "n_steps": 70,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-11510__qwen3.7-plus__think": {
+      "content_sha256": "59288cb00c7e49d98eecd86fac0fb4a5bad2ea2d684dc77e33ea1f505a8492ba",
+      "n_steps": 59,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-11510__zai-glm-5.2__think": {
+      "content_sha256": "49c3fffe753fe8429c5eaa46a0471c3805927d4d5d120223b3e0b659d14291fd",
+      "n_steps": 70,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-7590__deepseek-v4-flash__high": {
+      "content_sha256": "ee4909394a71263e312a887cdc339664008f8a226d38e77d2a3eebad069355a5",
+      "n_steps": 43,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-7590__deepseek-v4-flash__nothink": {
+      "content_sha256": "8bf6b1daa798b4282fa6b829ac04c23eab248e36773bf405d941809830a6bcd2",
+      "n_steps": 46,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-7590__gpt-5-mini__high": {
+      "content_sha256": "897637de31adcddf205ce11199d369e3a454a7d0073ae2a54e8e36cbf5df3380",
+      "n_steps": 60,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-7590__gpt-5-mini__medium": {
+      "content_sha256": "e4a6c0c5597cd397e831a32324dbee3b0eaf9197f323a41379841dd18ac6ea48",
+      "n_steps": 44,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-7590__gpt-5-mini__minimal": {
+      "content_sha256": "52ac73aa4d51b5f0ae207bd1a4de2a0a062f76bc27b1e525c0994a04dc471dad",
+      "n_steps": 38,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-7590__kimi-k2.5__think": {
+      "content_sha256": "db7c9fa26441ee92b599035e800194e0f5e679905df9d4dd12b93b5d64efb9b0",
+      "n_steps": 66,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-7590__kimi-k3__max": {
+      "content_sha256": "d4dc8966880a4dae83bf8767dee0712e43600af3f2c1b1c98ec94ae73a08bb54",
+      "n_steps": 56,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-7590__qwen3.7-plus__nothink": {
+      "content_sha256": "6f976e507bd96ebd01be446aad86c12675d1c84d853d4c91780720e2ada20123",
+      "n_steps": 80,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-7590__qwen3.7-plus__think": {
+      "content_sha256": "65ffe27fa6159949f12fa3916d2e55ba2f406da573359743d550ae17b6444e62",
+      "n_steps": 76,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-7590__zai-glm-5.2__think": {
+      "content_sha256": "968951c713143a7fc757cc806433be60e305501958d77924da32fbeb5e38935c",
+      "n_steps": 47,
+      "snapshot_steps": 46,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-7757__deepseek-v4-flash__high": {
+      "content_sha256": "7df6e69dc34a31c405c03b91c89be3b63322b173314881a090fc092bf1a68cc3",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-7757__gpt-5-mini__medium": {
+      "content_sha256": "e8fdf26647fd43cc49c40d7d35be5e67ea235244acf178e4046036936713f5c4",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-7757__gpt-5-mini__minimal": {
+      "content_sha256": "14e117a368927744abdbcf8abf09e8a2864d0262cd360b41fd6cfa03002e6223",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-7757__kimi-k3__max": {
+      "content_sha256": "8d71dfde2add0dc5e04c425c6cfe6d7cfe1439991bcfedb01f35ec740aa55892",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8035__deepseek-v4-flash__high": {
+      "content_sha256": "07d34badd14e84f6d4ea1c3a9c077a93fc0f7f25b56a9bd01b71abe2f80a7aa1",
+      "n_steps": 74,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8035__deepseek-v4-flash__max": {
+      "content_sha256": "89a00f120dad135a5c4a74f473aed057ae1ac09edb986e83f1d838664d98b4ef",
+      "n_steps": 53,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8035__gpt-5-mini__medium": {
+      "content_sha256": "7d3d411194bfc75ec138afca42df5755ff5e6c1e34c9b9946426162c193b3989",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8056__deepseek-v4-flash__high": {
+      "content_sha256": "f30be1d7d6e6117b2943443a1daf13d17a720024e8f4a988fd71e91c9c45a283",
+      "n_steps": 63,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8056__gpt-5-mini__medium": {
+      "content_sha256": "76b780c6f62b5fc637438ed88f0fc9afb90bff7a18219ff852e08af180b966aa",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-8056__kimi-k2.5__nothink": {
+      "content_sha256": "64468deedf210345090e2b56b012a9e70e291a939abfd1a468144a24ebb44ef2",
+      "n_steps": 50,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8056__kimi-k2.5__think": {
+      "content_sha256": "ed48eff0e68a40372a7514f3e2dead820f367f20006751a14d71027c88fb4007",
+      "n_steps": 57,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-8056__kimi-k3__max": {
+      "content_sha256": "eaa8825677ee347a6f0305cf0328a92c966362f9c4728bd179446d9b3c022ab8",
+      "n_steps": 39,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8120__deepseek-v4-flash__high": {
+      "content_sha256": "35b2a8edb0e87da1fcdf679211ebc0115b6a0b3f1dcedf44872ea6879d2e4cd1",
+      "n_steps": 39,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8120__gpt-5-mini__high": {
+      "content_sha256": "3e2ad88b5be710c191f2577e489554de715ec617a9047e99411f4a72a51ab506",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8120__gpt-5-mini__medium": {
+      "content_sha256": "8977c173244c08011c8ce0f450cf4a4432d3c0f6338f0ea69e55226c67f82922",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8269__deepseek-v4-flash__high": {
+      "content_sha256": "98a59fff8f9d8aa5bbb1c8b4c00d92446b7f221c746fc1b3da573b3f9a8c1fef",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8269__deepseek-v4-flash__nothink": {
+      "content_sha256": "9750a7dbd7e9d5044ca2d703692cb8776d95e26d9864f857826970fd0ab06c39",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8269__gpt-5-mini__medium": {
+      "content_sha256": "9d1a6db184e895b3eb6da35eca3292a891662440005cf7bb3a8c37cbfe7456f9",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8475__deepseek-v4-flash__high": {
+      "content_sha256": "098bfba855b892f96fb3f811031db91a78c2b1231c6cd6a98a2a580e52134ae8",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8475__deepseek-v4-flash__nothink": {
+      "content_sha256": "bef8938820ac48b05b8da350009a3049f2435e49f45edf6cf541682dd487db8c",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8475__gpt-5-mini__medium": {
+      "content_sha256": "7e2d5cf52de8eb9b739b25d4803283b25808e86761cdb7fabfdd1f890b8cb340",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8475__gpt-5-mini__minimal": {
+      "content_sha256": "d4dbe5bc06647cf052c1432d7dba6ab5905580bd66700150d0bb8e81e3c366d2",
+      "n_steps": 12,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8548__deepseek-v4-flash__high": {
+      "content_sha256": "619d2467df3547f51911a7ab96b8443e0a55bb5746b19a38da7973da5de3b7e4",
+      "n_steps": 171,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-8548__deepseek-v4-flash__nothink": {
+      "content_sha256": "345ce62fa1cdcdd744f93434eebdf0502ea243eaa781432695bfa3b7fb43d3a0",
+      "n_steps": 89,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-8548__gpt-5-mini__high": {
+      "content_sha256": "389d906932f3f2892923c540537655aef9f7992e4d6e5a3f107eddca98672745",
+      "n_steps": 62,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8548__gpt-5-mini__medium": {
+      "content_sha256": "6de11faeadbf426609a9961745afa6e7cf567b6305e3bfba1aeba6bb87e6cd0f",
+      "n_steps": 100,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-8548__kimi-k2.5__think": {
+      "content_sha256": "1bc007f61078d1fcade782f23d4557981286554c61e503103a88c1899bde4185",
+      "n_steps": 89,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-8548__kimi-k3__max": {
+      "content_sha256": "78af73a79139e9acb36969b5786e83fe278c254c18b2a1f10738876c4bdad011",
+      "n_steps": 63,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8548__qwen3.7-plus__nothink": {
+      "content_sha256": "37f5644322f304691827ac7f5c51d226134513720b43dc53b71ed3fe8a03b9b4",
+      "n_steps": 70,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-8548__qwen3.7-plus__think": {
+      "content_sha256": "001a07ffd75c6f7c6320d6ce27f1d2dc4d038dc60fbb155d001ced4ca78deedb",
+      "n_steps": 70,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-8548__zai-glm-5.2__think": {
+      "content_sha256": "695000ce3eaaf647e09fd2f0d76f6ea5a78c73d5ab479498f0539dd7be80b137",
+      "n_steps": 95,
+      "snapshot_steps": 94,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-8551__deepseek-v4-flash__high": {
+      "content_sha256": "686e05f9459a7b6a80103d97ffbc0f087430f5c51c4c5e19a9acacfe4ad1f6a6",
+      "n_steps": 49,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8551__deepseek-v4-flash__nothink": {
+      "content_sha256": "c8acade0ff314b78b0b45f2fb7a0c2a76fbaa732b7a8f30948f325bf7574205d",
+      "n_steps": 52,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8551__gpt-5-mini__medium": {
+      "content_sha256": "cefea12a5876cbc59a96d4df7b376b0ff000e409cd01c9aeb9a41040a6c528e5",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9320__deepseek-v4-flash__high": {
+      "content_sha256": "2ea85e9ea02d3b9fffeb627e87b4dd0b75a18a33caaa49b5420d6b769465df35",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9320__deepseek-v4-flash__nothink": {
+      "content_sha256": "7bbecd2aa55c989bc00132ba243829b807475f952a018f43e1c78ab0e14d890f",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9320__gpt-5-mini__medium": {
+      "content_sha256": "c405d40c63afeaff9413b7d238a579f9344062650b8151c1a2101b10f18d2ae0",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9320__gpt-5-mini__minimal": {
+      "content_sha256": "fc64209d4eaf218be368e10062c6679aa67b76d868b1639f8a5634980a2d74cd",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9461__deepseek-v4-flash__high": {
+      "content_sha256": "239675ae578b49b301f8f4ee5ccaeff6793086d60ddc0ee156cff33d3d05f29f",
+      "n_steps": 91,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9461__deepseek-v4-flash__nothink": {
+      "content_sha256": "bacc38396e0d048bc439cf803692a9892a1eec52757a3ae5cf77393a7b17afc3",
+      "n_steps": 140,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9461__gpt-5-mini__medium": {
+      "content_sha256": "2c66f8696891ed216874194898a59036a2f96deeb5cea3ec67a1ecd04f017e8d",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9461__kimi-k2.5__think": {
+      "content_sha256": "22a34179bedc52ef9e7467411e4625624fa103dcfd4db681ace9cc9b4035f0d4",
+      "n_steps": 65,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9461__kimi-k3__max": {
+      "content_sha256": "00f48bf3f727e5d458ea76c7101c47a2be484f690cbddc2e7b885ff380a17085",
+      "n_steps": 58,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9461__qwen3.7-plus__think": {
+      "content_sha256": "72337b52ad4e6f36a669ee63badaaf373d5845fdbb584ba01222cf812ce8eecd",
+      "n_steps": 70,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9461__zai-glm-5.2__think": {
+      "content_sha256": "ca07c3a1ae1abaeb9c5645bf916bc0e018bed09943fb01c1292ca7b8cb33e218",
+      "n_steps": 70,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9591__deepseek-v4-flash__high": {
+      "content_sha256": "6b7addb24552a29df95d60abdbe72e93fb7af1442cebac35017df779f3cf19c3",
+      "n_steps": 62,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9591__gpt-5-mini__medium": {
+      "content_sha256": "17bbb40683a4fc37568c8461130e45f6bc712b13c662cdcdb9affd7a606a9722",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9591__gpt-5-mini__minimal": {
+      "content_sha256": "573cbcc08ffb63e50de52034c8cf8f9970977298399cb7a03a491e78f3785fe0",
+      "n_steps": 64,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9591__kimi-k2.5__think": {
+      "content_sha256": "b72768f22a8a92868cfacb553f44d5f764757347656670b1b73e7b218825fcca",
+      "n_steps": 64,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9591__kimi-k3__max": {
+      "content_sha256": "f32eff9e894a2dc7ad421915350d45850354dbb2f46a8fef1d5df5eedf089cbe",
+      "n_steps": 37,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9602__deepseek-v4-flash__high": {
+      "content_sha256": "ec4594f0436d1e9596a84299ec4cbe02a23e752c1030d08d21ed80f60e72580d",
+      "n_steps": 57,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9602__deepseek-v4-flash__nothink": {
+      "content_sha256": "3dd759d298c668b17e390c7c4cb12425a9fafb767884362ea28efdd7a9af5b18",
+      "n_steps": 40,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9602__gpt-5-mini__medium": {
+      "content_sha256": "6eb91b8917d48de48e12326e3b0eb553ee23884c7c028f78c982faf8aa21b42a",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9602__gpt-5-mini__minimal": {
+      "content_sha256": "e2fa80cd587bd6bb99d0d81e409ed42b1ed4b3c4e5a268469e2f0c685291534e",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9602__kimi-k2.5__nothink": {
+      "content_sha256": "26e72383fbc272a41d77ddc6148e7bb1ba557d19773f3aba550c36a98b16dd41",
+      "n_steps": 51,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9602__kimi-k2.5__think": {
+      "content_sha256": "19a075ed6049e44cc5b6b3d6136a882ef03e0a245b33e5e7cbed5400198c0b6c",
+      "n_steps": 82,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9602__qwen3.7-plus__nothink": {
+      "content_sha256": "710ea49391428eb59c506fd68becdffe49a4e30e00116aa14553a24a413110d8",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9602__qwen3.7-plus__think": {
+      "content_sha256": "94eaade45768a488f4f8a1c4fba880c30b1cc2b8a5ea83f3727676c63401d3c2",
+      "n_steps": 63,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9602__zai-glm-5.2__think": {
+      "content_sha256": "ee579fef0d534e6299ce4f8d10172c46ac39b78f12a90126c90bacd868b44484",
+      "n_steps": 51,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9658__deepseek-v4-flash__high": {
+      "content_sha256": "76c6d7c8df92d402b01204187e015afe9d30aae8e64e14f5f861d7127d50637a",
+      "n_steps": 51,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9658__gpt-5-mini__medium": {
+      "content_sha256": "c678bdbd2c8981f97d4de3067300348c3b337b12b556a407b39704ae35a0d719",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9658__kimi-k2.5__nothink": {
+      "content_sha256": "418c9f013da4774514f2730e7256482e56e29cd9c928fee5a3090f82a1231543",
+      "n_steps": 53,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9658__kimi-k2.5__think": {
+      "content_sha256": "b361d4e77ebffb237ebe10327d698458e5a9fddd6200c55174f36fae4ae8ce42",
+      "n_steps": 62,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9658__kimi-k3__max": {
+      "content_sha256": "e3d86c25623e766c406b8bd63295ff60b5820ecfc564f135ed023aa622c557be",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9673__deepseek-v4-flash__high": {
+      "content_sha256": "91eca00c0ec6efdc0f90d3842c59eed694a27b1efa1ce7808a2970e9fdb7bfd4",
+      "n_steps": 43,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9673__deepseek-v4-flash__nothink": {
+      "content_sha256": "2db614836d9c1de7729e2116abf2a818fd25fcedefa6b29ce63612c6d2446e0c",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9673__gpt-5-mini__medium": {
+      "content_sha256": "0b4098104b04ef129a90204286905d7ee28267d42741e0faa07c6283d2dd6461",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9698__deepseek-v4-flash__high": {
+      "content_sha256": "85167304d18ee72bdc190db94526d5a66b120d2384b81dc699b1c37585e7c6e2",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9698__deepseek-v4-flash__nothink": {
+      "content_sha256": "423a2d2b626d9f54cbbc1b9c1cc81a2666905aabe9827579e9c481baef4fe246",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9698__gpt-5-mini__medium": {
+      "content_sha256": "42f92b627642f3f79bd8fba95927f658333135d6ffd79b8f683b9b6dff46ddea",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9711__deepseek-v4-flash__high": {
+      "content_sha256": "5ff42ae97ff12a3e806f528beac610785e9e17a2065b0ed0a83f6ebb0fdd0fa8",
+      "n_steps": 21,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9711__gpt-5-mini__medium": {
+      "content_sha256": "9251458837d6bcbf1067f71bb08531bda60b126fe00f1eb7fc657ce606343ac4",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9711__gpt-5-mini__minimal": {
+      "content_sha256": "1d3f1535cc60a0ca3428ff06508d6ffb6379afba218beec14f839f40e91b6285",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9711__kimi-k2.5__nothink": {
+      "content_sha256": "37bb36ad9911bb31a96db80e5de272448de549cf599aa66122d8dedd13bbac10",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9711__kimi-k2.5__think": {
+      "content_sha256": "570d510a3576a2652b54e663f41760f07a1ea6e33f90604f00516b508f5d73d4",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9711__kimi-k3__max": {
+      "content_sha256": "975e9023ca63b14aef53d59a2f6f6788e70e0bc3adfcacd4bca905287500ec01",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9711__qwen3.7-plus__nothink": {
+      "content_sha256": "71c47558e4257e400997318dfbfe495abc1f8f3f294e957ff7f61754c088712f",
+      "n_steps": 25,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9711__qwen3.7-plus__think": {
+      "content_sha256": "daf87f1dfbbafc493950ce5cd547f4764232c41d41030460034f276cca6d42d6",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sphinx-doc__sphinx-9711__zai-glm-5.2__think": {
+      "content_sha256": "d2c21d0c1ba75d6de72551a73c9cf871d3e670c5292b861c8491256a05c2f759",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-12489__deepseek-v4-flash__high": {
+      "content_sha256": "eebd2f3c4c68051f369c385f821f3171c854b8f16e02c8965ef9b60304cb9fc1",
+      "n_steps": 66,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-12489__deepseek-v4-flash__max": {
+      "content_sha256": "87a7a6d7d14906e0d6839f6a213d4159f4f21ec18290a77f185755b830287126",
+      "n_steps": 39,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-12489__deepseek-v4-flash__nothink": {
+      "content_sha256": "94b300e6e8813f0444fddeab6cfd076f2dc77f90a7841de9205d4852430103f2",
+      "n_steps": 77,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-12489__gpt-5-mini__medium": {
+      "content_sha256": "ed3f5d7074c502e8c4ddc5392b071336097d455c3b6662bbe1e357f55964498a",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-12489__gpt-5-mini__minimal": {
+      "content_sha256": "29c4b518770d128894219d376e5806aea3b835c01bb0774048419570b83442f7",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-12489__kimi-k2.5__nothink": {
+      "content_sha256": "80d5e576ff2f1d411368f99268e254379e005fb554b931dfa6c7913d5ae5939f",
+      "n_steps": 70,
+      "snapshot_steps": 70,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-12489__kimi-k3__max": {
+      "content_sha256": "4cc8bb227d3ca8f022e7f8d129121787144f075752f5275ecb15fe0d0a9bdc42",
+      "n_steps": 46,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-12489__qwen3.7-plus__nothink": {
+      "content_sha256": "3d3adcce42f44b9ba544b1bc83c7f8ab9ae8965a56d1ed4dd63bbf82328285f4",
+      "n_steps": 59,
+      "snapshot_steps": 58,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-12489__zai-glm-5.2__nothink": {
+      "content_sha256": "47e1b54ec9ca6b62540becf80079887a3f885651c99af5150fde251f6fa91797",
+      "n_steps": 57,
+      "snapshot_steps": 56,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-13480__deepseek-v4-flash__high": {
+      "content_sha256": "770ab63954cf56de63b4e1654dbddae277b08b0e5487aa6cbba668d440a839a3",
+      "n_steps": 15,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-13480__gpt-5-mini__medium": {
+      "content_sha256": "0bc17df8c9fddca09310b425b2a40a3487a2e51ceefc704eb54766b202a4bea6",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-13852__deepseek-v4-flash__high": {
+      "content_sha256": "528cf928a5671b20ba6cb661e137a811f81a63e170cee1f1367b44d220b2aa77",
+      "n_steps": 36,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13852__deepseek-v4-flash__max": {
+      "content_sha256": "f163990219a2e729e9d3fc8f27007ccbef7d34167900e2e4779ca5b939f8871b",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13852__deepseek-v4-flash__nothink": {
+      "content_sha256": "3e82ce469c5b83e16a3630bfa98cf384333a85cd3713e20d1c8e9138afed2b33",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13852__gpt-5-mini__medium": {
+      "content_sha256": "bbf261d3642c1f3943b8a7da570dec417b10f19c471838f6d0d028323e7e0dff",
+      "n_steps": 12,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13852__gpt-5-mini__minimal": {
+      "content_sha256": "6b791379a8b1877b5d6aeaa95364143b0f858b3dba2b155dff6f080cac77438a",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13852__kimi-k2.5__think": {
+      "content_sha256": "27b35e1771ab5978b2fecd4c7e43f640ad390b606180e71e4828a5cda81718f8",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13852__qwen3.7-plus__nothink": {
+      "content_sha256": "ea3906bcdbf17270b9a6c8c30ebe0555928df44de63dcfaab0b91d8c6042e154",
+      "n_steps": 52,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-13852__qwen3.7-plus__think": {
+      "content_sha256": "81b1bee0ac8de72aea9db685eb5929d871715f81c19f07dfa2702ca0ba3adfee",
+      "n_steps": 51,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13852__zai-glm-5.2__think": {
+      "content_sha256": "08840f6041b7e7a77360bc2e159d66f7aa7c6eec336219c3593271c63446a4cd",
+      "n_steps": 59,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-13877__deepseek-v4-flash__high": {
+      "content_sha256": "c595f4862c98eb28d425d1b27c4252c6e799b8cbf4d74729d3e1303c1a64bde4",
+      "n_steps": 61,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-13877__deepseek-v4-flash__nothink": {
+      "content_sha256": "a34ca1199f73aad7540cadf867cfec0b57673ff9708def92b9cd22f0a4c231ff",
+      "n_steps": 46,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-13877__gpt-5-mini__high": {
+      "content_sha256": "3a99a2ca5f3be6fa9f3d4c9a1a40328196b9e49edd557f465bc3d0f00f56e65b",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13877__gpt-5-mini__medium": {
+      "content_sha256": "54166baa774d760497b2c1c8b9a29898a83c2033ac679f4756e3855f0167a3fd",
+      "n_steps": 13,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-13877__gpt-5-mini__minimal": {
+      "content_sha256": "cb6bb7e7d3d1e1b59d3f3b7c58ba959b26e8ce3c6178f46db799d658cef826ab",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13878__deepseek-v4-flash__high": {
+      "content_sha256": "354f2533dd5d57b479d11a8f256261ad3c05f4d8833e2122bf85af552a014883",
+      "n_steps": 97,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-13878__deepseek-v4-flash__max": {
+      "content_sha256": "b1e30e25b73311e177c7d13d01e98551fc4213e94b8da401008730cb611de218",
+      "n_steps": 141,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-13878__deepseek-v4-flash__nothink": {
+      "content_sha256": "6df004f0be0ac68c31a37c9fa780f5868bbff49bad7f93dbcee7a8ba4537be12",
+      "n_steps": 247,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-13878__gpt-5-mini__medium": {
+      "content_sha256": "43f133b6d2ec267cfb01ae460f40841dcb2f35b9cd13b0227419ecb9a94e822e",
+      "n_steps": 20,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13878__kimi-k2.5__nothink": {
+      "content_sha256": "2f4b1482998d465501b062e177e97c9cbc537940d87180429bce5b6dabbcf313",
+      "n_steps": 70,
+      "snapshot_steps": 70,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13878__kimi-k3__max": {
+      "content_sha256": "08621b11db7569939c7761f19a5c78130a970d8d38632977526b94c52bb973d9",
+      "n_steps": 60,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-13974__deepseek-v4-flash__high": {
+      "content_sha256": "c548bc8358df29a26053af57a7cf2af80a627cb537a1d619a934ede7fee21fc7",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-13974__deepseek-v4-flash__nothink": {
+      "content_sha256": "86844e8db6b05f5762dfa4ed9eae6148a06d17cdf318882de9aa0a5c5629e698",
+      "n_steps": 39,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13974__gpt-5-mini__high": {
+      "content_sha256": "9bdf7c6e50c1cfad9da7d168be0fac4610b6b39282a3b5d8b971208e4178ce17",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13974__gpt-5-mini__medium": {
+      "content_sha256": "feac81bd90e17b904b3b97f12cf1fb652cac805fa84d044a7bff7d4d6e0ffc13",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13974__kimi-k2.5__think": {
+      "content_sha256": "a7aae04a2a32700300c8f9b9f3e3ee9d27beedf57c3b7c18be27f1a8b6736a12",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-13974__kimi-k3__max": {
+      "content_sha256": "436a482fcc95af99cb68432db204b6b963f5fb881861dacddefd9882eb91d5b1",
+      "n_steps": 54,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-14248__deepseek-v4-flash__high": {
+      "content_sha256": "21e58175425c36c9ef0df7f2a88ed1441a9cfd2e7eae9e584fdda350e48ea4da",
+      "n_steps": 141,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-14248__deepseek-v4-flash__max": {
+      "content_sha256": "b1a015f438125fb51452f1a7cf9d74d4df83ba70d3bbad1df2063815849bda78",
+      "n_steps": 164,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-14248__deepseek-v4-flash__nothink": {
+      "content_sha256": "580be33cf52783906db6fcd4a5bdf401b0ac16d5fc4167a41b2ee9d68afc493d",
+      "n_steps": 132,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-14248__gpt-5-mini__medium": {
+      "content_sha256": "034d6b485c7e150d90998cdc2daa42436ba5652c33bdd2e0b2be76499257689a",
+      "n_steps": 40,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-14248__gpt-5-mini__minimal": {
+      "content_sha256": "1a7ad6a394fac3a889c8956724594b33ea67911ea593e56332ed7449b3d2992e",
+      "n_steps": 42,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-14248__kimi-k2.5__nothink": {
+      "content_sha256": "9933b9d531f5985a14081b73709b65679ed6d16ed0045e29eed03711ce303ac9",
+      "n_steps": 72,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-14248__kimi-k2.5__think": {
+      "content_sha256": "6cee7710ca72404d9be7055a7de783849e0bedbdc23215b3d121da1c79fb3f04",
+      "n_steps": 91,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-14248__kimi-k3__max": {
+      "content_sha256": "9b195c37f3478ac871a0101187a8d8d9553debb824ce63b818b0e418bc87a997",
+      "n_steps": 58,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-14976__deepseek-v4-flash__high": {
+      "content_sha256": "8316936cd32d2d935525c4b5675f56a78c4cf0819873cd56f011a8ef2c7002cd",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-14976__gpt-5-mini__high": {
+      "content_sha256": "936789169313e576de1c09164908f41e9c2b53436c69fd881e64fb7fe42cba41",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-14976__gpt-5-mini__medium": {
+      "content_sha256": "12a5a817726d857a91ae40a499720a417c6d5b8a6ceafa40b2a4e93d3bc29aa4",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-14976__gpt-5-mini__minimal": {
+      "content_sha256": "d78ae535b47f27f395ac607985693a1e3a340f58105575969180f6c61108bb64",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-15017__deepseek-v4-flash__nothink": {
+      "content_sha256": "1bf33013534cb0f1caa77398d32f65f1050dbcffc7ff438e4118a8b8c6afd100",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-15017__gpt-5-mini__medium": {
+      "content_sha256": "bdb17ad52c7e4c8f9d7e78cc2fed9c96935d4d77a7c1ebafab5b492d6442d3e6",
+      "n_steps": 27,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-16450__deepseek-v4-flash__high": {
+      "content_sha256": "1f4200e57d8fd6f7b2102aa268deee859728efa93f73b51f478b0044bc1d5413",
+      "n_steps": 46,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-16450__deepseek-v4-flash__max": {
+      "content_sha256": "46c5c691914c33cb20d18749eb2f777f8ad13c93c427a84168dc89b08bcd21ba",
+      "n_steps": 59,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-16450__deepseek-v4-flash__nothink": {
+      "content_sha256": "53bd1842693c65918cf6689e2bb9c93e02adbfdbb15f041b6c232c68a5a712eb",
+      "n_steps": 93,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-16450__gpt-5-mini__high": {
+      "content_sha256": "9f0116c2c57822f89ed5c065ea405626c1629628ad870179a1b3d5cae8a8dfd6",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-16450__gpt-5-mini__medium": {
+      "content_sha256": "333aa5dfb9827d402538c2aa0fd6b4788a9100151f22c5ff0f38ada62c54600b",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-16450__gpt-5-mini__minimal": {
+      "content_sha256": "ba5fb81842a3858525259c20f053f5b5dd65911d1a8335b1dcab7c48e1046f67",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-16597__deepseek-v4-flash__high": {
+      "content_sha256": "54f23e28e9d6f753d3789c34f3a0a38125c6e23ac62ddbdd0cd5b6fbd17e19f6",
+      "n_steps": 127,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-16597__gpt-5-mini__medium": {
+      "content_sha256": "1d5b7df359f3fa2e7654c6a940b70d8be5d1f254e768543755a58bca1c118af1",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-16597__kimi-k2.5__think": {
+      "content_sha256": "d0b9523affa76cf99c575aa1f71cd6e7073df2ed0625d590ca669ccba5335fab",
+      "n_steps": 70,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-16597__kimi-k3__max": {
+      "content_sha256": "25f4b2a8eb6e2d4f508d69a7f9ee2e337fe0b0db4a7e17f41400ee6582ade033",
+      "n_steps": 56,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-16597__qwen3.7-plus__think": {
+      "content_sha256": "d4fa1b4ba3a6dd1a33fa9eaa1677ff33330b844c466c05df7c3e364df9c6a525",
+      "n_steps": 70,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-16597__zai-glm-5.2__think": {
+      "content_sha256": "9bbd4997473a1d1e14a36207474c7f1543875b3d30da00581803565b483bfaf3",
+      "n_steps": 32,
+      "snapshot_steps": 31,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17139__deepseek-v4-flash__high": {
+      "content_sha256": "99a6ab03dc6f32dff420112e230678e5cb2d45ce84c46fd2c3de2fad0629dff9",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-17139__deepseek-v4-flash__max": {
+      "content_sha256": "4a06a7aaffcb43dff43a3d16b2e8c03dccbd7fd01d77dbf717f498abb3fa7dfa",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-17139__deepseek-v4-flash__nothink": {
+      "content_sha256": "43692fbef2f3a941156ac551514e791be13e77a1c55095f940a95bfa8aafc82b",
+      "n_steps": 32,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-17139__gpt-5-mini__medium": {
+      "content_sha256": "5de429105a698c3294aa84d3188e7d5b6372c31b24ca03336ff1d37b01469848",
+      "n_steps": 14,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-17318__deepseek-v4-flash__high": {
+      "content_sha256": "0658c3cf9379325cc9ecfd65b4b06be6569a59b8ca29e29b3f2c6ed63401d1bd",
+      "n_steps": 33,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17318__deepseek-v4-flash__nothink": {
+      "content_sha256": "5cf56cd057bf01ede0292143e671e346dbf8db96d3abc422a32a39f457986fa9",
+      "n_steps": 41,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17318__gpt-5-mini__medium": {
+      "content_sha256": "c63d9478b9e8c8a634311559b398900b9127f7b348fc10913d52736f9e8352a5",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17318__kimi-k2.5__nothink": {
+      "content_sha256": "1f3c595b263aa3b6243670c57271aa4d3dfeb7f6b6305f9fa84765d701538d71",
+      "n_steps": 29,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17318__kimi-k2.5__think": {
+      "content_sha256": "a666a0e172c6fb41ecfb2cf0457d732a1a014646fbc0045b1645155a1c5cbd79",
+      "n_steps": 44,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-17318__kimi-k3__max": {
+      "content_sha256": "2a2a68745e04092599e9c4ef0120e050b5192381c59577811f62814a3f917050",
+      "n_steps": 37,
+      "snapshot_steps": 36,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-17318__qwen3.7-plus__nothink": {
+      "content_sha256": "39c7e4fbbb8e012b9ae515574f0e410c82b096b157650babca847bbd439c73df",
+      "n_steps": 39,
+      "snapshot_steps": 38,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17318__zai-glm-5.2__nothink": {
+      "content_sha256": "f9ce22071e0042bc0fb3d36b96a7cbc58c53d5883d634b8416c25d8eb481106d",
+      "n_steps": 27,
+      "snapshot_steps": 26,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17630__deepseek-v4-flash__high": {
+      "content_sha256": "75ecb9ecc796b74dcf2d01cebe1e0a0997196cc9fa9667c38270c87106989913",
+      "n_steps": 61,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17630__deepseek-v4-flash__max": {
+      "content_sha256": "60cd69926137753d779676b34ed556cb594081f27080e7dd62d6be67ced2ad6b",
+      "n_steps": 51,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17630__deepseek-v4-flash__nothink": {
+      "content_sha256": "125cdbd9a8c6f6f213c254260d910c4732e69fa681c347f2430f099106ebe379",
+      "n_steps": 79,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17630__gpt-5-mini__medium": {
+      "content_sha256": "bb41e2090d3fbb28a6f5d00e7322adc0050073ff66805115264be5b60fcdf391",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17630__kimi-k2.5__think": {
+      "content_sha256": "e4a8d734f79c7ee88569187eb9255a22ff8f5d464933408c9d9bd4b7b863f8f7",
+      "n_steps": 50,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17630__kimi-k3__max": {
+      "content_sha256": "74df03c91931895a6c7d8885616ce5195f3ca4a3deb9a1bd2bad4fa656b3c45a",
+      "n_steps": 69,
+      "snapshot_steps": 68,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-17630__qwen3.7-plus__nothink": {
+      "content_sha256": "a00300e8a3eb87af28af6f8d8a35b14f7d4fd149b0537b4e71f3c792e2c1787f",
+      "n_steps": 50,
+      "snapshot_steps": 49,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17630__zai-glm-5.2__nothink": {
+      "content_sha256": "1b8fee35267daffa7e57202ae03d6a0bc3c101aeb48b29f50c3178684171f45f",
+      "n_steps": 70,
+      "snapshot_steps": 70,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17655__deepseek-v4-flash__high": {
+      "content_sha256": "a960ed2193557192eb4c684f20631821f2c8badc561c15e345b86c6d2b5174e1",
+      "n_steps": 47,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-17655__deepseek-v4-flash__nothink": {
+      "content_sha256": "464b86f2df9cc165083652659b82e86e595a65b2a990a08f216c341414caf619",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-17655__gpt-5-mini__high": {
+      "content_sha256": "0636e7557f29ca862a35556523eb2ac7c305ba12c280f16b67825a2d57d4c93f",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-17655__gpt-5-mini__medium": {
+      "content_sha256": "4255f7a7b052be818ce0824a276e8a055a06a8a9ff6cf300038b75904a1880e1",
+      "n_steps": 26,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-17655__gpt-5-mini__minimal": {
+      "content_sha256": "8f3860800c673bc7e71b5541b24395bbe311eeaca770ffc1c48604216e6794d3",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-17655__kimi-k2.5__nothink": {
+      "content_sha256": "98fb09f76a500adb596eb68ecc47c777cb2f29474b045b1b8288dde9fc987151",
+      "n_steps": 51,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-17655__kimi-k2.5__think": {
+      "content_sha256": "8c877b348d02c22635183279e6c21e19e431017d7424f84b15203393fcaef10b",
+      "n_steps": 46,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-17655__kimi-k3__max": {
+      "content_sha256": "7726e0c14c0e4b151aa9686569430e5db1c68c7043e953e541f52a06ca6f50e2",
+      "n_steps": 53,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-20154__deepseek-v4-flash__high": {
+      "content_sha256": "cf013c6dc3f80bf375215b9e899ca661f8197951644bdc345aa210d9ffbecef5",
+      "n_steps": 23,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-20154__deepseek-v4-flash__nothink": {
+      "content_sha256": "a5b745f14f042d0762421dd40a676b9d2c92829bf36defacacc34c55135df718",
+      "n_steps": 31,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-20154__gpt-5-mini__high": {
+      "content_sha256": "955ed03311d6015cf443edb367a62a5d6634a78f0b449ddb476589422b9a7a30",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-20154__gpt-5-mini__medium": {
+      "content_sha256": "c3662c4e226054f63d7f98d4290a78de5987bd21879f70b9bd6dd79359e4955b",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-20590__deepseek-v4-flash__high": {
+      "content_sha256": "59e456983ded783267e907cb7201d539f4cef8fe4d1c95c0f62c127c89f62249",
+      "n_steps": 28,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-20590__gpt-5-mini__high": {
+      "content_sha256": "9fff89dd366f015d19e3a72bbd84a38ec5b6437a4dfdc5846f11ba0e954b2939",
+      "n_steps": 45,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-20590__gpt-5-mini__medium": {
+      "content_sha256": "38ae6b4ad213753fe9bee6b9c4dc4ce1cf98fe61b52bd6da6ac412ff70560f44",
+      "n_steps": 34,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-20590__gpt-5-mini__minimal": {
+      "content_sha256": "a5c7cf495ee2ae26b3613bffd3e66d99166f6f24ba7a37d43042e3d3321f3145",
+      "n_steps": 22,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-20916__deepseek-v4-flash__max": {
+      "content_sha256": "7f6bc6d628efae40049725d1e71795268347b9a98ddfd6191aab335f7b1ce851",
+      "n_steps": 52,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-20916__deepseek-v4-flash__nothink": {
+      "content_sha256": "7674608fcc996834c93407af8f3bea2e6ea02c9e5c08da8caa29b9dea06f6067",
+      "n_steps": 105,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-21596__deepseek-v4-flash__high": {
+      "content_sha256": "b09bb0479176efca331d73b1db65a498824e6ba8a24d14bab12af3c32ba54134",
+      "n_steps": 64,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-21596__deepseek-v4-flash__max": {
+      "content_sha256": "1adc9b8a3b6f34d1d1c8f34cebbfb342892c0c1a11122c19bbd89a5302722837",
+      "n_steps": 63,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-21596__gpt-5-mini__high": {
+      "content_sha256": "6bdc2dd2875e82c561ca8fde9eac4923934c19619468f387f779a3d284461e75",
+      "n_steps": 30,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-21596__gpt-5-mini__medium": {
+      "content_sha256": "ad0d18aaa4d18034d8b89e97c5a58c48bf2d39d9708c612aad441b1c17ad2694",
+      "n_steps": 35,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-21596__kimi-k2.5__think": {
+      "content_sha256": "177fd5b43e6edeb6f68edbeb9f41d527cf7e423a1f73583f71861abec9023675",
+      "n_steps": 43,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-21612__gpt-5-mini__medium": {
+      "content_sha256": "d93a0bb38214144fcb0f0f5037ee6832a11fd7d76abbae36f3936f5b84f860af",
+      "n_steps": 16,
+      "snapshot_steps": null,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-24539__deepseek-v4-flash__high": {
+      "content_sha256": "6c0da7ae2ae2d415c69ee25c6020b596e81a7b94c2a7ffe913cedd9de8fed9b3",
+      "n_steps": 18,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-24539__deepseek-v4-flash__max": {
+      "content_sha256": "e8482c91f1bf45a2a91de82b5068fc443c0432d6ff854c259c05891c7836e5ed",
+      "n_steps": 19,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-24539__deepseek-v4-flash__nothink": {
+      "content_sha256": "808969caf270be573210dd239dcbb036822130c02fc612464ef3ac9171f55163",
+      "n_steps": 17,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-24539__gpt-5-mini__medium": {
+      "content_sha256": "1d2f4a630f31710923ff1982bb1dadbd5ae5df12f9d1b8c7d6b5a6ba9d74b63f",
+      "n_steps": 24,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-24539__gpt-5-mini__minimal": {
+      "content_sha256": "ceb20d6ea42ab165f2c09d75ab44cc93fc544ce9b45b1ce619c88e33b0c05a87",
+      "n_steps": 12,
+      "snapshot_steps": null,
+      "terminal_resolved": true
+    }
+  }
+}

@@ -9,31 +9,38 @@ routing/
   results.csv                 # THE committed source of truth — per-cell outcomes from live runs
   data/                       # Curated read-only inputs
     challenges.json           # Index of the 500 swebench_verified specs (challenges, tasks)
-    external_swebench.csv     # Per-instance resolve rates from SWE-bench/experiments (separate table)
   strategies/
     __init__.py               # Strategy protocol
     oracle.py                 # Upper bound: perfect per-task selection
     fixed.py                  # Always-cheap, always-frontier, random
     knn.py                    # kNN retrieval (shunt's approach)
     knn_cascade.py            # kNN-informed verify-and-escalate
-    external_prior.py         # Escalate on external p_solve difficulty (in-sample lookup)
-    knn_blended.py            # kNN over our verified runs ∪ external Verified priors (down-weighted)
-  heldout_eval.py             # Out-of-sample generalization over held-out instances (no live result yet)
   exploration_replay.py       # Direct-Method replay of the SHIPPED exploration policy on the dense slice
   run_eval.py                 # Evaluate all strategies
+  instrument_control.py       # Positive control + destroyed-signal null (both selection rules)
+  sensitivity.py              # Minimum detectable effect — how weak a signal the corpus can see
   metrics.py                  # Metric definitions
-  report.py                   # Comparison tables and plots (derived from results.csv)
-  scripts/                    # Analysis + figure producers (all read results.csv, write reports/)
+  report.py                   # Drives the nine report figures (derived from results.csv)
+  figures/                    # One module per report figure; `context.py` loads the corpus once
+    kill_gate.py              # Pre-registered delta=5pp non-inferiority forest + paired cost
+    cost_quality_frontier.py  # The one cost-quality plane (replaced four)
+    evidence_basis.py         # Measured vs imputed, on dollars AND passes, plus per band
+    oracle_gap.py             # Oaxaca cost split, regret ladder, gamma-invariance
+    cache_economics.py        # List price vs the invoice against the gate's cache model
+    decision_audit.py         # Chosen x cheapest-sufficient: the over/under-provisioning budget
+    complementarity.py        # Tri-state grid, coverage range, and the routing ceiling
+    task_difficulty.py        # Capability bands + what the cascade picked, by difficulty
+    arm_manipulation.py       # Manipulation check FIRST, then the reasoning-arm contrast
+  scripts/                    # Analysis + figure producers (read results.csv, write docs/assets/figures/routing/)
     compute_costs.py          # Per-model cost/pass rollup from the outcome cache
-    embedding_compare.py      # TF-IDF vs embedding neighbourhoods (retrieval quality)
-    plot_exploration.py       # Exploit-only vs exploit+exploration cost/quality + explore share
-    plot_external.py          # External-signal plots (difficulty, ours-vs-external, held-out)
-    plot_strategies.py        # Strategy Pareto scatter (same rows as report.py)
-    threshold_sweep.py        # kNN (k, success_rate, min_samples) sweep + reward heatmap
-    viz_knn.py                # kNN neighbourhood / routing-map visualisations
+    knn_nulls.py              # Permutation nulls + the shared kNN selection rule (no plotting)
+    ladder_evidence.py        # Per-rung escalation evidence: price multiple, helps/hurts, null
+    plot_exploration.py       # Exploration cost/quality and where the budget went
+    plot_knn_nulls.py         # embedding_signal: transfer curve, positive control, cross-repo
+    threshold_sweep.py        # kNN sweep with real outer-loop CV -> the regime map
+    viz_knn.py                # knn_calibration: reliability of the weighted neighbour rate
   artifacts/                  # gitignored — parameterized run_eval outputs + embedding cache
-  reports/                    # gitignored — regenerable plots (PNG) + derived strategy_summary.csv
-../runner/build_external_prior.py  # Regenerates data/external_swebench.csv from the experiments clone
+  reports/                    # derived CSV/JSON only (gitignored); the PNGs live in docs/assets/figures/routing/
 benchmark/
   challenges/
     swebench_verified/        # The 500 instance specs (the sole challenge source)
@@ -45,7 +52,85 @@ There is a **single committed data source of truth**:
 regenerable, never committed**: the **per-strategy** summary
 (`strategy_summary.csv`) is computed in-memory by `summary.py` (used by
 `report.py`, `run_matrix.py`, `run_eval.py`) and written to the gitignored
-`reports/` dir; plots and parameter sweeps likewise regenerate from `results.csv`.
+`reports/` dir; plots (into `docs/assets/figures/routing/`) and parameter sweeps likewise
+regenerate from `results.csv`.
+
+**One strategy, one committed number.** `cost_quality_frontier.png` is drawn from the
+same in-memory rows `strategy_summary.csv` is written from, so the scatter and the table
+cannot disagree. The retired `knn_cost_comparison.png` published a *second* (cost, pass)
+pair for the kNN router — a proxy 77.7% at \$1.73 against the live engine's number in the
+same report set — which is a correctness bug, not a second view. The proxy publisher was
+deleted; `strategy_summary.csv` is now the single producer of every strategy's (cost, pass).
+
+## Instrument validity (`instrument_control.py`) — run this before quoting anything
+
+The permutation nulls in `scripts/knn_nulls.py` answer *"could chance have produced this
+number?"*. They cannot answer the prior question, *"is this pipeline computing anything about
+the task text at all?"* — a front end that embeds the wrong field, or embeds nothing, produces
+an observation and a null that agree perfectly and report `NULL RESULT` forever.
+
+`instrument_control.py` answers that one. It builds a small corpus whose task text carries a
+known-learnable signal, hands it to the pipeline at the **front** (`matrix["tasks"]`, upstream of
+`routing_text` and the embedder), and requires two things:
+
+- **positive control** — the assembled pipeline recovers the planted signal, scoring clearly
+  above chance;
+- **destroyed-signal null** — the same pipeline, with the outcomes permuted, collapses back to
+  chance.
+
+The planted signal is deliberately **orthogonal to repository identity**: every repository
+contributes equally to both outcome classes, so a pipeline that recovers only the repo name out
+of the label scores at chance and is rejected. `repo_identity_positive_score` re-scores the same
+corpus with labels re-aligned onto the repo and is reported as a diagnostic contrast, never as
+part of the verdict — dead on the planted signal but high there means the front end propagates
+repository identity and nothing finer.
+
+Two rules decide, so the control has **two legs** over that one planted corpus:
+
+| Leg | Rule under test | What it certifies |
+|---|---|---|
+| `run_control` | `knn_nulls.select_from_rates` | the transfer-curve and cross-repo **figures** |
+| `run_strategy_control` | `kNNStrategy` → `RouterEngine.decide` → `SelectionRule` | `reports/strategy_summary.csv`, the table the kill-gate comparison reads |
+
+Clearing one certifies nothing about the other: `select_from_rates` documents three named
+divergences from the shipped rule (weighting, `min_samples`, the fallback branch). The strategy
+leg hands the engine its whole ranked pool, so `SelectionRule._escalate` can never land on an arm
+the corpus has no cell for — it refuses loudly rather than scoring the remainder.
+
+```sh
+python3 -m benchmark.routing.instrument_control              # both legs; exit 0 = admissible
+python3 -m benchmark.routing.instrument_control --leg strategy
+```
+
+`TransferCurve`, `CrossRepo` and `summary.StrategyTable` all take the verdict as a **required,
+non-defaulted** field, so no figure and no summary row can be produced — and no verdict quoted —
+without stating whether the instrument that produced it has cleared both legs. Every row
+`write_summary_csv` emits carries `instrument_admissible` and `instrument_verdict`. An instrument
+that has not cleared them is a coverage-gap, not a falsification: a negative result from it says
+nothing about routing.
+
+## How weak a signal could this corpus see? (`sensitivity.py`)
+
+A passed positive control licenses one claim: the committed `NULL RESULT` is a null on an
+instrument **proven to detect something — at the strength probed**. The planted signal is far
+larger than any plausible real routing signal, so whether the null means "nothing is there" or
+"something is there, below our floor" is a separate question.
+
+`sensitivity.py` answers it. It re-assigns the **real** outcome rows to the **real** tasks so
+that a fraction `rho` of them line up with a direction in the real embedding space, sweeps `rho`
+downward, and reports the smallest effect the published test still flags at 80% power — as an
+interval, not a point. Because planting only re-assigns rows, the permutation null is unchanged,
+so the bar the planted signal must clear is the published analysis's own bar.
+
+`rho` converts to a portable unit: a perfect reader of the planted signal separates
+cheap-sufficient from escalation-needed tasks at an AUROC of one half plus half of `rho`. The
+sweep reports both, over both splits (the published ungrouped one, which leaks same-repo
+siblings into a held-out task's index, and a repo-grouped one), both k-rules (the config `k` and
+the figure's selection-corrected best-over-k), and both plantable geometries.
+
+```sh
+python3 -m benchmark.routing.sensitivity          # prints; writes nothing
+```
 
 ## Model registry (`src/shunt/config/models.yaml`) — the cost + routing source of truth
 
@@ -54,14 +139,14 @@ channels) and one `models` table. It is the cost source of truth. Prices are the
 **Requesty router listing** (the rate actually paid for requesty-routed models;
 direct providers list the same published rate).
 
-A model's **required core** — `model_id`, `tier`, `provider`, `supports_streaming`,
+A model's **required core** — `model_id`, `provider`, `supports_streaming`,
 `supports_cache_control` — makes it routable. The **optional `pricing` block** makes it
 benchmarkable: a model with no `pricing` is routable but invisible here, so it can never
 be scored against a fabricated price.
 
 | Field | Meaning |
 |-------|---------|
-| `model_id` / `tier` / `provider` | Model identity, routing tier (cheap/mid/high/frontier), and the `providers` row used to reach it |
+| `model_id` / `provider` | Model identity and the `providers` row used to reach it |
 | `pricing.input_cost_per_1m` / `.output_cost_per_1m` | Price, USD per 1M tokens (Requesty router listing) |
 | `pricing.cache_read_cost_per_1m` / `.cache_write_cost_per_1m` | Optional — cache-read/write rate where the provider lists one |
 | `pricing.price_provider` | Where the price is quoted from (`requesty` — the router listing) |
@@ -74,8 +159,7 @@ The **litellm route is derived**, not stored: `<litellm_prefix>/<model_id>`, e.g
 `deepseek/deepseek-v4-flash`, `openai/alibaba/qwen3.7-plus`. `base_url` and
 `api_key_env_var` come from the model's `providers` row.
 
-**Model row order is semantic** — `SelectionRule._escalate` returns the last row of a
-tier in file order. Never re-serialize the registry with a key-sorting dumper.
+**Model row order is NOT semantic** — the router ranks models by price for capability ranking. Never re-serialize the registry with a key-sorting dumper.
 
 **Cost model.** `config._pricing_dict` / `config.models_matrix` /
 `integrity.estimated_cost` read `input_cost_per_1m` / `output_cost_per_1m` × token
@@ -224,7 +308,8 @@ python3 -m benchmark.runner.check_integrity --check-derived
 ## Container
 
 A reproducible image (`benchmark/Dockerfile`) runs the loop identically anywhere.
-Code is mounted **read-only**; only `results.csv` and `reports/` are
+Code is mounted **read-only**; only `results.csv` and `docs/assets/figures/` (both halves'
+subdirectories) are
 writable. Build from the repo root (BuildKit reads `benchmark/Dockerfile.dockerignore`):
 
 ```sh
@@ -245,6 +330,7 @@ docker compose -f benchmark/compose.yaml run --rm benchmark  # simulated loop + 
 | CumReg_ci_lower / CumReg_ci_upper | 95% bootstrap CI on CumReg |
 | rAcc | Fraction of tasks where strategy picked same model as oracle |
 | Pareto | True if strategy is on the Pareto frontier (no other strategy has higher AvgPerf% AND lower TotalCost) |
+| instrument_admissible / instrument_verdict | The two-sided instrument verdict for the SHIPPED selection path (`run_strategy_control`), stamped on every row |
 
 ## Baselines
 
@@ -256,7 +342,9 @@ docker compose -f benchmark/compose.yaml run --rm benchmark  # simulated loop + 
 | Random | Uniform random (mean over seeds) |
 | kNN | Embed task → retrieve similar → cheapest capable |
 | kNN-cascade | kNN-informed try-verify-escalate |
-| External-Prior | SWE-bench leaderboard per-task difficulty prior; escalate on external p_solve signal |
+| Price-Cascade | Try-verify-escalate in ascending price order — no embeddings, no kNN |
+| Session-Cascade | The shipped escalation ladder at session cadence: one decision per session, effort rung then rank rung, climbed rank persisting, cache-safe analogue |
+| Tier-Classifier | Single-shot: predict the crossover tier, route there directly |
 
 ## Challenge store
 
@@ -275,7 +363,12 @@ spec → image → ephemeral-container run flow and the gold-smoke / `--live` co
 
 The canonical index is `benchmark/routing/data/challenges.json`:
 - `challenges` — lightweight index (id, source, language, difficulty)
-- `tasks` — metadata dict (id → description, repo, base_commit, difficulty, spec path)
+- `tasks` — metadata dict (id → description, repo, base_commit, difficulty, spec
+  path). `routing_text()` prefers `problem_statement` and every committed entry
+  carries it (all 500, backfilled 2026-08-05), so strategies embed the issue text
+  rather than the `description` label
+  (`<repo>@<commit12> - resolve <test-id>`, median 106 characters — kept as a
+  contrast row so the input change is visible, not asserted)
 - top-level `source`, `source_dataset`, `dataset_revision` — the HF provenance
 
 Model pricing and per-model outcomes are kept **out** of challenges.json to

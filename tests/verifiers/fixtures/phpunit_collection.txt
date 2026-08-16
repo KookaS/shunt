@@ -1,0 +1,6 @@
+PHPUnit 10.5.3 by Sebastian Bergmann and contributors.
+
+PHP Fatal error:  Uncaught Error: Class "Widget" not found in /x/tests/bootstrap.php:3
+Stack trace:
+#0 {main}
+  thrown in /x/tests/bootstrap.php on line 3

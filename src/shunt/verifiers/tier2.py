@@ -1,161 +1,347 @@
 from __future__ import annotations
 
-import hashlib
+import logging
 import os
-import re
 import subprocess
 import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
 from .base import Verifier, VerifierResult
 
-_DEFAULT_TIMEOUT = 120
-
-# A pytest/jest node id in the combined output: "path::Test::case" or "path::case". The first
-# such id is the failing check identity used as the escalation dedup key.
-_NODE_ID_RE: Final = re.compile(r"^(?:FAILED\s+)?([\w./\\-]+::[\w:.\[\]\-]+)", re.MULTILINE)
-
-# Volatile fragments that make the SAME recurring failure hash differently run-to-run. Stripped
-# before the hash fallback so a go/rust red with only a different timing/address/temp-path
-# hashes stably. Order matters: paths and timestamps before the bare-number/duration passes.
-_TS_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?")
-_NORMALIZERS: Final[list[tuple[re.Pattern[str], str]]] = [
-    (re.compile(r"0x[0-9a-fA-F]+"), "0xADDR"),  # hex addresses / pointers
-    (_TS_RE, "TS"),  # ISO-8601 timestamps
-    (re.compile(r"(?:/tmp|/var/folders|/private/var/folders)/\S+"), "TMPPATH"),  # temp dirs
-    (re.compile(r"\bpytest-of-\S+"), "TMPPATH"),
-    # Durations: "0.53s", "in 4.5s", "123ms", "1.2 seconds", "(0.00s)" (go/rust timing).
-    (re.compile(r"\b\d+(?:\.\d+)?\s*(?:ns|µs|us|ms|s|secs?|seconds?)\b"), "DUR"),
-]
-
-
-def _normalize_detail(detail: str) -> str:
-    """Strip run-to-run volatility (timings, hex addresses, temp paths, timestamps) from *detail*.
-
-    Only the hash fallback uses this — a recurring go/rust failure that differs solely in a
-    timing or address must hash to the SAME key, or recurrence never accumulates.
-    """
-    normalized = detail.strip()
-    for pattern, repl in _NORMALIZERS:
-        normalized = pattern.sub(repl, normalized)
-    return normalized
-
-
-# Collection/build/link-phase phrases that appear ONLY when the runner failed to
-# collect/build a target, never inside a rendered assertion value — so they classify as
-# environmental at any exit code. No bigger model fixes these; they must not escalate.
-_COLLECTION_MARKER_RE: Final = re.compile(
-    r"^ERROR collecting "
-    r"|error(?:s)? during collection"
-    r"|ImportError while importing"
-    r"|conftest\.py.*(?:ImportError|ModuleNotFoundError)"
-    r"|cannot find module "  # jest / go build error
-    r"|no required module provides package"  # go
-    r"|can't find crate for"  # rust
-    r"|unresolved import",  # rust compile error
-    re.IGNORECASE | re.MULTILINE,
+# The output-classification core (failing_check_id, environment-vs-capability, node-id normalizer)
+# lives in `parse` as a pure function so the offline benchmark replay derives byte-identical dedup
+# keys from the same output. Re-exported here for callers that import them from this module.
+from .parse import (  # noqa: F401 (re-exported: existing importers use these names from tier2)
+    _failing_check_id,
+    _is_environment_failure,
+    _normalize_detail,
+    parse_test_outcome,
 )
 
-# Python import phrases that a real collection error emits — but that can ALSO be quoted
-# verbatim inside a failing assertion (`assert "No module named x" in ...`). These are gated
-# on the runner's exit code: pytest returns 2 for a collection/usage error, 1 for a test
-# failure, so an assert (exit 1) that merely mentions them stays a genuine red.
-_AMBIGUOUS_IMPORT_RE: Final = re.compile(r"No module named|ModuleNotFoundError")
+logger = logging.getLogger(__name__)
 
-# Exit code a pytest run returns for a collection/usage error (vs 1 for a real test failure).
-_PYTEST_COLLECTION_EXIT: Final = 2
+# Sane default for a REAL repo suite (30 min), not a toy. The 120s that preceded it made the
+# whole capture loop a silent no-op on any repo bigger than a toy: a suite slower than the
+# budget times out, records NOTHING, and the escalation signal never accrues — the exact
+# "looks configured, does nothing" failure the disclosure exists to end. 1800s is the value
+# this project's own suite needs (~22m35s at 2026-08). A per-repo tighter budget is still
+# configurable via capture.verify_timeout_seconds; this is the floor for an unconfigured boot.
+_DEFAULT_TIMEOUT = 1800
+# Fraction of the timeout budget a run may consume before the log says so. Past this the
+# next slightly-slower run silently becomes `unknown` + infra, which reads as "no signal".
+_BUDGET_WARN_FRACTION = 0.7
+# Files whose mere existence is a pytest suite: nothing else creates them.
+_PYTEST_MARKER_FILES: Final = ("pytest.ini", "conftest.py")
+# Files that name pytest when the project uses it. Matched by substring on purpose — the
+# declaration lives in a different table for every packaging tool (`[project]`,
+# `[tool.poetry.group.dev.dependencies]` where the package is the KEY, `[tool.pdm…]`,
+# `[tool.uv]`, `[tool.hatch.envs…]`, `[options.extras_require]`), and a structured parse
+# that misses one turns capture silently off — the exact failure this layer exists to end.
+# This predicate is NOT a security control: whether a directory may be verified at all is
+# decided by `capture.trust_launch_dir` and the operator's own choice of work_dir, not by
+# how convincingly a tree declares a test runner.
+_PYTEST_MENTION_FILES: Final = ("pyproject.toml", "setup.cfg", "requirements-dev.txt", "tox.ini")
+# JavaScript/TypeScript runners, matched as quoted package.json keys so a stray prose word
+# ("canvas") cannot trigger a false detection. `node --test` matches the test-script form.
+_TS_RUNNER_MENTIONS: Final = (
+    '"jest"',
+    '"vitest"',
+    '"mocha"',
+    '"jasmine"',
+    '"karma"',
+    '"ava"',
+    "node --test",
+)
 
 
-def _is_environment_failure(combined: str, returncode: int) -> bool:
-    """True when the output is an environment/collection error, not a real capability red."""
-    # Unambiguous collection markers classify at any exit code; the ambiguous Python import
-    # phrases only when the runner signalled a collection/usage error (pytest exit 2) — an
-    # assertion (exit 1) whose message quotes an import string is a genuine failure.
-    if _COLLECTION_MARKER_RE.search(combined):
-        return True
-    if returncode != _PYTEST_COLLECTION_EXIT:
+def _mentions(path: Path, needle: str) -> bool:
+    """True when *path* exists and contains *needle* anywhere in its text."""
+    try:
+        return path.is_file() and needle in path.read_text()
+    except (OSError, UnicodeDecodeError):
         return False
-    return _AMBIGUOUS_IMPORT_RE.search(combined) is not None
 
 
-def _failing_check_id(detail: str) -> str:
-    """Stable dedup key for a failure: the first test node id, else a hash of the detail."""
-    # A node id (`path::case`) is ideal — a recurrence of the SAME failing test is the signal;
-    # opaque output with no node id falls back to a hash of the NORMALIZED detail (timings, hex
-    # addresses, temp paths, timestamps stripped) so a recurrence still hashes stably.
-    match = _NODE_ID_RE.search(detail)
-    if match:
-        return match.group(1).strip()
-    return "hash:" + hashlib.sha256(_normalize_detail(detail).encode()).hexdigest()[:16]
+def _mentions_pytest(path: Path) -> bool:
+    """True when *path* exists and names pytest anywhere in its text."""
+    return _mentions(path, "pytest")
 
 
-def _has_pytest(work_dir: str) -> bool:
-    root = Path(work_dir)
-    cfg = root / "pyproject.toml"
-    if cfg.is_file():
-        content = cfg.read_text()
-        if "pytest" in content or "[tool.pytest" in content:
-            return True
-    if (root / "setup.cfg").is_file():
-        content = (root / "setup.cfg").read_text()
-        if "pytest" in content:
-            return True
-    if (root / "requirements-dev.txt").is_file():
-        content = (root / "requirements-dev.txt").read_text()
-        if "pytest" in content:
-            return True
-    return False
+def _has_pytest(root: Path) -> bool:
+    if any((root / name).is_file() for name in _PYTEST_MARKER_FILES):
+        return True
+    return any(_mentions_pytest(root / name) for name in _PYTEST_MENTION_FILES)
 
 
-def _has_typescript(work_dir: str) -> bool:
-    root = Path(work_dir)
+def _has_typescript(root: Path) -> bool:
     pkg = root / "package.json"
     if not pkg.is_file():
         return False
-    content = pkg.read_text()
-    return "jest" in content or "vitest" in content
+    try:
+        content = pkg.read_text()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return any(name in content for name in _TS_RUNNER_MENTIONS)
 
 
-def _has_go(work_dir: str) -> bool:
-    return (Path(work_dir) / "go.mod").is_file()
+def _has_go(root: Path) -> bool:
+    return (root / "go.mod").is_file()
 
 
-def _has_rust(work_dir: str) -> bool:
-    return (Path(work_dir) / "Cargo.toml").is_file()
+def _has_rust(root: Path) -> bool:
+    return (root / "Cargo.toml").is_file()
 
 
-_PYTEST_CMD: Final = [sys.executable, "-m", "pytest", "-x", "--tb=short", "-q"]
-_LANGUAGE_DETECTORS: Final[list[tuple[str, str, list[str]]]] = [
-    ("python", "pytest", _PYTEST_CMD),
-    ("typescript", "jest", ["npx", "jest", "--passWithNoTests"]),
-    ("go", "go-test", ["go", "test", "./..."]),
-    ("rust", "cargo-test", ["cargo", "test"]),
+def _has_java(root: Path) -> bool:
+    return any((root / name).is_file() for name in ("pom.xml", "build.gradle", "build.gradle.kts"))
+
+
+def _has_dotnet(root: Path) -> bool:
+    return any(any(root.glob(f"*{suffix}")) for suffix in (".csproj", ".fsproj", ".vbproj", ".sln"))
+
+
+def _has_ruby(root: Path) -> bool:
+    if (root / ".rspec").is_file():
+        return True
+    if _mentions(root / "Gemfile", "rspec"):
+        return True
+    if _mentions(root / "Gemfile", "minitest"):
+        return True
+    if _mentions(root / "Gemfile", "test-unit"):
+        return True
+    if _mentions(root / "Gemfile", "cucumber"):
+        return True
+    rake = root / "Rakefile"
+    return _mentions(rake, "RSpec") or _mentions(rake, "Rake::TestTask")
+
+
+def _has_php(root: Path) -> bool:
+    configs = ("phpunit.xml", "phpunit.dist.xml", "phpunit.xml.dist")
+    if any((root / name).is_file() for name in configs):
+        return True
+    composer = root / "composer.json"
+    if not composer.is_file():
+        return False
+    try:
+        content = composer.read_text()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return any(name in content for name in ("phpunit", "pest", "behat", "codeception"))
+
+
+def _has_cpp(root: Path) -> bool:
+    if (root / "CTestTestfile.cmake").is_file():
+        return True
+    cmake = root / "CMakeLists.txt"
+    if not cmake.is_file():
+        return False
+    try:
+        text = cmake.read_text()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return "enable_testing" in text or "add_test" in text
+
+
+def _has_swift(root: Path) -> bool:
+    return (root / "Package.swift").is_file()
+
+
+def _has_shell(root: Path) -> bool:
+    if any(root.rglob("*.bats")):
+        return True
+    return any(_mentions(root / name, "shunit2") for name in os.listdir(root))
+
+
+def _has_perl(root: Path) -> bool:
+    if any(root.glob("t/*.t")):
+        return True
+    return any((root / name).is_file() for name in ("Makefile.PL", "Build.PL", "cpanfile"))
+
+
+def _has_r(root: Path) -> bool:
+    return _mentions(root / "DESCRIPTION", "testthat")
+
+
+def _has_elixir(root: Path) -> bool:
+    return (root / "mix.exs").is_file()
+
+
+def _has_haskell(root: Path) -> bool:
+    return (
+        (root / "stack.yaml").is_file()
+        or (root / "package.yaml").is_file()
+        or any(root.glob("*.cabal"))
+    )
+
+
+# `-p no:cacheprovider`: the verification run is a read-only observation of someone else's
+# repo, so it must not write a `.pytest_cache/` into their tree.
+_PYTEST_CMD: Final = [
+    sys.executable,
+    "-m",
+    "pytest",
+    "-x",
+    "--tb=short",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+]
+# Default command per language for the families whose invocation does not depend on which
+# runner a project declares. Languages with variable commands are resolved in *_command.
+_DEFAULT_COMMANDS: Final[dict[str, list[str]]] = {
+    "python": _PYTEST_CMD,
+    "go": ["go", "test", "./..."],
+    "rust": ["cargo", "test"],
+    "dotnet": ["dotnet", "test"],
+    "swift": ["swift", "test"],
+    "shell": ["bats", "--tap", "."],  # --tap forces the machine-readable TAP channel
+    "perl": ["prove", "-l"],
+    "r": ["Rscript", "-e", "testthat::test_local()"],
+    "elixir": ["mix", "test"],
+}
+# CMake/CTest needs configure + build before the tests exist; the chain is ONE entry so the
+# classification still sees a single output stream (the build step's output included, so a
+# compile error classifies as infra via its markers rather than as a fabricated red).
+_CPP_CMD: Final = [
+    "sh",
+    "-c",
+    "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug && "
+    "cmake --build build -j 2 && ctest --test-dir build --output-on-failure",
+]
+# Per-language detection: (lang name, canonical framework, predicate over the repo root).
+# ORDER IS PRECEDENCE — python first because a polyglot tree that also has a pom.xml or go.mod
+# is most likely a Python repo the operator wants verified with pytest. New families append.
+_LANGUAGE_DETECTORS: Final[list[tuple[str, str, Callable[[Path], bool]]]] = [
+    ("python", "pytest", _has_pytest),
+    ("typescript", "jest", _has_typescript),
+    ("go", "go-test", _has_go),
+    ("rust", "cargo-test", _has_rust),
+    ("java", "maven-surefire", _has_java),
+    ("dotnet", "vstest", _has_dotnet),
+    ("ruby", "rspec", _has_ruby),
+    ("php", "phpunit", _has_php),
+    ("cpp", "ctest", _has_cpp),
+    ("swift", "xctest", _has_swift),
+    ("shell", "bats", _has_shell),
+    ("perl", "prove", _has_perl),
+    ("r", "testthat", _has_r),
+    ("elixir", "exunit", _has_elixir),
+    ("haskell", "hspec", _has_haskell),
 ]
 
 
+def _typescript_command(root: Path) -> list[str]:
+    """The command for the TypeScript runner a package.json actually declares."""
+    pkg = root / "package.json"
+    try:
+        content = pkg.read_text() if pkg.is_file() else ""
+    except (OSError, UnicodeDecodeError):
+        content = ""
+    if '"vitest"' in content:
+        return ["npx", "vitest", "run"]
+    if '"mocha"' in content:
+        return ["npx", "mocha"]
+    if '"jasmine"' in content:
+        return ["npx", "jasmine"]
+    if '"karma"' in content:
+        return ["npx", "karma", "start", "--single-run"]
+    if '"ava"' in content:
+        return ["npx", "ava"]
+    if "node --test" in content:
+        return ["node", "--test"]
+    return ["npx", "jest", "--passWithNoTests"]
+
+
+def _java_command(root: Path) -> list[str]:
+    """Maven when the tree declares a pom.xml, else the Gradle wrapper / gradle."""
+    if (root / "pom.xml").is_file():
+        return ["mvn", "test"]
+    if (root / "gradlew").is_file():
+        return ["./gradlew", "test"]
+    return ["gradle", "test"]
+
+
+def _ruby_command(root: Path) -> list[str]:
+    """RSpec when declared, else the rake test task (minitest / test-unit default)."""
+    if (root / ".rspec").is_file() or _mentions(root / "Gemfile", "rspec"):
+        return ["bundle", "exec", "rspec"]
+    return ["bundle", "exec", "rake", "test"]
+
+
+def _php_command(root: Path) -> list[str]:
+    """Pest wraps PHPUnit; run the binary the project's vendor dir actually holds."""
+    if _mentions(root / "composer.json", "pest"):
+        return ["vendor/bin/pest"]
+    return ["vendor/bin/phpunit"]
+
+
+def _haskell_command(root: Path) -> list[str]:
+    """stack when a stack.yaml pins the resolver, else cabal."""
+    if (root / "stack.yaml").is_file():
+        return ["stack", "test"]
+    return ["cabal", "test"]
+
+
+# Languages whose command depends on which runner the project declares.
+_COMMAND_RESOLVERS: Final[dict[str, Callable[[Path], list[str]]]] = {
+    "typescript": _typescript_command,
+    "java": _java_command,
+    "ruby": _ruby_command,
+    "php": _php_command,
+    "cpp": lambda _root: _CPP_CMD,
+    "haskell": _haskell_command,
+}
+
+
+def _command_for(lang_name: str, root: Path) -> list[str]:
+    resolver = _COMMAND_RESOLVERS.get(lang_name)
+    if resolver is not None:
+        return resolver(root)
+    return _DEFAULT_COMMANDS[lang_name]
+
+
 def _detect(work_dir: str) -> tuple[str, list[str]] | None:
-    for lang_name, _framework, cmd in _LANGUAGE_DETECTORS:
-        if lang_name == "python" and _has_pytest(work_dir):
-            return (lang_name, cmd)
-        if lang_name == "typescript" and _has_typescript(work_dir):
-            return (lang_name, cmd)
-        if lang_name == "go" and _has_go(work_dir):
-            return (lang_name, cmd)
-        if lang_name == "rust" and _has_rust(work_dir):
-            return (lang_name, cmd)
+    root = Path(work_dir)
+    for lang_name, _framework, predicate in _LANGUAGE_DETECTORS:
+        if predicate(root):
+            return (lang_name, _command_for(lang_name, root))
     return None
 
 
+def detect_framework(work_dir: str) -> str | None:
+    """The test-framework language detected at *work_dir*, or None when there is none."""
+    detected = _detect(work_dir)
+    return detected[0] if detected is not None else None
+
+
 class AutoDetectVerifier(Verifier):
-    def __init__(self, timeout: float = _DEFAULT_TIMEOUT) -> None:
-        self._timeout = timeout
+    def __init__(self, timeout: float | None = None) -> None:
+        self._timeout = _DEFAULT_TIMEOUT if timeout is None else timeout
 
     def detect(self, work_dir: str) -> str | None:
-        detected = _detect(work_dir)
-        if detected is None:
-            return None
-        return detected[0]
+        return detect_framework(work_dir)
+
+    def _log_duration(self, lang_name: str, elapsed: float) -> None:
+        """Report what the run cost against its budget — the knob is otherwise unguessable."""
+        # A run per session close, so the healthy case is debug: at INFO it would be permanent
+        # noise. The near-budget case is a WARNING because the next slightly slower run records
+        # nothing at all, and a silent stop looks exactly like "there was no signal".
+        if elapsed > self._timeout * _BUDGET_WARN_FRACTION:
+            logger.warning(
+                "verify: %s run took %.1fs of a %.0fs budget (>%d%%) — a slightly slower run "
+                "will time out and record NOTHING; raise capture.verify_timeout_seconds",
+                lang_name,
+                elapsed,
+                self._timeout,
+                int(_BUDGET_WARN_FRACTION * 100),
+            )
+        else:
+            logger.debug(
+                "verify: %s run took %.1fs of a %.0fs budget", lang_name, elapsed, self._timeout
+            )
 
     def verify(self, text: str = "", work_dir: str | None = None) -> VerifierResult:
         if work_dir is None or not os.path.isdir(work_dir):
@@ -174,6 +360,7 @@ class AutoDetectVerifier(Verifier):
             )
 
         lang_name, cmd = detected
+        started = time.monotonic()
         try:
             result = subprocess.run(
                 cmd,
@@ -197,34 +384,10 @@ class AutoDetectVerifier(Verifier):
                 is_infra_failure=True,
             )
 
-        if result.returncode == 0:
-            return VerifierResult(
-                outcome="success",
-                confidence=0.8,
-                detail=f"{lang_name} tests passed:\n{result.stdout}",
-                exit_code=0,
-            )
+        self._log_duration(lang_name, time.monotonic() - started)
         # The failing check identity is parsed from stdout+stderr (pytest prints node ids to
         # stdout); it becomes the escalation dedup key so a recurrence of the SAME test is what
-        # triggers a step, not two unrelated reds.
+        # triggers a step, not two unrelated reds. Classification is the shared pure parser, so
+        # an offline container replay of the same output derives the identical key.
         combined = f"{result.stdout}\n{result.stderr}"
-        stderr = result.stderr[:500] if result.stderr else ""
-        if _is_environment_failure(combined, result.returncode):
-            # An environmental red (missing module, broken collection) is not a capability
-            # outcome — treat it like infra: unknown + is_infra_failure, so the capture path
-            # writes no Tier-2 label and it never counts toward escalation.
-            return VerifierResult(
-                outcome="unknown",
-                confidence=0.0,
-                detail=f"{lang_name} environment/collection error (rc={result.returncode}):\n"
-                f"{stderr}",
-                exit_code=result.returncode,
-                is_infra_failure=True,
-            )
-        return VerifierResult(
-            outcome="failure",
-            confidence=0.7,
-            detail=f"{lang_name} tests failed (rc={result.returncode}):\n{stderr}",
-            exit_code=result.returncode,
-            failing_check_id=_failing_check_id(combined),
-        )
+        return parse_test_outcome(combined, result.returncode)

@@ -1,0 +1,270 @@
+"""Per-step verified-outcome stamping — the change that lets escalation recurrence fire."""
+
+# Proves the full chain end-to-end: mocked per-step VerifierResults (from an offline replay) →
+# stamped StepViews carrying a REAL recurring dedup_key → the swept policy cell reports
+# ``n_escalated > 0``. Real machinery, mocked only at the container boundary (unit mocking).
+
+from __future__ import annotations
+
+from benchmark.escalation import features, replay, run_eval
+from benchmark.escalation.normalize.mini_swe_agent import (
+    MiniSweAgentParser,
+    restamp_trajectory,
+    stamp_step,
+    unstamp_step,
+    unstamp_trajectory,
+)
+from benchmark.escalation.replay import GridPoint
+from shunt.verifiers.parse import parse_test_outcome
+from tests.escalation.factories import make_step, make_trajectory
+
+_KEY = "tests/t.py::test_widget"
+
+
+def _fail(node_id: str) -> object:
+    return parse_test_outcome(f"{node_id} FAILED\nAssertionError", 1)
+
+
+def _pass() -> object:
+    return parse_test_outcome("2 passed", 0)
+
+
+def _infra() -> object:
+    return parse_test_outcome("ERROR collecting tests/t.py\nImportError", 2)
+
+
+def _messages(n: int) -> list[dict[str, object]]:
+    """A mini-swe-agent-shaped message list: n assistant turns each followed by a tool result."""
+    msgs: list[dict[str, object]] = [{"role": "user", "content": "task"}]
+    for i in range(n):
+        msgs.append(
+            {
+                "role": "assistant",
+                "content": f"edit {i}",
+                "extra": {"actions": [{"command": f"echo {i}"}]},
+            }
+        )
+        msgs.append({"role": "tool", "content": "ok", "extra": {"returncode": 0}})
+    return msgs
+
+
+# ── stamp_step: the shared per-step field-set ─────────────────────────────────
+
+
+def test_stamp_step_failure_carries_dedup_key() -> None:
+    stamped = stamp_step(make_step(step_index=1), _fail(_KEY))
+    assert stamped.success is False
+    assert stamped.failing_check_id == _KEY
+    assert stamped.dedup_key == _KEY
+    assert stamped.blocking is True
+    assert stamped.confirmed is True
+
+
+def test_stamp_step_success_is_non_failure() -> None:
+    stamped = stamp_step(make_step(step_index=1, success=False, failing_check_id="x"), _pass())
+    assert stamped.success is True
+    assert stamped.failing_check_id is None
+    assert stamped.dedup_key is None
+    assert stamped.blocking is False
+
+
+def test_stamp_step_infra_is_never_a_capability_failure() -> None:
+    stamped = stamp_step(make_step(step_index=1), _infra())
+    assert stamped.is_infra_failure is True
+    assert stamped.failing_check_id is None
+    assert stamped.blocking is False  # infra never counts toward escalation
+
+
+# ── exit_code (the step's own code) vs replay_rc (the replay harness's rc) ──
+
+
+def test_live_stamp_writes_the_steps_own_exit_code_never_replay_rc() -> None:
+    # The LIVE map's outcome carries the agent step's own exit code → `exit_code`.
+    live = stamp_step(make_step(step_index=1), _fail(_KEY))
+    assert live.exit_code == 1
+    assert live.replay_rc is None
+
+
+def test_offline_restamp_writes_replay_rc_never_exit_code() -> None:
+    # The OFFLINE replay's outcome carries the container run's rc → `replay_rc`; the step's own
+    # `exit_code` is cleared, so the two referents never share one field.
+    base = make_trajectory([make_step(step_index=i) for i in range(3)], terminal_resolved=True)
+    restamped = restamp_trajectory(base, {0: _fail(_KEY), 1: _fail(_KEY)})
+    assert restamped.steps[0].replay_rc == 1
+    assert restamped.steps[0].exit_code is None
+    assert restamped.steps[1].replay_rc == 1
+    assert restamped.steps[1].exit_code is None
+    # the never-replayed step keeps both unset
+    assert restamped.steps[2].replay_rc is None
+
+
+def test_the_two_referents_never_conflated_by_stamp_step() -> None:
+    # Same input outcome, two sources: the live stamp and the offline restamp must land the
+    # numeric value in DIFFERENT fields, and never both.
+    outcome = _fail(_KEY)
+    live = stamp_step(make_step(step_index=0), outcome)
+    offline = stamp_step(make_step(step_index=0), outcome, replay=True)
+    assert live.exit_code == offline.replay_rc == 1
+    assert live.replay_rc is None
+    assert offline.exit_code is None
+
+
+def test_replay_returncode_reads_both_spellings() -> None:
+    # Backward-compat contract: a reader wanting the replay rc reads `replay_rc` first, then
+    # falls back to the legacy `exit_code` spelling committed corpora were written in.
+    from benchmark.escalation import schema
+
+    legacy = make_step(step_index=0, exit_code=7)  # pre-split corpus shape
+    assert legacy.replay_rc is None
+    assert schema.replay_returncode(legacy) == 7
+    new = make_step(step_index=0, exit_code=None, replay_rc=7)
+    assert schema.replay_returncode(new) == 7
+    # a live step carrying its OWN exit code and no replay rc reads as its own code
+    live = make_step(step_index=0, exit_code=3)
+    assert schema.replay_returncode(live) == 3
+
+
+def test_unstamp_clears_replay_rc_with_the_other_stamps() -> None:
+    stamped = make_step(
+        step_index=0, success=False, failing_check_id=_KEY, exit_code=4, replay_rc=4
+    )
+    cleared = unstamp_step(stamped)
+    assert cleared.exit_code is None
+    assert cleared.replay_rc is None
+
+
+# ── parser side-channel map ─────────────────────────────────────────────────
+
+
+def test_parser_stamps_steps_from_the_outcome_map() -> None:
+    outcomes = {1: _fail(_KEY), 2: _fail(_KEY)}
+    traj = MiniSweAgentParser().parse(_messages(3), {"trajectory_id": "t"}, outcomes)
+    assert traj.steps[1].failing_check_id == _KEY
+    assert traj.steps[2].dedup_key == _KEY
+    assert traj.steps[0].failing_check_id is None  # unmapped step keeps the default
+
+
+def test_terminal_stamp_wins_over_a_per_step_outcome() -> None:
+    # The last step is both mapped AND terminal-stamped; the harness resolved label wins.
+    outcomes = {2: _fail(_KEY)}
+    traj = MiniSweAgentParser().parse(
+        _messages(3), {"trajectory_id": "t", "terminal_resolved": True}, outcomes
+    )
+    assert traj.steps[-1].success is True  # terminal resolved wins
+    assert traj.steps[-1].failing_check_id is None
+
+
+# ── restamp_trajectory (offline path) ─────────────────────────────────────────
+
+
+def test_restamp_preserves_terminal_and_updates_hash() -> None:
+    base = make_trajectory([make_step(step_index=i) for i in range(3)], terminal_resolved=True)
+    restamped = restamp_trajectory(base, {0: _fail(_KEY), 1: _fail(_KEY)})
+    assert restamped.steps[0].dedup_key == _KEY
+    assert restamped.steps[-1].success is True  # terminal authority
+    assert restamped.header.content_sha256 != base.header.content_sha256  # hash re-derived
+
+
+# ── unstamp_trajectory: the admissibility gate's un-stamp path ────────────────
+#
+# A rejected instance used to be SKIPPED, which left the trajectory exactly as the defective
+# replay had stamped it — astropy-8872 came out of a rebuild byte-identical, 100% blocking on
+# exit-4, 284 fabricated steps intact. Clearing has to be an active write.
+
+
+def _stamped(index: int) -> object:
+    """A step carrying the full fabricated stamp set the pre-fix replay wrote."""
+    return make_step(
+        step_index=index,
+        success=False,
+        confirmed=True,
+        failing_check_id="hash:deadbeefdeadbeef",
+        exit_code=4,
+        observation=f"obs-{index}",
+        action=f"act-{index}",
+        args=f"args-{index}",
+        result=f"res-{index}",
+    )
+
+
+def test_unstamp_step_clears_exactly_the_stamped_fields() -> None:
+    cleared = unstamp_step(_stamped(0))
+    assert cleared.confirmed is False
+    assert cleared.exit_code is None
+    assert cleared.failing_check_id is None
+    assert cleared.dedup_key is None
+    assert cleared.blocking is False
+    assert cleared.is_infra_failure is False
+    # `success=True` is load-bearing: a cleared step left at False reads as a verified FAIL.
+    assert cleared.success is True
+
+
+def test_unstamp_step_preserves_everything_that_is_not_a_stamp() -> None:
+    original = _stamped(2)
+    cleared = unstamp_step(original)
+    for field in (
+        "step_index",
+        "decision_index",
+        "observation",
+        "action",
+        "args",
+        "result",
+        "tool",
+        "metadata",
+        "model",
+        "reasoning_effort",
+        "rank_index",
+        "effort_index",
+    ):
+        assert getattr(cleared, field) == getattr(original, field), field
+
+
+def test_a_cleared_step_routes_to_excluded_and_none() -> None:
+    # The two predicates the eval actually reads. Both must say "never observed".
+    traj = unstamp_trajectory(make_trajectory([_stamped(i) for i in range(3)]))
+    assert features.is_stamped(traj) is False
+    assert all(replay.verified_outcome(s) is replay.VerifiedOutcome.NONE for s in traj.steps[:-1])
+
+
+def test_unstamp_trajectory_is_idempotent() -> None:
+    # A rebuild re-visits a rejected instance on every run; clearing twice must be a no-op, or
+    # the content hash churns and the manifest reports a false integrity mismatch.
+    once = unstamp_trajectory(make_trajectory([_stamped(i) for i in range(3)]))
+    twice = unstamp_trajectory(once)
+    assert twice == once
+
+
+def test_unstamp_keeps_the_terminal_harness_grade() -> None:
+    # The terminal label comes from the SWE-bench GRADER, a different instrument the replay
+    # admissibility gate says nothing about — dropping it would discard a real measurement.
+    traj = unstamp_trajectory(
+        make_trajectory([_stamped(i) for i in range(3)], terminal_resolved=True)
+    )
+    assert traj.steps[-1].confirmed is True
+    assert traj.steps[-1].success is True
+    assert traj.steps[-1].exit_code is None  # but the replay's exit code is still cleared
+
+
+# ── the Phase-1 goal: a recurring dedup_key makes the trigger fire ────────────
+
+
+def test_recurring_dedup_key_yields_n_escalated_gt_zero() -> None:
+    # Steps 1 and 2 fail on the SAME node id within the window → escalate_after_n=2 fires.
+    outcomes = {1: _fail(_KEY), 2: _fail(_KEY)}
+    traj = MiniSweAgentParser().parse(
+        _messages(4), {"trajectory_id": "t", "terminal_resolved": False}, outcomes
+    )
+    report = run_eval.evaluate([traj], [GridPoint(2, 10)])
+    # Per CELL, never summed across the sweep: the old top-level field reported 415 escalations
+    # over 12 grid cells as 4980.
+    assert report.policy_cells[0].n_escalated > 0
+
+
+def test_two_distinct_single_failures_do_not_escalate() -> None:
+    # Different keys never aggregate — the recurrence trigger stays silent (guards over-firing).
+    outcomes = {1: _fail("tests/t.py::test_a"), 2: _fail("tests/t.py::test_b")}
+    traj = MiniSweAgentParser().parse(
+        _messages(4), {"trajectory_id": "t", "terminal_resolved": False}, outcomes
+    )
+    report = run_eval.evaluate([traj], [GridPoint(2, 10)])
+    assert report.policy_cells[0].n_escalated == 0

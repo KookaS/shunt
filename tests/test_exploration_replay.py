@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -18,6 +20,13 @@ def _fake_embed(texts: list[str]) -> np.ndarray:
     return np.array(
         [np.random.default_rng(abs(hash(t)) % (2**32)).random(8) for t in texts],
         dtype=np.float32,
+    )
+
+
+def _decision(task: str, cost: float) -> er.Decision:
+    """One replayed decision — only task and cost matter to the spend-pairing tests."""
+    return er.Decision(
+        task=task, model=CHEAP, reason="exploit", passed=True, cost=cost, is_exploratory=False
     )
 
 
@@ -180,6 +189,48 @@ class TestEvaluate:
         assert 0.0 <= report.baseline_pass_rate.value <= 1.0
         assert report.cost_multiple >= 1.0
         assert set(report.per_task_baseline_pass) == set(report.slice_.tasks)
+
+    def test_cost_multiple_pairs_on_the_tasks_both_arms_scored(self) -> None:
+        # The bug this pins: the baseline skips tasks the exploration arm scores, so a
+        # ratio of raw totals divides spend over one task set by spend over a larger one.
+        # Here the exploration arm spends the SAME per shared task, so the honest
+        # multiple is 1.0 — an unpaired ratio would report 2.0 off the extra task alone.
+        base = er.RunOutcome(
+            decisions=[_decision("t0", 1.0), _decision("t1", 1.0)],
+            missing=[("t2", MID)],
+            explore_spend=0.0,
+            exploit_spend=2.0,
+        )
+        run = er.RunOutcome(
+            decisions=[_decision("t0", 1.0), _decision("t1", 1.0), _decision("t2", 2.0)],
+            missing=[],
+            explore_spend=2.0,
+            exploit_spend=2.0,
+        )
+        assert er._paired_cost_multiples(base, [run]) == [pytest.approx(1.0)]
+        assert er._missing_by_model(base) == {MID: 1}
+
+    def test_cost_multiple_is_undefined_when_the_arms_share_no_scored_task(self) -> None:
+        # The bug this pins: the zero-denominator branch returned 1.0, publishing "exploration
+        # cost no overhead" — a measured finding — where nothing was measured at all. NaN is the
+        # only honest value, and it must propagate to both aggregates rather than be averaged away.
+        base = er.RunOutcome(
+            decisions=[_decision("t0", 1.0)], missing=[], explore_spend=0.0, exploit_spend=1.0
+        )
+        disjoint = er.RunOutcome(
+            decisions=[_decision("t1", 2.0)], missing=[], explore_spend=2.0, exploit_spend=0.0
+        )
+        overlapping = er.RunOutcome(
+            decisions=[_decision("t0", 2.0)], missing=[], explore_spend=2.0, exploit_spend=0.0
+        )
+        assert math.isnan(er._paired_cost_multiples(base, [disjoint])[0])
+        assert math.isnan(er._mean_multiple([]))
+        assert math.isnan(er._worst_multiple([]))
+        # One undefined seed makes both aggregates undefined — never silently dropped.
+        mixed = er._paired_cost_multiples(base, [overlapping, disjoint])
+        assert mixed[0] == pytest.approx(2.0)
+        assert math.isnan(er._mean_multiple(mixed))
+        assert math.isnan(er._worst_multiple(mixed))
 
     def test_explore_share_by_round_has_one_point_per_decision(self) -> None:
         report = er.evaluate(

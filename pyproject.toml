@@ -36,6 +36,12 @@ dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
   "pytest-cov>=5.0",
+  # Model-based state-machine testing for the escalation ladder. The ladder is a pure state
+  # machine over (rank, effort, failure window), so its multi-hop behaviour — climb, restart,
+  # exhaustion, interleaving — is provable with ZERO model calls. Hand-written cases only ever
+  # covered a single hop; the sequences that matter are the long ones, and Hypothesis shrinks a
+  # failure to the minimal one. See tests/router/test_ladder_statemachine.py.
+  "hypothesis>=6.112",
   "ruff>=0.8",
   "mypy>=1.13",
   "pre-commit>=4.0",
@@ -43,6 +49,17 @@ dev = [
   "deptry>=0.20",
 ]
 docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
+# Opt-in, default-off live full-content trajectory capture: real authenticated
+# encryption at rest (Fernet/AES). Kept OUT of the core wheel — a deployment that
+# never sets `capture.full_content: true` never installs it; the sink imports it
+# lazily and errors clearly if the feature is enabled without this extra.
+# Also backs the TEST suite: `tests/capture/test_trajectory_capture.py` exercises
+# the encrypt -> redact -> decrypt round-trip, so CI's test job installs this extra
+# (`uv sync --extra dev --extra benchmark --extra capture`) — the encryption-at-rest
+# security surface must RUN, never skip for a missing dependency. Deliberately not
+# merged into `dev`: it stays opt-in for a deployment and is added explicitly where
+# the tests are run.
+capture = ["cryptography>=43"]
 # Extra runtime deps the eval harness (benchmark/) needs beyond the core.
 # swebench: the official SWE-bench evaluation harness (invoked via `python -m
 # swebench.harness.run_evaluation`); datasets: pulls Verified instances + gold
@@ -53,11 +70,11 @@ docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
 # talks to its sandbox (a keyless install otherwise fails at first live call).
 benchmark = [
     "matplotlib>=3.9",
-    # scikit-learn/scipy are BENCHMARK-only (PCA, TF-IDF, cosine similarity, the
-    # held-out normal CDF). They were in the core dependency list, so every
+    # scikit-learn/scipy are BENCHMARK-only (PCA, cosine similarity, the
+    # McNemar binomtest). They were in the core dependency list, so every
     # `pip install shunt-router` pulled ~100 MB the shipped router never imports:
-    # `grep -r sklearn src/` is empty. scipy was imported by heldout_eval.py while
-    # undeclared anywhere, surviving only as a transitive of scikit-learn.
+    # `grep -r sklearn src/` is empty. scipy was undeclared anywhere, surviving
+    # only as a transitive of scikit-learn.
     "scikit-learn>=1.5",
     "scipy>=1.13",
     "swebench>=4.1",
@@ -96,7 +113,11 @@ pythonpath = ["."]
 # leave hundreds of files named test_output.txt — pytest's default --doctest-glob is
 # `test*.txt`, so collection ERRORS on the first one and the whole gate reports red for a
 # reason unrelated to the code. CI never saw it: a fresh checkout has no artifacts.
-testpaths = ["tests"]
+# `benchmark/tests` is named EXPLICITLY rather than `benchmark`, which keeps that
+# protection while still collecting the harness's own suite — listing only `tests`
+# silently dropped 227 benchmark tests (14 files, including the pipeline staleness
+# and imputation coverage) from every local run AND from CI.
+testpaths = ["tests", "benchmark/tests"]
 
 [tool.setuptools.package-data]
 # The bundled defaults (models.yaml registry + router.yaml policy) are loaded at
@@ -215,3 +236,8 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 disallow_untyped_calls = false
 warn_return_any = false
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.112",
+]

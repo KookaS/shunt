@@ -27,33 +27,107 @@ router:
     propensity_mc_samples: 100    # logged TS propensity, for off-policy evaluation
     prior_strength_cap: 20.0      # max pseudo-counts an offline per-model estimate can seed
 
-  # Auto-escalation on repeated verified failure. Shipped OFF: it needs the verified
-  # outcome-capture loop (below) writing Tier-2 failures, and enabling it adds exploration
-  # cost. When enabled, a SAME verified failure (same normalized failing-check id) seen
-  # escalate_after_n times within stale_window decisions raises one rung at the NEXT session
-  # boundary — effort first (cache-safe), then a model tier. Never mid-cached-turn.
+  # Auto-escalation on repeated verified failure. Ships ON (owner choice, 2026-08-08) with the
+  # honest caveats: the recurrence trigger is a NULL DETECTOR at the live cadence (the as-shipped
+  # counter fires on 723/723 offline runs at the base rate; its only real edge is the eval-only
+  # edit-gated family production cannot run), so no measurement yet shows it to separate outcomes —
+  # the value is the LADDER's, and it is OBSERVATIONAL, not causal (the arms ran in parallel under
+  # adaptive coverage): at session cadence, escalating resolves +0.416 [+0.239, +0.581] more tasks
+  # per instance than a same-cost retry (n=48 paired; a 3.02x ratio, which carries no interval).
+  # READ THAT DIRECTIONALLY, NOT AS A SIZE: the retry arm covers 27 instances to escalate's 30, a
+  # coverage mismatch no statistic in the report removes.
+  # THAT CONTRAST IS THE WEAKEST OF THE FOUR BASELINES AND MUST NEVER BE QUOTED ALONE. On the same
+  # 48 instances the escalate arm LOSES to always-frontier on quality (-0.108 [-0.165, -0.056],
+  # interval excludes zero) and is INDISTINGUISHABLE from firing at random at the same rate
+  # (-0.039 [-0.152, +0.084]). NOR is there a cost result to fall back on: the per-arm USD figures
+  # are computed on different task sets against different floors, so they are not comparable. The
+  # common-task-set (full-policy) read now exists and is sound on money — escalating costs
+  # -0.2168 [-0.3292, -0.1215] per instance less than always-frontier over all 48 — but its
+  # QUALITY axis is empty (the two arms differ in outcome on 0 of 48 instances, because wherever
+  # escalation fires they are the same sessions), so it is context, not a claim. And the measured
+  # arm is the
+  # corpus's two most expensive models (zai-glm-5.2, kimi-k3), which is NOT the ladder
+  # rank_shortlist below walks. Escalation ships ON as a DESIGN choice — one decision per session,
+  # cache-safe, bounded spend — not as a measured win.
+  # See docs/escalation-claim.md (the scoped claim), docs/escalation.md and
+  # benchmark/escalation/reports/metrics.json. It is INERT without
+  # a capture.work_dir (its only verified-failure signal); a boot warning says so. When enabled, a
+  # SAME verified failure (same normalized failing-check id) seen escalate_after_n times within
+  # stale_window decisions raises one rung at the NEXT session boundary — effort first (cache-safe),
+  # then a model rank. Never mid-cached-turn.
+  # A switch inside a cached turn invalidates the prompt cache and the recompute costs ~4x
+  # the context, so the boundary is the ONLY point a model change is free.
   escalation:
-    enabled: false
-    escalate_after_n: 2           # same-key verified failures before a step (1 = failure-biased)
+    enabled: true
+    # 2, not 1: a single red is normal fail-then-fix, so 1 is failure-biased. 2 is a
+    # PRIOR: in the as-shipped policy sweep (the counter this product runs) every low
+    # threshold is at chance — n=2 fires 723/723 at AUROC 0.500, n=3 722/723 at 0.501 —
+    # so no shipped-counter measurement prefers one over the other. See the comment on
+    # EscalationConfig.escalate_after_n in src/shunt/router/escalation.py.
+    escalate_after_n: 2           # same-key verified failures before a step
     stale_window: 10              # a failure not recurring within N decisions is retired
-    blocking_exit_code: 2         # FUTURE hook-stream path only; the off-wire test gate counts a
-                                  # real failure by verifier outcome (a pytest/jest/go red is exit
-                                  # 1, cargo 101), not this code — a collection/import error (exit 2)
-                                  # is treated as infra, not a capability failure.
-    # Under effort_then_tier the router first raises the current model's reasoning EFFORT arm
+    # Under effort_then_rank the router first raises the current model's reasoning EFFORT arm
     # (same model → cache namespace unchanged, cache-safe); the arm's params are applied to the
-    # outbound request. It steps a model TIER only once the model's reasoning ladder is exhausted
-    # (or the model declares no reasoning arms). tier_only skips the effort rung entirely.
-    ladder: effort_then_tier      # effort_then_tier | tier_only (one rung per step, never to frontier)
+    # outbound request. It steps to the next-higher-RANK model only once the model's reasoning
+    # ladder is exhausted (or the model declares no reasoning arms). rank_only skips the effort rung.
+    ladder: effort_then_rank      # effort_then_rank | rank_only (rank_only skips the effort rung)
+    # Rank order IS price order, so walking every rank buys every intermediate model on the way
+    # to a frontier the task was going to need anyway — and each intermediate rung is only left
+    # after another escalate_after_n verified recurrences, so it costs sessions too. The ladder
+    # therefore walks only the 3 CHEAPEST ranks one at a time and then jumps straight to the top
+    # rank. 3 mirrors the offline Price-Cascade shortlist (benchmark/routing/strategies/
+    # price_cascade.py), the shape whose cost is measured rather than assumed.
+    # 0 restores the every-rank walk. A jump never lands below the rank the task already climbed
+    # to, and never above the top rank.
+    rank_shortlist: 3             # cheapest N ranks are rungs; the rung above them is the top rank
+    # Epsilon-greedy randomization at FLAGGED checkpoints, with the realized propensity logged.
+    # A SEPARATE opt-in on top of `enabled`: turning escalation on must never silently randomize
+    # your routing. 0.0 (default) = today's fully deterministic behaviour, bit for bit.
+    # Why it exists: under a deterministic policy P(escalate) = 0, the overlap condition every
+    # off-policy estimator needs FAILS, so "does escalation help?" is not identified at any
+    # sample size. Randomizing a small fraction of flagged checkpoints and logging the
+    # propensity is what makes the question answerable (benchmark/escalation/ope.py). The
+    # explored arm is always HOLD — exploration can only WITHHOLD an escalation, never invent
+    # one, so it introduces no model switch the policy would not already make (cache-safe).
+    exploration_epsilon: 0.0      # 0 = deterministic; 0.1-0.3 while collecting identifiable data
+    exploration_seed: null        # null ⇒ the router draws one and records it on every decision
 
-  # Off-wire automatic outcome capture. With a work_dir set, at each session's close shunt
-  # re-runs THAT repo's test suite (pytest/jest/go/cargo, auto-detected) off the wire and
-  # records the verified pass/fail as a Tier-2 outcome — no human `shunt flag` needed. Unset
-  # ⇒ capture is MANUAL. Runs only where shunt sits alongside the code+tests (`shunt start`
-  # with SHUNT_WORK_DIR); see docs/feedback.md.
+  # Off-wire automatic outcome capture. At each session's close shunt re-runs the resolved
+  # repo's test suite (pytest/jest/go/cargo, auto-detected) off the wire and records the
+  # verified pass/fail as a Tier-2 outcome — no human `shunt flag` needed. The repo is
+  # resolved in this order: work_dirs[tool_identity] → SHUNT_WORK_DIR / --work-dir /
+  # work_dir → shunt's own launch directory (checked, see trust_launch_dir) → none
+  # (MANUAL). So `cd myrepo && shunt start` captures with no configuration at all.
+  # WARNING: arming ANY work_dir arms arbitrary code execution — re-running a suite runs
+  # that tree's own code (conftest.py, build.rs, npm scripts). See docs/feedback.md.
   capture:
     work_dir: null
     # work_dirs: { "<tool_identity_hash>": "/path/to/repo" }   # per-tool override map
+    # Wall-clock budget for ONE verification run. null ⇒ 1800s (30 min — the floor for a real
+    # repo suite; 120s made the capture loop a silent no-op on anything bigger than a toy).
+    # a suite slower than the budget times out, records NOTHING, and the loop is a silent
+    # no-op. Each run logs its duration at debug, and WARNS past 70% of the budget.
+    verify_timeout_seconds: null
+    # How many times a FAILING suite is re-run before the red is trusted (~83% of pass→fail
+    # transitions are flakes). Worst case 1 + N runs, each up to the timeout above. Minimum
+    # 1 — an unconfirmed failure is dropped by the escalation gate, so 0 would silently
+    # turn auto-escalation off. To stop re-running, set escalation.enabled: false.
+    rerun_confirmations: 2
+    # Trust shunt's own launch directory, promoted to its git root, as the last resolution
+    # layer. Checked before use: it must be a real directory, inside a git repo, with a
+    # detectable test framework. That is a CAPABILITY check ("can this repo be verified?"),
+    # not a trust gate — the directory is the one you started shunt in. A client-supplied
+    # path on the wire is NEVER honoured at any setting. This switch is the whole gate on
+    # the layer: set it false on a shared/multi-tenant host.
+    trust_launch_dir: true
+    # Opt-in full-content per-step trajectory capture. Shipped OFF (secure-by-default): only
+    # behaviour-only verified-outcome fields are recorded until set true. When on, every
+    # free-text field is redacted then encrypted to a LOCAL, gitignored dir (never on the
+    # wire, never mid-cached-turn); needs the 'capture' extra + SHUNT_ESCALATION_KEY.
+    full_content: false
+    # Where the encrypted local plane is written. null ⇒ outside the repo
+    # ($SHUNT_HOME/trajectories); never inside the tree, never committed.
+    trajectory_dir: null
 
   # Batch offline re-fit: rebuild the kNN index from the append-only outcome log every
   # N captured outcomes (0 disables; the boot-time rebuild still runs). Learning is
@@ -61,8 +135,19 @@ router:
   refit:
     every_n_outcomes: 50
 
+  # Per-session spend cap. Once a session's cumulative PROVIDER-REPORTED cost
+  # (usage.cost — never a locally derived price) reaches max_spend_usd, the router
+  # REFUSES further routing for that session: a clean 402 error naming the cap, never
+  # a fabricated success. A SOFT ceiling at the next request boundary: the request that
+  # crosses the cap completes, the following one is refused. null (the default) =
+  # unlimited. 0.0 refuses every request.
+  # This is the key the live tier's spend cap documents (compose.live.yaml /
+  # SHUNT_LIVE_MAX_SPEND_USD); the exploration budget above is a separate, softer knob.
+  budget:
+    max_spend_usd: null
+
   # Which registry models (src/shunt/config/models.yaml) the live router may pick.
-  # Empty/absent = every registry model. This is core + the latest frontier tier,
+  # Empty/absent = every registry model. This is core + the latest frontier models,
   # EXCLUDING the superseded claude-opus-4-6 (it stays in the registry as the old
   # kill-gate baseline, just not live by default). A model absent from this list is
   # known to the registry but NOT chosen for live inference. The frontier entries

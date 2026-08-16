@@ -6,8 +6,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from shunt.models import TIER_ORDER
-
 logger = logging.getLogger(__name__)
 
 
@@ -24,7 +22,11 @@ class ModelPoolProtocol(Protocol):
     concrete ``ModelPool``.
     """
 
-    def get_tier_models(self, tier: str) -> Sequence[ModelInfo]: ...
+    def ranked_models(self) -> Sequence[ModelInfo]: ...
+
+    def rank_of(self, name: str) -> int | None: ...
+
+    def models_from_rank(self, i: int) -> Sequence[ModelInfo]: ...
 
     def is_healthy(self, name: str) -> bool: ...
 
@@ -185,14 +187,12 @@ class SelectionRule:
         tested_models: set[str],
         model_pool: ModelPoolProtocol,
     ) -> tuple[str, str]:
-        for tier in TIER_ORDER:
-            for m in model_pool.get_tier_models(tier):
-                if m.name not in tested_models:
-                    return (m.name, "exploration_untested")
+        ranked = model_pool.ranked_models()  # weakest -> strongest by price
+        for m in ranked:
+            if m.name not in tested_models:
+                return (m.name, "exploration_untested")
 
-        for tier in reversed(TIER_ORDER):
-            models = model_pool.get_tier_models(tier)
-            if models:
-                return (models[-1].name, "safe_fallback")
+        if ranked:
+            return (ranked[-1].name, "safe_fallback")  # strongest as the safe fallback
 
         return (self._cold_start_model, "safe_fallback")

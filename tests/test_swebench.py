@@ -275,7 +275,11 @@ class TestInfraFailure:
     def test_run_live_cell_raises_when_report_missing(self, tmp_path, monkeypatch):
         # Docker/image unavailable ⇒ run_harness returns report_path=None.
         monkeypatch.setattr(
-            infer, "generate_patch_live", lambda spec, model, arm="default": self._patch()
+            infer,
+            "generate_patch_live",
+            lambda spec, model, arm="default", timeout=None, step_limit=None, cost_limit=None: (  # noqa: E501
+                self._patch()
+            ),
         )
         monkeypatch.setattr(
             infer.swebench_harness,
@@ -285,11 +289,21 @@ class TestInfraFailure:
         with pytest.raises(infer.HarnessInfraError):
             infer.run_live_cell("psf__requests-1142", "m", work_dir=tmp_path, run_id="t")
 
-    def test_run_live_cell_raises_on_nonzero_returncode(self, tmp_path, monkeypatch):
-        # Harness exited non-zero (timeout/error) ⇒ not a real pass=False result.
+    def test_run_live_cell_records_fail_on_nonzero_returncode_with_report(
+        self, tmp_path, monkeypatch
+    ):
+        # A WRITTEN report with a nonzero harness returncode is a legitimate pass=False, NOT an
+        # infra failure: some graded test suites (e.g. matplotlib) exit nonzero when the
+        # FAIL_TO_PASS tests fail. The report's verdict is authoritative — record it so the cell
+        # resolves instead of being left MISSING and re-run forever. (Real infra failure = no
+        # report, covered by test_run_live_cell_raises_when_report_missing.)
         report = tmp_path / "r.json"
         monkeypatch.setattr(
-            infer, "generate_patch_live", lambda spec, model, arm="default": self._patch()
+            infer,
+            "generate_patch_live",
+            lambda spec, model, arm="default", timeout=None, step_limit=None, cost_limit=None: (  # noqa: E501
+                self._patch()
+            ),
         )
         monkeypatch.setattr(
             infer.swebench_harness,
@@ -298,8 +312,13 @@ class TestInfraFailure:
                 {"psf__requests-1142": False}, report, {}, 137
             ),
         )
-        with pytest.raises(infer.HarnessInfraError):
-            infer.run_live_cell("psf__requests-1142", "m", work_dir=tmp_path, run_id="t")
+        monkeypatch.setattr(infer, "_capture_escalation_trajectory", lambda *a, **k: None)
+        monkeypatch.setattr(infer.image_version, "used_image_digest", lambda *a, **k: "")
+        row = infer.run_live_cell("psf__requests-1142", "m", work_dir=tmp_path, run_id="t")
+        assert row["pass"] is False
+        assert row["timeout_flag"] is False
+        # Agent finished (no limit hit) but the harness did not resolve → uncensored unsolved.
+        assert row["stop_reason"] == "unsolved"
 
     def test_run_live_cells_skips_infra_failure_no_row(self, monkeypatch):
         # An infra-failing cell writes NO row; the good cell still computes.
@@ -326,7 +345,9 @@ class TestInfraFailure:
         def fake(cid, model, **kw):
             if cid == "bad__cell-1":
                 raise ImportError("scaffold missing")
-            return {"pass": False, "in_tok": 0, "out_tok": 0, "calls": 0, "real_cost": 0.0}
+            # A valid ran-but-failed outcome (calls>0): a genuine unsolved fail must
+            # have actually run, else the write-time data-integrity wall aborts it.
+            return {"pass": False, "in_tok": 0, "out_tok": 0, "calls": 1, "real_cost": 0.0}
 
         monkeypatch.setattr(infer, "run_live_cell", fake)
         monkeypatch.setattr(run_matrix.config, "models_missing_cache", lambda *a, **k: [])
@@ -379,45 +400,3 @@ class TestSelect:
         table = select_swebench.load_experiments_resolves(tmp_path)
         assert table["a__b-1"]["opus-run"] is True
         assert table["c__d-2"]["opus-run"] is False
-
-
-class TestRoutingHeadroom:
-    def test_zero_at_ceiling_and_floor(self):
-        # Everyone solves (ceiling) and nobody solves (floor) → no routing value.
-        assert select_swebench.routing_headroom(p_solve=0.98, p_frontier=0.99) < 0.05
-        assert select_swebench.routing_headroom(p_solve=0.0, p_frontier=0.0) == 0.0
-
-    def test_peaks_in_routable_band(self):
-        # Field mostly fails but a frontier model solves → high headroom.
-        assert select_swebench.routing_headroom(p_solve=0.2, p_frontier=0.7) == pytest.approx(0.5)
-
-    def test_never_negative(self):
-        # A task where the frontier cohort underperforms the field mean clamps to 0.
-        assert select_swebench.routing_headroom(p_solve=0.9, p_frontier=0.6) == 0.0
-
-    def test_rank_orders_by_headroom_then_id(self):
-        rates = {
-            "z__z-1": (0.9, 0.95),  # headroom 0.05
-            "a__a-1": (0.2, 0.7),  # headroom 0.50
-            "m__m-1": (0.2, 0.7),  # headroom 0.50 — tie, id-sorted after a__a-1
-        }
-        ranked = select_swebench.rank_by_headroom(rates)
-        assert [r[0] for r in ranked] == ["a__a-1", "m__m-1", "z__z-1"]
-        assert ranked[0][1] == pytest.approx(0.5)
-
-    def test_load_external_rates_missing_file_is_empty(self, tmp_path):
-        assert select_swebench.load_external_rates(tmp_path / "nope.csv") == {}
-
-    def test_enrich_challenges_adds_derived_rates(self, tmp_path, monkeypatch):
-        manifest = tmp_path / "challenges.json"
-        manifest.write_text(json.dumps({"tasks": {"a__b-1": {"language": "python"}}}))
-        monkeypatch.setattr(
-            select_swebench,
-            "load_external_rates",
-            lambda *a, **k: {"a__b-1": (0.3, 0.8)},
-        )
-        select_swebench.enrich_challenges_with_rates(manifest)
-        task = json.loads(manifest.read_text())["tasks"]["a__b-1"]
-        assert task["p_solve"] == 0.3
-        assert task["p_frontier"] == 0.8
-        assert task["routing_headroom"] == pytest.approx(0.5)

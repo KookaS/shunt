@@ -30,18 +30,27 @@ def _make_repo(tmp_path: Path, test_body: str) -> Path:
     return repo
 
 
-# ── engine fakes (cheap→mid→high, empty neighbourhood → base pick is qwen) ──────
+# ── engine fakes (qwen<glm (rank 0<1), empty neighbourhood → base pick is qwen) ──────
 @dataclass
 class _M:
     name: str
 
 
-class _TieredPool:
+class _RankedPool:
     def __init__(self) -> None:
-        self._tiers = {"cheap": [_M("qwen")], "mid": [_M("glm")], "high": [], "frontier": []}
+        self._ranked = [_M("qwen"), _M("glm")]  # weakest -> strongest
 
-    def get_tier_models(self, tier: str) -> list[_M]:
-        return self._tiers.get(tier, [])
+    def ranked_models(self) -> list[_M]:
+        return list(self._ranked)
+
+    def rank_of(self, name: str) -> int | None:
+        for i, m in enumerate(self._ranked):
+            if m.name == name:
+                return i
+        return None
+
+    def models_from_rank(self, i: int) -> list[_M]:
+        return self._ranked[max(i, 0) :]
 
     def is_healthy(self, name: str) -> bool:
         return True
@@ -92,7 +101,7 @@ class _Store:
 
 def _engine(work_dir: str) -> RouterEngine:
     return RouterEngine(
-        model_pool=_TieredPool(),
+        model_pool=_RankedPool(),
         session_manager=_SessionManager(),
         outcome_index=_Index(),
         embedder=_Embedder(),

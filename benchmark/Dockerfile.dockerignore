@@ -11,7 +11,7 @@ venv/
 **/.mypy_cache/
 benchmark/.runs/
 benchmark/routing/artifacts/
-benchmark/routing/reports/
+docs/assets/figures/
 tests/
 docs/
 *.egg-info/

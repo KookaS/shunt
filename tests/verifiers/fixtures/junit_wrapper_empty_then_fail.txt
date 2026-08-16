@@ -1,0 +1,5 @@
+<testsuites><testsuite name="wrapper" tests="0" errors="0" failures="0" skipped="0" time="0.0" timestamp="2026-08-11T10:00:00.000000" hostname="host">
+</testsuite><testsuite name="widget" tests="5" failures="2" errors="0" skipped="0" time="0.01">
+<testcase classname="widget_test" name="test_ok" time="0.001" />
+<testcase classname="widget_test" name="test_parse" time="0.001"><failure message="AssertionError: assert 2 == 3">assert 2 == 3</failure></testcase>
+</testsuite></testsuites>

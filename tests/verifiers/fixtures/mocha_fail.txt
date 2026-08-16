@@ -1,0 +1,12 @@
+
+  Widget
+    ✓ returns a value
+    ✗ throws on bad input
+
+
+  1 passing (10ms)
+  1 failing
+
+  1) Widget throws on bad input:
+     AssertionError: expected undefined to be an object
+      at Context.<anonymous> (test/widget.test.js:9:26)

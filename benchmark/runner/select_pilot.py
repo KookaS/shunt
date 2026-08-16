@@ -6,33 +6,22 @@ import sys
 from pathlib import Path
 
 from benchmark import config
-from shunt.models import TIER_ORDER
 
 
-def _models_by_tier(tier: str) -> set[str]:
-    pricing = config.load_pricing()
-    enabled = set(config.enabled_models())
-    return {
-        name
-        for name, info in pricing.items()
-        if isinstance(info, dict) and info.get("tier") == tier and name in enabled
-    }
+def _price_bands() -> tuple[set[str], set[str], set[str]]:
+    """Enabled models in (cheap, mid, escalation) price-tercile bands (the ``frontier-only``
+    pattern means "only a top-band model passed", not a literal label)."""
+    cheap, mid, escalation = config.price_bands()
+    return set(cheap), set(mid), set(escalation)
 
 
 def _escalation_models() -> set[str]:
-    """Enabled models in any tier above ``mid`` — the escalation band (high, frontier, …).
-
-    Derived from ``TIER_ORDER``; the ``frontier-only`` pattern means "a top-tier model
-    passed", not literally the ``frontier`` label.
-    """
-    above = TIER_ORDER[TIER_ORDER.index("mid") + 1 :]
-    return set().union(*(_models_by_tier(t) for t in above)) if above else set()
+    """Enabled models in the top price band — the escalation band."""
+    return _price_bands()[2]
 
 
 def classify_pattern(task_id: str, results: dict) -> str:
-    cheap = _models_by_tier("cheap")
-    mid = _models_by_tier("mid")
-    escalation = _escalation_models()
+    cheap, mid, escalation = _price_bands()
     cheap_pass = all(results.get(m, {}).get("pass", False) for m in cheap if m in results)
     mid_pass = all(results.get(m, {}).get("pass", False) for m in mid if m in results)
     escalation_pass = any(results.get(m, {}).get("pass", False) for m in escalation if m in results)
@@ -98,27 +87,27 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         used_patterns.add(pattern)
         return True
 
-    # Phase 1: one cheap-fail-mid-pass per language
+    # Step 1: one cheap-fail-mid-pass per language
     for lang in sorted(target_languages):
         if len(selected) >= target_count:
             break
         pick_one("cheap-fail-mid-pass", lang)
 
-    # Phase 2: one frontier-only per language
+    # Step 2: one frontier-only per language
     for lang in sorted(target_languages):
         if len(selected) >= target_count:
             break
         if (lang, "frontier-only") not in used_lang_pattern:
             pick_one("frontier-only", lang)
 
-    # Phase 3: one all-pass per language (avoid-over-escalation test)
+    # Step 3: one all-pass per language (avoid-over-escalation test)
     for lang in sorted(target_languages):
         if len(selected) >= target_count:
             break
         if (lang, "all-pass") not in used_lang_pattern:
             pick_one("all-pass", lang)
 
-    # Phase 4: fill remaining with discriminating tasks
+    # Step 4: fill remaining with discriminating tasks
     need = target_count - len(selected)
     if need > 0:
         for lang in sorted(target_languages):
@@ -136,7 +125,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
                     selected.append((tid, meta, clang, pat, tags))
                     need -= 1
 
-    cheap = _models_by_tier("cheap")
+    cheap = _price_bands()[0]
     frontier = _escalation_models()
 
     print("=" * 72)

@@ -6,7 +6,7 @@
 #   Phase A — observe cheap+mid on ALL sampled tasks (cheap breadth).
 #   Phase B — derive strata (pure, no spend): discriminating set D (cheap/mid disagree)
 #             plus a deterministic uniform audit A of the non-discriminating remainder.
-#   Phase C — run the frontier (control_model, + high tier if configured) on D ∪ A only.
+#   Phase C — run the frontier (control_model, + high-band model if configured) on D ∪ A only.
 # Every phase reuses run_matrix's classify_cells, challenge-major executor, --max-cost and
 # per-cell checkpointing verbatim. Simulated by default; --live delegates to the real
 # harness. State lives entirely in results.csv, so a killed run resumes from the cache.
@@ -26,9 +26,9 @@ from pathlib import Path
 from benchmark import config
 from benchmark.routing import integrity
 from benchmark.routing.metrics import discriminating_set
-from benchmark.runner import image_version, swebench_specs
+from benchmark.runner import image_version, infer, swebench_specs
 from benchmark.runner.calibration import DEFAULT_SALT
-from benchmark.runner.run_matrix import _has_keys, collect_phase
+from benchmark.runner.run_matrix import _has_keys, collect_phase, preflight_refuses
 from benchmark.runner.sampling import AUDIT_SALT, in_frontier_audit
 from shunt.secrets import load_dotenv_file
 
@@ -37,31 +37,36 @@ _MANIFEST_PATH = (
 )
 
 
-def _tier_of(model: str) -> str:
-    """Registry tier for a model ('cheap' if unknown)."""
-    info = config.load_pricing().get(model)
-    return info.get("tier", "cheap") if isinstance(info, dict) else "cheap"
+def _band_of(model: str) -> str:
+    """Price-band label ('cheap' | 'mid' | 'escalation') for a model, else 'cheap'."""
+    cheap, mid, escalation = config.price_bands()
+    if model in escalation:
+        return "escalation"
+    if model in mid:
+        return "mid"
+    return "cheap"
 
 
 def phase_a_models(mode: str) -> list[str]:
-    """Cheap+mid models to observe on ALL tasks: one representative per tier, or all."""
-    enabled = config.enabled_models()  # tier-sorted, cheapest-first within tier
-    cheap_mid = [m for m in enabled if _tier_of(m) in ("cheap", "mid")]
+    """Cheap+mid-band models to observe on ALL tasks: one representative per band, or all."""
+    cheap, mid, _ = config.price_bands()
     if mode == "full":
-        return cheap_mid
-    reps: dict[str, str] = {}
-    for model in cheap_mid:  # first (cheapest) seen per tier wins
-        reps.setdefault(_tier_of(model), model)
-    return [reps[t] for t in ("cheap", "mid") if t in reps]
+        return cheap + mid
+    reps: list[str] = []
+    if cheap:
+        reps.append(cheap[0])  # cheapest of the cheap band
+    if mid:
+        reps.append(mid[0])  # cheapest of the mid band
+    return reps
 
 
 def frontier_models(include_high: bool) -> list[str]:
-    """Phase-C models: the control_model baseline, plus the high tier when requested."""
+    """Phase-C models: the control_model baseline, plus the next escalation-band model."""
     control = config.frontier_model()
     models = [control] if control else []
     if include_high:
-        enabled = config.enabled_models()
-        high = next((m for m in enabled if _tier_of(m) == "high" and m not in models), None)
+        _, _, escalation = config.price_bands()
+        high = next((m for m in escalation if m not in models), None)
         if high:
             models.append(high)
     return models
@@ -104,7 +109,7 @@ def _write_manifest(
         "phase_a_mode": phase_a_mode,
         "phase_a_models": models_a,
         "frontier_models": models_c,
-        "tier_map": {m: _tier_of(m) for m in (*models_a, *models_c)},
+        "price_band_map": {m: _band_of(m) for m in (*models_a, *models_c)},
         "n_tasks": n_tasks,
         "n_discriminating": len(discriminating),
         "n_audit": len(audit),
@@ -114,9 +119,14 @@ def _write_manifest(
     path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
 
 
-def _resolve_digests(tasks: list[str], live: bool) -> dict[str, str | None] | None:
+def _resolve_digests(tasks: list[str], check_images: bool) -> dict[str, str | None] | None:
+    # A registry `imagetools inspect` per image — 429s on the swebench namespace and defeats
+    # GHCR pre-staging, so opt-in via --check-images, NOT forced by --live (a failed resolve
+    # returns None, and on a fresh collection the digest only anchors drift for RE-runs).
     return (
-        image_version.resolve_spec_digests(swebench_specs.spec_image_refs(tasks)) if live else None
+        image_version.resolve_spec_digests(swebench_specs.spec_image_refs(tasks))
+        if check_images
+        else None
     )
 
 
@@ -124,13 +134,19 @@ def run_collect(
     config_path: str = "benchmark/benchmark.yaml",
     *,
     live: bool = False,
-    timeout: int = 600,
+    timeout: int = infer._AGENT_WALL_LIMIT_S,
     workers: int = 1,
     max_cost: float | None = None,
+    max_cost_overshoot: float = 0.0,
+    max_start_failures: int | None = None,
+    max_consecutive_failures: int | None = None,
+    check_images: bool = False,
+    step_limit: int | None = None,
 ) -> int:
     """Drive the three-phase collection; returns a process exit code (0 ok, 2 refused)."""
     load_dotenv_file()
     config.load(config_path)
+    step_limit = config.live_step_limit() if step_limit is None else step_limit
     knobs = config.collect_config()
     audit_fraction = float(knobs.get("audit_fraction", 0.20))
     audit_salt = str(knobs.get("audit_salt", AUDIT_SALT))
@@ -160,8 +176,11 @@ def run_collect(
         return 2
     if _refuse_live(live, models_a, models_c):
         return 2
+    # Preflight: one real $0 completion proves the key works BEFORE any container starts.
+    if preflight_refuses(live):
+        return 2
 
-    digests = _resolve_digests(tasks, live)
+    digests = _resolve_digests(tasks, check_images)
     results_path = config.results_csv_path()
     budget_a = knobs.get("budget_phase_a") or max_cost
     budget_c = knobs.get("budget_phase_c") or max_cost
@@ -179,6 +198,10 @@ def run_collect(
         workers=workers,
         max_cost=budget_a,
         results_path=results_path,
+        max_cost_overshoot=max_cost_overshoot,
+        max_start_failures=max_start_failures,
+        max_consecutive_failures=max_consecutive_failures,
+        step_limit=step_limit,
     )
 
     cache = config.load_results()
@@ -202,6 +225,10 @@ def run_collect(
         workers=workers,
         max_cost=budget_c,
         results_path=results_path,
+        max_cost_overshoot=max_cost_overshoot,
+        max_start_failures=max_start_failures,
+        max_consecutive_failures=max_consecutive_failures,
+        step_limit=step_limit,
     )
 
     _write_manifest(
@@ -240,7 +267,19 @@ def _add_args(ap: argparse.ArgumentParser, config_path: str) -> None:
     ap.add_argument(
         "--live", action="store_true", help="Run uncached cells for real (needs Docker + keys)"
     )
-    ap.add_argument("--timeout", type=int, default=600, help="Per-cell timeout (live mode)")
+    ap.add_argument(
+        "--timeout",
+        type=int,
+        default=infer._AGENT_WALL_LIMIT_S,
+        help="Generous graceful per-cell wall-clock backstop (s); PRIMARY bound is --step-limit.",
+    )
+    ap.add_argument(
+        "--step-limit",
+        type=int,
+        default=None,
+        help="Primary model-speed-agnostic per-cell bound (max agent steps). "
+        "Default: benchmark.yaml live.step_limit.",
+    )
     ap.add_argument("--workers", type=int, default=1, help="Concurrent live cells (1 = serial)")
     ap.add_argument(
         "--max-cost",
@@ -267,6 +306,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> int:
         timeout=args.timeout,
         workers=args.workers,
         max_cost=args.max_cost,
+        step_limit=args.step_limit,
     )
 
 

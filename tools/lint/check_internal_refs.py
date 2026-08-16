@@ -40,12 +40,30 @@ _SKIP_DIRS = frozenset(
 )
 _SCAN_SUFFIXES = frozenset({".py", ".md", ".yaml", ".yml", ".toml"})
 
-# Internal planning vocab that must not appear in shipped text.
+# Internal planning vocab that must not appear in shipped text. Mirrors the wrapper
+# `shunt-isolation` gate (scripts/check_shunt_isolation.py) — SH004 cannot read the
+# real ADR/decision slug registry (that tree lives only in the wrapper), so both gates
+# cover the STATIC prefix families and the wrapper adds the slug registry on top.
+# Patterns are tight (\b-prefixed, digit-anchored) so English uses stay unflagged:
+# "STORY" as a word or "AC-" inside "PACK-" never match. Comment lines that QUOTE a
+# family's literal form carry this gate's own noqa token, as the phrase-lines below
+# already did.
 _PATTERNS = (
     re.compile(r"\bSTORY-\d"),
     re.compile(r"\bEPIC-\d"),
     re.compile(r"\bKR-\d"),
     re.compile(r"\bKI-\d"),
+    re.compile(r"\bSG-\d"),  # subgoal refs (SG-1, SG-2…)  # noqa: SHUNT-ISO
+    re.compile(r"\bPIV-\d"),  # pre-decided-pivot refs (PIV-1…)  # noqa: SHUNT-ISO
+    re.compile(r"\bAC\d{1,2}\b"),  # acceptance-criteria refs (AC1…AC13)  # noqa: SHUNT-ISO
+    re.compile(r"\bAC-\d"),  # dashed form alongside the compact one (AC-1…)  # noqa: SHUNT-ISO
+    re.compile(r"\bADR[-\s]?\d", re.IGNORECASE),
+    re.compile(r"\(D\d"),  # decision refs like "(D3)"  # noqa: SHUNT-ISO
+    re.compile(  # internal decision path, e.g. decisions/0002  # noqa: SHUNT-ISO
+        r"\bdecisions?/\d"
+    ),
+    re.compile(r"\bdecisions?\s+\d{4}\b", re.IGNORECASE),  # prose form  # noqa: SHUNT-ISO
+    re.compile(r"\bproject/\w+/(?:backlog|journal|report|roadmap|vision)"),  # internal docs
     re.compile(r"\bMonth-?\d"),
     re.compile(r"see backlog", re.IGNORECASE),  # noqa: SHUNT-ISO (this gate's own vocab)
     re.compile(r"see journal", re.IGNORECASE),  # noqa: SHUNT-ISO (this gate's own vocab)

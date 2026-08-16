@@ -1,0 +1,7 @@
+Build started 2026-08-11 10:00:00
+  Failed!  - Failed: 1, Passed: 4, Skipped: 0, Total: 5, Duration: 2 s - test.dll (net8.0)
+  Failed WidgetTests.ParseReturnsValue [101 ms]
+  Error Message:
+   Assert.Equal() Failure
+   Expected: 3
+   Actual:   2

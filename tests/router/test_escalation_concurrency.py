@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from shunt.router.engine import RouterEngine
+from shunt.router.engine import RouterEngine, task_state_key
 from shunt.router.escalation import EscalationConfig
 
 
@@ -20,17 +20,21 @@ class _M:
     name: str
 
 
-class _TieredPool:
+class _RankedPool:
     def __init__(self) -> None:
-        self._tiers = {
-            "cheap": [_M("qwen")],
-            "mid": [_M("glm")],
-            "high": [_M("opus")],
-            "frontier": [],
-        }
+        self._ranked = [_M("qwen"), _M("glm"), _M("opus")]  # weakest -> strongest
 
-    def get_tier_models(self, tier: str) -> list[_M]:
-        return self._tiers.get(tier, [])
+    def ranked_models(self) -> list[_M]:
+        return list(self._ranked)
+
+    def rank_of(self, name: str) -> int | None:
+        for i, m in enumerate(self._ranked):
+            if m.name == name:
+                return i
+        return None
+
+    def models_from_rank(self, i: int) -> list[_M]:
+        return self._ranked[max(i, 0) :]
 
     def is_healthy(self, name: str) -> bool:
         return True
@@ -73,7 +77,7 @@ class _Embedder:
 
 def _engine(escalate_after_n: int) -> RouterEngine:
     return RouterEngine(
-        model_pool=_TieredPool(),
+        model_pool=_RankedPool(),
         session_manager=_SessionManager(),
         outcome_index=_Index(),
         embedder=_Embedder(),
@@ -89,7 +93,7 @@ def _fail(eng: RouterEngine) -> None:
         task_key="repoA",
         dedup_key="t::a",
         exit_code=1,
-        blocking=True,
+        is_infra_failure=False,
         confirmed=True,
     )
 
@@ -102,7 +106,7 @@ def test_concurrent_same_key_failures_all_accrue_no_lost_update() -> None:
     with ThreadPoolExecutor(max_workers=16) as pool:
         list(pool.map(lambda _i: _fail(eng), range(n)))
 
-    log = eng.snapshot_escalation_state()["failure_log"]["repoA"]
+    log = eng.snapshot_escalation_state()["failure_log"][task_state_key("repoA")]
     assert len(log) == n  # every concurrent append landed exactly once
 
 
@@ -117,4 +121,5 @@ def test_concurrent_decides_escalate_at_most_once_for_the_same_evidence() -> Non
 
     escalated = [reason for _m, reason, _prov in results if reason == "auto_escalation"]
     assert len(escalated) == 1  # the first decision retires the window; the rest see none
-    assert eng.snapshot_escalation_state()["failure_log"].get("repoA", []) == []
+    log = eng.snapshot_escalation_state()["failure_log"]
+    assert log.get(task_state_key("repoA"), []) == []

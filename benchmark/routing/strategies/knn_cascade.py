@@ -1,48 +1,36 @@
-"""kNN-informed cascade routing: order models by kNN-expected success, then try
-them in cascade until one passes.
+"""kNN-informed cascade routing: shortlist models whose kNN-expected success clears
+a bar, then try them cheapest-first until one passes.
 """
 
 from __future__ import annotations
 
-import math
-
 import hnswlib
 import numpy as np
 
-from . import Strategy
+from . import Strategy, routing_text
+from ._cascade_common import cheapest_priced_model, frontier_model, model_pricing
 
-# ---------------------------------------------------------------------------
-# Lazy fastembed loader
-# ---------------------------------------------------------------------------
-_EMBEDDER = None
-
-
-def _get_embedder():
-    global _EMBEDDER  # noqa: PLW0603, SH001 (lazy embedder singleton; loaded once on first use)
-    if _EMBEDDER is None:
-        from fastembed import TextEmbedding
-
-        _EMBEDDER = TextEmbedding(model_name="jinaai/jina-embeddings-v2-base-code")
-    return _EMBEDDER
-
-
-def _embed_texts(texts: list[str]) -> np.ndarray:
-    return np.array(list(_get_embedder().embed(texts)), dtype=np.float32)
+# `_embed_texts` reaches the SHIPPED Embedder through the one loader the rest of the
+# routing family shares (same precedent as tier_classifier). A local `TextEmbedding(...)`
+# here hardcoded the model name past `load_embedding_config()`, so flipping
+# `embedding.yaml`'s active row (or SHUNT_EMBEDDER_MODEL) would silently score kNN and
+# kNN-cascade in two different embedding spaces; it also skipped the durable cache_dir,
+# the 4000-char clip, `fingerprint()`, and the SHUNT_DISALLOW_REAL_EMBEDDER test wall.
+from .knn import _embed_texts
 
 
 # ---------------------------------------------------------------------------
 # Pure cascade-order algorithm (testable without ML)
 # ---------------------------------------------------------------------------
-# Default equal-quality band: models whose distance-weighted neighbour success
-# rate falls in the same ``success_tolerance``-wide bucket are treated as tied on
-# quality, so the cheaper one is tried first (cheap-first discipline). 0.05 = 5
-# percentage points, within the noise floor of a kNN estimate from a handful of
-# neighbours (min_samples ~3, k ~20); a gap wider than one bucket is a genuine
-# quality signal that must win.
-_DEFAULT_SUCCESS_TOLERANCE: float = 0.05
-# The price term is bounded to half a bucket so it can only reorder *within* an
-# equal-quality band, never cross a full bucket and override a real quality gap.
-_PRICE_PENALTY_WEIGHT: float = 0.5
+def _weighted_success_rate(outcomes: list[tuple[float, bool]]) -> float:
+    """Distance-weighted share of neighbour runs that passed (nearer neighbours count more)."""
+    total_weight = 0.0
+    weighted_passes = 0.0
+    for dist, passed in outcomes:
+        conf = 1.0 - min(dist, 1.0)
+        weighted_passes += conf * (1.0 if passed else 0.0)
+        total_weight += conf
+    return weighted_passes / total_weight if total_weight > 0 else 0.0
 
 
 def compute_cascade_order(
@@ -51,50 +39,40 @@ def compute_cascade_order(
     max_tries: int = 3,
     min_samples: int = 3,
     success_rate_threshold: float = 0.7,
-    success_tolerance: float = _DEFAULT_SUCCESS_TOLERANCE,
-) -> list[tuple[str, float]]:
-    """Order neighbour-seen models by ``bucket - 0.5*(price/max_price)`` desc, where
-    ``bucket = floor(weighted_rate / success_tolerance)`` — the integer band
-    dominates (genuine quality wins) and price only breaks within-band ties."""
-    max_price = max(pricing.values()) if pricing else 1.0
-    tol = success_tolerance if success_tolerance > 0 else _DEFAULT_SUCCESS_TOLERANCE
+) -> list[str]:
+    """Cheapest first among the models whose neighbour success rate clears the bar.
 
-    scored: list[tuple[str, float]] = []
-    for model, outcomes in neighbor_results.items():
-        if len(outcomes) < min_samples:
-            continue
-
-        total_weight = 0.0
-        weighted_passes = 0.0
-        for dist, passed in outcomes:
-            conf = 1.0 - min(dist, 1.0)
-            weighted_passes += conf * (1.0 if passed else 0.0)
-            total_weight += conf
-
-        weighted_rate = weighted_passes / total_weight if total_weight > 0 else 0.0
-
-        if weighted_rate < success_rate_threshold:
-            continue
-
-        price = pricing.get(model, 0.0)
-        # +1e-9 pulls exact tol multiples (e.g. 0.70/0.10 == 6.999… in float) back
-        # onto the intended bucket boundary before flooring.
-        bucket = math.floor(weighted_rate / tol + 1e-9)
-        norm_price = price / max_price if max_price > 0 else 0.0
-        score = bucket - _PRICE_PENALTY_WEIGHT * norm_price
-        scored.append((model, score))
-
-    scored.sort(key=lambda x: -x[1])
-    return scored[:max_tries]
+    Quality gates *eligibility* (``min_samples`` + ``success_rate_threshold``); price alone
+    decides the *order*, because a failed cheap attempt escalates rather than losing the task.
+    """
+    # The rate must never rank the shortlist. A blended quality-minus-price score cannot
+    # express "cheapest that clears the bar": whatever weight the price term carries, a
+    # rate gap wide enough outvotes an arbitrarily large price gap, and the shipped
+    # version put the frontier first on 79% of tasks in a cascade documented as cheap-first.
+    # `model in pricing` is the LIKE-FOR-LIKE bar: Price-Cascade draws its candidates from
+    # `matrix["models"]` (priced by construction), so admitting an unpriced model here would
+    # let kNN-cascade route somewhere its own baseline structurally cannot, and the published
+    # head-to-head is only a comparison if both draw from the same universe. Sorting an
+    # unpriced model last was not enough — it stayed inside the `max_tries` shortlist.
+    eligible = [
+        model
+        for model, outcomes in neighbor_results.items()
+        if model in pricing
+        and len(outcomes) >= min_samples
+        and _weighted_success_rate(outcomes) >= success_rate_threshold
+    ]
+    # Name breaks exact price ties so the order is deterministic across dict orderings.
+    eligible.sort(key=lambda model: (pricing[model], model))
+    return eligible[:max_tries]
 
 
 # ---------------------------------------------------------------------------
 # Strategy
 # ---------------------------------------------------------------------------
 class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm name)
-    """kNN-informed cascade: rank neighbour-seen models by distance-weighted
-    success minus a price penalty, try the top ``max_tries`` in order against
-    the matrix, and fall back to the frontier model if none pass.
+    """kNN-informed cascade: shortlist the neighbour-seen models whose distance-weighted
+    success clears the bar, try the ``max_tries`` cheapest in ascending price order, and
+    fall back to the frontier model if none pass.
     """
 
     def __init__(
@@ -118,7 +96,9 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
         # Cascade metadata (reset per :meth:`select` call)
         self.cascade_total_cost: float = 0.0
         self.cascade_tried_models: list[str] = []
-        self.cascade_order: list[tuple[str, float]] = []
+        # Per-attempt (model, cost), in billing order — see PriceCascade for why the collapsed
+        # total cannot serve the cache-aware cost model.
+        self.cascade_attempts: list[tuple[str, float]] = []
         # False when the cascade path (any tried model, or the frontier fallback)
         # lands on an unmeasured matrix cell — the true cost/outcome is unknown, so
         # this decision is a coverage gap, not a real fail@$0.
@@ -131,55 +111,59 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
     def select(self, task_id: str, task_meta: dict, matrix: dict) -> str:
         if not matrix.get("results"):
             self.cascade_tried_models = []
+            self.cascade_attempts = []
             self.cascade_total_cost = 0.0
-            self.cascade_order = []
             self.cascade_scorable = False
-            return _fallback_model(matrix)
+            return cheapest_priced_model(matrix)
         if not self._ready:
             self._build(matrix)
 
         self.cascade_tried_models = []
+        self.cascade_attempts = []
         self.cascade_total_cost = 0.0
         self.cascade_scorable = True
 
         order = self._get_cascade_order(task_id, task_meta, matrix)
-        self.cascade_order = order
 
         task_results = matrix.get("results", {}).get(task_id, {})
 
-        for model, _score in order:
+        for model in order:
             self.cascade_tried_models.append(model)
             outcome = task_results.get(model, {})
             if not outcome:
                 self.cascade_scorable = False
-            self.cascade_total_cost += outcome.get("cost", 0.0)
+            attempt_cost = float(outcome.get("cost", 0.0))
+            self.cascade_attempts.append((model, attempt_cost))
+            self.cascade_total_cost += attempt_cost
             if outcome.get("pass", False):
                 return model
 
-        # Fallback to frontier (most expensive model)
-        pricing = self._pricing
-        assert pricing is not None
-        frontier = max(pricing, key=lambda m: pricing[m])
+        # Escalate to the frontier — the SAME target Price-Cascade uses, so the zero-ML
+        # baseline and this router are compared on one escalation rule, not two.
+        frontier = frontier_model(matrix) or cheapest_priced_model(matrix)
+        # Re-running a model the shortlist already failed is a second API call with a
+        # guaranteed-identical outcome — bill it once and return it as the (failed) pick.
+        if frontier in self.cascade_tried_models:
+            return frontier
         self.cascade_tried_models.append(frontier)
         frontier_outcome = task_results.get(frontier, {})
         if not frontier_outcome:
             self.cascade_scorable = False
-        self.cascade_total_cost += frontier_outcome.get("cost", 0.0)
+        frontier_cost = float(frontier_outcome.get("cost", 0.0))
+        self.cascade_attempts.append((frontier, frontier_cost))
+        self.cascade_total_cost += frontier_cost
         return frontier
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _get_cascade_order(
-        self, task_id: str, task_meta: dict, matrix: dict
-    ) -> list[tuple[str, float]]:
+    def _get_cascade_order(self, task_id: str, task_meta: dict, matrix: dict) -> list[str]:
         assert self._index is not None
         assert self._embeddings is not None
         assert self._pricing is not None
         assert self._task_ids is not None
 
-        description = task_meta.get("description", task_id)
-        query_emb = _embed_texts([description])
+        query_emb = _embed_texts([routing_text(task_id, task_meta)])
 
         k_search = min(self._k + 1, len(self._task_ids))
         labels, distances = self._index.knn_query(query_emb.reshape(1, -1), k_search)
@@ -205,42 +189,23 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
         )
 
     def _build(self, matrix: dict) -> None:
-        """Build HNSW index over all task descriptions."""
+        """Build HNSW index over every task's routing text."""
         task_ids = sorted(matrix.get("results", {}).keys())
         self._task_ids = task_ids
-        self._pricing = _model_pricing(matrix)
+        self._pricing = model_pricing(matrix)
 
-        # Embed all task descriptions
-        descriptions = [matrix["tasks"].get(tid, {}).get("description", tid) for tid in task_ids]
-        self._embeddings = _embed_texts(descriptions)
+        # Embed each task's routing text (problem statement, else the short description)
+        texts = [routing_text(tid, matrix["tasks"].get(tid, {})) for tid in task_ids]
+        self._embeddings = _embed_texts(texts)
 
         # Build HNSW index
         dim = self._embeddings.shape[1]
         index = hnswlib.Index(space="cosine", dim=dim)
         index.init_index(max_elements=len(task_ids), ef_construction=100, M=16)
         # num_threads=1: pin the neighbour graph for bit-reproducible regeneration
-        # (multi-threaded add_items wobbles at ~1e-4), matching knn_blended._build_hnsw.
+        # (multi-threaded add_items wobbles at ~1e-4).
         index.add_items(self._embeddings, np.arange(len(task_ids)), num_threads=1)
         index.set_ef(50)
         self._index = index
 
         self._ready = True
-
-
-# ---------------------------------------------------------------------------
-# Module-level helpers
-# ---------------------------------------------------------------------------
-def _model_pricing(matrix: dict) -> dict[str, float]:
-    """Return ``{model: total_cost_per_1M}`` from the matrix."""
-    models = matrix.get("models", {})
-    return {m: models[m].get("input_price", 0) + models[m].get("output_price", 0) for m in models}
-
-
-def _fallback_model(matrix: dict) -> str:
-    """Cheapest priced model, or a fixed default when the matrix has no data.
-
-    With an empty results matrix the cascade has no neighbours to rank, so it
-    degrades to a cheap default rather than embedding an empty task list.
-    """
-    pricing = _model_pricing(matrix)
-    return min(pricing, key=lambda m: pricing[m]) if pricing else "deepseek-v4-flash"

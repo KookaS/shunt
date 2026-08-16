@@ -1,0 +1,7 @@
+<testsuite name="widget" tests="5" failures="2" errors="0" skipped="0" time="0.01">
+  <testcase name="doesThing" classname="com.x.WidgetTest" time="0.001"/>
+  <testcase name="parsesInput" classname="com.x.WidgetTest" time="0.002"><failure message="expected 3 but was 2">assertion</failure></testcase>
+  <testcase name="roundtrips" classname="com.x.WidgetTest" time="0.001"/>
+  <testcase name="rejectsBad" classname="com.x.WidgetTest" time="0.001"><error message="Call to undefined method">boom</error></testcase>
+  <testcase name="isClean" classname="com.x.WidgetTest" time="0.001"/>
+</testsuite>

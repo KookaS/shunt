@@ -22,7 +22,6 @@ models:
   qwen3-coder-local:
     # Whatever `ollama list` shows, or vLLM's --served-model-name.
     model_id: qwen3-coder
-    tier: cheap
     provider: local
     supports_streaming: true
     supports_cache_control: false

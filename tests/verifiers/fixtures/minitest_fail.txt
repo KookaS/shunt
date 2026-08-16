@@ -1,0 +1,10 @@
+Run options: --seed 54321
+
+.F...
+
+Failure:
+WidgetTest#test_parse [/x/test/widget_test.rb:9]:
+Expected: 3
+  Actual: 2
+
+5 runs, 5 assertions, 1 failures, 0 errors, 0 skips

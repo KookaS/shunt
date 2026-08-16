@@ -1,0 +1,4 @@
+1..3
+ok 1 file_has_correct_content
+ok 2 command_exits_cleanly
+ok 3 invalid_input_rejected

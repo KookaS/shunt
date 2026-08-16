@@ -18,7 +18,6 @@ import pytest
 
 from shunt.db.outcome_index import OutcomeIndexAdapter
 from shunt.db.store import OutcomeStore
-from shunt.models import TIER_ORDER
 from shunt.models.config import ModelPool
 from shunt.proxy.router import ProxyRouter
 from shunt.router.embedder import Embedder
@@ -280,9 +279,9 @@ def test_build_engine_honors_always_cheap_strategy(
         engine._outcome_index = index
         engine._embedder = FakeEmbedder()
         model, reason, _ = engine.decide(session.session_id, "refactor this")
-        # always_cheap ignores neighbors and picks the lowest-tier model of the pool.
+        # always_cheap ignores neighbors and picks the cheapest (rank-0) model of the pool.
         assert reason == "always_cheap"
-        assert model == model_pool.get_tier_models(TIER_ORDER[0])[0].name
+        assert model == model_pool.ranked_models()[0].name
     finally:
         store.close()
 

@@ -181,5 +181,6 @@
     "test_uuid_pk_subquery (expressions.tests.BasicExpressionsTests)"
   ],
   "image_ref": "swebench/sweb.eval.x86_64.django_1776_django-16082:latest",
-  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+  "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+  "problem_statement": "Resolve output_field when combining numeric expressions with MOD operator.\nDescription\n\t\nWhen writing a Django expression for a query that does MOD, if the types of the query are different (Decimal and Integer), it doesn't resolve the result to a Decimal type, like it does for other mathematical operators.\n"
 }

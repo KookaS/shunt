@@ -1,0 +1,14 @@
+running 1 test
+test widget::parses_input ... FAILED
+
+failures:
+
+---- widget::parses_input stdout ----
+assert `out.contains("error[E0308]")` failed: `left == right`
+  left: "cannot find crate for"
+ right: "error[E0308]"
+
+failures:
+    widget::parses_input
+
+test result: FAILED. 1 failed; 0 passed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s

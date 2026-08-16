@@ -48,10 +48,14 @@ def embedding_cache_dir(config_cache_dir: str | None = None) -> str:
 # OOM-killed. A coding agent's system prompt alone exceeds 20k, so an uncapped embed
 # takes the whole router down on the FIRST real request from Claude Code or opencode.
 #
-# 4000 is not arbitrary: re-embedding the routing corpus at a 4000-char cap raised the
-# held-out correlation from 0.068 to 0.113, so it is the value the routing evidence
-# already points at, and it costs ~400 MB over the model itself. It is the packaged
-# embedding.yaml default; SHUNT_EMBED_MAX_CHARS still overrides it.
+# 4000 is a memory bound first, and that is the part that is measured: the allocation
+# figures above, and the ~400 MB the cap costs over the model itself. The correlation
+# sometimes quoted for it — re-embedding the routing corpus at a 4000-char cap raising
+# held-out correlation from 0.068 to 0.113 — came from a one-off off-corpus pass that
+# nothing here reproduces, and it CANNOT be reproduced here: the committed routing corpus
+# embeds a 106-character label (max 194), so this cap never binds on it. Treat that pair
+# as suggestive, not as the justification. It is the packaged embedding.yaml default;
+# SHUNT_EMBED_MAX_CHARS still overrides it.
 DEFAULT_MAX_EMBED_CHARS: Final[int] = 4000
 
 

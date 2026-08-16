@@ -1,0 +1,13 @@
+── Failure (test-widget.R:5:3): widget behaves ─────────────────────────────
+widget(1) not equal to 2
+1/1 mismatches
+[1] 1
+Backtrace:
+  ▸ test-widget.R:5:3
+
+══ Results ═══════════════════════════════════════════════════════════════
+Duration: 0.2s
+
+OK:       1
+Failed:   1
+Total:    2

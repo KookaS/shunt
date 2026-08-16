@@ -1,0 +1,16 @@
+test_arithmetic (test_widget.py) ...
+test_parse (test_widget.py) ... ERROR
+test_roundtrip (test_widget.py) ... ok
+
+======================================================================
+ERROR: test_parse (test_widget.py)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/x/test_widget.py", line 9, in test_parse
+    self.assertEqual(parse("1+1"), 3)
+AssertionError: 2 != 3
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.002s
+
+FAILED (failures=0, errors=1)

@@ -1,1 +1,5 @@
 *.webp filter=lfs diff=lfs merge=lfs -text
+# Trajectory corpora are GB-scale — track via LFS. The manifest.json stays OUT of LFS so it
+# diffs in review (it is the small, human-auditable Layer-1 integrity anchor).
+benchmark/escalation/data/**/*.jsonl   filter=lfs diff=lfs merge=lfs -text
+benchmark/escalation/data/**/*.parquet filter=lfs diff=lfs merge=lfs -text

@@ -1,0 +1,58 @@
+{
+  "bootstrap_iterations": 10000,
+  "cache_aware_ratio": 0.15309129291373624,
+  "cache_aware_ratio_ci": {
+    "ci_lower": 0.09615491357162134,
+    "ci_upper": 0.21755277090578296,
+    "mean": 0.15309129291373624
+  },
+  "cache_control": {
+    "cache_aware": 50.9268114,
+    "naive": 50.9268114
+  },
+  "cache_oracle": {
+    "cache_aware": 21.042442036,
+    "naive": 21.042442036
+  },
+  "cache_router": {
+    "cache_aware": 7.7964514012000015,
+    "naive": 7.7964514012000015
+  },
+  "cost_delta": {
+    "ci_lower": -0.43548729780571427,
+    "ci_upper": -0.31609507629714284,
+    "mean": -0.37428023939428573
+  },
+  "cost_ratio": {
+    "ci_lower": 0.1165983946725535,
+    "ci_upper": 0.25914767964284297,
+    "mean": 0.18488434136226717
+  },
+  "coverage": {
+    "control_coverage": 0.5163043478260869,
+    "control_measured": 95,
+    "floor": 0.9,
+    "router_coverage": 0.8369565217391305,
+    "router_measured": 154,
+    "tripped": true
+  },
+  "exit_code": 1,
+  "frontier_model": "kimi-k3",
+  "impute_enabled": true,
+  "n": 184,
+  "n_scorable": 93,
+  "n_unscorable": 91,
+  "naive_ratio": 0.15309129291373624,
+  "pass_rate": {
+    "control": 175,
+    "router": 144
+  },
+  "pass_rate_delta": {
+    "ci_lower": -0.25806451612903225,
+    "ci_upper": -0.10752688172043011,
+    "mean": -0.1827956989247312
+  },
+  "task_seed": 42,
+  "verdict": "UNTESTED",
+  "verifier_threshold": 0.6
+}

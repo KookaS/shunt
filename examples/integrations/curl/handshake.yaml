@@ -1,10 +1,32 @@
 # CI handshake spec. This file's PRESENCE makes the tool CI-eligible — the matrix
 # in .github/workflows/integration-handshake.yml globs examples/integrations/*/handshake.yaml
 # and runs one matrix leg per file. `service` names the compose service whose exit
-# code is the verdict; `expected_tier` must name a tier present in
+# code is the verdict; `expected_model` must name a model present in
 # tests/integrations/fake_registry.yaml (checked by tests/test_integrations_sync.py).
 tool: curl
 wire: openai
 service: curl
-expected_tier: cheap
+expected_model: qwen3.7-plus
 best_effort: false   # required leg — must pass
+
+# Scenarios this tool runs (workflow matrix = tool x scenario):
+#   wiring     — one request reaches Shunt and a decision rides back (compose.yaml)
+#   escalation — N prompts across session boundaries make Shunt escalate on verified
+#                failures (compose.escalation.yaml + the assert-escalation sidecar)
+#   live       — workflow_dispatch only, real provider, hard spend cap (compose.live.yaml)
+scenarios: [wiring, escalation, live]
+
+# The escalation leg. `best_effort: false` on purpose: curl has no onboarding to be
+# brittle about, so a regression in the escalation ladder MUST turn the build red.
+escalation:
+  service: curl-escalation
+  best_effort: false
+
+# The live tier — AUTHORED, NOT RUN. Filtered out of the pull_request matrix entirely
+# (see the `discover` job); it reaches a runner only via workflow_dispatch on main, into
+# a protected environment, with a secret present and an explicit spend acknowledgement.
+# `best_effort: false` because a live run that fails should be loud — it has already
+# spent the money.
+live:
+  service: curl-escalation
+  best_effort: false
