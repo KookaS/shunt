@@ -105,11 +105,26 @@ uv run shunt                  # pinned deps from uv.lock
 
 `uv run shunt`, `python -m shunt`, and the installed `shunt` command are equivalent —
 each starts the proxy on `127.0.0.1:8080`. No uv? `pip install -e . && shunt` works
-too. (Run from the repo root; the same `shunt <subcommand>` verbs — `flag`, `reindex`,
-`explain`, `escalate` — apply.)
+too. (Run from the repo root; the same `shunt <subcommand>` verbs — `doctor`, `flag`,
+`reindex`, `explain`, `escalate` — apply.)
 
-Point your tool at localhost:8080 (today, every request forwards to the cheap
-default):
+### Check the install first
+
+```bash
+shunt doctor
+```
+
+It reads configuration only — no provider call, no spend, and it will not download the
+embedding model. It reports which provider keys resolve (presence, never the value),
+how many models are routable, whether the embedding weights are already cached, whether
+the bind address is free, and the one a fresh install usually gets wrong: whether
+escalation is **armed** or merely *enabled and inert*. It exits non-zero only when the
+router could not serve a request at all, so it is safe in a setup script.
+
+Point your tool at localhost:8080. The router picks the session model on the first
+turn and locks it for the session; until enough outcomes accumulate — 20 verified, or
+50 labelled of any tier — it cold-starts to the cheap default, which is why a fresh
+install looks like one:
 
 | Tool | Env var |
 |---|---|

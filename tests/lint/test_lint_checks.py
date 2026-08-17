@@ -657,7 +657,7 @@ def _number_tree(
     benchmark: str | None = None,
     benchmark_data: str | None = None,
 ) -> Path:
-    """A minimal repo shaped like shunt: the three result docs."""
+    """A minimal repo shaped like shunt: the three main result docs."""
     docs = tmp_path / "docs"
     docs.mkdir(parents=True)
     if results is not None:
@@ -763,6 +763,25 @@ def test_sh012_unmarked_scorable_claim_fails(tmp_path: Path) -> None:
         ),
     )
     assert _run("check_number_provenance.py", "--root", str(root)) == 1
+
+
+def test_sh012_unmarked_site_outside_the_old_three_doc_list_fails(tmp_path: Path) -> None:
+    # The scan set used to be a hardcoded (results, benchmark, benchmark-data) list, so a
+    # result statistic published in CHANGELOG.md or README.md was unenforced. The walk is
+    # now every *.md in the tree; this is the regression test for that widening.
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\nOn the 184-task set the figure is ~70%.\n"
+    )
+    (tmp_path / "README.md").write_text("# Shunt\n\nMeasured on the 74-task set.\n")
+    assert _run("check_number_provenance.py", "--root", str(tmp_path)) == 1
+
+
+def test_sh012_marked_site_outside_the_old_three_doc_list_passes(tmp_path: Path) -> None:
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\nOn the 184-task set the figure is ~70%. "
+        "<!-- frozen-value: n=184, date=2026-08-11, run=49b8362 -->\n"
+    )
+    assert _run("check_number_provenance.py", "--root", str(tmp_path)) == 0
 
 
 def test_sh012_generator_marker_accepts_a_generated_number(tmp_path: Path) -> None:

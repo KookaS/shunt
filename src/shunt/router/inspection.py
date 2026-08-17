@@ -154,6 +154,12 @@ def escalation_sources(policy_path: Path | None) -> dict[str, str]:
         data = strict_yaml_load(policy_path.read_text())
     except (OSError, ValueError):
         return defaults
+    # An empty or comment-only file parses to None, and `false` to a bool — strict_yaml_load's
+    # `-> dict` annotation is a promise about the happy path only. Without this, `shunt escalate`
+    # (and, since it shares this reader, `shunt doctor`) raised AttributeError on a config the
+    # policy loader accepts as "use the built-in defaults".
+    if not isinstance(data, dict):
+        return defaults
     section = data.get("router", data)
     if not isinstance(section, dict):
         return defaults
@@ -164,6 +170,18 @@ def escalation_sources(policy_path: Path | None) -> dict[str, str]:
         # the operator hunting for a knob that is not what turned escalation off.
         return {**defaults, "enabled": _ABSENT_BLOCK}
     return {k: (str(policy_path) if k in block else _BUILTIN_DEFAULT) for k in _ESCALATION_KEYS}
+
+
+def escalation_config_items(policy: RouterPolicy, policy_path: Path | None) -> list[ConfigItem]:
+    """The effective escalation knobs with provenance — the ONE list both CLIs render."""
+    # Shared so `shunt escalate` and `shunt doctor` cannot disagree. A second copy of the key
+    # tuple in the diagnostics module meant a knob added here was silently absent there, which
+    # is a drift bug that reports coverage it does not have rather than failing loudly.
+    config = policy.escalation.to_config()
+    return [
+        ConfigItem(key=key, value=getattr(config, key), source=source)
+        for key, source in escalation_sources(policy_path).items()
+    ]
 
 
 @dataclass(frozen=True)
@@ -399,10 +417,7 @@ def escalation_report(
     return EscalationReport(
         enabled=config.enabled,
         policy_path=str(policy_path) if policy_path else "built-in defaults (no router.yaml)",
-        config=[
-            ConfigItem(key=key, value=getattr(config, key), source=source)
-            for key, source in escalation_sources(policy_path).items()
-        ],
+        config=escalation_config_items(policy, policy_path),
         work_dir=work_dir,
         work_dir_source=work_dir_source,
         mapped_work_dirs=dict(policy.capture.work_dirs),
@@ -427,6 +442,7 @@ __all__ = [
     "LadderPosition",
     "WindowEvent",
     "WindowKey",
+    "escalation_config_items",
     "escalation_report",
     "escalation_sources",
     "resolve_inspection_work_dir",

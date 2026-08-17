@@ -17,6 +17,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from shunt.bind import resolve_bind
 from shunt.capture import CaptureCoordinator, CaptureWorker, RefitScheduler, WorkDirResolver
 from shunt.capture.trajectory import TrajectoryRecorder
 from shunt.capture.trajectory_store import LiveTrajectorySink, load_key, resolve_live_dir
@@ -800,8 +801,8 @@ async def messages(request: Request) -> Response:
 
 
 def run() -> None:
-    host = os.environ.get("SHUNT_HOST", "127.0.0.1")
-    port = int(os.environ.get("SHUNT_PORT", "8080"))
+    # Single definition, shared with `shunt doctor` — see shunt/bind.py for why.
+    host, port = resolve_bind()
 
     level = configure_logging()
     if level == "DEBUG":

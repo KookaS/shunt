@@ -1,7 +1,8 @@
 site_name: Shunt
 site_description: >-
-  Pre-alpha, cache-safe LLM proxy that today forwards to a cheap default; kNN
-  outcome-based routing is designed and offline-validated but not yet live.
+  Pre-alpha, cache-safe LLM router. Speaks both the OpenAI and Anthropic wire
+  formats, picks the session model on the first turn, and escalates from verified
+  test outcomes at session boundaries. The make-or-break kill gate is untested.
 site_url: https://kookas.github.io/shunt/
 repo_url: https://github.com/KookaS/shunt
 repo_name: KookaS/shunt

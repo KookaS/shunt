@@ -86,6 +86,11 @@ benchmark = [
 [project.urls]
 Homepage = "https://github.com/KookaS/shunt"
 Repository = "https://github.com/KookaS/shunt"
+# The package is explained almost entirely by its docs — a PyPI page that does not
+# link to them sends the reader nowhere. Issues is the only inbound channel a PyPI
+# visitor can reach without first finding the repo.
+Documentation = "https://kookas.github.io/shunt/"
+Issues = "https://github.com/KookaS/shunt/issues"
 
 [project.scripts]
 shunt = "shunt.cli:main"

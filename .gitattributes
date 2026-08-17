@@ -3,3 +3,11 @@
 # diffs in review (it is the small, human-auditable Layer-1 integrity anchor).
 benchmark/escalation/data/**/*.jsonl   filter=lfs diff=lfs merge=lfs -text
 benchmark/escalation/data/**/*.parquet filter=lfs diff=lfs merge=lfs -text
+# state_capture.json is DELIBERATELY NOT tracked here, though at ~477KiB it is the largest
+# plain blob under this tree. It is a DERIVED artifact rewritten on every audit pass
+# (state_capture_audit.write_report), so LFS would push a whole new object per regeneration
+# with no delta, and `diff=lfs` would destroy the per-record diff its compact serializer
+# exists to preserve. The reasoning is at benchmark/runner/state_capture_audit.py (see the
+# serializer's own comment) and is echoed by benchmark/runner/snapshot_archive.py. Its size
+# sits under the check-added-large-files ceiling on purpose — that headroom is the design.
+# Do not "fix" this by adding a pattern; it was ruled out on the merits.

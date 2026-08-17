@@ -11,6 +11,7 @@ from shunt import __version__
 from shunt.log_config import LEVELS, LOG_LEVEL_ENV
 
 if TYPE_CHECKING:
+    from shunt.router.diagnostics import DoctorReport
     from shunt.router.inspection import EscalationReport
 
 
@@ -272,6 +273,52 @@ def _print_next(report: EscalationReport) -> None:
         )
 
 
+def _doctor(args: argparse.Namespace) -> None:
+    """Diagnose the install: what is live, what is inert, and why. Never spends, never mutates."""
+    from shunt.router.diagnostics import doctor_report
+    from shunt.secrets import load_dotenv_file
+
+    # Same .env load `start` does, or doctor would report keys as MISSING that the server
+    # will happily find — the single most confusing answer this command could give.
+    load_dotenv_file()
+    report = doctor_report(work_dir=args.work_dir, launch_dir=os.getcwd())
+
+    if args.as_json:
+        import dataclasses
+        import json
+
+        # `status` is the stable field a machine consumer keys on, and every name in
+        # CHECK_ORDER is present in every branch — see diagnostics.CHECK_ORDER for why.
+        payload = {
+            "serviceable": report.serviceable,
+            "checks": [
+                {**dataclasses.asdict(check), "status": check.status} for check in report.checks
+            ],
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        _print_doctor_report(report)
+
+    if not report.serviceable:
+        sys.exit(1)
+
+
+def _print_doctor_report(report: DoctorReport) -> None:
+    """Render the diagnosis, one block per check, worst news legible at a glance."""
+    markers = {"fail": "FAIL", "warn": "WARN", "ok": "ok", "skipped": "n/a"}
+    for check in report.checks:
+        marker = markers[check.status]
+        head, _, rest = check.detail.partition("\n")
+        print(f"[{marker:^4}] {check.name:<12} {head}")
+        for line in rest.splitlines():
+            print(f"{'':<21}{line}")
+    print()
+    if report.serviceable:
+        print("Router is serviceable. WARN lines are degraded-but-working states, not errors.")
+    else:
+        print("Router CANNOT serve a request — fix the FAIL line(s) above.")
+
+
 def _flag(args: argparse.Namespace) -> None:
     """Record a human-verified outcome for a routed session."""
     # This is the router's outcome write-back path. Until it is used, no outcome row exists,
@@ -366,6 +413,28 @@ def main() -> None:
         help="Emit the report as JSON instead of the text block.",
     )
     escalate.set_defaults(func=_escalate)
+
+    doctor = sub.add_parser(
+        "doctor",
+        help="Diagnose the install: which keys resolve, what is armed, what is inert",
+        description="Read-only and non-spending: which provider keys resolve (presence only, "
+        "never the value), how many models the registry leaves routable, whether the embedding "
+        "weights are cached, whether the bind address is free, and — the one a new install "
+        "usually gets wrong — whether escalation is ARMED or merely enabled and inert. Exits "
+        "non-zero only when the router could not serve a request at all.",
+    )
+    doctor.add_argument(
+        "--work-dir",
+        default=None,
+        help="Repo to check escalation arming against (default: the router's own resolution).",
+    )
+    doctor.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the diagnosis as JSON instead of the text block.",
+    )
+    doctor.set_defaults(func=_doctor)
 
     flag = sub.add_parser("flag", help="Flag a session outcome as good or bad")
     flag.add_argument("session_id", help="Session ID to flag")

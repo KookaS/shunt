@@ -295,6 +295,7 @@ Easy to conflate, so, precisely:
 
 ```bash
 pip install shunt-router
+shunt doctor    # what resolves, what is armed, what is inert — no spend, no download
 shunt
 ```
 
@@ -373,7 +374,7 @@ headline, stated plainly:
 > blocked mid-session cascades at equal quality. On the 184-task scoring path it
 > costs $28.71 cache-aware at 96.74%, against Price-Cascade's $27.11 at the same
 > pass rate and Always-Frontier's $96.02 at 95.11%. On the harder fully-measured
-> 74-task set it costs $28.76 at 90.91% against Always-Frontier's $37.63 at
+> 74-task set it costs $28.76 at 90.91% against Always-Frontier's $37.63 at <!-- frozen-value: n=74, date=2026-08-11, run=49b8362 -->
 > 86.36%.**
 > The saving is real and comes from *mechanism*, not prediction — the machine
 > learning still contributes nothing. And it is much smaller on measured cells
@@ -417,7 +418,7 @@ embedding does not buy routing quality. See
 [Results](docs/results.md#routing-results).
 
 **The correction: the saving is much smaller on measured cells.** Set B is the
-raw, un-imputed basis — 74 scorable tasks, every cell actually run, and
+raw, un-imputed basis — 74 scorable tasks, every cell actually run, and <!-- frozen-value: n=74, date=2026-08-11, run=49b8362 -->
 biased *hard* where set A is biased easy. **Set A has 184 tasks and set B has 74,
 so totals do not compare across them; compare only within a set.**
 

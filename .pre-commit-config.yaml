@@ -130,7 +130,11 @@ repos:
       # n/date/run of the corpus it was computed on. A frozen marker without a corpus, or
       # a signature match with no marker at all (a seventh site added silently), fails.
       # Whole-tree scan (the SH004/SH009/SH011 shape): the failure is an addition/edit,
-      # and only a scan of the committed docs sees every number-bearing line. BLOCKING.
+      # and only a scan of the committed docs sees every number-bearing line. Scope is
+      # every `*.md` in the tree (README.md and CHANGELOG.md included — a hardcoded
+      # three-doc list used to leave both unenforced) but ONLY the lines matching the
+      # gate's result-statistic shapes, so a green exit is not "every number is sourced".
+      # BLOCKING.
       - id: sh012-number-provenance
         name: SH012 number-bearing sites carry a provenance marker
         entry: python tools/lint/check_number_provenance.py

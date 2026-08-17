@@ -274,8 +274,8 @@ cells).
   synthetic row.
 - **Below the floor, the verdict is UNTESTED** — not PASS, not FAIL. Reports may publish measured
   numbers, but no verdict line.
-- The gate currently sits below this floor: on the 200-task set, the control (`kimi-k3`) has
-  ~50.6% of cells measured, and only 74 tasks have all six models measured. Closing the control
+- The gate currently sits below this floor: on the scored 184-task set the control (`kimi-k3`) has <!-- frozen-value: n=184, date=2026-08-11, run=6bbd898 -->
+  51.6% of cells measured (95 of 184), and only 74 tasks have all six models measured. Closing the control
   gap is the bounded recollection of the step-limit-censored cells (the recollection work keyed
   on the `step_limit` staleness anchor below); the floor is what makes that spend meaningful
   rather than cosmetic.

@@ -121,7 +121,8 @@ DEFAULT_DB_DIR = Path.home() / ".local" / "share" / "shunt"
 DEFAULT_DB_PATH = DEFAULT_DB_DIR / "outcomes.db"
 
 
-def _get_default_db_path() -> str:
+def default_db_path() -> str:
+    """The outcome DB path the store opens by default — public so `doctor` can stat it."""
     env_path = os.environ.get("SHUNT_DATA_DIR")
     if env_path:
         return os.path.join(env_path, "outcomes.db")
@@ -159,7 +160,7 @@ class OutcomeStore:
         index_path: str | None = None,
         hnsw_kwargs: dict[str, Any] | None = None,
     ) -> None:
-        self._db_path = db_path or _get_default_db_path()
+        self._db_path = db_path or default_db_path()
         self._lock = threading.Lock()
 
         try:

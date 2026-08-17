@@ -8,6 +8,41 @@ description: Add provider credentials and register new models, with or without a
 Shunt ships with a registry of providers and models. Configuring it means two
 things: giving it keys, and telling it about models you want it to route to.
 
+## Check what is configured: `shunt doctor`
+
+Before changing anything, ask the router what it currently sees:
+
+```bash
+shunt doctor          # add --json for machine-readable output
+shunt doctor --work-dir /path/to/repo    # check arming against a specific repo
+```
+
+It is read-only and non-spending: no provider is called, nothing is written, and the
+embedding model is **not** downloaded (it reports whether the weights are cached, which
+is the point). Keys are reported as `set` or `MISSING` — never the value, so the output
+is safe to paste into an issue. Values in the `config` block are labelled `built-in
+default` or with the path of the file that overrode them, so you can tell which of your
+settings are actually yours.
+
+The line most worth reading is `escalation`. *Enabled* and *armed* are different
+states: escalation's only signal is re-running a repo's own tests off the wire, so with
+no repo resolved — or a repo that declares no test framework this verifier recognises —
+it is enabled and **inert**, doing nothing at all. `doctor` says which.
+
+It exits non-zero only when the router could not serve a request at all: no provider key
+resolves, the registry or `router.yaml` will not load, every model's circuit breaker is
+open, or the bind address is unusable. A degraded-but-working install still exits `0`.
+Note that the embedder verdict depends on `router.strategy`: under `knn` a missing or
+unreadable weights cache is fatal, while under `always_cheap` / `always_frontier` nothing
+embeds at all, so the same cache is only a warning.
+
+`--json` emits the same report with a stable shape: every check name is always present,
+in the same order, each carrying an explicit `status` of `ok`, `warn`, `fail`, or
+`skipped` — so a script keying on `credentials` keeps working even on a broken install.
+
+For the escalation *state* of a repo — the failure window, the ladder rung, what the
+next decision would do — use [`shunt escalate`](#inspect-it-shunt-escalate) instead.
+
 ## Add credentials
 
 Every provider reads its key from one environment variable. Set the variable for
