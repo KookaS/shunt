@@ -232,7 +232,7 @@ def test_escalation_survives_a_model_change_with_different_arm_vocabularies() ->
 
     _fail(eng)
     _fail(eng)
-    m, r, prov = eng._maybe_escalate(task, "glm", "knn", {})
+    m, r, prov = eng._maybe_escalate(task, "s0", "glm", "knn", {})
     assert m == "glm"  # same model on the effort rung (cache-safe) — NOT a voided deadlock
     assert r == "auto_escalation"
     assert prov["escalated_reasoning_arm"] == "think"  # glm's own ladder, from its default

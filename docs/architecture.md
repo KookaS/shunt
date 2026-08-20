@@ -84,7 +84,7 @@ The knobs are live; exploration behaviour adapts as verified outcomes accumulate
 | Module | Role | On the live path? |
 |---|---|---|
 | **proxy/** | HTTP server: `/health`, `/v1/chat/completions`, `/v1/messages`, `/v1/models` (stub), `/admin/loop-health` (read-only loop-health metrics, aggregates only — no prompts; **unauthenticated, like every route** — see [SECURITY.md](https://github.com/KookaS/shunt/blob/main/SECURITY.md)), streaming passthrough; calls router to decide model on first turn | **Yes** |
-| **session/** | Session lifecycle: ID generation, inactivity timeout, model lock (keeps the session on one model — cache-safety) | **Yes** |
+| **session/** | Session lifecycle: ID generation (the tool's conversation id when it sends one, else a source-IP + user-agent hash), inactivity timeout, model lock (keeps the session on one model — cache-safety) | **Yes** |
 | **models/** | Provider config: model pool, price-derived capability rank, fallback chain | **Yes** (read at startup) |
 | **router/** | Decision core: embed prompt via fastembed, kNN retrieval via hnswlib, selection rule → model chosen via outcome feedback or cold-start | **Yes** — called on first turn; learns from verified outcomes |
 | **capture/** | Off-wire outcome capture: session-close triggers, work-dir resolver, coordinator, background worker | **Yes** — wired at session-close to run verifiers async |
@@ -108,7 +108,7 @@ verified outcomes build a neighbourhood for kNN to search.
 
 ```
 ├── src/shunt/             Router package
-│   ├── cli.py             CLI entry point (shunt start, doctor, explain, escalate, flag, reindex, version)
+│   ├── cli.py             CLI entry point (shunt start, doctor, explain, escalate, flag, reindex, inspect, version)
 │   ├── proxy/             HTTP server: /health, /v1/chat/completions, /v1/messages, /v1/models
 │   │                      (calls router to decide model; cold-starts to cheap default)
 │   ├── router/            Decision core — embed → nearest-neighbour → selection rule
@@ -118,6 +118,10 @@ verified outcomes build a neighbourhood for kNN to search.
 │   ├── db/                SQLite persistence for sessions, outcomes, index
 │   ├── session/           Session lifecycle, inactivity timeout, model lock
 │   ├── models/            Provider config, price-derived capability rank, fallback chain
+│   ├── inspect/           Figure frame, layout contract and diagnostics over the live outcome store (`shunt inspect`, [inspect] extra)
+│   │   └── inference/     Seven-figure inference family over the live store, driven by a figures.json manifest (`python -m shunt.inspect.inference`)
+│   ├── analysis/          Off-policy evaluation (ope.py) and instrument admissibility (admissibility.py) over logged decisions
+│   │                      (shipped rather than benchmark-side: src/shunt/ may not import benchmark/ — SH006 — and the rig image carries no benchmark/ tree)
 │   └── config/            Shipped defaults: models.yaml registry, router.yaml policy
 ├── benchmark/             Offline model-capability and routing evaluation
 ├── docs/                  User documentation (MkDocs)

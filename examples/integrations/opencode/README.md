@@ -38,6 +38,14 @@ The OpenAI wire base URL keeps its **`/v1` suffix**. The API key is ignored —
 Shunt holds the real provider keys — but must be non-empty. `model="auto"` lets
 Shunt route.
 
+## Sessions
+
+opencode sends `X-Session-Id` on every request — fresh on a new conversation
+(`/new`), stable when one is resumed, and forks carry `x-parent-session-id`.
+Shunt keys its sessions on that header when present: a new conversation gets a
+fresh routing decision, and a resumed one reuses the model previously locked for
+it. See [Session identity](../../docs/routing.md#session-identity).
+
 ## Run the handshake (CI, best-effort)
 
 The compose file embeds the opencode config (the same JSON as above, with

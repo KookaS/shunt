@@ -1,8 +1,66 @@
 {
-  "plot_exploration": "2ecd50e9911405ed36e577cd8a6fc766fd98427fc2c2431971f245928da8660e",
-  "plot_knn_nulls": "4ff23be73fe73bab5da62e610c1ec02b118640ef62c3b51fe276f8b349e3d6e7",
-  "report": "78cebb00cd436dbffe665371ea9cd4ed5a3b52d4c4a8af2eea310e3fca23bd66",
-  "run_eval": "dd514d7afdd69ffb0f73affc4f7e7c50bd0cb7749d6276327ad5ce6a00b530b9",
-  "threshold_sweep": "1505082c02b0016607ae3e70af71c1da80d309e486728baa8f67851fd5f27851",
-  "viz_knn": "dec710bc593c3f12136cc0d497eba237f04ed04df0eacf0e8135767e3efdfd92"
+  "plot_exploration": {
+    "inputs": "619c96c800917e8c085ca6b57892ce0f28c95d240e802c9467a333d0f9e9ecd8",
+    "outputs": {
+      "exploration_cost.png": "fcb485f036d591451e2053965069561cba1d23e7e55d16837a7d6e4493f53e5c"
+    }
+  },
+  "plot_knn_nulls": {
+    "inputs": "06306962a3795ba2b9432a85c8c61c1e701bd40067da37c778ff5ce9c551a469",
+    "outputs": {
+      "embedding_signal.png": "047634af4af14b9066e5d41883aa478b9cf1125c719edd4941697c481638dad4"
+    }
+  },
+  "render_inference_figures": {
+    "inputs": "c5974eca407fc5e4f5a6c83beb9b8d69b403671f1f430409c726ef4eeddd32f4",
+    "outputs": {
+      "inference_cost.png": "1200879261e9be3ebabf2e9e038e03d9e21857dcbfcd045eb292f0d7205b66bb",
+      "inference_escalation.png": "ba86080378d75fd907e3e7121b8d47c01d6ffb68700fee4bdd66991bbc6e1b9e",
+      "inference_neighbourhood.png": "2a340a57f94652f28a178b0950c17836f8d041e6e56a957b58ef9548cd63d0eb",
+      "inference_ope.png": "1e45f735969b24718ffa511b5b378b75b3a633917cbd69518e5e0e659f0608ca",
+      "inference_policy.png": "8b5af7d2b99e070479834fb96ec9b999580d4b17eb205b84496c0a1b7cfbf732",
+      "inference_strata.png": "e3c95aeb218fe214a4925497a3abe84c4a47562249b3f7ed6f06d59610dae812",
+      "inference_unit_economics.png": "bd3478de76a1168a8ccf3a8c476864a5b16fffe0d716d3663cd1d55c3e39143d"
+    }
+  },
+  "report": {
+    "inputs": "a6bbe8ce2761f24d1a09566351507f593a12aeaf6a0ab2067598b0bf05551e42",
+    "outputs": {
+      "arm_manipulation.png": "4061dcf67ce2259cc7e0d718f7f28823d091daf69b22eafc0a38a71513968b00",
+      "cache_economics.png": "52f834502ed923f096d04a31fd98bb713a82f17d65e79a3c2e9abba92b82b056",
+      "complementarity.png": "89810e34dd1d2e4fd2e9ce8625f018ca32b8d1ef0b134ec2299d3d6047277e58",
+      "cost_quality_frontier.png": "343229eff0105637cd1f56b33c63d86e845fbaa8e3f500fa8b6511fd58921077",
+      "evidence_basis.png": "b7d94989024ad064f6001f72de27fcaefc81321945baca9061faf535b3703cf0",
+      "kill_gate.png": "d9a8665b57e813c267f02a8932ce8bc7fc451fa6d74a77d92a57dcb72379fb67",
+      "ladder_rungs.png": "af4d739db3e52a869d793acd1759de79b65bfd4bf2246c01b8e3a8cab84ff3f3",
+      "live_gap.png": "6bdf2fe7643a2457e81c56d7f9e1abe11837ae7d2b502a003da32b2f900bd73c",
+      "oracle_gap.png": "dd4b2b7fc42071d62ab700a9a90a0138e20331b4556093d52ced75b8e0c73050",
+      "routing_decision_audit.png": "a6b461033bc003bce6ac929d374981baa8d74e3fe695c4c019ea39d3fa395251",
+      "task_difficulty.png": "c67bb8402b5c570df89aa1810a8f3e6868a5b93ed73b003c192d661ccc495687"
+    }
+  },
+  "run_eval": {
+    "inputs": "d7e815759bba43ab3f3e0f24655ba87d7daba5925fb0a7197d465c9901a9c71f",
+    "outputs": {
+      "corpus_and_coverage.png": "b8c5d94c91dff3fcd5f64a2008c25d0be4042fbd18bd4d17255c611ed58c5963",
+      "escalation_budget.png": "7b6b06d18969f928440fd1f6bb6ac102d3929db504b66a6f86737d0ced86247f",
+      "escalation_decision.png": "6f65320feb18d4d5efd24ea36ab8e305bf05595ecc03fbdd000e254979036400",
+      "metrics.json": "068f25ae57a6c295a3770ced849776092944329796a19a8ca3d266bd9b0529b5",
+      "operating_point.png": "c72eb4a64043298567a5c4ead30393e6f89ab724a0ffe458c3cf3bc0bc84fd66",
+      "policy_sweep.png": "27afdf45ac2a0651c7bb8b9c3e1126d5166a4bbfb761fa6d6a46ea6fce131359",
+      "session_value.png": "eaf017cf2275b22ca34d605d00556f12b44dd90d551ece47a4a935df1db93cf7"
+    }
+  },
+  "threshold_sweep": {
+    "inputs": "3d83b027f4bd1b6b73ec39b907ec0edb50c33bf83c9ff61d4f0976bc989422da",
+    "outputs": {
+      "sweep_regimes.png": "3726747cb6054c52b3b3803bee4b53bfd66caa2b0d003a2728e531eb7f6979c9"
+    }
+  },
+  "viz_knn": {
+    "inputs": "37f1db269263623cb7f80ce89f3d7514d780e50de7dbeb5f47018f7cd9781353",
+    "outputs": {
+      "knn_calibration.png": "01a13a14cc87a9d9c9c95c279c9b909f0b2ea39460676474468f914ab4016e05"
+    }
+  }
 }

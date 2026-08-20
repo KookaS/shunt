@@ -106,6 +106,30 @@ trust, not volume.
 Cold-start sessions are still embedded and still recorded. That is the point of
 them: they are how the corpus gets built.
 
+On a fresh deployment the store is empty, so the router stays on the fixed cheap
+model until enough verified outcomes accumulate. You can warm it deliberately:
+`python -m benchmark.routing.seed_live` (from a checkout) loads the benchmark's
+measured — never imputed — outcome cells into the store, so the index is warm at
+inference. Seeded sessions use ids `bench:...` and the reason `benchmark_seed`;
+they are non-policy, and the router re-fits from live verified outcomes as they
+accumulate.
+
+Re-seeding is incremental and skippable. Each seeded row stores a per-cell
+`content_hash` (task, model, outcome, cost, and text); on re-import only cells
+whose hash changed are written — updated in place, never re-embedded when
+unchanged. The warm-start bundle commits the measured cells via git LFS at
+`benchmark/routing/data/seed/`: one `.npz` per embedder fingerprint, with a plain
+`manifest.json` beside it (fresh clones need `git lfs pull`). Build it with
+`make seed-bundle`; `make check-seed-bundle` proves it current against the committed
+`results.csv` and `challenges.json`. Re-running `seed_live` skips
+re-importing while the stored marker's digests (results + challenges) still match —
+`--force` forces a full re-import.
+
+Be clear about what seeding does not buy: the embedding→outcome
+signal on the benchmark corpus measured at chance (see
+[the embedding-signal figure](#fig-embedding-signal)), so seeding is a start-warm
+convenience, not evidence the rule routes your workload.
+
 ### The neighbourhood
 
 Once warm, the embedding goes to an HNSW index (hnswlib, cosine space) which returns
@@ -188,6 +212,17 @@ gets.
   rebuilt every `refit.every_n_outcomes` captures, so a single new outcome does not
   move routing until the next re-fit or restart.
 
+### Session identity
+
+Sessions are keyed on the tool's conversation id when the tool presents one.
+opencode sends `X-Session-Id` on every request — fresh on a new conversation,
+stable when one is resumed, and a fork carries `x-parent-session-id`. A new
+conversation id means a new session and a fresh routing decision on the new task.
+A resumed conversation reuses the model previously locked for it (see
+`session_resume` / `fork_resume`). Tools that send no conversation id (Claude
+Code, aider, plain clients) fall back to `(source_ip, user_agent)` — the old
+"one client, one model" grouping now applies only to them.
+
 ### The reason tokens
 
 Every decision names its rule. These are the values you will see in the header and
@@ -205,6 +240,9 @@ in `shunt explain`:
 | `conservative_fallback` | An exploratory downshift was blocked for lack of banked slack |
 | `auto_escalation` | A pending escalation directive overrode the base pick |
 | `escalation_floor` | This task had already escalated to a higher rank, so the base pick was lifted back to it |
+| `session_resume` | A resumed conversation reused the model locked for it (persisted across restarts) — non-policy, no selection propensity |
+| `fork_resume` | A conversation resumed via a fork reused the parent conversation's model — non-policy, no selection propensity |
+| `benchmark_seed` | A session seeded from the benchmark's measured outcomes — non-policy, never a learned choice |
 | `always_cheap` / `always_frontier` | A fixed strategy is configured; no embedding, no query |
 
 ## Why it is built this way

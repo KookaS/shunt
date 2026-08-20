@@ -106,3 +106,6 @@ reports/
 benchmark/escalation/reports/*
 !benchmark/escalation/reports/metrics.json
 !benchmark/escalation/reports/difficulty_go_no_go.json
+
+# The docs-figure seed store: a rebuildable cache of the committed bundle, never committed.
+benchmark/routing/.build/

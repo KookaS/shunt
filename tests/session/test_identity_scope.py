@@ -55,3 +55,44 @@ def test_continuous_use_holds_the_lock_so_the_cache_survives() -> None:
         stored.last_activity = datetime.now(UTC) - timedelta(seconds=840)
         assert manager.cleanup_expired() == []
         assert manager.find_or_create(_identity()).session_id == first_id
+
+
+# ── Header-keyed identity (external session id) ──────────────────────────────
+# opencode sends `X-Session-Id` (fresh per conversation, stable on a resume), so the
+# proxy keys sessions on `ext:<external_id>` when the header is present. These tests pin
+# that the SessionManager treats each external id as its OWN session and that the
+# header-less (ip, user_agent) fallback still groups as today.
+
+
+def test_same_external_id_is_one_session() -> None:
+    manager = SessionManager(inactivity_timeout=900, grace_period=120)
+    first = manager.find_or_create("ext:ses-A")
+    resumed = manager.find_or_create("ext:ses-A")
+    assert resumed.session_id == first.session_id
+    assert resumed is first
+
+
+def test_new_external_id_is_a_new_session() -> None:
+    # The opencode /new case: a fresh conversation carries a fresh external id, so it
+    # must NOT inherit the previous conversation's session (or its locked model).
+    manager = SessionManager(inactivity_timeout=900, grace_period=120)
+    build = manager.find_or_create("ext:ses-A")
+    build.model_chosen = "kimi-k3"
+    new_conversation = manager.find_or_create("ext:ses-B")
+    assert new_conversation.session_id != build.session_id
+    assert new_conversation.model_chosen is None
+
+
+def test_external_id_is_distinct_from_ip_ua_fallback() -> None:
+    manager = SessionManager(inactivity_timeout=900, grace_period=120)
+    external = manager.find_or_create("ext:ses-A")
+    fallback = manager.find_or_create(_identity())
+    assert external.session_id != fallback.session_id
+
+
+def test_header_less_fallback_still_groups_by_ip_ua() -> None:
+    # No header present → today's (ip, user_agent) grouping, unchanged.
+    manager = SessionManager(inactivity_timeout=900, grace_period=120)
+    a = manager.find_or_create(_identity())
+    b = manager.find_or_create(_identity())
+    assert a.session_id == b.session_id

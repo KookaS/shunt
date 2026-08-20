@@ -514,6 +514,95 @@ def _get_tool_identity(request: Request) -> str:
     return SessionManager.compute_tool_identity(source_ip, user_agent)
 
 
+_MAX_EXTERNAL_SESSION_ID_LEN = 128
+
+
+def _sanitize_external_id(raw: str | None) -> str | None:
+    """One header value → a safe external session id, or None when absent/blank."""
+    if not raw:
+        return None
+    cleaned = "".join(c for c in raw if c.isprintable() and ord(c) < 128).strip()
+    if not cleaned:
+        return None
+    return cleaned[:_MAX_EXTERNAL_SESSION_ID_LEN]
+
+
+def _get_external_session_id(request: Request) -> tuple[str | None, str | None]:
+    """The (session_id, parent_session_id) pair declared via headers, if any.
+
+    `x-session-affinity` aliases `x-session-id`; forks carry `x-parent-session-id`. Absent
+    or blank values return None so callers fall back to (ip, user_agent).
+    """
+    session_id = _sanitize_external_id(
+        request.headers.get("x-session-id") or request.headers.get("x-session-affinity")
+    )
+    parent_id = _sanitize_external_id(request.headers.get("x-parent-session-id"))
+    return session_id, parent_id
+
+
+def _resume_locked_model(
+    request: Request,
+    session: Session,
+    external_id: str | None,
+    parent_id: str | None,
+) -> None:
+    """Reuse a prior conversation's locked model for a resumed/forked external session.
+
+    Fires only on a fresh in-memory session (model_chosen unset) so an open session is
+    never re-routed — cache-safety holds. The reused model must still be routable.
+    """
+    if session.model_chosen is not None or external_id is None:
+        return
+    outcome_store: OutcomeStore = request.app.state.outcome_store
+    stored = outcome_store.get_session_by_external_id(external_id)
+    source = "session_resume"
+    if not stored or not stored.get("model_chosen"):
+        if parent_id is None:
+            return
+        stored = outcome_store.get_session_by_external_id(parent_id)
+        source = "fork_resume"
+    if stored is None:
+        return
+    model = stored.get("model_chosen")
+    if not isinstance(model, str) or not model:
+        return
+    model_pool: ModelPool = request.app.state.model_pool
+    if model_pool.get_model(model) is None or not model_pool.is_healthy(model):
+        return
+    session.model_chosen = model
+    session.metadata["model"] = model
+    session.metadata["model_source"] = source
+    session.decision_provenance = {
+        "model_chosen": model,
+        "selection_rule_used": source,
+        "fallback_chain_triggered": False,
+        "router_propensity": None,
+        "auto_escalated": False,
+        "new_label_window": False,
+    }
+    # The resumed conversation is intentionally NOT re-embedded: its original session
+    # already represents the task in the kNN corpus, so no last_prompt is recorded.
+    logger.info(
+        "session: RESUMED %s external=%s model=%s reason=%s",
+        session.session_id,
+        external_id,
+        model,
+        source,
+    )
+
+
+def _session_for_request(mgr: SessionManager, request: Request) -> Session:
+    """Open (or reuse) the session for *request*: header-keyed when possible, else (ip, ua)."""
+    external_id, parent_id = _get_external_session_id(request)
+    identity = f"ext:{external_id}" if external_id else _get_tool_identity(request)
+    session = mgr.find_or_create(identity)
+    if external_id is not None:
+        session.external_session_id = external_id
+    mgr.cleanup_expired()
+    _resume_locked_model(request, session, external_id, parent_id)
+    return session
+
+
 def _store_session_with_provenance(
     outcome_store: OutcomeStore,
     router: ProxyRouter,
@@ -563,6 +652,7 @@ def _store_session_with_provenance(
             selection_propensity=provenance.get("router_propensity"),
             model_fingerprint=router.model_fingerprint(model_name),
         ),
+        external_session_id=session.external_session_id,
     )
 
 
@@ -688,8 +778,7 @@ async def chat_completions(request: Request) -> Response:
     mgr: SessionManager = request.app.state.session_manager
     router: ProxyRouter = request.app.state.router
 
-    session = mgr.find_or_create(_get_tool_identity(request))
-    mgr.cleanup_expired()
+    session = _session_for_request(mgr, request)
 
     stream = body.get("stream", False)
 
@@ -748,8 +837,7 @@ async def messages(request: Request) -> Response:
     mgr: SessionManager = request.app.state.session_manager
     router: ProxyRouter = request.app.state.router
 
-    session = mgr.find_or_create(_get_tool_identity(request))
-    mgr.cleanup_expired()
+    session = _session_for_request(mgr, request)
 
     stream = body.get("stream", False)
 

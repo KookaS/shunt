@@ -73,6 +73,7 @@ STAMP_LEDGER_NAME = "stamp_ledger.json"
 _FIGURES_DIR = Path("docs/assets/figures")
 _ROUTING_FIGURES_DIR = _FIGURES_DIR / "routing"
 _ESCALATION_FIGURES_DIR = _FIGURES_DIR / "escalation"
+_INFERENCE_FIGURES_DIR = _FIGURES_DIR / "inference"
 _ROUTING_REPORTS_DIR = Path("benchmark/routing/reports")
 _ESCALATION_PLOTS_DIR = Path("benchmark/escalation/reports")
 
@@ -562,7 +563,7 @@ def _module_file(name: str) -> Path:
 # appends them to each job's tuple. `benchmark.routing.plot_style` is in the layer rather than
 # listed per job so no job can silently omit it again.
 _ROUTING_ANALYSIS: Final[tuple[str, ...]] = (
-    "benchmark.admissibility",
+    "benchmark.admissibility",  # a shim over `shunt.analysis.admissibility`, digested just below
     "benchmark.config",
     "benchmark.plot_frame",
     "benchmark.routing",
@@ -581,6 +582,12 @@ _ROUTING_ANALYSIS: Final[tuple[str, ...]] = (
     "benchmark.routing.strategies.knn",
     "benchmark.routing.strategies.oracle",
     "benchmark.routing.summary",
+    # The frame, the shared style helpers and the instrument adjudicator ship in the wheel;
+    # benchmark/plot_frame.py, benchmark/routing/plot_style.py and benchmark/admissibility.py are
+    # re-export shims, so digesting only those would certify a figure drawn by changed code.
+    "shunt.analysis.admissibility",
+    "shunt.inspect.plot_frame",
+    "shunt.inspect.plot_style",
 )
 # plot_timing additionally derives from the report/summary machinery, whose own closure reaches
 # the run_eval/validate path — those modules join its digest too.
@@ -637,6 +644,21 @@ class FigureJob:
 
 def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
     """The measured outcomes + task set a half's figures are derived from."""
+    if half == "inference":
+        return (
+            # The seed bundle's manifest, not the .npz: the manifest names the bundle file
+            # (content-keyed) plus its results/challenges digests, so it moves whenever the
+            # corpus does at the cost of one small file read.
+            _ROUTING / "data" / "seed" / "manifest.json",
+            # `build_live_pool()` (seed_live.py:431) INTERSECTS the registry with the router
+            # policy to decide which model rows survive seeding, so renaming or dropping a
+            # live model changes the corpus row count and therefore the committed figures.
+            # Both are digest inputs for that reason — and the first time someone renames a
+            # model, `make check-inference-figures` goes red for a reason that reads as
+            # entirely unrelated to the rename. This is that reason.
+            _REPO_ROOT / "src" / "shunt" / "config" / "models.yaml",
+            _REPO_ROOT / "src" / "shunt" / "config" / "router.yaml",
+        )
     if half == "escalation":
         return (
             # The corpus manifest, not the trajectory directory: `_digest` expands a
@@ -737,7 +759,7 @@ _REPORT_JOB: Final[FigureJob] = FigureJob(
 )
 
 _ESCALATION_ANALYSIS: Final[tuple[str, ...]] = (
-    "benchmark.admissibility",
+    "benchmark.admissibility",  # a shim over `shunt.analysis.admissibility`, digested just below
     "benchmark.config",
     "benchmark.plot_contract",
     "benchmark.plot_frame",
@@ -746,7 +768,7 @@ _ESCALATION_ANALYSIS: Final[tuple[str, ...]] = (
     "benchmark.escalation.deployability",
     "benchmark.escalation.features",
     "benchmark.escalation.metrics",
-    "benchmark.escalation.ope",
+    "benchmark.escalation.ope",  # a shim over `shunt.analysis.ope`, digested just below
     "benchmark.escalation.plots",
     "benchmark.escalation.policy_eval",
     "benchmark.escalation.prefix_eval",
@@ -754,6 +776,12 @@ _ESCALATION_ANALYSIS: Final[tuple[str, ...]] = (
     "benchmark.escalation.run_eval",
     "benchmark.escalation.schema",
     "benchmark.escalation.session_eval",
+    # See the note in `_ROUTING_ANALYSIS`: the shims delegate, so digest the implementations.
+    "shunt.analysis.admissibility",
+    "shunt.analysis.ope",
+    "shunt.inspect.plot_contract",
+    "shunt.inspect.plot_frame",
+    "shunt.inspect.plot_style",
 )
 
 _ESCALATION_JOB: Final[FigureJob] = FigureJob(
@@ -779,7 +807,65 @@ _ESCALATION_JOB: Final[FigureJob] = FigureJob(
     optional_outputs=("session_value.png",),
 )
 
-FIGURE_JOBS: Final[tuple[FigureJob, ...]] = (*_STANDALONE, _REPORT_JOB, _ESCALATION_JOB)
+_INFERENCE_ANALYSIS: Final[tuple[str, ...]] = (
+    # The corpus builder's own reach: `docs_corpus` seeds through `seed_live`, which pulls the
+    # censoring rules and the strategy set into what the seeded rows look like.
+    "benchmark.config",
+    "benchmark.routing",
+    "benchmark.routing.censoring",
+    "benchmark.routing.docs_corpus",
+    "benchmark.routing.seed_live",
+    # The drawing is all SHIPPED code — the same modules the rig container renders from, where
+    # no `benchmark/` exists. `shunt.inspect.inference` itself is digested as a directory (see
+    # the job's `inputs`) so a new module in the package joins without anyone listing it.
+    "shunt.analysis.admissibility",
+    "shunt.analysis.ope",
+    "shunt.db.store",
+    "shunt.inspect.plot_contract",
+    "shunt.inspect.plot_frame",
+    "shunt.inspect.plot_style",
+)
+
+# The seven inference figures: the live router's own account, drawn from a seed-only store built
+# from committed data. Its producer is benchmark-side (only the committed mode's inputs live
+# here); the drawing is shipped code. stage=FIGURES, so `--from figures` redraws it and records
+# its digest exactly as it does the standalone routing jobs.
+_INFERENCE_FIGURES: Final[FigureJob] = FigureJob(
+    "benchmark.routing.render_inference_figures",
+    (
+        "inference_cost.png",
+        "inference_escalation.png",
+        "inference_neighbourhood.png",
+        "inference_ope.png",
+        "inference_policy.png",
+        "inference_strata.png",
+        "inference_unit_economics.png",
+    ),
+    _figure_inputs(
+        _ROUTING / "render_inference_figures.py",
+        # A directory, so `_digest` expands it to its sorted *.py: the whole shipped drawing
+        # package (data, estimators, figures, specs, the container entrypoint).
+        _REPO_ROOT / "src" / "shunt" / "inspect" / "inference",
+        _STRATEGIES,
+        analysis=_INFERENCE_ANALYSIS,
+    ),
+    figures_dir=_REPO_ROOT / _INFERENCE_FIGURES_DIR,
+    # Every declared output is a PNG, so `reports_dir` is never consulted; it points at the
+    # figures dir rather than inheriting routing's, which would be a lie about where this
+    # job's artifacts live.
+    reports_dir=_REPO_ROOT / _INFERENCE_FIGURES_DIR,
+    half="inference",
+)
+
+FIGURE_JOBS: Final[tuple[FigureJob, ...]] = (
+    *_STANDALONE,
+    _REPORT_JOB,
+    _ESCALATION_JOB,
+    _INFERENCE_FIGURES,
+)
+# Every half a figure job declares — the `--half` filter's choices, so registering a new half
+# extends the flag without an argparse edit.
+FIGURE_HALVES: Final[tuple[str, ...]] = tuple(sorted({job.half for job in FIGURE_JOBS}))
 # Kept as the name `stage_figures` and benchmark/tests/test_pipeline.py already use: the
 # subset this pipeline stage actually regenerates.
 STANDALONE_FIGURES: Final[tuple[FigureJob, ...]] = tuple(
@@ -806,9 +892,68 @@ def _digest(paths: tuple[Path, ...]) -> str:
     return sha.hexdigest()
 
 
+def _file_digest(path: Path) -> str:
+    """SHA-256 of one file's bytes — the committed-output half of the freshness record."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@dataclass(frozen=True)
+class _ManifestEntry:
+    """One job's freshness record: its input digest and the output bytes certified with it."""
+
+    inputs: str
+    # None = the entry predates output digesting: the job's committed bytes were never
+    # certified, which is reported as UNCERTIFIED rather than silently accepted as fresh.
+    outputs: dict[str, str] | None
+
+
 def figure_digests(jobs: tuple[FigureJob, ...] = FIGURE_JOBS) -> dict[str, str]:
     """Current input digest per figure job — every committed figure, not only standalone ones."""
     return {job.name: _digest((*_data_inputs(job.half), *job.inputs)) for job in jobs}
+
+
+def figure_output_digests(jobs: tuple[FigureJob, ...] = FIGURE_JOBS) -> dict[str, dict[str, str]]:
+    """Current SHA-256 of each declared output that is on disk, per figure job."""
+    # The INPUT digest answers "were the figures drawn from today's data and code"; it cannot
+    # answer "are the committed bytes still what that code draws". Recording the OUTPUT bytes at
+    # certification time is what closes that: two figures drifted this session (a PNG whose bytes
+    # moved against an unmodified producer, and one that does not reproduce from committed data)
+    # and the input-only gate reported both green.
+    return {
+        job.name: {
+            out: _file_digest(job.output_dir(out) / out)
+            for out in job.outputs
+            if (job.output_dir(out) / out).exists()
+        }
+        for job in jobs
+    }
+
+
+def _manifest_entries(path: Path) -> dict[str, _ManifestEntry]:
+    """Parse the manifest; a legacy bare-string value means inputs recorded, outputs never were."""
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    entries: dict[str, _ManifestEntry] = {}
+    for name, value in payload.items():
+        if isinstance(value, dict):
+            outputs = value.get("outputs")
+            entries[str(name)] = _ManifestEntry(
+                inputs=str(value.get("inputs", "")),
+                outputs=(
+                    {str(k): str(v) for k, v in outputs.items()}
+                    if isinstance(outputs, dict)
+                    else None
+                ),
+            )
+        else:
+            entries[str(name)] = _ManifestEntry(inputs=str(value), outputs=None)
+    return entries
 
 
 def write_figure_manifest(
@@ -824,29 +969,65 @@ def write_figure_manifest(
     # jobs it actually regenerated. Entries named by neither set are preserved: this write only
     # records what the calling stage produced. The old whole-file overwrite is what let a
     # crashed stage's digest survive as fresh.
-    recorded: dict[str, str] = {}
-    if path.exists():
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            payload = {}
-        recorded = {str(k): str(v) for k, v in payload.items()}
+    entries = _manifest_entries(path)
     for name in drop:
-        recorded.pop(name, None)
-    recorded.update(figure_digests(jobs) if jobs is not None else figure_digests())
-    path.write_text(json.dumps(recorded, indent=2, sort_keys=True) + "\n")
+        entries.pop(name, None)
+    certified = jobs if jobs is not None else FIGURE_JOBS
+    inputs, outputs = figure_digests(certified), figure_output_digests(certified)
+    for name, digest in inputs.items():
+        entries[name] = _ManifestEntry(inputs=digest, outputs=outputs[name])
+    payload = {
+        name: {"inputs": entry.inputs, "outputs": entry.outputs}
+        if entry.outputs is not None
+        else entry.inputs
+        for name, entry in entries.items()
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return path
 
 
-def stale_figures(path: Path = FIGURE_MANIFEST) -> list[str]:
+def stale_figures(
+    path: Path = FIGURE_MANIFEST, jobs: tuple[FigureJob, ...] = FIGURE_JOBS
+) -> list[str]:
     """Figure jobs whose inputs changed since the committed PNGs were produced."""
-    if not path.exists():
-        return [job.name for job in FIGURE_JOBS]
-    try:
-        recorded = json.loads(path.read_text())
-    except ValueError:
-        return [job.name for job in FIGURE_JOBS]
-    return [name for name, digest in figure_digests().items() if recorded.get(name) != digest]
+    entries = _manifest_entries(path)
+    return [
+        name
+        for name, digest in figure_digests(jobs).items()
+        if name not in entries or entries[name].inputs != digest
+    ]
+
+
+def drifted_figures(
+    path: Path = FIGURE_MANIFEST, jobs: tuple[FigureJob, ...] = FIGURE_JOBS
+) -> list[str]:
+    """Committed outputs whose bytes no longer match what was recorded at certification."""
+    entries, current = _manifest_entries(path), figure_output_digests(jobs)
+    drifted: list[str] = []
+    for job in jobs:
+        recorded = entries.get(job.name)
+        if recorded is None or recorded.outputs is None:
+            continue
+        for out, digest in recorded.outputs.items():
+            if current[job.name].get(out) != digest:
+                drifted.append(f"{job.name}:{out}")
+    return drifted
+
+
+def uncertified_figures(
+    path: Path = FIGURE_MANIFEST, jobs: tuple[FigureJob, ...] = FIGURE_JOBS
+) -> list[str]:
+    """Outputs of jobs recorded with an input digest only — their bytes were never certified."""
+    # Named per OUTPUT, not per job: the two figures known to have drifted this session
+    # (sweep_regimes.png, inference_neighbourhood.png) have to be readable in the report, and a
+    # job name alone hides which of its 8 PNGs the reader should go look at.
+    entries = _manifest_entries(path)
+    return [
+        f"{job.name}:{out}"
+        for job in jobs
+        if job.name in entries and entries[job.name].outputs is None
+        for out in job.outputs
+    ]
 
 
 def missing_figures(jobs: tuple[FigureJob, ...] = FIGURE_JOBS) -> list[str]:
@@ -1131,23 +1312,51 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Only verify the committed standalone figures are current, then exit (no drawing)",
     )
+    ap.add_argument(
+        "--half",
+        choices=FIGURE_HALVES,
+        default=None,
+        help=(
+            "Restrict --check-figures to one figure half (default: all). Scoped to the CHECK "
+            "deliberately: the stages regenerate whatever their own job set names, and no "
+            "caller needs a half-scoped redraw — `make check-inference-figures` needs a "
+            "half-scoped report of a half whose render lives outside this pipeline's stages."
+        ),
+    )
     return ap
 
 
-def check_figures() -> int:
-    """Report stale/missing standalone figures; 0 when the committed set is current."""
-    stale, absent = stale_figures(), missing_figures()
+def figure_jobs_for(half: str | None) -> tuple[FigureJob, ...]:
+    """Every figure job, or just one half's — the `--half` filter's one definition."""
+    return FIGURE_JOBS if half is None else tuple(j for j in FIGURE_JOBS if j.half == half)
+
+
+def check_figures(half: str | None = None) -> int:
+    """Report stale/missing figures for one half (None = all); 0 when the set is current."""
+    jobs = figure_jobs_for(half)
+    stale, absent = stale_figures(jobs=jobs), missing_figures(jobs)
+    drifted, uncertified = drifted_figures(jobs=jobs), uncertified_figures(jobs=jobs)
     for name in stale:
         print(f"STALE: {name} — its inputs changed since the committed PNGs were drawn")  # noqa: T201
     for name in absent:
         print(f"MISSING: {name}")  # noqa: T201
-    if not stale and not absent:
-        pngs = sum(len(job.outputs) for job in FIGURE_JOBS)
-        print(f"Figures current: {len(FIGURE_JOBS)} jobs, {pngs} outputs.")  # noqa: T201
+    for name in drifted:
+        print(  # noqa: T201
+            f"DRIFTED: {name} — the committed bytes are not the bytes certified for this job"
+        )
+    for name in uncertified:
+        print(f"UNCERTIFIED: {name} — no certified bytes on record for this output")  # noqa: T201
+    if not (stale or absent or drifted or uncertified):
+        pngs = sum(len(job.outputs) for job in jobs)
+        scope = "" if half is None else f" ({half})"
+        print(f"Figures current{scope}: {len(jobs)} jobs, {pngs} outputs.")  # noqa: T201
         return 0
+    # `--from evaluate` and not `--from report`: the report stage spawns run_eval only as a
+    # STATUS PROBE, which never calls write_figure_manifest, so it cannot certify that job.
     print(  # noqa: T201
-        "Regenerate with: make benchmark-figures "
-        "(or: uv run --extra benchmark python -m benchmark.pipeline --from figures)",
+        "Repair with: uv run --extra benchmark python -m benchmark.pipeline --from evaluate "
+        "(redraws the evaluate/report/figures jobs and re-records both digests). "
+        "Never hand-edit benchmark/routing/figure_inputs.json.",
         file=sys.stderr,
     )
     return 1
@@ -1159,7 +1368,10 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.check_figures:
         config.load(args.config)
-        return check_figures()
+        return check_figures(args.half)
+    if args.half is not None:
+        # Loud rather than silently ignored: --half only filters the check.
+        _build_parser().error("--half applies to --check-figures only")
     return run_pipeline(args).returncode
 
 

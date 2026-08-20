@@ -604,4 +604,4 @@ is not wired to the escalation path.
   every figure, every caveat
 - [Escalation dataset](escalation-data-card.md) — what the corpus is
 - [Reproducing the escalation eval](escalation-reproduction.md) — run it yourself
-- [Results](results.md) — every measured routing and escalation number
+- [Results](results.md) — every measured routing, escalation, and inference number

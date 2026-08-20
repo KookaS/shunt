@@ -106,10 +106,13 @@ statuses below are the current audit of that contract:
   stamps, `manifest.json`, `admissibility.json`, `stamp_ledger.json`, and the report PNGs.
   Untracked: the per-step diffs above, the ~100 GB image set, and the HF dataset rows. Everything
   needed to **re-score** is in git; what is needed to **re-derive** is not. **LFS caveat:**
-  the trajectory corpus (`benchmark/escalation/data/**/*.jsonl`) is **Git-LFS-tracked** — the
-  objects live outside the commit, so a fresh clone without LFS materialisation (`git lfs
-  pull`) gets pointer files, not data, and the evals cannot read the corpus until they are
-  fetched. `manifest.json` stays plain git so the ledger is always readable.
+   the trajectory corpus (`benchmark/escalation/data/**/*.jsonl`) is **Git-LFS-tracked** — the
+   objects live outside the commit, so a fresh clone without LFS materialisation (`git lfs
+   pull`) gets pointer files, not data, and the evals cannot read the corpus until they are
+   fetched. `manifest.json` stays plain git so the ledger is always readable. The seed
+   bundle (`benchmark/routing/data/seed/*.npz`) is LFS-tracked the same way — a fresh clone
+   needs `git lfs pull` before `seed_live --from-bundle` can read it, and `make seed-bundle`
+   regenerates it from `results.csv`.
 - **YES — flag a model the collection has not covered.** `benchmark.model_coverage` (`make
   model-coverage`) enumerates the models in `benchmark.yaml`'s `models:` list, not the models the
   data happens to contain, and exits nonzero when one of them is `ABSENT` (no data) or `THIN`
@@ -131,13 +134,32 @@ classifies 0 cells to recompute on unchanged content, and the escalation replay 
 containers). Only collecting **new** live model outcomes spends. What does go stale after a
 code change is the derived artifacts committed beside the results — `metrics.json`, the PNGs,
 `figures.json` — which those two targets regenerate, and `make check-figures`
-(`benchmark.pipeline --check-figures`) proves current without regenerating anything.
+(`benchmark.pipeline --check-figures`) proves current without regenerating anything. It checks
+both halves of each job's freshness record — the digest of its **inputs** and the SHA-256 of
+each **committed output** certified alongside them — and so reports four conditions: `STALE`
+(inputs moved since the draw), `MISSING` (no PNG on disk), `DRIFTED` (the committed bytes are
+not the bytes certified for that job, i.e. a figure changed outside the certifying stage) and
+`UNCERTIFIED` (a manifest entry that predates output digesting, so no output bytes are on
+record). The input-only gate reported two genuinely drifted figures as current; the last two
+conditions are what closed that. All four repair with `--from evaluate` — never by hand-editing
+`benchmark/routing/figure_inputs.json`.
+`--check-figures --half {routing,escalation,inference}` narrows the report to one half, so
+one half's staleness never decides another half's exit code (`make check-inference-figures`);
+`--half` is check-only and a hard `parser.error` on any other subcommand.
+
+The full figure-target list: `make routing-report` (routing half), `make escalation-eval`
+(escalation half), `make inference-figures` (the seven inference PNGs; `OUT=/tmp/x` diverts
+them plus the manifest to a scratch dir), `make benchmark-figures` (the pipeline's `figures`
+stage — the **only** target that re-records the freshness manifest, so it is what certifies a
+newly-added or changed figure), `make check-figures` and `make check-inference-figures` (the
+gates). `make inference-figures` renders without re-recording; a bare `--check-figures` stays
+red until `make benchmark-figures` runs.
 
 ## Layout
 
 ```
 benchmark/
-  admissibility.py             # Instrument-validity adjudicator (positive control + destroyed-signal null)
+  admissibility.py             # Re-export shim over shunt.analysis.admissibility (the adjudicator ships in the wheel)
   model_coverage.py            # Per-model corpus coverage — flags enabled models the collection missed
   challenges/                  # Individual challenge files
     swebench_verified/         # SWE-bench Verified instance SPECS (the sole source, runnable)
@@ -154,6 +176,7 @@ benchmark/
     results.csv                # THE committed source of truth — per-cell outcomes from live runs
     data/                      # Curated read-only inputs
       challenges.json          # Challenge index of the 500 swebench_verified specs (challenges, tasks)
+      seed/                    # LFS-tracked warm-start bundles (one .npz per embedder fingerprint + plain manifest.json)
     strategies/                # Routing strategies (one file per strategy)
       __init__.py
       oracle.py                # Perfect-information upper bound

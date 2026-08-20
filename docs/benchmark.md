@@ -354,9 +354,20 @@ escalation-eval` are **$0 of API money**. Only collecting **new** live model out
 
 What *does* go stale after a code change is the derived artifacts committed beside the
 results — `escalation/reports/metrics.json`, the PNGs under `docs/assets/figures/<half>/`, and
-`<half>/figures.json`. `make escalation-eval` and `make routing-report` regenerate them, and
-`make check-figures` (`benchmark.pipeline --check-figures`) proves the committed figures are
-current without regenerating anything — the gate to run after a code change before trusting an
+the per-half `figures.json`. The figure targets:
+
+| Target | Does |
+|---|---|
+| `make escalation-eval` | redraws the **escalation** half |
+| `make routing-report` | redraws the **routing** half |
+| `make benchmark-figures` | runs the pipeline's `figures` stage (`--from figures`) — redraws the standalone routing figures **and the inference half**, and is the only target that **re-records** the freshness manifest |
+| `make inference-figures` | redraws the seven **inference** PNGs only (`OUT=/tmp/x` for a scratch copy). It renders but does **not** re-record the manifest — certify with `make benchmark-figures` |
+| `make check-figures` | `benchmark.pipeline --check-figures` — proves every committed figure is current without regenerating anything |
+| `make check-inference-figures` | the same gate narrowed to one half (`--check-figures --half inference`) |
+
+`--check-figures` accepts `--half {routing,escalation,inference}`, so one half's staleness never
+decides another half's exit code; `--half` is a check-only flag and is a hard `parser.error`
+anywhere else. `make check-figures` is the gate to run after a code change before trusting an
 old PNG.
 
 Re-replaying is what `--restamp` does, and you only need it when the *instrument* changes —
@@ -533,10 +544,15 @@ section per figure. That is a deliberate split: the figures used to carry a five
 footer that was, on some plots, taller than the plot, and on the sweep table it collided
 with the data.
 
-The full record is not prose someone has to remember to keep. `benchmark/plot_frame.py` is
-the only code in the repo that may write a figure — a lint gate (SH007) blocks any that
-tries to skip it — and it records each figure's reading, goal, terms, notes, limitations,
-sample counts and input digest into a committed `benchmark/<half>/figures.json`. A second
+The full record is not prose someone has to remember to keep. `src/shunt/inspect/plot_frame.py`
+is the one legal figure writer in the repo — a lint gate (SH007) blocks anything that tries
+to skip it, and `benchmark/plot_frame.py` is a re-export shim over the same implementation,
+so the benchmark figures and the ephemeral `shunt inspect` diagnostics share one contract
+rather than a copy that drifts. The frame records each figure's reading, goal, terms, notes,
+limitations, sample counts and input digest into a committed `figures.json` beside the code
+that writes it — `benchmark/<half>/figures.json` for the two benchmark halves, and
+`src/shunt/inspect/inference/figures.json` for the inference half, whose producer ships inside
+the package (the diagnostics pass no `Provenance` and so write no row). A second
 gate (SH009) then holds that manifest in a bijection with the docs: every figure has a
 section, every section has a figure, and the three on-canvas strings must match in both
 places. So a retired figure cannot leave a stale explanation behind it, which is the way
@@ -545,7 +561,7 @@ this kind of documentation normally rots.
 Anything that depends on the data (how many tasks were dropped as coverage gaps, whether
 the frontier ran on a subset, whether a detector has no usable signal) is computed at
 render time rather than written into a caption, so it cannot go stale as the data grows.
-Layout is checked the same structural way: `benchmark/plot_contract.py` measures every
+Layout is checked the same structural way: `src/shunt/inspect/plot_contract.py` measures every
 rendered artist and refuses to write a figure with an overlapping title, a table spilling
 past its axes, or a clipped tick label.
 

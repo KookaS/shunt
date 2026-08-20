@@ -12,6 +12,105 @@ This file is the source for the GitHub release notes, so the two cannot disagree
 
 ## [Unreleased]
 
+### Added
+
+- **`shunt inspect` — diagnostic figures over the live outcome store.** A read-only command
+  that never spends: it prints the store's census (embedded / labeled / tier-2, seeded vs live,
+  `live cost` / `seeded cost` / `cost unknown`) and draws the neighbourhood figure for a prompt.
+  matplotlib stays out of the core wheel, so the drawing lives behind a new **`inspect` extra**
+  (`pip install 'shunt-router[inspect]'`); without it the command exits with that instruction
+  rather than an ImportError traceback.
+- **The live router, measured — a new documentation half and seven new figures.**
+  [`docs/inference.md`](inference.md) judges the shipped router on its own outcome store rather
+  than on a replayed benchmark corpus: what live inference cost, whether the choice
+  distribution is collapsing, whether near neighbours still predict outcomes, and the
+  off-policy value of routing and escalation. The figures ship in the wheel
+  (`shunt.inspect.inference`), are rendered by `make inference-figures`, and land under
+  `docs/assets/figures/inference/`. Every panel that cannot be computed says so on the canvas —
+  an empty panel is a result, not a gap, and the off-policy numbers are **refused**
+  (`NOT_IDENTIFIED`) rather than estimated where the logs cannot identify them. The committed
+  render comes from a deterministic seed-only store containing no live traffic, and the page
+  says so before the first figure.
+- **Off-policy evaluation and instrument admissibility now ship in the wheel** as
+  `shunt.analysis.ope` (IPS / SNIPS / doubly-robust with cross-fit, ESS, and the
+  `IDENTIFIED` / `NOT_IDENTIFIED` verdict) and `shunt.analysis.admissibility` (the
+  positive-control + shuffled-label adjudicator). They used to live under `benchmark/`, which
+  shipped figures may not import. `benchmark.escalation.ope` and `benchmark.admissibility` are
+  now re-export shims over the single implementation — no mirrored copy that can drift and
+  silently change a published number.
+- **The figure frame, layout audit and plot palette ship in the wheel** as
+  `shunt.inspect.plot_frame`, `shunt.inspect.plot_contract` and `shunt.inspect.plot_style`, so
+  shipped figure code draws through the same contract without importing `benchmark`.
+  `benchmark.plot_frame`, `benchmark.plot_contract` and `benchmark.routing.plot_style` are
+  re-export shims and every existing import keeps working; `plot_style` additionally keeps its
+  benchmark-corpus-typed helpers local, since they have no place in the wheel. Note that
+  importing any of them now forces the matplotlib **Agg** backend, because the shipped frame
+  does.
+- **`escalation_hold_reason` provenance.** Every escalation HOLD now records *why* it held, as
+  one of the fixed reason tokens, in the turn's provenance — previously a hold was
+  indistinguishable from an escalation that was never considered, which made the hold rate
+  unmeasurable after the fact.
+- **New figure targets and a half-scoped freshness gate.** `make inference-figures` (redraw the
+  seven inference PNGs; `OUT=/tmp/x` diverts both the PNGs and the manifest to a scratch dir,
+  leaving the committed tree untouched) and `make check-inference-figures`. The pipeline's
+  `--check-figures` takes a new **`--half {routing,escalation,inference}`** so one half's
+  staleness no longer decides another half's exit code; `--half` is check-only and is a hard
+  `parser.error` anywhere else. `make benchmark-figures` (the pipeline's `figures` stage)
+  remains the only target that **re-records** the freshness manifest — a bare
+  `make inference-figures` or `make routing-report` redraws without certifying, and
+  `--check-figures` stays red until the stage runs. The manifest digests the committed
+  **outputs** (the PNGs and the derived artifacts beside them) as well as the inputs, so a
+  figure edited or regenerated out of band is caught too — an input-only digest went green
+  whenever the inputs were untouched, however stale the drawing had become.
+- **Per-conversation session identity, and model reuse across a resume or a fork.** The router
+  now keys a session on the tool's own conversation id when the request carries one —
+  `X-Session-Id`, with `x-session-affinity` as an alias and `x-parent-session-id` naming a fork's
+  origin — instead of on `(source_ip, user_agent)` alone. A new conversation id starts a new
+  session and takes a fresh routing decision; a resumed or forked conversation re-serves the model
+  already locked for it (`session_resume` / `fork_resume`) rather than re-deciding mid-task, which
+  is what keeps a resumed conversation cache-safe. Clients that send no conversation id (Claude
+  Code, aider, plain HTTP) keep the old `(source_ip, user_agent)` grouping — the fallback is
+  unchanged, it simply no longer applies to tools that identify their conversations. Header values
+  are sanitised and length-capped before they reach the store. See
+  [routing](routing.md#session-identity).
+
+### Changed
+
+- **Benchmark-seeded sessions carry a fixed timestamp** (`2020-01-01T00:00:00+00:00`) instead
+  of the wall clock at import, so two seed runs from the same bundle write the same rows.
+  Intentional rig behaviour change: seeded rows now drop out of the loop-health
+  `recent_choices` window and sort last in a session listing. That is the point — the
+  routing-collapse alarm was reading the replayed benchmark matrix's model distribution as
+  *recent router behaviour*, because seeding stamped every one of its rows later than every
+  real session.
+- **Database schema is now v4.** The `sessions` table gains a nullable `external_session_id`
+  column plus an index on it, which is where the conversation id above is persisted so a resume
+  can find its earlier model. The migration is additive and backward-compatible: an existing
+  v1/v2/v3 store is migrated in place on the next boot, and rows written before the bump keep
+  working with `external_session_id` NULL. No action is required, and there is no downgrade path —
+  a v4 store opened by an older build will not see the column.
+
+### Fixed
+
+- **`shunt inspect` and `/admin/loop-health` no longer present benchmark spend as inference
+  cost.** Every cost and recency aggregate the *live* router publishes now excludes seeded
+  (`bench:`) rows: `loop_health`'s `cost_by_model` and `recent_choices`, and the census panel
+  of `shunt inspect`, which replaces its single `total cost:` line with `live cost:`,
+  `seeded cost:` and `cost unknown: N sessions`. On a rig holding the 792-row seed corpus the
+  old line read `$118.9242` against `$0.2492` of real live spend. `get_stats()["total_cost"]`
+  is unchanged — it is the whole-store stat — and gains `live_total_cost` /
+  `seeded_total_cost` beside it. Sessions whose provider reported no `usage.cost` are now
+  counted and published (`n_cost_unknown`) rather than silently dropped from the sum.
+- **The kNN index is reproducible.** The HNSW build passed `hnswlib`'s default
+  `num_threads=-1`, so among exact-tie vectors the returned neighbour *ids* varied between
+  builds of the identical corpus (38 of 50 probes on the 792-row seed corpus; distances were
+  always identical). Pinned to a single thread — 792 rows now index in ~92 ms instead of
+  ~20 ms, which is not a cost worth a non-reproducible neighbourhood.
+  The two embedding readers that feed the index now also pin `ORDER BY rowid`: SQLite
+  guarantees no scan order without one, and the row order they return *is* the index's slot
+  layout, so a new index or an engine version bump could have silently reordered it and changed
+  a committed figure with no other symptom.
+
 ## [0.1.0a1] — unreleased
 
 First published artifact. Everything below already worked in the repository; what is

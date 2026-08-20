@@ -1,34 +1,43 @@
 #!/usr/bin/env python3
-"""SH007: every benchmark figure is created, titled and saved through the plot frame."""
+"""SH007: every figure is created, titled and saved through a plot frame."""
 
 from __future__ import annotations
 
 import ast
 import os
 import sys
+from typing import Final
 
 from _shared import Finding, run
 
 _CODE = "SH007"
-# The frame is the one legal site for all three calls below. It is what reserves the title
-# band, records the figure's full record into benchmark/<half>/figures.json (which SH009 then
-# holds in bijection with the docs), and runs the layout audit before writing the PNG.
-_FRAME_MODULE = os.path.join("benchmark", "plot_frame.py")
+# The frame is the only legal site for all three calls below. It reserves the title band (a
+# caller-owned title cannot be measured before the axes rect exists), pins the named canvas
+# sizes, owns the savefig, and records the figure's full record into the manifest named by its
+# `Provenance` — benchmark/<half>/figures.json, which SH009 then holds in bijection with the
+# docs. `shunt inspect`'s diagnostics pass no `Provenance`, so they write no row. There is one
+# implementation, in src/shunt/inspect/plot_frame.py; benchmark/plot_frame.py re-exports it and
+# is listed here because a `# noqa: SH007` opt-out could otherwise be needed on the shim.
+_FRAME_MODULES: Final[tuple[str, ...]] = (
+    os.path.join("benchmark", "plot_frame.py"),
+    os.path.join("src", "shunt", "inspect", "plot_frame.py"),
+)
 
 _SAVE_MESSAGE = (
-    "save figures through benchmark.plot_frame.save()/render() so the figure carries its "
-    "claim title and is recorded in figures.json — a bare savefig ships a plot no one can "
-    "read away from the docs, and one no gate can trace back to its data"
+    "save figures through a plot frame (benchmark.plot_frame.save()/render() or "
+    "shunt.inspect.plot_frame.save()) so the figure carries its claim title band — a bare "
+    "savefig ships a plot no one can read away from the docs, and one no gate can trace "
+    "back to its data"
 )
 _CREATE_MESSAGE = (
-    "build figures with benchmark.plot_frame.new_figure(SIZE)/subplots(SIZE, ...) — a raw "
+    "build figures with a plot frame's new_figure(SIZE)/subplots(SIZE, ...) — a raw "
     "plt.figure/plt.subplots picks an ad-hoc figsize with no layout engine, which is how the "
     "set ended up with 15 different canvas sizes and a title drawn over its own table"
 )
 _TITLE_MESSAGE = (
     "the frame draws the one title; set it via FigureSpec(title=..., subtitle=...) and use "
-    "benchmark.plot_frame.panel_label(ax, ...) to caption a panel — a caller-owned title "
-    "cannot be measured before the axes rect is reserved, so it overlaps the content"
+    "a plot frame's panel_label(ax, ...) to caption a panel — a caller-owned title cannot be "
+    "measured before the axes rect is reserved, so it overlaps the content"
 )
 
 _WRITERS = frozenset({"savefig", "print_figure", "print_png"})
@@ -74,8 +83,8 @@ def _is_test(path: str) -> bool:
 
 
 def check(path: str, tree: ast.Module) -> list[Finding]:
-    """Flag figure creation, titling and saving outside the plot frame module."""
-    if os.path.normpath(path).endswith(_FRAME_MODULE):
+    """Flag figure creation, titling and saving outside a plot frame module."""
+    if os.path.normpath(path).endswith(_FRAME_MODULES):
         return []
     # Tests may build a figure by hand: they exercise draw functions in isolation, and the
     # layout-audit tests must be able to construct a DELIBERATELY broken figure to prove the

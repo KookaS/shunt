@@ -1,6 +1,6 @@
 ---
 title: Results
-description: Measured routing and escalation results on Shunt's own benchmark, with every figure, every caveat, and every null reported as a null.
+description: Measured routing, escalation, and inference results on Shunt's own benchmark, with every figure, every caveat, and every null reported as a null.
 ---
 
 # Results
@@ -811,11 +811,13 @@ what it cannot support — beside the mechanism it illustrates:
 
 - **Routing** (15 figures): [routing.md → Figures](routing.md#figures)
 - **Escalation** (6 figures): [escalation.md → Figures](escalation.md#figures)
+- **The live router** (7 figures): [inference.md → Figures](inference.md#figures)
 
 The figures live under `docs/assets/figures/`, one subdirectory per half
-(`routing/`, `escalation/`), inside the published docs tree, which is
+(`routing/`, `escalation/`, `inference/`), inside the published docs tree, which is
 why the pages above can link them relatively. A committed `figures.json` per half — beside
-the code that writes it, in `benchmark/routing/` and `benchmark/escalation/` — records every
+the code that writes it, in `benchmark/routing/`, `benchmark/escalation/` and
+`src/shunt/inspect/inference/` — records every
 figure's full record and its input digest, and a lint gate (SH009) holds that manifest in
 bijection with the sections above — so a retired figure cannot leave a stale description
 behind it, and a documented figure cannot go missing.

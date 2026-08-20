@@ -707,7 +707,7 @@ class RouterEngine:
             return (model_name, reason, provenance)
         with self._lock:
             model_name, reason, provenance = self._maybe_escalate(
-                task_key, model_name, reason, provenance
+                task_key, session_id, model_name, reason, provenance
             )
             # Stamp THIS decision's index onto the provenance so a later verified failure is
             # logged against when the session was ROUTED, not when it was captured (session close,
@@ -718,7 +718,12 @@ class RouterEngine:
         return (model_name, reason, provenance)
 
     def _maybe_escalate(
-        self, task_key: str, model_name: str, reason: str, provenance: dict[str, Any]
+        self,
+        task_key: str,
+        session_id: str,
+        model_name: str,
+        reason: str,
+        provenance: dict[str, Any],
     ) -> tuple[str, str, dict[str, Any]]:
         """Raise the effort rung, then a model rank, on due failures. Caller holds _lock."""
         # Effort first (cache-safe: same model, higher reasoning arm), rank only once the model's
@@ -781,12 +786,21 @@ class RouterEngine:
             }
         if directive.action is EscalationAction.RAISE_EFFORT:
             applied = self._apply_effort(
-                task_key, model_name, reason, provenance, directive, cur_arm
+                task_key, session_id, model_name, reason, provenance, directive, cur_arm
             )
         elif directive.action is EscalationAction.RAISE_RANK:
-            applied = self._apply_rank(task_key, model_name, reason, provenance, directive)
+            applied = self._apply_rank(
+                task_key, session_id, model_name, reason, provenance, directive
+            )
         else:  # HOLD — nothing to deliver, and an EXPLORED hold really did happen
-            return (model_name, reason, provenance)
+            # Record WHY the hold happened. Without it a held boundary is indistinguishable from
+            # one where escalation never ran at all, so the hold-reason breakdown is not merely
+            # empty but underivable: the window/alarm/cold-start state that decided it is gone by
+            # capture time. Every HOLD reason is a fixed token (`disabled`, `collapse_suppressed`,
+            # `no_recurring_failure`, `escalation_ceiling`, `exploration_hold`) with no
+            # caller-derived text, so unlike `ExplorationRecord.checkpoint_id` it needs no
+            # redaction on the way to persistence.
+            return (model_name, reason, {**provenance, "escalation_hold_reason": directive.reason})
         if applied is not None:
             return applied
         # The rung could not be delivered (no healthy higher model / no arm above). The escalate
@@ -868,6 +882,7 @@ class RouterEngine:
     def _apply_effort(  # noqa: PLR0913 (escalation branch threads the resolved ladder state)
         self,
         task_key: str,
+        session_id: str,
         model_name: str,
         reason: str,
         provenance: dict[str, Any],
@@ -883,7 +898,8 @@ class RouterEngine:
         self._task_effort_arm[task_key] = next_arm
         self._retire_after_escalation(task_key)
         logger.info(
-            "decide: auto-escalation effort %s arm %s -> %s (%s)",
+            "escalation: session=%s model=%s arm=%s -> arm=%s reason=%s",
+            session_id,
             model_name,
             cur_arm,
             next_arm,
@@ -904,6 +920,7 @@ class RouterEngine:
     def _apply_rank(
         self,
         task_key: str,
+        session_id: str,
         model_name: str,
         reason: str,
         provenance: dict[str, Any],
@@ -925,7 +942,13 @@ class RouterEngine:
         climbed = self._rank_of(higher)
         if climbed is not None:
             self._task_rank_floor[task_key] = max(climbed, self._task_rank_floor.get(task_key, 0))
-        logger.info("decide: auto-escalation %s -> %s (%s)", model_name, higher, directive.reason)
+        logger.info(
+            "escalation: session=%s model=%s -> model=%s reason=%s",
+            session_id,
+            model_name,
+            higher,
+            directive.reason,
+        )
         return (
             higher,
             "auto_escalation",

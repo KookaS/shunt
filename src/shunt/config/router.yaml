@@ -86,7 +86,7 @@ router:
     # Why it exists: under a deterministic policy P(escalate) = 0, the overlap condition every
     # off-policy estimator needs FAILS, so "does escalation help?" is not identified at any
     # sample size. Randomizing a small fraction of flagged checkpoints and logging the
-    # propensity is what makes the question answerable (benchmark/escalation/ope.py). The
+    # propensity is what makes the question answerable (shunt/analysis/ope.py). The
     # explored arm is always HOLD — exploration can only WITHHOLD an escalation, never invent
     # one, so it introduces no model switch the policy would not already make (cache-safe).
     exploration_epsilon: 0.0      # 0 = deterministic; 0.1-0.3 while collecting identifiable data

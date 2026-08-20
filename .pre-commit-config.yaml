@@ -78,12 +78,13 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-      # SH007 keeps benchmark/plot_frame.py the ONE place a figure is created, titled and
-      # saved. It reserves the title band (a caller-owned title cannot be measured before
-      # the axes rect exists, so it lands on the content), pins the named canvas sizes, runs
-      # the layout audit, and records the figure into figures.json. Tests may still build a
-      # raw figure — the layout-audit tests have to construct the defect they assert against
-      # — but may not save or title one. BLOCKING.
+      # SH007 keeps the plot frames (benchmark/plot_frame.py and
+      # src/shunt/inspect/plot_frame.py) the ONLY places a figure is created, titled and
+      # saved. They reserve the title band (a caller-owned title cannot be measured before
+      # the axes rect exists, so it lands on the content) and pin the named canvas sizes.
+      # The benchmark frame also runs the layout audit and records the figure into
+      # figures.json. Tests may still build a raw figure — the layout-audit tests have to
+      # construct the defect they assert against — but may not save or title one. BLOCKING.
       - id: sh007-plot-frame
         name: SH007 figures created, titled and saved through the plot frame
         entry: python tools/lint/check_plot_frame.py

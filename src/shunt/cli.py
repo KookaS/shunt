@@ -376,6 +376,45 @@ def _reindex(args: argparse.Namespace) -> None:
     )
 
 
+def _inspect(args: argparse.Namespace) -> None:
+    """Render diagnostic figures over the LIVE outcome store — read-only, never spends."""
+    # Lazy so a base install without the `inspect` extra keeps every other command working;
+    # the frame's matplotlib import is what fails, and the message names the fix.
+    from pathlib import Path
+
+    from shunt.db.store import OutcomeStore
+
+    try:
+        from shunt.inspect.figures import render
+    except ImportError:
+        print(
+            "shunt inspect needs the [inspect] extra — install it with: "
+            "pip install 'shunt-router[inspect]'"
+        )
+        sys.exit(1)
+
+    output_dir = Path(args.output_dir)
+    store = OutcomeStore()
+    try:
+        result = render(store, output_dir, prompt=args.prompt, k=args.k)
+    finally:
+        store.close()
+
+    if result.figure_path is None:
+        print("shunt inspect: no embedded sessions in the outcome store — nothing to plot.")
+        print("Seed the corpus (e.g. `shunt flag` / capture), then re-run.")
+        sys.exit(0)
+
+    print(f"embedded: {result.n_embedded}")
+    print(f"labeled:  {result.n_labeled}   tier-2: {result.n_tier2}")
+    print(f"origin:   {result.seeded} seeded vs {result.live} live")
+    if result.pc1_share is not None and result.pc2_share is not None:
+        print(f"variance: PC1 {result.pc1_share * 100:.1f}%  PC2 {result.pc2_share * 100:.1f}%")
+    if result.pin_warning:
+        print(f"warning:  {result.pin_warning}")
+    print(f"figure:   {result.figure_path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="shunt",
@@ -448,6 +487,32 @@ def main() -> None:
         "model's space and advance the corpus fingerprint. Run with the server STOPPED.",
     )
     reindex.set_defaults(func=_reindex)
+
+    inspect = sub.add_parser(
+        "inspect",
+        help="Render diagnostic figures from the live outcome store (read-only)",
+        description="Read-only: plots the embedding corpus the router actually queries — a "
+        "PCA projection colored by model and outcome with seeded-vs-live origin, a corpus "
+        "census, and the kNN neighbourhood of the latest labeled session / a pinned prompt. "
+        "Figures are ephemeral diagnostics, never committed.",
+    )
+    inspect.add_argument(
+        "--output-dir",
+        default="shunt-inspect",
+        help="Directory for the rendered figures (created if missing; default: ./shunt-inspect).",
+    )
+    inspect.add_argument(
+        "--prompt",
+        default=None,
+        help="Embed this prompt (real embedder) and mark its projected position and neighbours.",
+    )
+    inspect.add_argument(
+        "--k",
+        type=int,
+        default=5,
+        help="Neighbours to draw per query point (default: 5).",
+    )
+    inspect.set_defaults(func=_inspect)
 
     version = sub.add_parser("version", help="Print version")
     version.set_defaults(func=_version)

@@ -1,0 +1,11 @@
+{
+  "{\"dim\": 768, \"max_chars\": 4000, \"repo\": \"jinaai/jina-embeddings-v2-base-code\", \"revision\": null}": {
+    "challenges_digest": "7895944703c761afb8d64d745fad582b5d130a5c6c89931385c15f49be196851",
+    "dim": 768,
+    "embedder": "jinaai/jina-embeddings-v2-base-code",
+    "file": "seed_dfec4c83a001b16e.npz",
+    "max_chars": 4000,
+    "n_cells": 792,
+    "results_digest": "12867a984433008aa8dba3dc71a483e007b42b63fd7c0f29ab929adac3180d47"
+  }
+}

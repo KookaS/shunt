@@ -170,7 +170,12 @@ feedback endpoint yet — feedback is the `shunt` CLI, which is why a container 
 - `GET /admin/loop-health` — label coverage, propensity support, and a
   **reward-independent** routing-collapse alarm. The alarm keys on the model-choice
   distribution alone, so a degenerate loop that keeps reward looking fine while the
-  policy ossifies onto one model cannot hide from it.
+  policy ossifies onto one model cannot hide from it. Every cost and recency figure it
+  reports covers **live sessions only** — rows imported from the benchmark corpus
+  (`bench:` session ids) are replayed benchmark spend, not this router's economics, and
+  a corpus imported in one burst would otherwise fill the whole recency window. `cost`
+  also reports `n_cost_unknown`: sessions the provider never reported a cost for, counted
+  rather than summed, because an unreported cost is unknown and not a free session.
 
 ```bash
 curl -s localhost:8080/admin/loop-health

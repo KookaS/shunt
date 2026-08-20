@@ -570,6 +570,30 @@ What gets recorded, on the session's decision provenance, at flagged checkpoints
 | `features` | The state as of the decision — failure counts, distinct keys, ladder headroom |
 | `randomized` | `false` for a checkpoint with no rung left to climb; those are excluded, not weighted |
 
+Separately — on every boundary the ladder actually evaluated **and could name a hold
+for**, flagged or not — the provenance carries `escalation_hold_reason`: the token naming
+why nothing was escalated. It is one of
+`collapse_suppressed` (the routing-collapse guard fired), `no_recurring_failure` (no
+same-key recurrence reached the threshold), `escalation_ceiling` (top rank and top
+reasoning arm — nothing left to climb) or `exploration_hold` (ε-greedy withheld the rung).
+Without it a held boundary is indistinguishable from one where escalation never ran at
+all, so a hold breakdown could not be derived after the fact. A router with escalation
+`enabled: false` records no token, because it takes no escalation decision to explain.
+
+The decision function carries a fifth token, `disabled`, for a disabled configuration —
+but a live router cannot emit it. Escalation being off is decided *before* the ladder
+runs: the engine resolves no task identity for the session and returns the base decision
+untouched, so the ladder is never consulted and no provenance is written. `disabled` is
+therefore structurally unreachable from the serving path, and the hold breakdown drawn
+from these tokens carries it as a permanently empty category rather than a real one.
+
+One further case carries no token either: when a directive says raise but the rung
+**cannot be delivered** — no arm above, or every higher-rank model unhealthy — the engine
+returns early with the served model unchanged. That is a hold in effect, and it is
+recovered from the voided exploration record rather than from a token, so a token
+breakdown is a *lower bound* on holds (see
+[the live router](inference.md#fig-inference-escalation)).
+
 Three properties worth knowing:
 
 - **It cannot cost you cache.** The explored arm is always *hold*. Randomizing can only
@@ -580,10 +604,10 @@ Three properties worth knowing:
 - **It costs quality while it runs.** You are deliberately declining some escalations. Turn it
   off outside collection windows.
 
-Read the logs back with the estimator in `benchmark/escalation/ope.py`:
+Read the logs back with the estimator that ships in `shunt.analysis.ope`:
 
 ```python
-from benchmark.escalation.ope import always_escalate, estimate_policy_value, rows_from_records
+from shunt.analysis.ope import always_escalate, estimate_policy_value, rows_from_records
 from shunt.db.store import OutcomeStore
 
 store = OutcomeStore()

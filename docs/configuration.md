@@ -670,6 +670,28 @@ half-migrated corpus. Restart the server afterward to pick up the new space.
 > different weights under the same name, the fingerprint still matches and the swap goes
 > undetected. Pin the cache or re-benchmark if that matters for your deployment.
 
+## Inspect the live corpus: `shunt inspect`
+
+`shunt inspect [--output-dir DIR] [--prompt TEXT] [--k N]` renders diagnostic
+figures from the live outcome store, so you can verify inference data is
+loading: a PCA projection of the embedded corpus (points coloured by model,
+marker by outcome, benchmark-seeded vs live), a corpus census panel
+(session/embedding/labeled/Tier-2 counts, seeded-vs-live split, per-model
+counts, total cost), and a k-nearest-neighbours overlay for the most recent
+session and an optional `--prompt`, embedded via the shipped embedder. Requires
+the `[inspect]` optional extra (`pip install 'shunt-router[inspect]'` or
+`uv sync --extra inspect`). An empty corpus prints a clean "still cold-start"
+note.
+
+## Warm-start from the benchmark: `seed_live`
+
+`python -m benchmark.routing.seed_live` (from a checkout) warms the store from the
+benchmark's measured outcomes — see [routing.md](routing.md#cold-start-comes-first).
+`--from-bundle [PATH]` imports from the committed LFS bundle without loading the
+embedder (no PATH auto-discovers the fingerprint match via `manifest.json`);
+`--force` re-imports despite a matching marker. Build it with `make seed-bundle`;
+`make check-seed-bundle` proves it current.
+
 ## The rest of the environment variables
 
 Defaults that are fine to leave alone, but which you can override without editing

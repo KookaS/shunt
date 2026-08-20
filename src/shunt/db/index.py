@@ -73,7 +73,12 @@ class HNSWIndex:
         ids = np.arange(n, dtype=np.intp)
         data = np.array([e[1] for e in items], dtype=np.float32)
 
-        self._index.add_items(data, ids)
+        # num_threads=1, not hnswlib's default -1: a multi-threaded add races on insertion
+        # order, and among exact-tie vectors (the seed corpus stores one embedding per task,
+        # shared by its 6 model rows) that changes which id knn_query returns. Distances are
+        # unaffected; the neighbour ids are not, so a committed figure built on them would
+        # not be reproducible.
+        self._index.add_items(data, ids, num_threads=1)
         self._index.set_ef(self._ef_search)
 
         self._ids = [e[0] for e in items]
