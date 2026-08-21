@@ -32,6 +32,12 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
         "is the committed figure directory",
     )
     parser.add_argument(
+        "--manifest",
+        type=Path,
+        help="read --emit-docs-section from this manifest instead of the inference one "
+        "(how a second figure family emits its own page)",
+    )
+    parser.add_argument(
         "--emit-docs-section",
         metavar="FIGURE",
         help="print the SH009 markdown block for one figure (or `all`) from the manifest "
@@ -43,15 +49,18 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse(argv)
     if args.emit_docs_section:
-        return _emit(args.emit_docs_section, args.out_dir)
+        return _emit(args.emit_docs_section, args.out_dir, args.manifest)
     if args.out_dir is None:
         print("--out-dir is required unless --emit-docs-section is given", file=sys.stderr)
         return 2
     return _render(args.out_dir)
 
 
-def _emit(figure: str, out_dir: Path | None) -> int:
-    manifest = MANIFEST if out_dir is None else _manifest_for(out_dir)
+def _emit(figure: str, out_dir: Path | None, explicit: Path | None) -> int:
+    if explicit is not None:
+        manifest = explicit
+    else:
+        manifest = MANIFEST if out_dir is None else _manifest_for(out_dir)
     if not manifest.exists():
         print(f"no manifest at {manifest} — render the figures first", file=sys.stderr)
         return 1
@@ -60,11 +69,12 @@ def _emit(figure: str, out_dir: Path | None) -> int:
         print(sections, end="")
         return 0
     name = figure if figure.endswith(".png") else f"{figure}.png"
-    rows = json.loads(manifest.read_text()).get("figures", {})
+    payload = json.loads(manifest.read_text())
+    rows = payload.get("figures", {})
     if name not in rows:
         print(f"{name} has no manifest row in {manifest}", file=sys.stderr)
         return 1
-    print(docs_section(name, rows[name]), end="")
+    print(docs_section(name, rows[name], half=str(payload.get("half") or "inference")), end="")
     return 0
 
 

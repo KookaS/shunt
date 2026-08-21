@@ -11,7 +11,7 @@
 #   no --out-dir   the COMMITTED docs figures. Seed-only, deterministic, no network and no live
 #                  rig; the only mode that may touch the committed manifest.
 #   --out-dir X    the same seven, drawn from whatever `SHUNT_DATA_DIR` points at (seed rows and
-#                  live rows alike). `_committed_home()` diverts the manifest to
+#                  live rows alike). `Family.manifest_for()` diverts the manifest to
 #                  `X/../figures.json` so a scratch render cannot dirty the committed one.
 
 from __future__ import annotations

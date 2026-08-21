@@ -1,8 +1,8 @@
 {
   "figures": {
     "inference_cost.png": {
-      "caveat": "no live sessions in this corpus \u2014 every panel is empty, not zero",
-      "data_digest": "fcc42b216e9a280f",
+      "caveat": null,
+      "data_digest": "17c49ecc94f567fc",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -15,9 +15,9 @@
         "Cost is the provider's reported figure, so a provider that under-reports cache reads under-reports here too."
       ],
       "n": {
-        "cost_unknown": 0,
-        "live_sessions": 0,
-        "seeded_excluded": 792
+        "cost_unknown": 28,
+        "live_sessions": 453,
+        "seeded_excluded": 250
       },
       "notes": [
         "Every panel filters to the live stratum. The seeded row count excluded from the sum is printed in the subtitle, so the exclusion is stated rather than assumed.",
@@ -25,7 +25,7 @@
       ],
       "reading": "Panel A is live spend per model over 7 days, 30 days and the whole store; a model absent from a window served nothing in it. Panel B is cost coverage: how many live sessions the provider actually reported a cost for, against how many it did not. Panel C accumulates live spend over time. An entirely empty figure means the corpus holds no live sessions, which is the honest answer for a seed-only render.",
       "size": "wide",
-      "subtitle": "live inference cost (USD); replayed benchmark spend is excluded by construction \u00b7 seeded rows excluded (n=792) \u00b7 live sessions n=0",
+      "subtitle": "live inference cost (USD); replayed benchmark spend is excluded by construction \u00b7 seeded rows excluded (n=250) \u00b7 live sessions n=453 \u00b7 live cost \\$34.6770",
       "terms": [
         [
           "stratum",
@@ -40,7 +40,7 @@
     },
     "inference_escalation.png": {
       "caveat": "panel C covers ladder-evaluated holds only \u2014 a lower bound; `disabled` is unreachable live",
-      "data_digest": "fcc42b216e9a280f",
+      "data_digest": "17c49ecc94f567fc",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -53,9 +53,9 @@
         "Panel D compares populations, not the same session under both arms; it is descriptive and carries no causal claim."
       ],
       "n": {
-        "escalation_records": 0,
-        "live_sessions": 0,
-        "undeliverable_holds": 0
+        "escalation_records": 138,
+        "live_sessions": 453,
+        "undeliverable_holds": 1
       },
       "notes": [
         "The hold vocabulary is five tokens: `collapse_suppressed`, `no_recurring_failure`, `escalation_ceiling`, `exploration_hold`, and `disabled` \u2014 which a live router cannot emit, because the engine returns before the ladder runs when escalation is off, so that bar is structurally zero and is drawn only to say the vocabulary is complete. The derived bar is not a sixth token and is not written by the engine; it is inferred, and is drawn hatched to say so.",
@@ -63,7 +63,7 @@
       ],
       "reading": "Panel A is the escalation rate per window. Panel B splits fired escalations by rung: `raise_effort` keeps the model and steps its reasoning arm, `raise_rank` moves to a higher-capability model, `escalation_floor` re-serves a rung this task already earned. Panel C breaks holds down by reason token, plus one derived bar for the holds the engine never tokenised. Panel D compares verified outcomes before and after an escalation fired. Empty panels mean the corpus holds no live escalations.",
       "size": "wide_tall",
-      "subtitle": "live sessions only; hold panel is ladder-evaluated holds plus a derived bar \u00b7 live sessions n=0 \u00b7 escalation records n=0 \u00b7 derived undeliverable holds n=0",
+      "subtitle": "live sessions only; hold panel is ladder-evaluated holds plus a derived bar \u00b7 live sessions n=453 \u00b7 escalation records n=138 \u00b7 derived undeliverable holds n=1",
       "terms": [
         [
           "hold",
@@ -77,8 +77,8 @@
       "title": "Escalation: how often it fires, which rung, why it held, what followed"
     },
     "inference_neighbourhood.png": {
-      "caveat": "no live decisions in this corpus \u2014 panel C is empty, not zero",
-      "data_digest": "fcc42b216e9a280f",
+      "caveat": null,
+      "data_digest": "17c49ecc94f567fc",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -91,8 +91,8 @@
         "A bin holding few sessions has a noisy realised rate; bin counts are printed so a bin resting on a handful of sessions is not read as a trend."
       ],
       "n": {
-        "live_decisions": 0,
-        "probed": 792
+        "live_decisions": 453,
+        "probed": 459
       },
       "notes": [
         "Panels A and B are computed over the indexed population, which is both strata; the reliability question is about the embedding space, not about origin.",
@@ -100,7 +100,7 @@
       ],
       "reading": "Panel A bins each session by the success rate of its k nearest neighbours and plots the realised success rate of the sessions in that bin against the diagonal; points on the diagonal mean the neighbourhood is calibrated, points below mean it is optimistic. Panel B is the distribution of neighbour distances \u2014 a corpus whose neighbours are all far away has no neighbourhood to speak of. Panel C asks, for each live decision, what fraction of its top-k neighbours were seeded rows; on a seed-only corpus there are no live decisions and the panel is empty.",
       "size": "wide",
-      "subtitle": "leave-one-out over every indexed session; k nearest, self excluded \u00b7 k=10 \u00b7 probed n=792 \u00b7 live decisions n=0",
+      "subtitle": "leave-one-out over every indexed session; k nearest, self excluded \u00b7 k=10 \u00b7 probed n=459 \u00b7 live decisions n=453",
       "terms": [
         [
           "leave-one-out",
@@ -115,7 +115,7 @@
     },
     "inference_ope.png": {
       "caveat": "off-policy value is NOT IDENTIFIED here \u2014 each panel prints the estimator\u2019s own refusal",
-      "data_digest": "fcc42b216e9a280f",
+      "data_digest": "17c49ecc94f567fc",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -128,9 +128,9 @@
         "An ADMISSIBLE instrument verdict is a gate against breakage \u2014 a filter that stopped filtering, an estimator that stopped weighting \u2014 not a warrant that these numbers are accurate to within a few points."
       ],
       "n": {
-        "escalation_logged": 0,
+        "escalation_logged": 21,
         "escalation_usable": 0,
-        "routing_logged": 0,
+        "routing_logged": 453,
         "routing_usable": 0
       },
       "notes": [
@@ -140,7 +140,7 @@
       ],
       "reading": "Panel A is the value of the target routing policy (serve the top-scored candidate) against the dashed line the logged policy actually paid. Panel B is the same three estimators for `always_escalate` and `never_escalate`, plus the contrast V(escalate) - V(hold), which is the decision question a level cannot answer; the contrast is read against zero, not against the bars. Panel C is the empirical distribution of the importance weights, whose right tail is where an off-policy estimate goes wrong quietly. Panel D divides each identification floor into what the logs measured, so 1.0 is the floor and a short bar is the reason a panel refused. A panel is empty only when a leg has no logged decision at all; where a leg has decisions the estimator cannot use, the panel prints the refusal verbatim instead of drawing a bar, and that refusal is the figure's result.",
       "size": "wide_tall",
-      "subtitle": "IPS, SNIPS and doubly-robust values with cluster-bootstrap intervals, beside the overlap diagnostics that decide whether any of them means anything \u00b7 routing NOT IDENTIFIED \u00b7 escalation NOT IDENTIFIED \u00b7 usable rows: routing 0/0, escalation 0/0",
+      "subtitle": "IPS, SNIPS and doubly-robust values with cluster-bootstrap intervals, beside the overlap diagnostics that decide whether any of them means anything \u00b7 routing NOT IDENTIFIED \u00b7 escalation NOT IDENTIFIED \u00b7 usable rows: routing 0/453, escalation 0/21",
       "terms": [
         [
           "identified",
@@ -167,7 +167,7 @@
     },
     "inference_policy.png": {
       "caveat": "the seed band is corpus composition, not a routing decision",
-      "data_digest": "fcc42b216e9a280f",
+      "data_digest": "17c49ecc94f567fc",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -180,7 +180,7 @@
         "Propensity is missing for every non-policy decision \u2014 an escalated turn is imposed, not sampled \u2014 so panel C covers policy decisions only."
       ],
       "n": {
-        "live_sessions": 0,
+        "live_sessions": 453,
         "seeded_models": 6
       },
       "notes": [
@@ -189,7 +189,7 @@
       ],
       "reading": "Panel A is live model share within a trailing window \u2014 not cumulative share, which would dilute a recent collapse with history that has stopped being true. Where the corpus is seed-only it instead shows one hatched band: the seeded model distribution, which is the benchmark matrix's sweep design and not a choice the router made. Panel B tracks rolling choice entropy and frontier share against the loop-health alarm lines; entropy at or below the alarm means the distribution has concentrated onto a few arms. Panel C is each model's mean selection propensity against the exploration floor: a model below the floor has effectively stopped being tried. Panels B and C are empty where there is no live traffic to read, and say so on the canvas. Panel B is also empty when no model registry was supplied, because normalized entropy is undefined without the number of arms the router could have picked.",
       "size": "wide",
-      "subtitle": "live share, rolling entropy and frontier share against the loop-health alarms \u00b7 live sessions n=0 \u00b7 window=100 \u00b7 seeded models n=6",
+      "subtitle": "live share, rolling entropy and frontier share against the loop-health alarms \u00b7 live sessions n=453 \u00b7 window=100 \u00b7 seeded models n=6",
       "terms": [
         [
           "selection propensity",
@@ -204,7 +204,7 @@
     },
     "inference_strata.png": {
       "caveat": null,
-      "data_digest": "fcc42b216e9a280f",
+      "data_digest": "17c49ecc94f567fc",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -218,9 +218,9 @@
       ],
       "n": {
         "ambiguous": 0,
-        "live": 0,
-        "seeded": 792,
-        "sessions": 792
+        "live": 453,
+        "seeded": 250,
+        "sessions": 703
       },
       "notes": [
         "Stratum is decided by three signals: the session-id prefix, `decision_provenance.selection_rule_used == \"benchmark_seed\"`, and the winning outcome event's source. Rows where they disagree are counted as `ambiguous` and surfaced on the canvas rather than assigned to either stratum.",
@@ -229,7 +229,7 @@
       ],
       "reading": "Panel A counts sessions at five lifecycle stages per stratum: stored, embedded, labeled, Tier-2 and indexed. They are not a funnel and do not nest: `embedded` and `indexed` are the only two contained in `stored`, while `labeled` is counted off the append-only `outcome_events` log and `tier2` off the materialized `outcomes` view, so a later stage can exceed an earlier one. Read each bar as its own count, and read the red line for any adjacent pair that actually inverts. Panel B places every session on its `timestamp`; the seeded stratum is imported in one burst and so collapses to a single column, which is exactly why any recency-window read over the whole store reports the benchmark matrix rather than router behaviour. Panel C counts labeled sessions per model in each stratum.",
       "size": "wide",
-      "subtitle": "lifecycle stage counts, arrival times and per-model labels, split seeded vs live \u00b7 seeded n=792 \u00b7 live n=0 \u00b7 ambiguous n=0",
+      "subtitle": "lifecycle stage counts, arrival times and per-model labels, split seeded vs live \u00b7 seeded n=250 \u00b7 live n=453 \u00b7 ambiguous n=0",
       "terms": [
         [
           "stratum",
@@ -260,7 +260,7 @@
     },
     "inference_unit_economics.png": {
       "caveat": "the grey band is REPLAYED BENCHMARK outcomes, not live inference",
-      "data_digest": "fcc42b216e9a280f",
+      "data_digest": "17c49ecc94f567fc",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -273,8 +273,8 @@
         "Success is Tier-2 only. A model whose work is never verified contributes no successes however well it performed."
       ],
       "n": {
-        "live_labeled": 0,
-        "seeded_labeled": 792
+        "live_labeled": 209,
+        "seeded_labeled": 250
       },
       "notes": [
         "The seeded band is drawn from replayed benchmark outcomes whose cost came from the benchmark run, not from live inference. It is a reference for shape, never a baseline for live spend.",
@@ -282,7 +282,7 @@
       ],
       "reading": "Panel A is the verified-success rate per model with a Wilson 95% interval; a bar marked * is provisional (fewer than 10 labeled sessions) and its point estimate should not be ranked against another. Panel B divides spend by verified successes. Grey bars are the seeded reference band \u2014 replayed benchmark outcomes, a reference point and not a measurement of live routing. Coloured bars are live traffic; where there are none, the live claim is empty and says so.",
       "size": "wide",
-      "subtitle": "Wilson 95% intervals; hatching marks replayed seeded rows; * marks n<10 \u00b7 seeded models n=6 \u00b7 live labeled sessions n=0",
+      "subtitle": "Wilson 95% intervals; hatching marks replayed seeded rows; * marks n<10 \u00b7 seeded models n=6 \u00b7 live labeled sessions n=209",
       "terms": [
         [
           "verified success",
@@ -296,6 +296,6 @@
       "title": "Cost per verified success, live traffic against the seeded reference band"
     }
   },
-  "half": "inference",
+  "half": "demo",
   "schema": 1
 }

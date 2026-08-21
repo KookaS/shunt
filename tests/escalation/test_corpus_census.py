@@ -7,6 +7,7 @@ Proves `census()` reports the live corpus, moves when a file is planted, and tha
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -82,6 +83,15 @@ def test_no_committed_source_states_a_stale_corpus_count(stale: str) -> None:
     # No committed .py/.md under benchmark/ or docs/ may hardcode the old corpus count.
     # This is the machine form of the story's grep gate — a stale literal is a disagreement
     # with the live corpus, and it fails here before it can be committed.
+    #
+    # MATCHED ON A NUMBER BOUNDARY, NOT AS A RAW SUBSTRING (fixed 2026-08-21). The plain
+    # `stale in text` form fired on any longer number that happened to contain the digits:
+    # a measured inter-arrival gap of `47994.854` and a measured cost of `0.0033831679999…`
+    # both contain "799" and neither states a corpus count. That is a false positive on
+    # MEASURED DATA, and the only two ways out of it are to fix the matcher or to falsify the
+    # data — so the matcher is fixed here. `\b` still catches every real usage (`799`,
+    # `n=799`, `799 trajectories`, `(799)`) because a corpus count is always its own token.
+    pattern = re.compile(rf"(?<!\d){re.escape(stale)}(?!\d)")
     offenders: list[str] = []
     for tree in (_ROOT / "benchmark", _ROOT / "docs"):
         for path in tree.rglob("*"):
@@ -90,7 +100,7 @@ def test_no_committed_source_states_a_stale_corpus_count(stale: str) -> None:
             if "data/live" in path.parts or "__pycache__" in path.parts:
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
-            if stale in text:
+            if pattern.search(text):
                 offenders.append(str(path.relative_to(_ROOT)))
     assert not offenders, (
         f"{stale!r} still appears in committed sources (would rot when the corpus grows): "

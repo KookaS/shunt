@@ -14,6 +14,10 @@ from PIL import Image  # noqa: E402
 
 from benchmark import plot_frame  # noqa: E402
 
+# The watermark is deliberately NOT re-exported through `benchmark.plot_frame`: the two
+# benchmark halves are measurement halves and have no business reaching it.
+from shunt.inspect import plot_frame as shipped_frame  # noqa: E402
+
 _SPEC = plot_frame.FigureSpec(
     title="Cheap-first routing does not beat always-frontier at equal quality",
     subtitle="175 tasks · total USD per strategy · 95% Wilson bands",
@@ -306,3 +310,54 @@ class TestBandNeverOverflowsTheCanvas:
         """Sizing the wrap to the FULL width was the original overflow bug."""
         columns = len(plot_frame._wrap("w " * 400, 10.0, 9.0)[0])
         assert columns < int(10.0 * 72.0 / (9.0 * plot_frame._GLYPH_ADVANCE))
+
+
+# --- the watermark: applied at the one door a figure can leave by --------------------
+
+
+def _pixels(path) -> set[tuple[int, int, int]]:
+    return {px for px in Image.open(path).convert("RGB").getdata()}
+
+
+def test_no_watermark_by_default(tmp_path) -> None:
+    path = plot_frame.render(tmp_path / "plain.png", _SPEC, lambda ax: _draw(ax))
+    assert path.exists()
+    # The mark is the only artist that paints CAVEAT_RED into the plotting area of a figure
+    # whose spec carries no caveat, so its colour is the signal.
+    assert not _watermark_ink(path)
+
+
+def test_every_save_inside_the_block_is_stamped(tmp_path) -> None:
+    # The point of the test: the draw callback below knows nothing about the watermark and is
+    # not asked about it. A family opts in once, and every figure it produces carries the mark.
+    with shipped_frame.watermarked("SYNTHETIC — NOT MEASURED"):
+        first = plot_frame.render(tmp_path / "a.png", _SPEC, lambda ax: _draw(ax))
+        second = plot_frame.render(tmp_path / "b.png", _SPEC, lambda ax: _draw(ax))
+    assert _watermark_ink(first)
+    assert _watermark_ink(second)
+
+
+def test_the_block_does_not_leak(tmp_path) -> None:
+    with shipped_frame.watermarked("SYNTHETIC — NOT MEASURED"):
+        plot_frame.render(tmp_path / "inside.png", _SPEC, lambda ax: _draw(ax))
+    after = plot_frame.render(tmp_path / "after.png", _SPEC, lambda ax: _draw(ax))
+    assert not _watermark_ink(after)
+
+
+def test_a_none_watermark_is_a_no_op(tmp_path) -> None:
+    plain = plot_frame.render(tmp_path / "plain.png", _SPEC, lambda ax: _draw(ax))
+    with shipped_frame.watermarked(None):
+        wrapped = plot_frame.render(tmp_path / "wrapped.png", _SPEC, lambda ax: _draw(ax))
+    assert wrapped.read_bytes() == plain.read_bytes()
+
+
+def _watermark_ink(path) -> bool:
+    """Is the mark's own colour on the canvas — CAVEAT_RED composited onto white at its alpha?
+
+    Derived from the module's constants rather than hardcoded, so a change to either the
+    colour or the alpha moves this test with it instead of silently invalidating it.
+    """
+    ink = tuple(int(shipped_frame.CAVEAT_RED[i : i + 2], 16) for i in (1, 3, 5))
+    alpha = shipped_frame._WATERMARK_ALPHA
+    want = tuple(255.0 - alpha * (255 - c) for c in ink)
+    return any(all(abs(px[i] - want[i]) <= 2 for i in range(3)) for px in _pixels(path))

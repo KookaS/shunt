@@ -84,14 +84,23 @@ each one:
   `results.csv` happens to hold cannot move it.
 - **Over the universe.** The draw runs over every id in `data/challenges.json`, never over the
   collected subset — a split conditioned on coverage would silently re-draw itself as cells land.
-- **Nested and pinned, and the ratchet is gated.** Raising `fraction` only adds members. The
-  holdout may therefore be GROWN but never SHRUNK — live cells already collected against the
-  committed ids would be invalidated — and that is a test, not a promise:
-  `TestHoldoutRatchet` asserts every id in the committed manifest is still held out under the
-  current `DEFAULT_FRACTION`, naming the departed tasks when it is not. Lowering the fraction,
-  renaming an id, or bumping `dataset_revision` in a way that drops a member all fail it. Ids
-  are immutable only relative to `challenges.json`'s `dataset_revision`, so the manifest records
-  it and a test fails when the two diverge.
+- **Nested and pinned, and the ratchet is gated in the generator.** Raising `fraction` only adds
+  members. The holdout may therefore be GROWN but never SHRUNK — live cells already collected
+  against the committed ids would be invalidated. Two walls hold that, and only the first is
+  load-bearing:
+  - `write_manifest()` **refuses to write** a manifest that drops any id the on-disk manifest
+    already declares, naming the departed tasks and exiting non-zero. Lowering `DEFAULT_FRACTION`,
+    changing the salt, renaming an id, or bumping `dataset_revision` in a way that drops a member
+    all fail here — at regeneration time, in the same command the maintenance path runs.
+  - `TestHoldoutRatchet` compares the committed manifest against a fresh draw. It catches a
+    *forgotten* regeneration only: both of its sides move together when the constant is changed
+    and the manifest regenerated in one edit, so on its own it is not a ratchet (measured: at
+    `fraction=0.1` with the manifest regenerated, 52 of 97 tasks departed and it still passed). <!-- frozen-value: n=97, date=2026-08-20, run=468883b -->
+
+  A genuine reset is therefore deliberate and greppable: delete
+  `data/live_split_manifest.json` first, then regenerate. Ids are immutable only relative to
+  `challenges.json`'s `dataset_revision`, so the manifest records it and a test fails when the
+  two diverge.
 
 `data/live_split_manifest.json` is the committed, reviewable record (plain JSON, deliberately not
 LFS, like the seed bundle's manifest). Regenerate it with

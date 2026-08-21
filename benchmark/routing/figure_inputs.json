@@ -1,30 +1,42 @@
 {
   "plot_exploration": {
-    "inputs": "619c96c800917e8c085ca6b57892ce0f28c95d240e802c9467a333d0f9e9ecd8",
+    "inputs": "a8aed3645afdad7096f1ec797c1336ece34df84efe6583613fafb82061dcd364",
     "outputs": {
       "exploration_cost.png": "fcb485f036d591451e2053965069561cba1d23e7e55d16837a7d6e4493f53e5c"
     }
   },
   "plot_knn_nulls": {
-    "inputs": "06306962a3795ba2b9432a85c8c61c1e701bd40067da37c778ff5ce9c551a469",
+    "inputs": "40b5375b75ead665dcc802dd2f8c43085d136131181d998426ed717bf799d4fa",
     "outputs": {
       "embedding_signal.png": "047634af4af14b9066e5d41883aa478b9cf1125c719edd4941697c481638dad4"
     }
   },
+  "render_demo_figures": {
+    "inputs": "b34779907a8b3b7bd465bb4743536e3ea47c77fe3e2d7ee183f8501201696d9a",
+    "outputs": {
+      "inference_cost.png": "3dd574a07ea1eb71add4bcd84472318f10229e1e4591adc7ac00ff24e91afdaf",
+      "inference_escalation.png": "193cfa295c50052e89b4e19890003c4e95d63d8e960eaf26cedc147cfa78f032",
+      "inference_neighbourhood.png": "ff58edca30587519ae0470bb07ed987efdc25df0acf8986f94ab712387c87059",
+      "inference_ope.png": "147d565e6b5dd27ba242cf6a42fb990cfe4d931f4787a30b675bda65828ad7a2",
+      "inference_policy.png": "db0304c1a68510feb9297719a035ce2d6a4e88101f1375a6cab754a9a44da7e2",
+      "inference_strata.png": "38ae4075c14cd62fd017e221a28d46a1d29727a65c5e9ace821ee13d49e84318",
+      "inference_unit_economics.png": "7b7f06d0858ce7036000a18a7c6572313d2db8b67bc3c04e9e586314c12ade8c"
+    }
+  },
   "render_inference_figures": {
-    "inputs": "c5974eca407fc5e4f5a6c83beb9b8d69b403671f1f430409c726ef4eeddd32f4",
+    "inputs": "04976eac18909cddceaeec149e5f6d5a66132d563df1ead4bd68a627e030fa30",
     "outputs": {
       "inference_cost.png": "1200879261e9be3ebabf2e9e038e03d9e21857dcbfcd045eb292f0d7205b66bb",
       "inference_escalation.png": "ba86080378d75fd907e3e7121b8d47c01d6ffb68700fee4bdd66991bbc6e1b9e",
       "inference_neighbourhood.png": "2a340a57f94652f28a178b0950c17836f8d041e6e56a957b58ef9548cd63d0eb",
       "inference_ope.png": "1e45f735969b24718ffa511b5b378b75b3a633917cbd69518e5e0e659f0608ca",
       "inference_policy.png": "8b5af7d2b99e070479834fb96ec9b999580d4b17eb205b84496c0a1b7cfbf732",
-      "inference_strata.png": "e3c95aeb218fe214a4925497a3abe84c4a47562249b3f7ed6f06d59610dae812",
+      "inference_strata.png": "24428a2e595ced6b5e181e872e05c21159229ea44a421b332686e378591bc29f",
       "inference_unit_economics.png": "bd3478de76a1168a8ccf3a8c476864a5b16fffe0d716d3663cd1d55c3e39143d"
     }
   },
   "report": {
-    "inputs": "a6bbe8ce2761f24d1a09566351507f593a12aeaf6a0ab2067598b0bf05551e42",
+    "inputs": "1e2f62033938ae23800264e686e13f125f04f4f39aa6f58d889a3c8a05fd0a09",
     "outputs": {
       "arm_manipulation.png": "4061dcf67ce2259cc7e0d718f7f28823d091daf69b22eafc0a38a71513968b00",
       "cache_economics.png": "52f834502ed923f096d04a31fd98bb713a82f17d65e79a3c2e9abba92b82b056",
@@ -40,7 +52,7 @@
     }
   },
   "run_eval": {
-    "inputs": "d7e815759bba43ab3f3e0f24655ba87d7daba5925fb0a7197d465c9901a9c71f",
+    "inputs": "744adc2c42fca71249fe51c0f886e91f28e4b8af16fdbe88a450724c48a51603",
     "outputs": {
       "corpus_and_coverage.png": "b8c5d94c91dff3fcd5f64a2008c25d0be4042fbd18bd4d17255c611ed58c5963",
       "escalation_budget.png": "7b6b06d18969f928440fd1f6bb6ac102d3929db504b66a6f86737d0ced86247f",
@@ -52,13 +64,13 @@
     }
   },
   "threshold_sweep": {
-    "inputs": "3d83b027f4bd1b6b73ec39b907ec0edb50c33bf83c9ff61d4f0976bc989422da",
+    "inputs": "e36b359b468a53f798040b8de222981ace1a64847a4d5c0386c57ad5f1be3fde",
     "outputs": {
       "sweep_regimes.png": "3726747cb6054c52b3b3803bee4b53bfd66caa2b0d003a2728e531eb7f6979c9"
     }
   },
   "viz_knn": {
-    "inputs": "37f1db269263623cb7f80ce89f3d7514d780e50de7dbeb5f47018f7cd9781353",
+    "inputs": "79736807a950a9833a85a854174e02350203277f7a368dde78fade526d12d643",
     "outputs": {
       "knn_calibration.png": "01a13a14cc87a9d9c9c95c279c9b909f0b2ea39460676474468f914ab4016e05"
     }

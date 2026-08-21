@@ -35,7 +35,7 @@
 # cell with `No module named 'minisweagent'`. Pass extra flags via ARGS=…, e.g.
 # `make benchmark-live ARGS="--live --max-cost 2"`.
 
-.PHONY: e2e docs docs-build stop help benchmark benchmark-live offline-replay escalation-eval model-coverage state-capture-check state-capture-mark state-export state-import state-verify replay-inputs routing-report benchmark-figures check-figures inference-figures check-inference-figures seed-bundle check-seed-bundle reconcile-cost live-smoke
+.PHONY: e2e docs docs-build stop help benchmark benchmark-live offline-replay escalation-eval model-coverage state-capture-check state-capture-mark state-export state-import state-verify replay-inputs routing-report benchmark-figures check-figures inference-figures check-inference-figures demo-figures check-demo-figures seed-bundle check-seed-bundle reconcile-cost live-smoke
 .DEFAULT_GOAL := help
 
 DOCS_REQS := docs/requirements.txt
@@ -65,6 +65,8 @@ help:
 	@echo "make check-figures   Verify the committed standalone figures are current (seconds)"
 	@echo "make inference-figures Regenerate the inference figures + manifest (OUT=/tmp/x for a scratch copy)"
 	@echo "make check-inference-figures Verify the committed inference figures are current (seconds)"
+	@echo "make demo-figures    Redraw the ILLUSTRATIVE demo figures (synthetic, watermarked, evidence of nothing)"
+	@echo "make check-demo-figures Verify the committed demo figures are current (seconds)"
 	@echo "make seed-bundle     Build the LFS-tracked warm-start seed bundle (real fastembed, embeds results.csv)"
 	@echo "make check-seed-bundle Prove the committed seed bundle is current (seconds, no spend)"
 	@echo "make reconcile-cost  Reconcile tracked cost vs the real bill (ARGS=\"--billed 35 --timestamp 2026-07-27T00:00:00\")"
@@ -217,6 +219,24 @@ inference-figures:
 # The cheap staleness gate for the inference half — seconds, draws nothing.
 check-inference-figures:
 	$(BENCH) benchmark.pipeline --check-figures --half inference $(ARGS)
+
+# The DEMO half: the same seven drawings over `benchmark/routing/demo_corpus.py`, a synthetic
+# corpus of 703 sessions (300 drawn from 40 measured atoms, 153 invented, 250 seeded). It exists
+# so `docs/inference-demo.md` can show what a populated panel looks like; NOTHING it draws is a
+# measurement, and every canvas is stamped `SYNTHETIC — NOT MEASURED` by the renderer rather than
+# by the drawing code.
+#
+#   make demo-figures                the COMMITTED demo figures under docs/assets/figures/demo/
+#   make demo-figures OUT=/tmp/x     a scratch copy, manifest diverted beside it
+#
+# SAME STALENESS TRAP as above: this target RENDERS and does not re-record. The demo job's
+# stage is FIGURES, so `--from figures` (make benchmark-figures) is what certifies it.
+demo-figures:
+	SHUNT_PLOT_STRICT=1 $(BENCH) benchmark.demo.render_demo_figures \
+		$(if $(OUT),--out-dir "$(OUT)",) $(ARGS)
+
+check-demo-figures:
+	$(BENCH) benchmark.pipeline --check-figures --half demo $(ARGS)
 
 # The LFS-tracked warm-start seed bundle: precomputed per-embedding-fingerprint embeddings
 # of the benchmark's MEASURED outcome cells, so a fresh deployment can warm the live kNN

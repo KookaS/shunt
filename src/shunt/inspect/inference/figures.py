@@ -195,7 +195,17 @@ def _strata_stages(ax: Axes, view: idata.StrataData) -> None:
             hatch=_PROVISIONAL_HATCH if offset == 0 else None,
             edgecolor="white",
         )
-    _bar_labels(ax, list(stages))
+    # Labelled from the DISPLAY map, not from the attribute names: `labeled` and `tier2` are
+    # indistinguishable as bare nouns, and the difference between them is the figure's point.
+    ax.set_xticks(range(len(stages)))
+    # `.get(stage, stage)` rather than a subscript: the label map is hand-written beside
+    # CENSUS_STAGES and a new stage added to one and not the other would otherwise raise
+    # KeyError inside a shipped renderer. Degrading to the raw key is the old behaviour and
+    # is visibly wrong on the canvas; `test_census_stage_labels_cover_every_stage` is what
+    # actually catches the divergence, at import time rather than at render time.
+    ax.set_xticklabels(
+        [idata.CENSUS_STAGE_LABELS.get(stage, stage) for stage in stages], fontsize=7.5
+    )
     ax.set_ylabel("sessions")
     _headroom(ax)
     ax.legend(fontsize=8, frameon=False, loc="upper right")
@@ -315,7 +325,13 @@ def _cost_by_model(ax: Axes, view: idata.CostData) -> None:
     if not models:
         _empty(ax, f"no live sessions in this corpus (n={view.n_live}) — nothing to cost")
     else:
-        colours = model_color_map(models)
+        # HUE ENCODES THE WINDOW, and nothing else. It used to encode the MODEL while the window
+        # rode on alpha and the legend explained only the window — so the three legend swatches
+        # were the first model's hue at three alphas and the colours a reader actually saw were
+        # explained nowhere. The model is already named on the x axis; spending the hue channel
+        # on it twice stole the channel from the variable that needs it. `model_color_map` still
+        # binds where a model has no other channel (F3 panel B, F5 panel A) — see the
+        # recolor-on-filter note in plot_style.
         width = 0.8 / len(view.windows)
         for offset, (label, agg) in enumerate(view.windows):
             totals = dict((m, t) for m, _n, t in agg.by_model)
@@ -324,7 +340,7 @@ def _cost_by_model(ax: Axes, view: idata.CostData) -> None:
                 [totals.get(m, 0.0) for m in models],
                 width=width,
                 label=label,
-                color=[colours[m] for m in models],
+                color=OKABE_ITO[0],
                 alpha=1.0 - 0.25 * offset,
                 edgecolor="white",
             )
@@ -468,12 +484,15 @@ def _rate_series(
     present = [(i, source[m]) for i, m in enumerate(models) if m in source and source[m].n_labeled]
     if not present:
         return False
-    palette = model_color_map(models)
+    # ONE hue per stratum, never one per model. The legend on this panel explains the STRATUM
+    # (grey+hatch = replayed, solid = live), so painting the live bars a different colour each
+    # left the "live" swatch matching only the first model and silently claiming a per-model
+    # encoding nothing explained. The model is already on the x axis; it needs no second channel.
     ax.bar(
         [i + (offset - 0.5) * _BAR for i, _row in present],
         [row.rate for _i, row in present],
         width=_BAR,
-        color=colour if colour else [palette[models[i]] for i, _row in present],
+        color=colour if colour else OKABE_ITO[0],
         hatch=_PROVISIONAL_HATCH if colour else None,
         edgecolor="white",
         label=label,
@@ -497,7 +516,8 @@ def _economics_cost(ax: Axes, view: idata.UnitEconomicsData) -> None:
     if not drawn:
         _empty(ax, "no model has a verified success, so cost per success is undefined")
     else:
-        palette = model_color_map(drawn)
+        # Same stratum-not-model hue rule as panel A: the y axis names every model, and the
+        # legend here explains the stratum, so a per-model palette would contradict its own key.
         ax.barh(
             [i + _BAR / 2 for i in range(len(drawn))],
             [seeded.get(m) or 0.0 for m in drawn],
@@ -511,7 +531,7 @@ def _economics_cost(ax: Axes, view: idata.UnitEconomicsData) -> None:
             [i - _BAR / 2 for i in range(len(drawn))],
             [live.get(m) or 0.0 for m in drawn],
             height=_BAR,
-            color=[palette[m] for m in drawn],
+            color=OKABE_ITO[0],
             edgecolor="white",
             label="live",
         )

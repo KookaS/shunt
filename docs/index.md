@@ -168,6 +168,7 @@ trust rules: [Feedback](feedback.md).
 - [Escalation dataset](escalation-data-card.md) — what the escalation corpus is: provenance, census, known defects, access mechanics
 - [Reproducing the escalation eval](escalation-reproduction.md) — run the offline escalation eval from a fresh clone, and the numbers a correct run reproduces
 - [The live router](inference.md) — seven figures measuring the shipped router on its own outcome store
+- [The same seven figures, on invented data](inference-demo.md) — an illustrative render of those seven over a synthetic corpus, so the panels the measured page leaves empty can be read at all
 - [Results](results.md) — every measured routing, escalation, and inference number, with its caveats
 - [Research log](research-log.md) — published ideas we tested, and what held
 - [Benchmark](benchmark.md) — run the offline model-capability and routing evals

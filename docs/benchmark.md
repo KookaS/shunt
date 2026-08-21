@@ -362,11 +362,13 @@ the per-half `figures.json`. The figure targets:
 | `make routing-report` | redraws the **routing** half |
 | `make benchmark-figures` | runs the pipeline's `figures` stage (`--from figures`) — redraws the standalone routing figures **and the inference half**, and is the only target that **re-records** the freshness manifest |
 | `make inference-figures` | redraws the seven **inference** PNGs only (`OUT=/tmp/x` for a scratch copy). It renders but does **not** re-record the manifest — certify with `make benchmark-figures` |
+| `make demo-figures` | redraws the seven **demo** PNGs (synthetic, watermarked, evidence of nothing) only (`OUT=/tmp/x` for a scratch copy). It renders but does **not** re-record the manifest — certify with `make benchmark-figures` |
 | `make check-figures` | `benchmark.pipeline --check-figures` — proves every committed figure is current without regenerating anything |
 | `make check-inference-figures` | the same gate narrowed to one half (`--check-figures --half inference`) |
+| `make check-demo-figures` | the same gate narrowed to one half (`--check-figures --half demo`) |
 
-`--check-figures` accepts `--half {routing,escalation,inference}`, so one half's staleness never
-decides another half's exit code; `--half` is a check-only flag and is a hard `parser.error`
+`--check-figures` accepts `--half {demo,escalation,inference,routing}`, so one half's staleness
+never decides another half's exit code; `--half` is a check-only flag and is a hard `parser.error`
 anywhere else. `make check-figures` is the gate to run after a code change before trusting an
 old PNG.
 
@@ -550,7 +552,7 @@ to skip it, and `benchmark/plot_frame.py` is a re-export shim over the same impl
 so the benchmark figures and the ephemeral `shunt inspect` diagnostics share one contract
 rather than a copy that drifts. The frame records each figure's reading, goal, terms, notes,
 limitations, sample counts and input digest into a committed `figures.json` beside the code
-that writes it — `benchmark/<half>/figures.json` for the two benchmark halves, and
+that writes it — `benchmark/<half>/figures.json` for the three benchmark halves, and
 `src/shunt/inspect/inference/figures.json` for the inference half, whose producer ships inside
 the package (the diagnostics pass no `Provenance` and so write no row). A second
 gate (SH009) then holds that manifest in a bijection with the docs: every figure has a

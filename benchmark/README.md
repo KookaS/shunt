@@ -143,13 +143,15 @@ not the bytes certified for that job, i.e. a figure changed outside the certifyi
 record). The input-only gate reported two genuinely drifted figures as current; the last two
 conditions are what closed that. All four repair with `--from evaluate` — never by hand-editing
 `benchmark/routing/figure_inputs.json`.
-`--check-figures --half {routing,escalation,inference}` narrows the report to one half, so
+`--check-figures --half {demo,escalation,inference,routing}` narrows the report to one half, so
 one half's staleness never decides another half's exit code (`make check-inference-figures`);
 `--half` is check-only and a hard `parser.error` on any other subcommand.
 
 The full figure-target list: `make routing-report` (routing half), `make escalation-eval`
 (escalation half), `make inference-figures` (the seven inference PNGs; `OUT=/tmp/x` diverts
-them plus the manifest to a scratch dir), `make benchmark-figures` (the pipeline's `figures`
+them plus the manifest to a scratch dir), `make demo-figures` (the seven ILLUSTRATIVE demo
+PNGs — synthetic, watermarked, evidence of nothing; same `OUT=` diversion),
+`make benchmark-figures` (the pipeline's `figures`
 stage — the **only** target that re-records the freshness manifest, so it is what certifies a
 newly-added or changed figure), `make check-figures` and `make check-inference-figures` (the
 gates). `make inference-figures` renders without re-recording; a bare `--check-figures` stays

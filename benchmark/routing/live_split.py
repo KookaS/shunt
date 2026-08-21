@@ -94,10 +94,35 @@ def split_manifest(
     }
 
 
+def committed_tasks() -> set[str]:
+    """Ids the on-disk manifest already declares; empty when no manifest has been written yet."""
+    if not MANIFEST_PATH.exists():
+        return set()
+    payload = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    return {str(t) for t in payload.get("tasks", [])}
+
+
 def write_manifest(
     fraction: float = DEFAULT_FRACTION, salt: str = LIVE_SPLIT_SALT
 ) -> dict[str, object]:
-    """Regenerate the committed manifest; the file is the reviewable artefact, not the source."""
+    """Regenerate the committed manifest, refusing any draw that drops an id it already holds."""
+    # THE RATCHET LIVES HERE, IN THE GENERATOR, AND NOT ONLY IN THE TEST. A test that compares
+    # the committed manifest against a fresh draw is satisfied by ANY edit that moves both sides
+    # together, which is exactly the documented maintenance path: change the constant, then run
+    # this module. It catches a forgotten regeneration and nothing else. Refusing to WRITE a
+    # shrinking manifest closes that: the only way to shrink the holdout is to delete the
+    # manifest first, which is a deliberate, greppable act rather than a side effect of a
+    # one-character edit. Live cells were collected against these ids; a departure retroactively
+    # invalidates them.
+    holdout = holdout_tasks(fraction, salt)
+    departed = sorted(committed_tasks() - set(holdout))
+    if departed:
+        raise ValueError(
+            f"refusing to write {MANIFEST_PATH}: {len(departed)} task(s) would leave the live "
+            f"holdout at fraction={fraction} salt={salt}, invalidating live results already "
+            f"collected against them: {departed}. The holdout may be grown, never shrunk; "
+            f"delete the manifest first if a reset is genuinely intended."
+        )
     manifest = split_manifest(fraction, salt)
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     return manifest

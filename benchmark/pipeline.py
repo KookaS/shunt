@@ -74,6 +74,7 @@ _FIGURES_DIR = Path("docs/assets/figures")
 _ROUTING_FIGURES_DIR = _FIGURES_DIR / "routing"
 _ESCALATION_FIGURES_DIR = _FIGURES_DIR / "escalation"
 _INFERENCE_FIGURES_DIR = _FIGURES_DIR / "inference"
+_DEMO_FIGURES_DIR = _FIGURES_DIR / "demo"
 _ROUTING_REPORTS_DIR = Path("benchmark/routing/reports")
 _ESCALATION_PLOTS_DIR = Path("benchmark/escalation/reports")
 
@@ -644,7 +645,10 @@ class FigureJob:
 
 def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
     """The measured outcomes + task set a half's figures are derived from."""
-    if half == "inference":
+    if half in ("inference", "demo"):
+        # The demo half shares this set: its corpus BORROWS real embeddings from the seed
+        # bundle (`demo_corpus._borrowed_vectors`), and F5 still reads the shipped registry to
+        # know how many arms the router could have picked.
         return (
             # The seed bundle's manifest, not the .npz: the manifest names the bundle file
             # (content-keyed) plus its results/challenges digests, so it moves whenever the
@@ -857,11 +861,47 @@ _INFERENCE_FIGURES: Final[FigureJob] = FigureJob(
     half="inference",
 )
 
+# The illustrative half: the same seven drawings over `demo_corpus`, a seeded resampling of 40
+# measured live rows. It reports nothing about the router and no analysis reads it — the job
+# exists so the figures cannot outlive their generator. `demo_corpus.py` is named EXPLICITLY
+# among the inputs (it carries DEMO_SEED, so the seed is digested with it): without that row the
+# corpus could be redrawn from a different seed and the committed PNGs would still read fresh.
+_DEMO_ANALYSIS: Final[tuple[str, ...]] = (
+    *_INFERENCE_ANALYSIS,
+    "benchmark.routing.demo_corpus",
+)
+
+_DEMO_FIGURES: Final[FigureJob] = FigureJob(
+    "benchmark.demo.render_demo_figures",
+    (
+        "inference_cost.png",
+        "inference_escalation.png",
+        "inference_neighbourhood.png",
+        "inference_ope.png",
+        "inference_policy.png",
+        "inference_strata.png",
+        "inference_unit_economics.png",
+    ),
+    _figure_inputs(
+        _REPO_ROOT / "benchmark" / "demo",
+        _ROUTING / "demo_corpus.py",
+        _REPO_ROOT / "src" / "shunt" / "inspect" / "inference",
+        # `docs_corpus` seeds through `seed_live`, which reads the strategy set — the same
+        # reach the inference job digests, and for the same reason.
+        _STRATEGIES,
+        analysis=_DEMO_ANALYSIS,
+    ),
+    figures_dir=_REPO_ROOT / _DEMO_FIGURES_DIR,
+    reports_dir=_REPO_ROOT / _DEMO_FIGURES_DIR,
+    half="demo",
+)
+
 FIGURE_JOBS: Final[tuple[FigureJob, ...]] = (
     *_STANDALONE,
     _REPORT_JOB,
     _ESCALATION_JOB,
     _INFERENCE_FIGURES,
+    _DEMO_FIGURES,
 )
 # Every half a figure job declares — the `--half` filter's choices, so registering a new half
 # extends the flag without an argparse edit.

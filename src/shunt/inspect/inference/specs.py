@@ -98,6 +98,29 @@ STRATA: Final[FigureText] = FigureText(
     definitions=(
         _STRATUM_TERM,
         (
+            "stored",
+            "A row in `sessions`: the router served the request and wrote the decision. Every "
+            "other stage is a subset of the same population, counted a different way.",
+        ),
+        (
+            "embedded",
+            "A stored session that also carries an embedding vector "
+            "(`sessions.embedding_blob`). Without one it can never be retrieved as a "
+            "neighbour, however well it was labelled.",
+        ),
+        (
+            "labeled (any tier)",
+            "A session with at least one non-tombstoned event in the append-only "
+            "`outcome_events` log, of EITHER tier. Tier-1 is the weak prior read off the wire; "
+            "Tier-2 is a verified test or typecheck result.",
+        ),
+        (
+            "verified (tier-2)",
+            "A session whose Tier-2 verdict reached the materialized `outcomes` view. A "
+            "Tier-1-only session is deliberately held out of that view until a Tier-2 "
+            "corroborates it, so it never becomes a routing neighbour.",
+        ),
+        (
             "indexed",
             "An actual member of the kNN index: embedded, with a materialized outcome and no "
             "tombstone. This is the population a routing decision can draw a neighbour from.",
@@ -110,6 +133,11 @@ STRATA: Final[FigureText] = FigureText(
         "surfaced on the canvas rather than assigned to either stratum.",
         "The seeder writes one deterministic timestamp for the whole corpus, so panel B's seeded "
         "column has no width by construction.",
+        "There is no Tier-1 bar, and its absence is the point: a Tier-1-only session is kept out "
+        "of the materialized view and out of the trusted kNN index until a Tier-2 corroborates "
+        "it, so it cannot influence a routing decision. It is not hidden either — `labeled (any "
+        "tier)` counts both tiers and `verified (tier-2)` counts only the verified one, so the "
+        "GAP between those two bars is exactly the Tier-1-only population.",
     ),
     limitations=(
         "Panel A counts sessions, not requests: a session serving many turns appears once.",

@@ -47,6 +47,11 @@ _HALVES: tuple[tuple[str, str, str], ...] = (
     ("routing", "benchmark/routing", "docs/routing.md"),
     ("escalation", "benchmark/escalation", "docs/escalation.md"),
     ("inference", "src/shunt/inspect/inference", "docs/inference.md"),
+    # The illustrative half. Its own row is what enforces the one rule the synthetic figures
+    # live under: never mixed with a measurement figure. Because membership is keyed on the
+    # half, a demo PNG dropped into docs/assets/figures/inference/ is an orphan finding rather
+    # than a figure that quietly acquires a measurement page's credibility.
+    ("demo", "benchmark/demo", "docs/inference-demo.md"),
 )
 
 # The PNGs live inside the published docs tree so the docs can link them relatively, ONE

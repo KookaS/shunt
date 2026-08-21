@@ -863,7 +863,7 @@ class TestFigureHalfFilter:
             job for half in pipeline.FIGURE_HALVES for job in pipeline.figure_jobs_for(half)
         ]
         assert sorted(j.name for j in selected) == sorted(j.name for j in pipeline.FIGURE_JOBS)
-        assert set(pipeline.FIGURE_HALVES) == {"escalation", "inference", "routing"}
+        assert set(pipeline.FIGURE_HALVES) == {"demo", "escalation", "inference", "routing"}
 
     def test_one_halfs_staleness_does_not_redden_another(self, tmp_path: Path) -> None:
         """The regression the filter prevents: an uncertified inference job turning the
@@ -912,11 +912,13 @@ class TestInferenceFigureJob:
 
     def test_the_inference_package_stays_out_of_the_benchmark_closures(self) -> None:
         """Adding the inference modules to the routing/escalation digests would re-stale all
-        22 benchmark PNGs on every inference edit — the exact regression a promotion caused
-        once already."""
+        22 benchmark PNGs on every inference edit — the regression a promotion caused once."""
+        # The `demo` half is exempt for the same reason `inference` is: it DRAWS with that
+        # package, so the package is genuinely one of its inputs. The guard is about the two
+        # MEASUREMENT halves, whose figures the package cannot touch.
         pkg = pipeline._REPO_ROOT / "src" / "shunt" / "inspect" / "inference"
         for job in pipeline.FIGURE_JOBS:
-            if job.half == "inference":
+            if job.half in ("inference", "demo"):
                 continue
             assert not any(pkg == p or pkg in p.parents for p in job.inputs), job.name
 

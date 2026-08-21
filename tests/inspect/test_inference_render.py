@@ -118,10 +118,14 @@ def test_an_inadmissible_instrument_costs_one_figure_not_the_family(
 
 
 def test_a_scratch_render_cannot_reach_the_committed_manifest(tmp_path: Path) -> None:
-    assert inference._committed_home(tmp_path) is False
+    # Asserted through `_manifest_for`/`Family.manifest_for`, the one surviving implementation
+    # of "is this the committed home". The predicate used to exist twice — a private helper
+    # here and the comparison inside `Family` — and two copies of one boolean is how a scratch
+    # render eventually reaches the committed manifest.
     assert inference._manifest_for(tmp_path) == tmp_path.parent / "figures.json"
     assert inference._manifest_for(inference.CANONICAL_PLOTS_DIR) == inference.MANIFEST
-    assert inference._committed_home(inference.CANONICAL_PLOTS_DIR) is True
+    assert inference.INFERENCE.manifest_for(tmp_path) == tmp_path.parent / "figures.json"
+    assert inference.INFERENCE.manifest_for(inference.CANONICAL_PLOTS_DIR) == inference.MANIFEST
 
 
 def test_the_committed_manifest_sits_beside_the_producer() -> None:

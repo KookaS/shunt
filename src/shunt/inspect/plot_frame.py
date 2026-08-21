@@ -29,7 +29,9 @@ from __future__ import annotations
 import json
 import os
 import textwrap
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
@@ -315,6 +317,55 @@ def panel_label(ax: Axes, text: str) -> None:
     ax.set_title(text, fontsize=9.5, color=MUTED, loc="left", pad=4.0)  # noqa: SH007
 
 
+# --------------------------------------------------------------------------- watermark
+
+
+# A family whose canvases must be labelled on their face sets this ONCE, around its whole
+# render; `save` reads it and stamps. That placement is the point. SH007 already denies
+# `savefig` outside this module, so `save` is the only door a figure can leave by — a draw
+# function has no opportunity to forget the mark because it is never asked for it, and a new
+# figure added to a watermarked family inherits the stamp by construction rather than by
+# review. A per-figure flag would have been one `FigureSpec` field away from a silent omission,
+# which on an illustrative family is the omission that matters.
+#
+# A ContextVar rather than a plain module global: `set`/`reset` needs no `global` statement
+# (SH001 denies those), it nests correctly, and a concurrent render in another task or thread
+# cannot inherit a stamp that was never meant for it.
+_WATERMARK: Final[ContextVar[str | None]] = ContextVar("shunt_plot_watermark", default=None)
+
+_WATERMARK_PT: Final[float] = 34.0
+_WATERMARK_ALPHA: Final[float] = 0.16
+_WATERMARK_ROTATION: Final[float] = 24.0
+
+
+@contextmanager
+def watermarked(text: str | None) -> Iterator[None]:
+    """Every canvas saved inside this block carries *text* across it. None is a no-op."""
+    token = _WATERMARK.set(text)
+    try:
+        yield
+    finally:
+        _WATERMARK.reset(token)
+
+
+def _stamp(fig: Figure, text: str) -> None:
+    """Draw the watermark across the middle of the canvas, over everything already drawn."""
+    fig.text(
+        0.5,
+        0.46,
+        text,
+        transform=fig.transFigure,
+        ha="center",
+        va="center",
+        rotation=_WATERMARK_ROTATION,
+        fontsize=_WATERMARK_PT,
+        fontweight="bold",
+        color=CAVEAT_RED,
+        alpha=_WATERMARK_ALPHA,
+        zorder=1000,
+    )
+
+
 def save(
     fig: Figure,
     path: Path,
@@ -334,6 +385,11 @@ def save(
             from shunt.inspect import plot_contract
 
             plot_contract.assert_clean(fig, path.name, band_top_px=band_top_px)
+        # AFTER the audit, deliberately: the mark is meant to lie across the data, which is
+        # exactly what `_audit_text_over_axes` calls a defect on every other figure text.
+        mark = _WATERMARK.get()
+        if mark:
+            _stamp(fig, mark)
         path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(path, dpi=DPI)  # noqa: SH007 (the frame itself)
     finally:

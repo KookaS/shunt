@@ -103,9 +103,16 @@ OKABE_ITO: Final[tuple[str, ...]] = (
 def model_color_map(models_in_order: Sequence[str]) -> dict[str, str]:
     """Assign each model its fixed Okabe-Ito hue by POSITION in ``models_in_order``."""
     # Callers must compute this once from the full/stable model list (e.g.
-    # tier-then-price order) and pass the same map to every figure — never
-    # re-derive it from a filtered subset, or a model's color would repaint
+    # tier-then-price order) and pass the same map to every figure THAT USES IT —
+    # never re-derive it from a filtered subset, or a model's color would repaint
     # when the subset changes (the recolor-on-filter anti-pattern).
+    #
+    # NOT every figure uses it, and that is deliberate. Hue is a scarce channel: a
+    # panel that already names the model on an axis should spend hue on its OTHER
+    # variable, and painting the model twice while the legend explains only the
+    # second variable is how a legend ends up contradicting its own bars. Reach for
+    # this map where the model has no other channel (a stacked area band); prefer a
+    # single hue per series where it does (a grouped or labelled bar).
     return {m: OKABE_ITO[i % len(OKABE_ITO)] for i, m in enumerate(models_in_order)}
 
 

@@ -31,6 +31,18 @@ This file is the source for the GitHub release notes, so the two cannot disagree
   (`NOT_IDENTIFIED`) rather than estimated where the logs cannot identify them. The committed
   render comes from a deterministic seed-only store containing no live traffic, and the page
   says so before the first figure.
+- **An illustrative render of those seven figures, on data that is invented.**
+  [`docs/inference-demo.md`](inference-demo.md) draws the same family over
+  `benchmark/routing/demo_corpus.py` — a synthetic corpus of 703 sessions (453 live + 250 seeded):
+  300 drawn live sessions resampled from 40 measured atoms, 153 invented live sessions covering
+  escalation scenarios, and 250 seeded sessions from benchmark models — so the panels the measured
+  page leaves empty can be read at all. It is illustration, never evidence: nothing on it is a
+  measurement, no result cites it, and every canvas is stamped `SYNTHETIC — NOT MEASURED` by the
+  renderer rather than by the drawing code. Rendered by `make demo-figures` into its own
+  `docs/assets/figures/demo/` half. The embeddings are the one real thing on the page — genuine
+  vectors borrowed from the committed seed bundle, so the geometry is real while the association
+  to a session is invented — and the off-policy panel still refuses, because the shipped logging
+  policy does not randomize.
 - **Off-policy evaluation and instrument admissibility now ship in the wheel** as
   `shunt.analysis.ope` (IPS / SNIPS / doubly-robust with cross-fit, ESS, and the
   `IDENTIFIED` / `NOT_IDENTIFIED` verdict) and `shunt.analysis.admissibility` (the
@@ -53,7 +65,7 @@ This file is the source for the GitHub release notes, so the two cannot disagree
 - **New figure targets and a half-scoped freshness gate.** `make inference-figures` (redraw the
   seven inference PNGs; `OUT=/tmp/x` diverts both the PNGs and the manifest to a scratch dir,
   leaving the committed tree untouched) and `make check-inference-figures`. The pipeline's
-  `--check-figures` takes a new **`--half {routing,escalation,inference}`** so one half's
+  `--check-figures` takes a new **`--half {demo,escalation,inference,routing}`** so one half's
   staleness no longer decides another half's exit code; `--half` is check-only and is a hard
   `parser.error` anywhere else. `make benchmark-figures` (the pipeline's `figures` stage)
   remains the only target that **re-records** the freshness manifest — a bare

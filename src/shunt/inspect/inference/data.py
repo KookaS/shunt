@@ -256,6 +256,21 @@ def strata(store: OutcomeStore, rows: list[SessionRow]) -> StrataData:
 
 CENSUS_STAGES: Final[tuple[str, ...]] = ("stored", "embedded", "labeled", "tier2", "indexed")
 
+# What each stage is CALLED on the canvas. The keys above are `StratumStages` attribute names and
+# are read by `getattr`, so they cannot carry the qualifier a reader needs — and without it the
+# panel is five nouns with no stated difference between `labeled` and `tier2`, which is exactly
+# the tier-1 question the figure never answers on its face. The two qualifiers are the whole
+# point: `labeled` counts ANY outcome event, `tier2` counts only the verified one, so the gap
+# between them IS the tier-1-only population that `store._materialize_outcome` keeps out of the
+# index. Display only; the census, the nesting check and the docs terms all key on CENSUS_STAGES.
+CENSUS_STAGE_LABELS: Final[dict[str, str]] = {
+    "stored": "stored",
+    "embedded": "embedded",
+    "labeled": "labeled\n(any tier)",
+    "tier2": "verified\n(tier-2)",
+    "indexed": "in kNN\nindex",
+}
+
 
 def _nesting_breaks(census: StratumCensus) -> tuple[str, ...]:
     """Adjacent census stages where the later count exceeds the earlier one it is drawn under."""
@@ -288,7 +303,12 @@ class CostData:
     n_live: int
 
 
-def cost(rows: list[SessionRow], windows: tuple[int | None, ...] = (7, 30, None)) -> CostData:
+def cost(
+    rows: list[SessionRow],
+    windows: tuple[int | None, ...] = (7, 30, None),
+    *,
+    now: datetime | None = None,
+) -> CostData:
     """F2's inputs. Every number here is live-only; the excluded seeded count is carried."""
     # Aggregated from `rows` rather than from `store.live_cost_aggregates`, so ONE definition
     # of live — the adjudicated `stratum` — drives every panel and the subtitle. The store's
@@ -302,16 +322,18 @@ def cost(rows: list[SessionRow], windows: tuple[int | None, ...] = (7, 30, None)
         running += row.cost
         curve.append((row.timestamp, running))
     return CostData(
-        windows=[(_window_label(w), _live_cost(rows, w)) for w in windows],
+        windows=[(_window_label(w), _live_cost(rows, w, now)) for w in windows],
         cumulative=curve,
         n_seeded_excluded=sum(1 for row in rows if row.stratum == SEEDED),
         n_live=sum(1 for row in rows if row.stratum == LIVE),
     )
 
 
-def _live_cost(rows: list[SessionRow], days: int | None) -> LiveCostAggregates:
+def _live_cost(
+    rows: list[SessionRow], days: int | None, now: datetime | None = None
+) -> LiveCostAggregates:
     """One window of live spend, in the shape the store used to hand back."""
-    live = [row for row in rows if row.stratum == LIVE and _in_window(row, days)]
+    live = [row for row in rows if row.stratum == LIVE and _in_window(row, days, now)]
     known = [row for row in live if row.cost_known]
     counts = Counter(row.model_chosen for row in known)
     totals: dict[str, float] = dict.fromkeys(counts, 0.0)
@@ -326,17 +348,24 @@ def _live_cost(rows: list[SessionRow], days: int | None) -> LiveCostAggregates:
     )
 
 
-def _in_window(row: SessionRow, days: int | None) -> bool:
-    """The ONE window this family means by `7d`: the last N days of wall clock, ending now."""
+def _in_window(row: SessionRow, days: int | None, now: datetime | None = None) -> bool:
+    """The ONE window this family means by `7d`: the last N days ending at *now*."""
     # Every windowed panel in the family shares this predicate. The rejected alternative anchored
     # the window on the NEWEST ROW instead, which relabels a year-old burst as "the last 7 days"
     # and made F2 and F6 print different `7d` denominators over one corpus. The whole delta is
     # compared, not `.days`, which floors and would let a `7d` bar quietly cover eight.
+    #
+    # `now` OVERRIDES the wall clock and defaults to it, so the shipped read of a live store is
+    # byte-identical to what it was. It exists for a corpus whose timestamps are FROZEN: an
+    # illustrative store anchored to a fixed date has windowed panels that thin toward empty as
+    # real time passes, which turns a committed figure stale on the calendar rather than on any
+    # change to the data. A caller that passes it is asserting its corpus has its own clock.
     if days is None:
         return True
     if row.timestamp is None:
         return False  # an unstamped row cannot be placed in a window; it is not "recent"
-    return row.timestamp >= datetime.now(row.timestamp.tzinfo) - timedelta(days=days)
+    reference = now if now is not None else datetime.now(row.timestamp.tzinfo)
+    return row.timestamp >= reference - timedelta(days=days)
 
 
 def _window_label(days: int | None) -> str:
@@ -643,7 +672,10 @@ class EscalationData:
 
 
 def escalation(
-    rows: list[SessionRow], windows: tuple[int | None, ...] = (7, 30, None)
+    rows: list[SessionRow],
+    windows: tuple[int | None, ...] = (7, 30, None),
+    *,
+    now: datetime | None = None,
 ) -> EscalationData:
     """F6's inputs. Holds split into the five tokens, anything else, and the derived case."""
     live = [row for row in rows if row.stratum == LIVE]
@@ -652,7 +684,7 @@ def escalation(
     rungs = Counter(row.rung for row in escalated)
     plain = [row for row in live if row.rung is None]
     return EscalationData(
-        rates=[_rate(live, w) for w in windows],
+        rates=[_rate(live, w, now) for w in windows],
         rungs=[(token, rungs.get(token, 0)) for token in RUNG_TOKENS],
         holds=[(token, holds.get(token, 0)) for token in HOLD_TOKENS],
         unknown_holds=sorted((t, n) for t, n in holds.items() if t not in HOLD_TOKENS),
@@ -666,8 +698,10 @@ def escalation(
     )
 
 
-def _rate(live: list[SessionRow], days: int | None) -> tuple[str, int, int]:
-    members = [row for row in live if _in_window(row, days)]
+def _rate(
+    live: list[SessionRow], days: int | None, now: datetime | None = None
+) -> tuple[str, int, int]:
+    members = [row for row in live if _in_window(row, days, now)]
     return (_window_label(days), sum(1 for row in members if row.rung is not None), len(members))
 
 

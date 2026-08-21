@@ -112,12 +112,20 @@ class TestHyperparameterInvariance:
 
 
 class TestHoldoutRatchet:
+    """The holdout may be GROWN but never SHRUNK — but THIS class is only half the ratchet."""
+
+    # Live collection was already performed against the ids the committed manifest declares, so
+    # a task departing the holdout retroactively invalidates every live cell measured on it. The
+    # ratchet has TWO walls, because this test alone is not one: it reads the committed manifest
+    # fresh and compares it to a fresh draw, so it catches only a *forgotten* regeneration. The
+    # documented maintenance path — edit DEFAULT_FRACTION, then run
+    # `python -m benchmark.routing.live_split` — moves both sides of the comparison together and
+    # leaves this test passing while tasks silently depart. Measured: at fraction=0.1 with the
+    # manifest regenerated, 52 of the 97 committed tasks left the holdout and this assertion
+    # still passed. The wall that actually holds is in `write_manifest`, which refuses to write
+    # the shrunk manifest at all — pinned by `TestGeneratorRefusesToShrink` below.
+
     def test_no_committed_task_may_leave_the_holdout(self):
-        # The holdout may be GROWN but never SHRUNK: live collection was already performed
-        # against the ids the committed manifest declares, so a task departing the holdout
-        # retroactively invalidates every live cell measured on it. Lowering
-        # DEFAULT_FRACTION, renaming an id, or bumping dataset_revision in a way that drops
-        # a member must fail here — raising the fraction keeps it passing (superset).
         committed = set(json.loads(live_split.MANIFEST_PATH.read_text())["tasks"])
         today = set(live_split.holdout_tasks(fraction=live_split.DEFAULT_FRACTION))
         departed = sorted(committed - today)
@@ -125,3 +133,47 @@ class TestHoldoutRatchet:
             f"{len(departed)} task(s) left the live holdout, invalidating live results "
             f"already collected against them: {departed}"
         )
+
+
+class TestGeneratorRefusesToShrink:
+    """`write_manifest` is the wall a same-commit edit cannot walk through."""
+
+    @staticmethod
+    def _seeded(tmp_path, monkeypatch, fraction=live_split.DEFAULT_FRACTION):
+        target = tmp_path / "live_split_manifest.json"
+        monkeypatch.setattr(live_split, "MANIFEST_PATH", target)
+        live_split.write_manifest(fraction=fraction)
+        return target
+
+    def test_lowering_the_fraction_and_regenerating_now_fails(self, tmp_path, monkeypatch):
+        target = self._seeded(tmp_path, monkeypatch)
+        before = target.read_text()
+        with pytest.raises(ValueError, match="would leave the live holdout") as excinfo:
+            live_split.write_manifest(fraction=0.1)
+        departed = set(live_split.holdout_tasks(fraction=live_split.DEFAULT_FRACTION)) - set(
+            live_split.holdout_tasks(fraction=0.1)
+        )
+        assert departed, "the red-check would be vacuous if 0.1 dropped nothing"
+        for task in sorted(departed)[:3]:
+            assert task in str(excinfo.value)
+        assert target.read_text() == before, "a refused write must not touch the manifest"
+
+    def test_raising_the_fraction_and_regenerating_still_passes(self, tmp_path, monkeypatch):
+        target = self._seeded(tmp_path, monkeypatch)
+        seeded = set(json.loads(target.read_text())["tasks"])
+        grown = live_split.write_manifest(fraction=0.3)
+        assert set(grown["tasks"]) > seeded
+        assert set(json.loads(target.read_text())["tasks"]) == set(grown["tasks"])
+        assert (len(seeded), grown["holdout_count"]) == (97, 152)
+
+    def test_a_changed_salt_that_drops_a_member_is_refused(self, tmp_path, monkeypatch):
+        self._seeded(tmp_path, monkeypatch)
+        with pytest.raises(ValueError, match="would leave the live holdout"):
+            live_split.write_manifest(salt="live-split-v2")
+
+    def test_an_absent_manifest_seeds_without_complaint(self, tmp_path, monkeypatch):
+        target = tmp_path / "live_split_manifest.json"
+        monkeypatch.setattr(live_split, "MANIFEST_PATH", target)
+        assert live_split.committed_tasks() == set()
+        manifest = live_split.write_manifest(fraction=0.1)
+        assert manifest["holdout_count"] == len(live_split.holdout_tasks(fraction=0.1))

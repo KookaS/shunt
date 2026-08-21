@@ -115,3 +115,13 @@ class TestCensusNesting:
         breaks = idata._nesting_breaks(census)
         assert len(breaks) == len(idata.CENSUS_STAGES) - 1
         assert all(name.startswith("live: ") for name in breaks)
+
+
+def test_census_stage_labels_cover_every_stage() -> None:
+    """F1 panel A subscripts the label map by stage; a gap would be a render-time KeyError."""
+    # The two constants are hand-written beside each other, so nothing but this test stops a
+    # sixth stage (or a rename) landing in one and not the other. The renderer degrades with
+    # `.get`, which keeps a shipped diagnostic from crashing — but a raw key on the canvas is
+    # a defect, so the divergence is caught here instead of in a figure nobody re-reads.
+    assert set(idata.CENSUS_STAGE_LABELS) == set(idata.CENSUS_STAGES)
+    assert all(idata.CENSUS_STAGE_LABELS[stage] for stage in idata.CENSUS_STAGES)
