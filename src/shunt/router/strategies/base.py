@@ -21,6 +21,16 @@ class RoutingStrategy(Protocol):
         """
         ...
 
+    # A SEPARATE question from `consults_neighbors`, and the two split apart: a fixed strategy
+    # opts out of the NEIGHBOURHOOD, which says nothing about the escalation layer. False makes
+    # the strategy a PINNED CONTROL — `always_cheap` and `always_frontier` are controls by
+    # contract, because a control that escalates no longer anchors the routing comparison it
+    # exists to anchor. `session_cascade` is the counter-case: same fixed pick, ladder included.
+    @property
+    def participates_in_escalation(self) -> bool:
+        """Whether a verified failure may move this strategy's pick at a later boundary."""
+        ...
+
     def select(
         self,
         neighbors: list[NeighborResult],

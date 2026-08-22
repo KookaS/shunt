@@ -65,19 +65,23 @@ _CASCADE_BLOCKER: Final[str] = (
     "needs a verified outcome per attempt mid-session, which is more than one decision "
     "per session and breaks cache-safety"
 )
-# UNMEASURED AND CAPPED — not merely "a mechanism exists". The live ladder is the
-# cache-safe analogue (one decision per session, reading only closed prior sessions), but
-# it cannot reach the cascade's operating point, so quoting the cascade's numbers as a
-# preview of what escalation would buy is wrong by roughly a factor of five.
+# TAKEN, AND MEASURED — this is no longer an assertion about an unbuilt mechanism. The route
+# is `router.strategy: session_cascade`, a live id since 2026-08-21, and Session-Cascade is
+# what it costs. State the SHORTFALL with the route, so nobody reads "there is a path" as
+# "the blocked row's number is available": paying one decision per session instead of one per
+# attempt costs +$1.37 [+0.82, +2.00] paired against Price-Cascade, and is not distinguishable
+# from kNN-cascade (-$1.23 [-3.42, +0.73]). That is the price of the cache-safety spine, and
+# it is the whole of what these two rows now measure.
 _CASCADE_PATH: Final[str] = (
-    "the live escalation ladder (src/shunt/router/escalation.py, effort_then_rank) is the "
-    "cache-safe analogue — one decision per session, over closed prior sessions only — and it "
-    "now DOES walk to the frontier, because the engine's per-task rank floor persists the "
-    "climbed rung across sessions (engine.py `_lift_to_rank_floor`). It is modelled offline by "
-    "Session-Cascade (strategies/session_cascade.py), which is the measurement of how far short "
-    "of this operating point session cadence lands: the same ladder paced one attempt per "
-    "session re-bills every rung `escalate_after_n` times, so equalling a within-task cascade "
-    "requires escalate_after_n=1 plus arm-level coverage the corpus does not have"
+    "TAKEN: the same ladder, paced one decision per session, is selectable as "
+    "`router.strategy: session_cascade` (src/shunt/router/policy.py LIVE_STRATEGIES) — "
+    "always_cheap plus escalation.enabled, over closed prior sessions only, walking to the "
+    "frontier because the engine's per-task rank floor persists the climbed rung across "
+    "sessions (engine.py `_lift_to_rank_floor`). Session-Cascade "
+    "(strategies/session_cascade.py) measures what that cadence costs: +$1.37 paired against "
+    "Price-Cascade, indistinguishable from kNN-cascade. What stays blocked is the WITHIN-TASK "
+    "cadence itself, and permanently: it is excluded by design, not pending. These two rows "
+    "are kept as the comparator that prices session cadence, not as unbuilt work"
 )
 
 # Everything that is not live, and why. A name absent from both this table and
@@ -110,18 +114,6 @@ _NON_LIVE: Final[Mapping[str, Classification]] = MappingProxyType(
         ),
         "kNN-cascade": Classification(StrategyClass.BLOCKED, _CASCADE_BLOCKER, _CASCADE_PATH),
         "Price-Cascade": Classification(StrategyClass.BLOCKED, _CASCADE_BLOCKER, _CASCADE_PATH),
-        "Session-Cascade": Classification(
-            StrategyClass.BLOCKED,
-            "it is not a router.strategy at all: it models the escalation LAYER that sits over "
-            "base routing (shipped as escalation.enabled, not as a selectable strategy id), so "
-            "no router.strategy value can name it. Its replay also assumes one failing-check "
-            "identity per task, which the live recurrence counter does not guarantee",
-            "the mechanism already runs in production; what is blocked is the NAME. Either "
-            "report this row as the escalation layer's offline estimate rather than as a router, "
-            "or expose the ladder as a router.strategy id in src/shunt/router/policy.py. Its "
-            "effort rung additionally needs per-arm coverage the corpus does not yet have",
-            shipped_as="escalation.enabled",
-        ),
         "Tier-Classifier": Classification(
             StrategyClass.BLOCKED,
             "its model order comes from an offline-fit capability rank derived from the "
@@ -167,9 +159,14 @@ def blocker(name: str) -> str | None:
 def shipped_mechanism(name: str) -> str | None:
     """The config surface a non-live row's mechanism already runs under, or None."""
     # `is_live` answers "may router.strategy name it"; this answers the different question
-    # "does the thing it measures run today". Session-Cascade is False on the first and
-    # not-None on the second, and a figure that conflates them tells a reader a shipped,
-    # default-on mechanism cannot be run.
+    # "does the thing it measures run today". Session-Cascade used to be the bearer of that
+    # split — False on the first, not-None on the second — and a figure conflating them told
+    # readers a shipped, default-on mechanism could not be run. It is now LIVE on both counts
+    # (`router.strategy: session_cascade`), so NO row sets `shipped_as` today and this returns
+    # None everywhere. The seam is kept, not deleted: the defect it guards is a class, not one
+    # row, and the next mechanism that ships under a config surface before it earns a strategy
+    # id needs it. If that never happens, delete the field, this function and the hollow-marker
+    # branch in cost_quality_frontier together — not one of the three.
     return classify(name).shipped_as
 
 

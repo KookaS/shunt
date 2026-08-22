@@ -106,25 +106,28 @@ def _cheapest(
 
 
 SPEC = FigureSpec(
-    title="Most of the headroom above the shipped router is blocked, not impossible",
+    title="What the bound's quality costs, and which of those prices you may actually pay",
     reading=(
         "Left: every strategy that reaches the bound's pass rate within one percentage "
         "point, as total spend on a log axis, cheapest at the bottom, coloured by class. A "
-        "HOLLOW bar is a blocked row whose mechanism already ships and is on by default under "
-        "another config surface — what is blocked there is the strategy NAME, not the "
-        "capability, so do not read its share of the bracket as unbuilt work. "
+        "GREEN bar is a price you can pay today — `router.strategy` names it. "
         "The blue bracket is the span between the cheapest LIVE way to buy that quality and "
         "the cheapest BLOCKED one — engineering work, not physics. The red bracket is the "
         "span from there down to the bound, which no strategy of any class can cross. "
+        "The subtitle carries how the two divide, because that split moves with the data and "
+        "this title deliberately does not claim it. "
         "Right: how many strategies each class contributes and the best pass rate it "
         "reaches, with the reason that class is kept in the corpus."
     ),
     goal=(
-        "Read the two brackets against each other. A large blue span and a small red one "
-        "means the shipped router's deficit is a backlog item; the reverse would mean the "
-        "corpus has been squeezed and the remaining distance is a property of the models, "
-        "not of the routing. Neither bracket is a result you can deploy — the whole point "
-        "of separating the classes is that only the green bars are purchasable."
+        "Read the CHEAPEST GREEN bar first — that is what this quality actually costs a "
+        "deployment, and if there is no green bar in the band the subtitle says so instead "
+        "of pricing an empty set. Then read the two brackets against each other. A large "
+        "blue span and a small red one means the shipped router's deficit is a backlog item; "
+        "the reverse means the corpus has been squeezed and the remaining distance is a "
+        "property of the models, not of the routing. Neither bracket is a result you can "
+        "deploy — the whole point of separating the classes is that only the green bars are "
+        "purchasable."
     ),
     definitions=(
         (

@@ -185,6 +185,13 @@ class LabelPoint:
     # Defaults keep every caller that has no x interval placing labels exactly as before.
     xerr_lo: float = 0.0
     xerr_hi: float = 0.0
+    # Text colour for THIS label, overriding `place_labels`' uniform default. It exists for
+    # the crowded-cluster case the offset search cannot solve: when several markers collapse
+    # into a few pixels, every label earns a leader, the leaders converge, and which name
+    # belongs to which marker stops being readable from geometry. Matching the label to its
+    # marker's colour restores the pairing without moving anything. None keeps the caller's
+    # uniform colour, which is what every figure with no such cluster wants.
+    color: str | None = None
 
 
 def _rects_overlap(
@@ -341,7 +348,7 @@ def place_labels(  # noqa: C901 (a single offset-search loop; splitting it hides
             if placed is not None:
                 break
         if placed is None:
-            _leader_label(ax, p, fontsize, color, taken, scale)
+            _leader_label(ax, p, fontsize, p.color or color, taken, scale)
             continue
         dx, dy = placed
         # A label pushed past the first ring is far enough from its marker that a reader
@@ -356,7 +363,7 @@ def place_labels(  # noqa: C901 (a single offset-search loop; splitting it hides
             xytext=(dx, dy),
             textcoords="offset points",
             fontsize=fontsize,
-            color=color,
+            color=p.color or color,
             ha="left" if dx > 0 else "right" if dx < 0 else "center",
             va="bottom" if dy > 0 else "top" if dy < 0 else "center",
             annotation_clip=True,

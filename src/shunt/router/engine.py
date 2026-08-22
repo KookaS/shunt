@@ -352,7 +352,7 @@ class RouterEngine:
         selection rule.
         """
         if not self._strategy.consults_neighbors:
-            return self._decide_fixed()
+            return self._decide_fixed(session_id)
 
         if not self._trust_neighbors:
             # Foreign embedding space: the stored corpus was built by a different embedder,
@@ -433,12 +433,18 @@ class RouterEngine:
         )
         return self._finalize_decision(session_id, model_name, "stale_embedding_space", provenance)
 
-    def _decide_fixed(self) -> tuple[str, str, dict[str, Any]]:
-        """Route a neighbor-independent (fixed) strategy: no cold-start, embedding, or query.
-
-        A fixed strategy (always_cheap/always_frontier) is a pure function of the pool, so it
-        must route deterministically from the first turn — never masked by cold-start warmup.
-        """
+    def _decide_fixed(self, session_id: str) -> tuple[str, str, dict[str, Any]]:
+        """Route a neighbor-independent (fixed) strategy: no cold-start, embedding, or query."""
+        # A fixed strategy (always_cheap/always_frontier/session_cascade) is a pure function of
+        # the pool, so it must route deterministically from the first turn — never masked by
+        # cold-start warmup.
+        # Whether a fixed pick is finalized is the STRATEGY's answer, not this branch's. Two
+        # fixed strategies want opposite things and `consults_neighbors` cannot tell them
+        # apart: `always_cheap` / `always_frontier` are pinned controls — a control that
+        # climbs a ladder no longer anchors the comparison it exists to anchor — while
+        # `session_cascade` is that same base pick with the ladder as its entire content, so
+        # skipping the escalation layer would leave it indistinguishable from `always_cheap`.
+        # A control also wants no `decision_index` advance: it logs no failures to retire.
         model_name, reason = self._strategy.select([], self._model_pool)
         provenance = build_provenance(
             model_chosen=model_name,
@@ -447,7 +453,9 @@ class RouterEngine:
             router_propensity=1.0,
             candidate_model_scores={},
         )
-        return (model_name, reason, provenance)
+        if not self._strategy.participates_in_escalation:
+            return (model_name, reason, provenance)
+        return self._finalize_decision(session_id, model_name, reason, provenance)
 
     def _route_locked(self, neighbors: list[NeighborResult]) -> tuple[str, str, dict[str, Any]]:
         """Choose a model (exploration if budgeted, else selection rule) — caller holds the lock."""

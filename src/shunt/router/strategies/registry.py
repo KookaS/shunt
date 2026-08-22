@@ -9,7 +9,11 @@ from typing import Final
 
 from shunt.router.selection import SelectionRule
 from shunt.router.strategies.base import RoutingStrategy
-from shunt.router.strategies.fixed import AlwaysCheapStrategy, AlwaysFrontierStrategy
+from shunt.router.strategies.fixed import (
+    AlwaysCheapStrategy,
+    AlwaysFrontierStrategy,
+    SessionCascadeStrategy,
+)
 from shunt.router.strategies.knn import KnnStrategy
 
 # Strategies whose selection consults the kNN neighborhood + exploration knobs. The
@@ -31,10 +35,20 @@ def _build_always_frontier(selection_rule: SelectionRule) -> RoutingStrategy:
     return AlwaysFrontierStrategy()
 
 
+def _build_session_cascade(selection_rule: SelectionRule) -> RoutingStrategy:
+    # `always_cheap`'s base pick plus the escalation layer — the live spelling of the
+    # benchmark's Session-Cascade row. It is a distinct CLASS rather than `AlwaysCheapStrategy`
+    # under a second name because the two differ on `participates_in_escalation`, and that
+    # difference is load-bearing in both directions: always_cheap is the pinned control every
+    # routing comparison is read against, and the ladder is all this strategy is.
+    return SessionCascadeStrategy()
+
+
 _BUILDERS: Final[dict[str, _StrategyBuilder]] = {
     "knn": _build_knn,
     "always_cheap": _build_always_cheap,
     "always_frontier": _build_always_frontier,
+    "session_cascade": _build_session_cascade,
 }
 
 

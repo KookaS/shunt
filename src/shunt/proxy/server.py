@@ -32,6 +32,7 @@ from shunt.router.embedder import Embedder, embedding_cache_dir
 from shunt.router.engine import RouterEngine
 from shunt.router.inspection import loop_health_for
 from shunt.router.policy import (
+    SESSION_CASCADE_STRATEGY,
     CapturePolicy,
     ExplorationPolicy,
     RouterPolicy,
@@ -363,6 +364,18 @@ def _log_capture_disclosure(policy: RouterPolicy, resolver: WorkDirResolver) -> 
             "shunt from inside your repo, or set SHUNT_WORK_DIR / capture.work_dir / "
             "--work-dir to arm it. (docs/escalation.md)"
         )
+        # Louder for the preset, because there the ladder is not a feature on top of routing
+        # — it IS the strategy. `session_cascade` without a repo degrades to plain
+        # `always_cheap` and never climbs, so the operating point the docs measure is simply
+        # not what is running. The config validator cannot catch this: whether a work_dir
+        # resolves is a property of the machine, not of the file.
+        if policy.strategy == SESSION_CASCADE_STRATEGY:
+            logger.warning(
+                "router.strategy is %r, whose whole content is that ladder — with no repo it "
+                "is running as plain 'always_cheap' and will never escalate. Arm a work_dir "
+                "before reading anything into its cost.",
+                SESSION_CASCADE_STRATEGY,
+            )
 
 
 @asynccontextmanager

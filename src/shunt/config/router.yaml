@@ -4,7 +4,19 @@
 # Env vars (SHUNT_ROUTER_STRATEGY, SHUNT_EXPLORATION_ENABLED,
 # SHUNT_EXPLORE_BUDGET_FRAC) and CLI flags win over both.
 router:
-  # Active algorithm — one of: knn | always_cheap | always_frontier.
+  # Active algorithm — one of: knn | always_cheap | always_frontier | session_cascade.
+  #
+  # `session_cascade` is a PRESET, not a fourth selection rule: it is `always_cheap` plus the
+  # escalation ladder below, i.e. start on the cheapest model and let a verified failure walk a
+  # rung at the next SESSION boundary. It is the live spelling of the benchmark's
+  # `Session-Cascade` row, and the cache-safe operating point the blocked offline cascades
+  # (`price_cascade`, `knn_cascade`) approximate at one decision per ATTEMPT — which this
+  # product does not do, and will not. Selecting it with `escalation.enabled: false` is a load
+  # error. It needs a `capture.work_dir` to be anything at all (see below).
+  #
+  # The default stays `knn`. That is a deliberate hold, not an oversight: the measured
+  # Session-Cascade row is always_cheap-based, so making it the default would change the
+  # shipped router's behaviour on the strength of a corpus whose cells are 35% imputed. Opt in.
   strategy: knn
 
   # Knobs for the active strategy.

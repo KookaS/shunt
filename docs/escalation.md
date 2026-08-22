@@ -324,6 +324,29 @@ bills ranks 3–8. The shape mirrors the offline `Price-Cascade` strategy's shor
 escalation target of last resort — because that is the shape whose cost this repo has
 actually measured. Set `rank_shortlist: 0` to restore the every-rank walk.
 
+**The default of 3 is measured, and it buys a rung measured harmful.** Both halves of that
+matter, so both are stated. Sweeping `rank_shortlist` over {0,1,2,3,4,5} on the committed
+corpus moves **pass rate not at all** — 96.74% at every value, with an *identically zero*
+paired per-task difference, because the ladder reaches the same terminal rung either way
+and only spend changes. On cost, 0, 4 and 5 are strictly worse than 3 (intervals exclude
+zero, both cost models). The one candidate to beat it, `rank_shortlist: 2` — which drops
+`gpt-5-mini` from the ladder — is cheaper on naive cost (−$1.96, 95% CI [−3.49, −0.51])
+but **not** distinguishable on cache-aware cost (−$1.09, [−2.20, +0.10]), and cache-aware
+is the cost model that governs here. So the default stays 3 on the evidence, not on
+inertia. `rank_shortlist: 1` cannot be quoted at all: its replay fails its own positive
+control, because a ladder with no intermediate rung cannot track planted depth.
+
+That leaves a real defect unfixed rather than hidden. Measured one rung at a time against
+the cheap base model, `gpt-5-mini` — which the shipped shortlist buys — is **net-harmful**
+on this corpus (4 helps, 36 hurts, n=190, exact p < 1e-6), while `zai-glm-5.2`, the
+cheapest target measured net-helpful, is skipped at every shortlist from 1 to 4. No
+`rank_shortlist` value can express "drop `gpt-5-mini`, keep `qwen3.7-plus`, add
+`zai-glm-5.2`", because the knob selects a *prefix of the price order* and the measured
+capability order is a different order entirely. Fixing it needs a capability-ordered
+ladder, which is a feature and not a setting — `src/shunt/router/capability_rank.py`
+currently ships the price prior verbatim. Read this section with
+[the ladder-rungs figure](routing.md#fig-ladder-rungs), which carries the per-rung numbers.
+
 The jump is bounded on both sides:
 
 - It never overshoots. The top rank is the ceiling; past it escalation holds.
@@ -536,6 +559,20 @@ router warns at boot which layer (if any) is armed; if none, escalation is enabl
 
 The full knob reference is in
 [Configuration](configuration.md#auto-escalate-on-repeated-verified-failure).
+
+### Escalation applies to whichever base strategy you run
+
+The ladder is a layer over base routing, not part of any one algorithm, so it works the same
+whether `router.strategy` is `knn`, `always_cheap` or `always_frontier`. If what you want is
+the whole cheap-first-then-climb behaviour as one setting, `router.strategy: session_cascade`
+is that preset — `always_cheap` plus this layer, refused at load if you turn the layer off.
+See [Choose the strategy](configuration.md#choose-the-strategy).
+
+What it is not, and cannot become: a cascade *inside* one task. Shunt makes one model decision
+per session and never switches mid-turn, so it cannot run the cheap model, read your tests, and
+retry on a bigger model within the same task. The ladder's unit is a session; the rung it
+climbed persists for the repo, so the cascade happens across your next few sessions instead of
+inside this one. [Results](results.md#routing-at-session-cadence) prices that difference.
 
 ## Measuring whether escalation actually helps
 

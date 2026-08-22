@@ -1,18 +1,18 @@
 {
   "plot_exploration": {
-    "inputs": "a8aed3645afdad7096f1ec797c1336ece34df84efe6583613fafb82061dcd364",
+    "inputs": "74833968ce4e81505a5bbd477e9636bcc3f4938e0dcfb8c6c14fa4b8788ca679",
     "outputs": {
       "exploration_cost.png": "fcb485f036d591451e2053965069561cba1d23e7e55d16837a7d6e4493f53e5c"
     }
   },
   "plot_knn_nulls": {
-    "inputs": "40b5375b75ead665dcc802dd2f8c43085d136131181d998426ed717bf799d4fa",
+    "inputs": "b101bccf41b0e640146dc4ad09c2b369eba4d53063cd35a147876abc562c40be",
     "outputs": {
       "embedding_signal.png": "047634af4af14b9066e5d41883aa478b9cf1125c719edd4941697c481638dad4"
     }
   },
   "render_demo_figures": {
-    "inputs": "b34779907a8b3b7bd465bb4743536e3ea47c77fe3e2d7ee183f8501201696d9a",
+    "inputs": "e0ac108ed3257ba6361889c65196c46bc877f32bdaef473bbc4d11e10ffc923c",
     "outputs": {
       "inference_cost.png": "3dd574a07ea1eb71add4bcd84472318f10229e1e4591adc7ac00ff24e91afdaf",
       "inference_escalation.png": "193cfa295c50052e89b4e19890003c4e95d63d8e960eaf26cedc147cfa78f032",
@@ -24,7 +24,7 @@
     }
   },
   "render_inference_figures": {
-    "inputs": "04976eac18909cddceaeec149e5f6d5a66132d563df1ead4bd68a627e030fa30",
+    "inputs": "046846ed3bcb4923e0e74b692cae94a68b2fa250ce2019fb5fe58866b43f0cc7",
     "outputs": {
       "inference_cost.png": "1200879261e9be3ebabf2e9e038e03d9e21857dcbfcd045eb292f0d7205b66bb",
       "inference_escalation.png": "ba86080378d75fd907e3e7121b8d47c01d6ffb68700fee4bdd66991bbc6e1b9e",
@@ -36,23 +36,23 @@
     }
   },
   "report": {
-    "inputs": "1e2f62033938ae23800264e686e13f125f04f4f39aa6f58d889a3c8a05fd0a09",
+    "inputs": "f53f4552fc6753dc57e88fd45d1ca2b518850c8005fa7bebbf8a58ebfa702601",
     "outputs": {
       "arm_manipulation.png": "4061dcf67ce2259cc7e0d718f7f28823d091daf69b22eafc0a38a71513968b00",
       "cache_economics.png": "52f834502ed923f096d04a31fd98bb713a82f17d65e79a3c2e9abba92b82b056",
       "complementarity.png": "89810e34dd1d2e4fd2e9ce8625f018ca32b8d1ef0b134ec2299d3d6047277e58",
-      "cost_quality_frontier.png": "343229eff0105637cd1f56b33c63d86e845fbaa8e3f500fa8b6511fd58921077",
+      "cost_quality_frontier.png": "45233cdc900f2a86b2a8c9d5a26465874d196138873ab6ea4a1008801c2c2be0",
       "evidence_basis.png": "b7d94989024ad064f6001f72de27fcaefc81321945baca9061faf535b3703cf0",
       "kill_gate.png": "d9a8665b57e813c267f02a8932ce8bc7fc451fa6d74a77d92a57dcb72379fb67",
       "ladder_rungs.png": "af4d739db3e52a869d793acd1759de79b65bfd4bf2246c01b8e3a8cab84ff3f3",
-      "live_gap.png": "6bdf2fe7643a2457e81c56d7f9e1abe11837ae7d2b502a003da32b2f900bd73c",
-      "oracle_gap.png": "dd4b2b7fc42071d62ab700a9a90a0138e20331b4556093d52ced75b8e0c73050",
+      "live_gap.png": "822e7d5c2b1d9b82de1714a0afb1256a1df1b7b3271324fd7acfbae320699f84",
+      "oracle_gap.png": "afd11f49ea1c9d1b2c8fccfd30aa906fddb1a6d9be90964a2d1975a88366a75a",
       "routing_decision_audit.png": "a6b461033bc003bce6ac929d374981baa8d74e3fe695c4c019ea39d3fa395251",
       "task_difficulty.png": "c67bb8402b5c570df89aa1810a8f3e6868a5b93ed73b003c192d661ccc495687"
     }
   },
   "run_eval": {
-    "inputs": "744adc2c42fca71249fe51c0f886e91f28e4b8af16fdbe88a450724c48a51603",
+    "inputs": "07276b4d9ae47b25699639cf129f19ab8fae77a118ec78ebc8b9ef9ac20590f2",
     "outputs": {
       "corpus_and_coverage.png": "b8c5d94c91dff3fcd5f64a2008c25d0be4042fbd18bd4d17255c611ed58c5963",
       "escalation_budget.png": "7b6b06d18969f928440fd1f6bb6ac102d3929db504b66a6f86737d0ced86247f",
@@ -64,13 +64,13 @@
     }
   },
   "threshold_sweep": {
-    "inputs": "e36b359b468a53f798040b8de222981ace1a64847a4d5c0386c57ad5f1be3fde",
+    "inputs": "fc786bb40d902977e8b474d115cd3f15f33b57ededb710cffd966c53f44c2bab",
     "outputs": {
       "sweep_regimes.png": "3726747cb6054c52b3b3803bee4b53bfd66caa2b0d003a2728e531eb7f6979c9"
     }
   },
   "viz_knn": {
-    "inputs": "79736807a950a9833a85a854174e02350203277f7a368dde78fade526d12d643",
+    "inputs": "e434e1a2fec7208309824d4c3944d26ffede71c913faadf3fc9a196711ffd763",
     "outputs": {
       "knn_calibration.png": "01a13a14cc87a9d9c9c95c279c9b909f0b2ea39460676474468f914ab4016e05"
     }

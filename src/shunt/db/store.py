@@ -959,6 +959,19 @@ class OutcomeStore:
                 os.remove(path)
 
     def persist_index(self) -> None:
+        """Write the vector index to disk, or do nothing when it holds no vectors."""
+        # An EMPTY index is a legitimate steady state, not a failure: a fixed strategy
+        # (`always_cheap`, `always_frontier`, `session_cascade`) reports
+        # `consults_neighbors=False`, so the server never warms the embedder and no session
+        # is ever embedded — yet capture still runs and still closes sessions. Letting
+        # `HNSWIndex.save`'s empty-guard escape here raised out of `_append_tier2` BEFORE
+        # `_record_outcome`, so with any fixed strategy AND an armed work_dir every capture
+        # died and no verified outcome was ever recorded — invisible until something needed
+        # one, which `session_cascade` does by construction. The guard stays where it is
+        # (reindex and friends do expect content); this caller is the one that legitimately
+        # has none.
+        if self._index.count == 0:
+            return
         self._index.save(self._index_path)
 
     def close(self) -> None:

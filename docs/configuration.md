@@ -256,6 +256,59 @@ way as the registry: write your own `router.yaml` in `~/.config/shunt/`, or poin
 `SHUNT_CONFIG_DIR` at a directory holding one. Both files resolve from the same
 place, so a single directory holds everything you edit.
 
+### Choose the strategy
+
+`router.strategy` takes one of four values.
+
+| Value | What it does |
+|---|---|
+| `knn` (default) | Embed the first turn, look up verified neighbours, take the cheapest model clearing the success bar. [The routing model](routing.md). |
+| `always_cheap` | Cheapest healthy model, every session. No embedding, no index. |
+| `always_frontier` | Strongest healthy model, every session. |
+| `session_cascade` | **Start cheap and climb.** `always_cheap` plus the escalation ladder: a repeated verified failure raises a rung at the next session boundary, and the climbed rung persists for that repo. |
+
+`session_cascade` is a preset, not a fourth algorithm — it is exactly `always_cheap` with
+[auto-escalation](escalation.md) on, named so you can select the operating point in one
+line instead of assembling it. Two consequences follow from that, and both are enforced
+rather than documented-and-hoped:
+
+- Setting it with `escalation.enabled: false` is a **load error**. With the ladder off the
+  config is a fixed cheap router wearing a cascade's name. Note the trap: your `router.yaml`
+  replaces the packaged one **wholesale**, and an *absent* `escalation:` block reads as OFF
+  (so an old config cannot be flipped on behind your back). A file containing only
+  `strategy: session_cascade` therefore fails to boot — spell the block out, as below.
+- It needs a repo to test. Without a resolvable `capture.work_dir` there is no verified
+  failure, so nothing ever climbs and you are running `always_cheap`. The router warns
+  twice at boot in that state; see [Record verified outcomes automatically](#record-verified-outcomes-automatically).
+
+It reports its own reason token, `session_cascade`, rather than `always_cheap` — the two
+pick the same model but differ on whether a verified failure may later move it, and that
+difference has to be visible in `shunt explain` and in `X-Shunt-Decision`. The climb itself
+shows up as `auto_escalation` and `escalation_floor` on later sessions.
+
+`always_cheap` and `always_frontier` are **pinned controls**: no verified failure moves
+them, ever. That is deliberate — they are the baselines a routing comparison is read
+against, and a baseline that quietly climbs a ladder is not a baseline. If you want cheap
+*and* climbing, that is `session_cascade`, which is why it is a separate value.
+
+```yaml
+router:
+  strategy: session_cascade
+  escalation:
+    enabled: true
+    escalate_after_n: 2
+    ladder: effort_then_rank
+    rank_shortlist: 3
+  capture:
+    work_dir: /path/to/your/repo
+```
+
+This is the live spelling of the benchmark's `Session-Cascade` row. What it is *not* is a
+within-task cascade: Shunt makes one model decision per session and never switches inside
+a cached turn, so it cannot try a cheap model, read your tests, and retry bigger within one
+task. The offline `price_cascade` / `knn_cascade` rows measure that, are rejected at boot,
+and stay that way — [Results](results.md#routing-results) carries what the difference costs.
+
 ### Choose which models are live-routable
 
 The registry (`models.yaml`) defines every model shunt *knows*. `router.yaml`'s

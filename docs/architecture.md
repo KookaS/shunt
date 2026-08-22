@@ -57,18 +57,34 @@ learns from them for subsequent sessions.
 ## Strategy and exploration
 
 Which algorithm the router runs is one value, `router.strategy`, read from the
-`router.yaml` packaged at `src/shunt/config/router.yaml`. Three strategies are
-live-eligible: `knn` (the default), `always_cheap`, and `always_frontier`. That
-list is `LIVE_STRATEGIES` in `src/shunt/router/policy.py`, and it is the whole of
-it — every other strategy the benchmark scores (`oracle`, `oracle_reward`,
-`random`, `knn_cascade`, `price_cascade`, `tier_classifier`) is rejected at boot.
-The reasons differ: `oracle` and `oracle_reward` read the task's own verified
-outcome and `random` is not a router at all; the two cascades are excluded on
-purpose, because a real quality cascade has to verify mid-session and escalate,
-and that is not one cache-safe decision per session; `tier_classifier` orders
-models by a capability rank fitted offline from the outcome matrix, which the live
-path cannot compute. Each blocker and its path to live is recorded in
-`benchmark/routing/strategy_class.py`. Override the file by putting your own in
+`router.yaml` packaged at `src/shunt/config/router.yaml`. Four strategies are
+live-eligible: `knn` (the default), `always_cheap`, `always_frontier`, and
+`session_cascade`. That list is `LIVE_STRATEGIES` in
+`src/shunt/router/policy.py`, and it is the whole of it — every other strategy the
+benchmark scores (`oracle`, `oracle_reward`, `random`, `knn_cascade`,
+`price_cascade`, `tier_classifier`) is rejected at boot. The reasons differ:
+`oracle` and `oracle_reward` read the task's own verified outcome and `random` is
+not a router at all; the two cascades are excluded on purpose and permanently,
+because a real quality cascade has to verify **mid-session** and escalate, and
+that is not one cache-safe decision per session; `tier_classifier` orders models
+by a capability rank fitted offline from the outcome matrix, which the live path
+cannot compute. Each blocker and its path to live is recorded in
+`benchmark/routing/strategy_class.py`.
+
+`session_cascade` is the odd one out: it is a **preset**, not a fourth algorithm —
+`always_cheap` plus [auto-escalation](escalation.md), so the router starts on the
+cheapest model and climbs a rung at the next session boundary on a repeated
+verified failure. It exists because that operating point is what the two blocked
+cascades approximate, at a cadence the cache-safety spine allows. Selecting it
+with escalation disabled is a load error. Because it is neighbour-independent it
+never embeds, exactly like the other two fixed strategies.
+
+It is nonetheless a *separate* strategy from `always_cheap` rather than a flag on it,
+because the two differ on one predicate — `participates_in_escalation`. `always_cheap` and
+`always_frontier` are **pinned controls**: a verified failure may never move their pick,
+since they are the baselines routing comparisons are read against. The cascade is the
+opposite, and the engine branches on that predicate rather than on `consults_neighbors`,
+which is False for all three and cannot tell them apart. Override the file by putting your own in
 `$SHUNT_CONFIG_DIR`, or override single values with the `shunt start` flags — see
 [configuration](configuration.md#tune-the-router).
 
