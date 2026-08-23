@@ -13,8 +13,8 @@ def _inmemory() -> sqlite3.Connection:
     return conn
 
 
-def test_schema_version_is_three() -> None:
-    assert SCHEMA_VERSION == 3
+def test_schema_version_is_five() -> None:
+    assert SCHEMA_VERSION == 5
 
 
 def test_run_migrations_creates_tables() -> None:
@@ -106,7 +106,7 @@ def test_migration_idempotent() -> None:
     run_migrations(conn)
     cursor = conn.execute("SELECT version FROM schema_version ORDER BY version")
     versions = [row[0] for row in cursor.fetchall()]
-    assert versions == [1, 2, 3]
+    assert versions == [1, 2, 3, 4, 5]
 
 
 def test_v2_sessions_provenance_columns() -> None:
@@ -207,7 +207,7 @@ def test_v1_db_migrates_cleanly() -> None:
 
     assert get_current_version(conn) == 1
     run_migrations(conn)
-    assert get_current_version(conn) == 3
+    assert get_current_version(conn) == SCHEMA_VERSION
 
     # Old rows survive and the new cost_known column defaults to 1 (known).
     row = conn.execute(

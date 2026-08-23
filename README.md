@@ -295,9 +295,16 @@ Easy to conflate, so, precisely:
 
 ```bash
 pip install shunt-router
+cd /path/to/your/repo    # not optional — see below
 shunt doctor    # what resolves, what is armed, what is inert — no spend, no download
 shunt
 ```
+
+**Start it from inside the repo you are working on**, or pass `--work-dir`. Escalation's
+only signal is a verified failure, and it gets one by re-running *that repo's* tests at
+session close. Launched anywhere else it stays enabled and never fires — the router warns
+at boot and `shunt doctor` says so, but nothing else will. This is also the step that arms
+test execution on that tree, so point it at a repo you trust.
 
 Or with Docker:
 
@@ -370,8 +377,9 @@ verdicts: **[docs/escalation-claim.md](docs/escalation-claim.md)**. The routing
 headline, stated plainly:
 
 > **The escalation ladder at session cadence — one decision per session,
-> cache-safe by construction, and enabled in a default install — now reaches the
-> blocked mid-session cascades at equal quality. On the 184-task scoring path it
+> cache-safe by construction, enabled in a default install and selectable as
+> `router.strategy: session_cascade` — reaches the blocked mid-session cascades
+> at equal quality. On the 184-task scoring path it
 > costs $28.71 cache-aware at 96.74%, against Price-Cascade's $27.11 at the same
 > pass rate and Always-Frontier's $96.02 at 95.11%. On the harder fully-measured
 > 74-task set it costs $28.76 at 90.91% against Always-Frontier's $37.63 at <!-- frozen-value: n=74, date=2026-08-11, run=49b8362 -->
@@ -389,33 +397,39 @@ it is the only row the cache term moves.
 |---|---:|---|---:|---:|
 | Oracle (hindsight — a bound, never deployable) | 96.7% | 94.0–98.9 | $18.33 | $18.33 |
 | Price-Cascade (blocked — not deployable) | 96.7% | 94.0–98.9 | $27.11 | $27.11 |
-| **Session-Cascade, `rank_shortlist=3` (ships enabled)** | **96.7%** | 94.0–98.9 | $33.56 | **$28.71** |
+| **Session-Cascade, `rank_shortlist=3` (`strategy: session_cascade`)** | **96.7%** | 94.0–98.9 | $33.56 | **$28.71** |
 | kNN-cascade (blocked — not deployable) | 96.7% | 94.0–98.9 | $30.44 | $30.44 |
 | Always-Frontier | 95.1% | 91.9–97.8 | $96.02 | $96.02 |
 | kNN | 78.3% | 72.3–84.2 | $13.21 | $13.21 |
 | Always-Cheap | 75.5% | 69.0–81.5 | $1.50 | $1.50 |
 | Tier-Classifier (blocked — not deployable) | 65.8% | — | $11.53 | $11.53 |
 
-`Session-Cascade` is the one row here whose *mechanism* you are already running.
-It is classified blocked, and the blocker is only the **name**: it is not a
-`router.strategy` value because it is not a router — it models the escalation
-**layer** over base routing, shipped as `escalation.enabled: true` with
-`escalation.rank_shortlist: 3`. Every other blocked row above needs a verified
-outcome mid-session, which breaks cache-safety and is rejected at boot; this one
-does not. On a paired per-task bootstrap it costs **$1.37 more than
-`Price-Cascade`** (95% CI [+0.82, +2.00]) and is **not distinguishable from
-`kNN-cascade`** (−$1.23, [−3.42, +0.73]) — and it is cache-safe and enableable,
-which neither of them is. Against Always-Frontier: **−$66.12** ([−74.19,
-−57.90]).
+`Session-Cascade` is the row you can actually buy at that quality. It is
+`router.strategy: session_cascade` — a preset meaning `always_cheap` plus the
+escalation ladder (`escalation.enabled: true`, `escalation.rank_shortlist: 3`) —
+so it starts on the cheapest model and climbs a rung at the next **session**
+boundary on a repeated verified failure. On a paired per-task bootstrap it costs
+**$1.37 more than `Price-Cascade`** (95% CI [+0.82, +2.00]) and is **not
+distinguishable from `kNN-cascade`** (−$1.23, [−3.42, +0.73]). Against
+Always-Frontier: **−$66.12** ([−74.19, −57.90]). That $1.37 is the entire price
+of being cache-safe, and it is what the two blocked rows below now exist to
+measure.
 
 `Price-Cascade` uses no embeddings, no nearest neighbours, and no training. It
 tries models in ascending price order and stops at the first one whose patch
-passes — which needs a verified outcome mid-session, so the router rejects
-`price_cascade` at boot. **You cannot buy that row.** The learned `kNN-cascade`
-costs *more* for the same 96.7% and is blocked for the same reason. The learned
-`kNN` row sits 1.7pp above `Always-Cheap`, inside noise: on this corpus the
-embedding does not buy routing quality. See
+passes — which needs a verified outcome **mid-session**, so the router rejects
+`price_cascade` at boot. **You cannot buy that row, and you never will**: one
+model decision per session is the cache-safety spine, not a to-do. The learned
+`kNN-cascade` costs *more* for the same 96.7% and is blocked for the same reason.
+The learned `kNN` row sits 1.7pp above `Always-Cheap`, inside noise: on this
+corpus the embedding does not buy routing quality. See
 [Results](docs/results.md#routing-results).
+
+Read the 96.7% shared by those three rows with the caveat it carries: a cascade
+stops at the first attempt whose tests pass and is then scored on that same
+label, so it is a **best-of-N coverage** number, not a single-shot one — which is
+also why all three land on exactly the hindsight `Oracle`'s pass count. The cost
+axis is honest; every attempt in the chain is billed.
 
 **The correction: the saving is much smaller on measured cells.** Set B is the
 raw, un-imputed basis — 74 scorable tasks, every cell actually run, and <!-- frozen-value: n=74, date=2026-08-11, run=49b8362 -->
@@ -572,7 +586,8 @@ above, because it uses no model, so there was no model to get wrong — and it i
 no longer only a measurement. `Price-Cascade` at $27.11 against Always-Frontier's
 $96.02 is still blocked at boot and still unrunnable, but the session-cadence
 ladder reaches the same 96.74% for $28.71 cache-aware, is cache-safe by
-construction, and ships enabled. What the audit and the un-imputed basis together
+construction, ships enabled, and is now nameable as
+`router.strategy: session_cascade`. What the audit and the un-imputed basis together
 sharpened is the *size*: on fully-measured tasks the saving is ~25%, not ~75%.
 And ~90% of the headroom is mechanical, which bounds the entire remaining prize
 for a perfect difficulty predictor at **about $7.0 on a $96.02 base**. That number
@@ -644,8 +659,14 @@ Seven things would move it, in the order they block each other:
 7. **Ladder composition.** The ladder ranks by price, and price order is not
    capability order: it buys `gpt-5-mini` (measured **net-harmful**, −0.168,
    n=190) and jumps over `zai-glm-5.2` (measured **net-helpful**, +0.155, n=84).
-   A capability-ordered ladder is the obvious next step; the resolver exists but
-   is not wired to the escalation path.
+   No setting fixes this. Sweeping `rank_shortlist` over {0,1,2,3,4,5} leaves
+   pass rate at 96.74% with an *identically zero* paired difference, and the only
+   variant that drops `gpt-5-mini` is not distinguishable from the default on
+   cache-aware cost (−$1.09, 95% CI [−2.20, +0.10]) — the knob picks a prefix of
+   the price order, and the measured capability order is a different order. A
+   capability-ordered ladder is the fix and it is a feature, not a knob: the
+   resolver exists but ships the price prior verbatim and is not wired to the
+   escalation path.
 
 Where the rest of the work goes next, in priority order.
 

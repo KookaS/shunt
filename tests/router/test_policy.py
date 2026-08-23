@@ -64,12 +64,58 @@ def test_unknown_strategy_rejected() -> None:
         RouterPolicy(strategy="oracle")
 
 
-def test_knn_cascade_is_not_live_eligible() -> None:
-    # knn_cascade is a benchmark-only quality cascade (mid-session verify-escalate is not
-    # one cache-safe per-session decision), so it must fail live-policy validation.
-    assert "knn_cascade" not in LIVE_STRATEGIES
+@pytest.mark.parametrize("name", ["knn_cascade", "price_cascade"])
+def test_within_task_cascades_are_not_live_eligible(name: str) -> None:
+    # Both are WITHIN-TASK cascades: they take a verified outcome per attempt mid-session,
+    # which is not one cache-safe per-session decision. The exclusion is permanent and by
+    # design, so this is a wall, not a not-yet. The cache-safe analogue is `session_cascade`.
+    assert name not in LIVE_STRATEGIES
     with pytest.raises(ValidationError, match="unknown router.strategy"):
-        RouterPolicy(strategy="knn_cascade")
+        RouterPolicy(strategy=name)
+
+
+def test_session_cascade_is_live_eligible() -> None:
+    # The cache-safe operating point the two blocked rows approximate: same ladder, paced one
+    # decision per SESSION. It is nameable precisely because it never switches mid-turn.
+    assert "session_cascade" in LIVE_STRATEGIES
+    policy = RouterPolicy(strategy="session_cascade")
+    assert policy.strategy == "session_cascade"
+    assert policy.escalation.enabled is True
+
+
+def test_session_cascade_without_escalation_is_a_load_error() -> None:
+    # The whole content of the name is always_cheap + the ladder. With the ladder off the
+    # config resolves to a fixed cheap router wearing a cascade's name — the deployability-
+    # honesty defect this id exists to remove, so it is refused rather than warned about.
+    # Contrast test_escalation_enabled_default_without_a_repo_is_not_a_load_error: that state
+    # is the common default and must not brick a boot; this one is only ever explicit.
+    with pytest.raises(ValidationError, match="requires router.escalation.enabled"):
+        RouterPolicy(strategy="session_cascade", escalation=EscalationPolicy(enabled=False))
+
+
+def test_session_cascade_in_a_minimal_user_file_is_refused_with_the_reason() -> None:
+    # The REAL boot path, not the constructor: `parse_router_policy` reads an absent
+    # `escalation:` block as OFF (a user file replaces the packaged one wholesale), so the
+    # most natural hand-written config for this preset is exactly the one that fails. That is
+    # deliberate — silently turning the ladder on would make the shim mean two things — but
+    # the error has to say WHY, or it reads as a contradiction of the documented example.
+    with pytest.raises(ValidationError, match="no `escalation:` block"):
+        parse_router_policy({"router": {"strategy": "session_cascade"}})
+
+
+def test_session_cascade_with_an_explicit_escalation_block_parses() -> None:
+    policy = parse_router_policy(
+        {"router": {"strategy": "session_cascade", "escalation": {"enabled": True}}}
+    )
+    assert policy.strategy == "session_cascade"
+    assert policy.escalation.enabled is True
+
+
+def test_always_cheap_without_escalation_is_still_fine() -> None:
+    # The coherence rule is scoped to the preset. Turning the ladder off under `always_cheap`
+    # is a legitimate configuration and must stay one.
+    policy = RouterPolicy(strategy="always_cheap", escalation=EscalationPolicy(enabled=False))
+    assert policy.escalation.enabled is False
 
 
 def test_escalation_enabled_default_without_a_repo_is_not_a_load_error() -> None:

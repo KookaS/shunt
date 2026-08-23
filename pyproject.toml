@@ -82,6 +82,10 @@ benchmark = [
     "mini-swe-agent>=2.4",
     "orjson>=3.10",
 ]
+# `shunt inspect` renders diagnostic figures over the live outcome store. matplotlib
+# stays OUT of the core wheel (a diagnostic must not cost every install ~30 MB); the
+# command lazy-imports the frame and errors clearly when this extra is absent.
+inspect = ["matplotlib>=3.9"]
 
 [project.urls]
 Homepage = "https://github.com/KookaS/shunt"
@@ -149,9 +153,11 @@ mini-swe-agent = ["minisweagent"]
 [tool.deptry.per_rule_ignores]
 # _shared is a sibling module of the tools/lint check scripts (first-party).
 DEP001 = ["_shared"]
-# matplotlib lives in the `benchmark` extra, consumed only by benchmark/ scripts.
-# swebench is invoked as a CLI (`python -m swebench…`), never imported, so deptry
-# sees it as unused — it is not.
+# matplotlib is imported by benchmark/ AND by the `inspect` extra's
+# src/shunt/inspect — deptry's shared-check scan (benchmark + src) sees the module used
+# and declared, but keep the ignore row so an import-only-in-a-gated-extra pattern
+# cannot turn this advisory red. swebench is invoked as a CLI (`python -m
+# swebench…`), never imported, so deptry sees it as unused — it is not.
 # orjson is swe-rex's transitive runtime need (see the benchmark extra comment): never
 # imported by us, but a keyless install fails at the first live call without it. Listed
 # here so deptry stays GREEN — a permanently-red advisory hides the next real finding.
@@ -213,6 +219,9 @@ convention = "google"
 "src/shunt/**/*.py" = ["D"]
 # The CLI entrypoint's stdout IS its output — print is not a debug leftover.
 "src/shunt/cli.py" = ["D", "T20"]
+# Same: the inference figure family's module entrypoint writes its paths and its
+# generated docs sections to stdout — that IS its output.
+"src/shunt/inspect/inference/__main__.py" = ["D", "T20"]
 # Proxy relays third-party streaming objects (openai/httpx) whose types are
 # genuinely dynamic; Any is the correct annotation for a pass-through relay.
 "src/shunt/proxy/router.py" = ["D", "ANN401"]

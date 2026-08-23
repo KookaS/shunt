@@ -8,7 +8,11 @@ import pytest
 
 from shunt.router.selection import NeighborResult, SelectionRule
 from shunt.router.strategies import RoutingStrategy, build_strategy
-from shunt.router.strategies.fixed import AlwaysCheapStrategy, AlwaysFrontierStrategy
+from shunt.router.strategies.fixed import (
+    AlwaysCheapStrategy,
+    AlwaysFrontierStrategy,
+    SessionCascadeStrategy,
+)
 from shunt.router.strategies.knn import KnnStrategy
 
 
@@ -101,6 +105,7 @@ class TestRegistry:
             ("knn", KnnStrategy),
             ("always_cheap", AlwaysCheapStrategy),
             ("always_frontier", AlwaysFrontierStrategy),
+            ("session_cascade", SessionCascadeStrategy),
         ],
     )
     def test_builds_each_live_strategy(self, name: str, cls: type) -> None:
@@ -116,6 +121,34 @@ class TestRegistry:
     def test_unknown_strategy_raises(self) -> None:
         with pytest.raises(ValueError, match="unknown"):
             build_strategy("knn_cascade", SelectionRule())
+
+    def test_the_control_contract_and_the_cascade_are_opposites(self) -> None:
+        # The invariant `test_a_fixed_strategy_is_a_pinned_control_and_never_escalates`
+        # depends on, stated where the strategies are built. always_cheap anchors every
+        # routing comparison, so a verified failure must never move it; session_cascade picks
+        # the same model and must move. `consults_neighbors` cannot express that difference —
+        # it is False for both — which is why the engine branches on this predicate instead.
+        rule = SelectionRule()
+        control = build_strategy("always_cheap", rule)
+        cascade = build_strategy("session_cascade", rule)
+        assert control.consults_neighbors is cascade.consults_neighbors is False
+        assert control.participates_in_escalation is False
+        assert build_strategy("always_frontier", rule).participates_in_escalation is False
+        assert cascade.participates_in_escalation is True
+
+    def test_the_cascade_reports_its_own_reason_not_the_controls(self) -> None:
+        # Same model, different token. Filtering decisions on `always_cheap` is how an
+        # analysis finds control sessions; if the cascade shared the token it would be
+        # counted as control, which is the confound the separate strategy exists to avoid.
+        pool = FakePool(["c1", "c2"])
+        assert build_strategy("always_cheap", SelectionRule()).select([], pool) == (
+            "c1",
+            "always_cheap",
+        )
+        assert build_strategy("session_cascade", SelectionRule()).select([], pool) == (
+            "c1",
+            "session_cascade",
+        )
 
     def test_every_live_strategy_is_buildable(self) -> None:
         # Wall against drift: a name that passes policy validation but has no builder

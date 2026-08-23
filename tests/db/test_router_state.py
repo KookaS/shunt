@@ -14,27 +14,23 @@ def _inmemory() -> sqlite3.Connection:
     return conn
 
 
-def test_schema_version_is_three() -> None:
-    assert SCHEMA_VERSION == 3
-
-
 def test_run_migrations_creates_router_state_table() -> None:
     conn = _inmemory()
     run_migrations(conn)
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "router_state" in tables
-    assert get_current_version(conn) == 3
+    assert get_current_version(conn) == SCHEMA_VERSION
 
 
 def test_run_migrations_idempotent() -> None:
     conn = _inmemory()
     run_migrations(conn)
     run_migrations(conn)  # second run must be a no-op, not an error
-    assert get_current_version(conn) == 3
+    assert get_current_version(conn) == SCHEMA_VERSION
     versions = [
         row[0] for row in conn.execute("SELECT version FROM schema_version ORDER BY version")
     ]
-    assert versions == [1, 2, 3]
+    assert versions == [1, 2, 3, 4, 5]
 
 
 def test_v2_db_migrates_to_v3_with_rows_intact() -> None:
@@ -75,7 +71,7 @@ def test_v2_db_migrates_to_v3_with_rows_intact() -> None:
 
     run_migrations(conn)
 
-    assert get_current_version(conn) == 3
+    assert get_current_version(conn) == SCHEMA_VERSION
     row = conn.execute("SELECT prompt_text FROM sessions WHERE session_id = 's1'").fetchone()
     assert row["prompt_text"] == "p"
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}

@@ -751,7 +751,7 @@ class ProxyRouter:
                 self._apply_reasoning_arm(attempt_kwargs, session, candidate)
 
             try:
-                return await self._try_model(candidate, attempt_kwargs), candidate
+                response = await self._try_model(candidate, attempt_kwargs)
             except UpstreamError as exc:
                 if exc.status_code in (400, 401, 403):
                     raise  # fail fast — auth / bad request
@@ -773,6 +773,15 @@ class ProxyRouter:
                     "Model %s failed with %s; trying next", candidate, redact_secrets(str(exc))
                 )
                 continue
+            session.metadata["last_turn_served_model"] = candidate
+            if candidate != model_name:
+                logger.info(
+                    "serving: session=%s locked=%s served=%s",
+                    session.session_id,
+                    model_name,
+                    candidate,
+                )
+            return response, candidate
 
         raise UpstreamError(
             f"All models exhausted. Last error: {last_error}",
@@ -1035,9 +1044,10 @@ class ProxyRouter:
             return
         turn_ratio = turn_cached / turn_prompt if turn_prompt > 0 else 0.0
         logger.info(
-            "Session %s cached_tokens=%.0f prompt_tokens=%d turn_hit_ratio=%.4f "
+            "Session %s model=%s cached_tokens=%.0f prompt_tokens=%d turn_hit_ratio=%.4f "
             "session_cached=%.0f session_prompt=%d session_hit_ratio=%.4f",
             session.session_id,
+            session.metadata.get("last_turn_served_model") or session.model_chosen,
             turn_cached,
             turn_prompt,
             turn_ratio,

@@ -1,6 +1,6 @@
 ---
 title: Results
-description: Measured routing and escalation results on Shunt's own benchmark, with every figure, every caveat, and every null reported as a null.
+description: Measured routing, escalation, and inference results on Shunt's own benchmark, with every figure, every caveat, and every null reported as a null.
 ---
 
 # Results
@@ -11,7 +11,8 @@ number.
 
 The short version: cheap-first allocation with verified escalation reaches
 always-frontier quality for a fraction of the cost, and — new this cycle — it
-now does so on a **cache-safe** strategy rather than only on a blocked one.
+now does so on a **cache-safe strategy you can select by name**
+(`router.strategy: session_cascade`) rather than only on a blocked one.
 `Session-Cascade`, which makes one decision per session and is what a default
 install actually runs, costs **$28.71 cache-aware at 96.74%** on the 184-task
 scoring path, against `Price-Cascade`'s $27.11 at the same pass rate and
@@ -144,7 +145,9 @@ task *starts* on — scored on the same 184 tasks (16 unscorable), from
 [`strategy_summary.csv`](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/strategy_summary.csv).
 An eighth scored strategy, `Session-Cascade`, is not a selection rule at all: it
 models the escalation *layer* over whatever base routing chose, so it gets [its
-own section](#routing-at-session-cadence) rather than a row here. Costs in this
+own section](#routing-at-session-cadence) rather than a row here. It is
+selectable as `router.strategy: session_cascade`, which is that layer over an
+`always_cheap` base. Costs in this
 table are naive per-task sums, cache-blind:
 
 | strategy | passes | pass rate | 95% CI | total cost | avg cost/task | cumulative regret |
@@ -256,16 +259,25 @@ once effort is exhausted; the climbed rank persists into the next session; every
 attempt is billed. Nothing switches inside a cached turn, so it is cache-safe by
 construction rather than by policy.
 
-**It is the mechanism that ships.** `escalation.enabled: true` and
+**It is the row you can buy.** `escalation.enabled: true` and
 `escalation.rank_shortlist: 3` are the defaults in
-`src/shunt/config/router.yaml`, so this ladder runs in a default install.
-`benchmark/routing/strategy_class.py` nonetheless classifies the row **BLOCKED**,
-and the blocker is narrow and worth stating exactly: `Session-Cascade` is not a
-`router.strategy` value, because it is not a router. It models the escalation
-**layer** sitting over whatever base routing chose, and no `router.strategy`
-value can name a different layer. **The name is blocked; the mechanism is not.**
-Do not read that row as something you cannot run — unlike `Price-Cascade`, you
-are running it.
+`src/shunt/config/router.yaml`, so the ladder runs in a default install, and
+since 2026-08-21 the whole operating point has a name:
+
+```yaml
+router:
+  strategy: session_cascade      # = always_cheap + the escalation ladder
+  capture:
+    work_dir: /path/to/your/repo # without a repo there is no verified failure, so nothing climbs
+```
+
+`benchmark/routing/strategy_class.py` now classifies the row **LIVE**, derived
+from the product's own `LIVE_STRATEGIES` rather than restated. It was previously
+BLOCKED on a narrow technicality — that no `router.strategy` value named a
+*layer* — which was true and also read, in every figure, as "you cannot run
+this". Registering the preset removes the technicality instead of hedging around
+it. Note what stays blocked: `Price-Cascade` and `kNN-cascade` verify **inside**
+one task, and no configuration will ever do that here.
 
 **What the row does not say is whether its rungs are worth buying.** It prices
 the ladder; it does not score the models the ladder steps to. Those are measured
@@ -305,7 +317,7 @@ cells are monotone-imputed. Its subset guard, verbatim:
 |---|---|---:|---|---:|---:|
 | Oracle (hindsight — bound) | 96.74% | — | $18.33 | [11.05, 27.18] | $18.33 |
 | Price-Cascade (blocked) | 96.74% | 94.02–98.91 | $27.11 | [17.92, 37.81] | $27.11 |
-| **Session-Cascade, `rank_shortlist=3` (shipped)** | **96.74%** | 94.02–98.91 | $33.56 | [22.53, 46.14] | **$28.71** |
+| **Session-Cascade, `rank_shortlist=3` (`strategy: session_cascade`)** | **96.74%** | 94.02–98.91 | $33.56 | [22.53, 46.14] | **$28.71** |
 | kNN-cascade (blocked) | 96.74% | 94.02–98.91 | $30.44 | [20.39, 42.06] | $30.44 |
 | Session-Cascade, `rank_shortlist=0` (pre-shortlist) | 96.57% | 93.71–98.86 | $48.19 | [29.32, 69.57] | $35.79 | <!-- frozen-value: n=180, date=2026-08-10, run=49b8362 -->
 | Always-Frontier | 95.11% | 91.85–97.83 | $96.02 | [88.73, 104.19] | $96.02 |
@@ -324,7 +336,7 @@ never a hardcoded number. Its subset guard, verbatim:
 | strategy | pass rate | 95% CI | naive cost | naive 95% CI | cache-aware cost |
 |---|---:|---|---:|---|---:|
 | Price-Cascade | 90.91% | 83.33–96.97 | $27.10 | [19.49, 36.56] | $27.10 |
-| **Session-Cascade, `rank_shortlist=3` (shipped)** | **90.91%** | 83.33–96.97 | $33.75 | [24.39, 44.23] | **$28.76** |
+| **Session-Cascade, `rank_shortlist=3` (`strategy: session_cascade`)** | **90.91%** | 83.33–96.97 | $33.75 | [24.39, 44.23] | **$28.76** |
 | Session-Cascade, `rank_shortlist=0` | 90.91% | 84.85–96.97 | $66.89 | [47.66, 89.68] | $49.34 | <!-- frozen-value: n=74, date=2026-08-11, run=49b8362 -->
 | Always-Frontier | 86.36% | 80.30–93.94 | $37.63 | [30.57, 45.58] | $37.63 |
 | kNN-cascade | 90.91% | 84.85–95.45 | $34.09 | [24.40, 46.95] | $34.09 |
@@ -533,7 +545,7 @@ roadmap.
 | | cost | saving vs always-frontier | what it requires |
 |---|---:|---:|---|
 | Always-Frontier | $96.02 | — | nothing |
-| **Price-Cascade** (blocked) | **$27.11** | **71.8%** | **no prediction — but mid-session verification, which is why it is not deployable** |
+| **Price-Cascade** (blocked) | **$27.11** | **71.8%** | **no prediction — but mid-session verification, which is why it is not deployable, and why `session_cascade` re-buys most of it at session cadence for +$1.37** |
 | Difficulty-only oracle | $14.25* | 83.9%* | perfect difficulty prediction |
 | Oracle (exact model) | $18.33 | 80.9% | + hindsight token counts |
 
@@ -811,11 +823,13 @@ what it cannot support — beside the mechanism it illustrates:
 
 - **Routing** (15 figures): [routing.md → Figures](routing.md#figures)
 - **Escalation** (6 figures): [escalation.md → Figures](escalation.md#figures)
+- **The live router** (7 figures): [inference.md → Figures](inference.md#figures)
 
 The figures live under `docs/assets/figures/`, one subdirectory per half
-(`routing/`, `escalation/`), inside the published docs tree, which is
+(`routing/`, `escalation/`, `inference/`), inside the published docs tree, which is
 why the pages above can link them relatively. A committed `figures.json` per half — beside
-the code that writes it, in `benchmark/routing/` and `benchmark/escalation/` — records every
+the code that writes it, in `benchmark/routing/`, `benchmark/escalation/` and
+`src/shunt/inspect/inference/` — records every
 figure's full record and its input digest, and a lint gate (SH009) holds that manifest in
 bijection with the sections above — so a retired figure cannot leave a stale description
 behind it, and a documented figure cannot go missing.
@@ -827,7 +841,8 @@ but the routing null is a null on a suite whose minimum detectable effect sits
 far above any plausible routing signal, so it bounds our resolution rather than
 the idea. What changed this cycle is that the mechanism no longer has to be
 quoted from a strategy the router refuses to run: the escalation ladder at
-session cadence is cache-safe, ships enabled, and reaches the blocked cascades'
+session cadence is cache-safe, ships enabled, is now selectable by name
+(`router.strategy: session_cascade`), and reaches the blocked cascades'
 operating point for $1.37 more on the 175-task set ([session <!-- frozen-value: n=175, date=2026-08-10, run=49b8362 -->
 cadence](#routing-at-session-cadence)). What also changed is the size of the
 prize — on fully-measured tasks the cascade family is ~25% cheaper than

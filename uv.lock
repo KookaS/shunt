@@ -3472,6 +3472,9 @@ docs = [
     { name = "mkdocs" },
     { name = "mkdocs-material" },
 ]
+inspect = [
+    { name = "matplotlib" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -3488,6 +3491,7 @@ requires-dist = [
     { name = "hnswlib", specifier = ">=0.8" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.112" },
     { name = "matplotlib", marker = "extra == 'benchmark'", specifier = ">=3.9" },
+    { name = "matplotlib", marker = "extra == 'inspect'", specifier = ">=3.9" },
     { name = "mini-swe-agent", marker = "extra == 'benchmark'", specifier = ">=2.4" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
@@ -3508,7 +3512,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
     { name = "vulture", marker = "extra == 'dev'", specifier = ">=2.11" },
 ]
-provides-extras = ["dev", "docs", "capture", "benchmark"]
+provides-extras = ["dev", "docs", "capture", "benchmark", "inspect"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "hypothesis", specifier = ">=6.112" }]

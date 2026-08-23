@@ -45,6 +45,7 @@ benchmark/
     validate.py                           Row-invariant validator (accounting-hole/ran-ness/schema/well-formed)
     data/                                 Curated read-only inputs
       challenges.json                     Challenge index + task metadata
+      seed/                               LFS-tracked warm-start bundles (one .npz per embedder fingerprint + plain manifest.json)
     reports/                              Gitignored — derived strategy_summary.csv + plots
     strategies/
       __init__.py                         Strategy protocol

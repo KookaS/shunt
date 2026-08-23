@@ -4,12 +4,13 @@
 # The canvas carries a claim, a subtitle and at most one red caveat (SH007 forces every
 # figure through benchmark/plot_frame.py, which draws exactly that). Everything a reader
 # needs beyond it — how to read the axes, what to look for, the terms, the method, every
-# limitation — lives in docs/routing.md and docs/escalation.md.
+# limitation — lives in the half's docs page (see `_HALVES`).
 #
-# That split only works if the two halves cannot drift apart, so this gate holds them in a
-# BIJECTION: PNG in docs/assets/figures/<half>/ <-> row in benchmark/<half>/figures.json <-> section
-# in the half's doc. One-way presence would miss the failure that actually bites — a RETIRED
-# figure whose docs section survives it, describing a plot nobody can look at. It also checks
+# That split only works if a half's figures, manifest and prose cannot drift apart, so this gate
+# holds each half in a BIJECTION: PNG in docs/assets/figures/<half>/ <-> row in the half's
+# <package>/figures.json <-> section in the half's doc. One-way presence would miss the failure
+# that actually bites — a RETIRED figure whose docs section survives it, describing a plot nobody
+# can look at. It also checks
 # the four rendered strings are byte-identical between the manifest and the prose — title,
 # subtitle, caveat and NOTES — so the doc quotes the figure rather than an older draft of it.
 # The per-model/per-strategy note rows carry every data-adjacent claim the canvas does not, so
@@ -37,9 +38,20 @@ _ROOT = Path(__file__).resolve().parents[2]
 # The whole-tree scan is the point (same rationale as SH004-SH006, NOT SH007's
 # `types: [python]`): the failure this catches is a DELETION, and no staged-file
 # filter ever sees a file that is no longer there.
+#
+# Each row is (half, package, doc): the package is an arbitrary repo-relative directory holding
+# that half's `figures.json` — it is NOT required to sit under benchmark/, and every consumer
+# below reads it from the row rather than rebuilding a path. Halves are open-ended; nothing here
+# assumes how many there are.
 _HALVES: tuple[tuple[str, str, str], ...] = (
     ("routing", "benchmark/routing", "docs/routing.md"),
     ("escalation", "benchmark/escalation", "docs/escalation.md"),
+    ("inference", "src/shunt/inspect/inference", "docs/inference.md"),
+    # The illustrative half. Its own row is what enforces the one rule the synthetic figures
+    # live under: never mixed with a measurement figure. Because membership is keyed on the
+    # half, a demo PNG dropped into docs/assets/figures/inference/ is an orphan finding rather
+    # than a figure that quietly acquires a measurement page's credibility.
+    ("demo", "benchmark/demo", "docs/inference-demo.md"),
 )
 
 # The PNGs live inside the published docs tree so the docs can link them relatively, ONE
@@ -304,13 +316,15 @@ def _check_manifest(
     ]
 
 
-def _claimed_by_half(root: Path) -> dict[str, set[str]]:
-    """half -> the PNG names its figures.json claims."""
-    claimed: dict[str, set[str]] = {}
+def _claimed_by_half(root: Path) -> dict[str, tuple[str, set[str]]]:
+    """half -> (its package, the PNG names its figures.json claims)."""
+    # The package travels with the claim so a finding can name the manifest that is actually
+    # missing the row; a half's figures.json does not necessarily live under benchmark/.
+    claimed: dict[str, tuple[str, set[str]]] = {}
     for half, pkg, _doc in _HALVES:
         manifest = root / pkg / "figures.json"
         rows = json.loads(manifest.read_text()).get("figures", {}) if manifest.exists() else {}
-        claimed[half] = set(rows)
+        claimed[half] = (pkg, set(rows))
     return claimed
 
 
@@ -339,13 +353,13 @@ def _check_orphans(root: Path) -> list[Finding]:
                     f"half that owns it, or delete it if the figure is retired",
                 )
             )
-        elif path.name not in claimed[half]:
+        elif path.name not in claimed[half][1]:
             out.append(
                 Finding(
                     rel,
                     1,
                     0,
-                    f"no entry in benchmark/{half}/figures.json — regenerate the figures, or "
+                    f"no entry in {claimed[half][0]}/figures.json — regenerate the figures, or "
                     f"delete the PNG if the figure is retired",
                 )
             )
@@ -451,8 +465,8 @@ def _check_readme(root: Path) -> list[Finding]:
                 benchmark_embeds[0][0],
                 0,
                 f"embeds {len(benchmark_embeds)} benchmark figures; the top-level README "
-                f"carries at most {_README_FIGURE_BUDGET} — move the rest to docs/routing.md "
-                f"and docs/escalation.md",
+                f"carries at most {_README_FIGURE_BUDGET} — move the rest to "
+                f"{', '.join(doc for _half, _pkg, doc in _HALVES)}",
             )
         )
     for line, url in benchmark_embeds:
@@ -463,7 +477,7 @@ def _check_readme(root: Path) -> list[Finding]:
 
 
 def main(argv: list[str]) -> int:
-    """Scan both halves plus the README; print every finding and exit non-zero on any."""
+    """Scan every half plus the README; print every finding and exit non-zero on any."""
     # --root exists so the gate is testable against a fixture tree; the hook passes no
     # arguments, so the repo root IS the coverage (same shape as SH004).
     root = _ROOT

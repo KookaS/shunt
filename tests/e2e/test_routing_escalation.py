@@ -398,6 +398,43 @@ def test_always_frontier_allocates_a_frontier_model(
         assert reason2 == "always_frontier"  # fixed strategy never escalates
 
 
+def test_session_cascade_starts_cheap_then_climbs(
+    app_factory: Any, tmp_path: Path, mock_acompletion: Any
+) -> None:
+    """The `session_cascade` preset, end to end: cheapest model first, then the ladder."""
+    # The LIVE spelling of the benchmark's Session-Cascade row — the cache-safe operating point
+    # the blocked Price-Cascade / kNN-cascade rows approximate at one decision per attempt.
+    # `always_cheap` above proves the base rule and that a pinned control never escalates; this
+    # asserts the opposite for the preset, which is the whole difference between the two ids.
+    repo = make_repo(tmp_path / "cascade-repo", kind="red")
+    with app_factory(repo=repo, strategy="session_cascade") as client:
+        work_dir = str(repo)
+        cheapest = client.app.state.model_pool.ranked_models()[0].name
+
+        r1, sid1 = _drive_session(client)
+        model1, reason1 = parse_decision(r1.headers["X-Shunt-Decision"])
+        assert model1 == cheapest
+        # Its own reason token, not always_cheap's: the two pick the same model but differ
+        # on whether a verified failure may move it, and an analysis filtering on
+        # `always_cheap` to find CONTROL sessions must not scoop up cascade sessions.
+        assert reason1 == "session_cascade"
+        close_session(client, sid1)
+        wait_failure_count(client, work_dir, 1)
+
+        r2, sid2 = _drive_session(client)
+        _, reason2 = parse_decision(r2.headers["X-Shunt-Decision"])
+        assert reason2 == "session_cascade"  # one red is fail-then-fix, not a rung
+        close_session(client, sid2)
+        wait_failure_count(client, work_dir, 2)
+
+        r3, _sid3 = _drive_session(client)
+        model3, reason3 = parse_decision(r3.headers["X-Shunt-Decision"])
+        assert reason3 == "auto_escalation"
+        # Effort rung first: the served model is unchanged, so the cache namespace is too.
+        # A rank step here would be the cache-safety spine broken, not a better cascade.
+        assert model3 == cheapest
+
+
 def test_always_cheap_allocates_the_cheapest_model(app_factory: Any, mock_acompletion: Any) -> None:
     """Routing allocated to the cheap end of the pool on a fixed strategy."""
     with app_factory(repo=None, strategy="always_cheap") as client:

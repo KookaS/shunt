@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import argparse
 import ast
+import dataclasses
 import importlib.util
 import json
 import os
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Final
@@ -25,6 +27,33 @@ from benchmark.runner import replay_admissibility
 
 # Captured before the autouse fixture below stubs the module attribute out.
 _REAL_WRITE_MANIFEST = pipeline.write_figure_manifest
+
+
+def _redirect(jobs: tuple[pipeline.FigureJob, ...], root: Path) -> tuple[pipeline.FigureJob, ...]:
+    """Copies of `jobs` writing under `root`, so a stubbed run cannot resolve to committed PNGs."""
+    root.mkdir(parents=True, exist_ok=True)
+    return tuple(dataclasses.replace(j, figures_dir=root, reports_dir=root) for j in jobs)
+
+
+def _writes_nothing(module: str, argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+    """A producer that exits 0 having rendered nothing."""
+    return subprocess.CompletedProcess([module], 0, stdout="", stderr="")
+
+
+def _renders(
+    jobs: tuple[pipeline.FigureJob, ...],
+) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """A producer that exits 0 AND writes each declared output of the job it was asked for."""
+
+    def run(module: str, argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        for job in jobs:
+            if job.module != module:
+                continue
+            for out in job.outputs:
+                (job.output_dir(out) / out).write_bytes(f"{module}:{out}".encode())
+        return subprocess.CompletedProcess([module], 0, stdout="", stderr="")
+
+    return run
 
 
 def _args(**over: object) -> argparse.Namespace:
@@ -477,6 +506,23 @@ class TestStandaloneFigureFreshness:
         """
         assert pipeline.stale_figures() == []
 
+    def test_committed_figures_are_certified_by_their_output_bytes(self) -> None:
+        """FAILS while any committed output's bytes are unproven against the manifest record.
+
+        Red until a serialised `--from evaluate` pass re-records both digests — which is the
+        point: the input-only gate called this state green.
+        """
+        assert pipeline.drifted_figures() == []
+        assert pipeline.uncertified_figures() == []
+
+    def test_every_job_has_a_manifest_entry(self) -> None:
+        """A job absent from the manifest was never certified by a FIGURES stage."""
+        # `stale_figures()` already reports such a job as stale; this pins the stronger
+        # statement — no job is exempt from the manifest — so a re-introduced exemption
+        # set cannot quietly hide one again.
+        recorded = set(json.loads(pipeline.FIGURE_MANIFEST.read_text()))
+        assert {j.name for j in pipeline.FIGURE_JOBS if j.name not in recorded} == set()
+
     def test_a_changed_input_is_detected(self, tmp_path: Path) -> None:
         manifest = tmp_path / "figure_inputs.json"
         _REAL_WRITE_MANIFEST(manifest)
@@ -545,27 +591,75 @@ class TestStandaloneFigureFreshness:
         assert crashed.name not in recorded  # entry absent, not merely unchanged
         assert pipeline.stale_figures(manifest) == [crashed.name]  # gate names the crash
 
-    def test_clean_figure_run_of_the_same_job_is_reported_fresh(
+    def test_an_exit_zero_producer_that_writes_nothing_certifies_nothing(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """NEGATIVE CONTROL: the SAME job run clean reports fresh.
+        """POSITIVE CONTROL (absent render): exit 0 having written nothing must NOT certify.
 
-        The positive control is not passing by always saying stale: a clean run of the
-        figure stage certifies every standalone job current again.
+        This asserted `stale_figures() == []` until 2026-08 and passed only because outputs
+        resolved against the committed repo tree instead of the run's own output directory.
         """
+        jobs = _redirect(pipeline.STANDALONE_FIGURES, tmp_path / "out")
+        monkeypatch.setattr(pipeline, "STANDALONE_FIGURES", jobs)
         monkeypatch.setattr(pipeline, "write_figure_manifest", _REAL_WRITE_MANIFEST)
         manifest = tmp_path / "figure_inputs.json"
-        _REAL_WRITE_MANIFEST(manifest)
-        assert pipeline.stale_figures(manifest) == []
+        monkeypatch.setattr(pipeline, "run_module", _writes_nothing)
+        with pytest.raises(pipeline.StageError):
+            pipeline.stage_figures(_args(), pipeline.PipelineState(), manifest=manifest)
+        recorded = json.loads(manifest.read_text())
+        assert [job.name for job in jobs if job.name in recorded] == []
+        assert pipeline.stale_figures(manifest, jobs) == [job.name for job in jobs]
 
-        def clean(module: str, argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
-            return subprocess.CompletedProcess([module], 0, stdout="", stderr="")
+    def test_clean_figure_run_that_really_renders_is_reported_fresh(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """NEGATIVE CONTROL: the SAME jobs run clean AND writing their outputs report fresh.
 
-        monkeypatch.setattr(pipeline, "run_module", clean)
+        The positive controls are not passing by always saying stale: a run that actually
+        renders certifies every standalone job current, undrifted and with its bytes on record.
+        """
+        jobs = _redirect(pipeline.STANDALONE_FIGURES, tmp_path / "out")
+        monkeypatch.setattr(pipeline, "STANDALONE_FIGURES", jobs)
+        monkeypatch.setattr(pipeline, "write_figure_manifest", _REAL_WRITE_MANIFEST)
+        manifest = tmp_path / "figure_inputs.json"
+        monkeypatch.setattr(pipeline, "run_module", _renders(jobs))
         pipeline.stage_figures(_args(), pipeline.PipelineState(), manifest=manifest)
         recorded = json.loads(manifest.read_text())
-        assert all(job.name in recorded for job in pipeline.STANDALONE_FIGURES)
+        assert all(job.name in recorded for job in jobs)
+        assert pipeline.stale_figures(manifest, jobs) == []
+        assert pipeline.missing_figures(jobs) == []
+        assert pipeline.drifted_figures(manifest, jobs) == []
+        assert pipeline.uncertified_figures(manifest, jobs) == []
+
+    def test_a_certified_output_edited_afterwards_is_reported_drifted(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The output half of the gate: committed bytes that stop matching the record are named.
+
+        Input-digest-only freshness was structurally blind to this — a PNG could stop being what
+        its producer draws and `--check-figures` stayed green.
+        """
+        jobs = _redirect(pipeline.STANDALONE_FIGURES, tmp_path / "out")
+        monkeypatch.setattr(pipeline, "STANDALONE_FIGURES", jobs)
+        monkeypatch.setattr(pipeline, "write_figure_manifest", _REAL_WRITE_MANIFEST)
+        manifest = tmp_path / "figure_inputs.json"
+        monkeypatch.setattr(pipeline, "run_module", _renders(jobs))
+        pipeline.stage_figures(_args(), pipeline.PipelineState(), manifest=manifest)
+        assert pipeline.drifted_figures(manifest, jobs) == []
+        edited = jobs[0]
+        out = edited.outputs[0]
+        (edited.output_dir(out) / out).write_bytes(b"someone redrew this by hand")
+        assert pipeline.stale_figures(manifest, jobs) == []  # inputs unmoved: input gate is blind
+        assert pipeline.drifted_figures(manifest, jobs) == [f"{edited.name}:{out}"]
+
+    def test_an_input_only_entry_is_reported_uncertified(self, tmp_path: Path) -> None:
+        """A legacy bare-string entry records no output bytes, so it certifies none of them."""
+        manifest = tmp_path / "figure_inputs.json"
+        manifest.write_text(json.dumps(pipeline.figure_digests()))
         assert pipeline.stale_figures(manifest) == []
+        assert pipeline.uncertified_figures(manifest) == [
+            f"{job.name}:{out}" for job in pipeline.FIGURE_JOBS for out in job.outputs
+        ]
 
     def test_a_stage_that_raises_records_no_digest(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -756,3 +850,81 @@ class TestFigureAnalysisClosure:
                 f"`inputs` (a change there can alter the figure without stale_figures noticing): "
                 + ", ".join(missing)
             )
+
+
+class TestFigureHalfFilter:
+    """`--half` exists so one half's freshness can be reported without another half's state
+    deciding the exit code — `make check-inference-figures` asks about the inference figures,
+    whose render lives outside this pipeline's stages, and must not be answered by routing's."""
+
+    def test_the_halves_partition_the_job_set(self) -> None:
+        assert pipeline.figure_jobs_for(None) == pipeline.FIGURE_JOBS
+        selected = [
+            job for half in pipeline.FIGURE_HALVES for job in pipeline.figure_jobs_for(half)
+        ]
+        assert sorted(j.name for j in selected) == sorted(j.name for j in pipeline.FIGURE_JOBS)
+        assert set(pipeline.FIGURE_HALVES) == {"demo", "escalation", "inference", "routing"}
+
+    def test_one_halfs_staleness_does_not_redden_another(self, tmp_path: Path) -> None:
+        """The regression the filter prevents: an uncertified inference job turning the
+        routing check red, which is how a real routing staleness would get ignored."""
+        manifest = tmp_path / "figure_inputs.json"
+        _REAL_WRITE_MANIFEST(manifest)
+        digests = pipeline.figure_digests()
+        digests["render_inference_figures"] = "0" * 64
+        manifest.write_text(json.dumps(digests))
+        routing = pipeline.figure_jobs_for("routing")
+        inference = pipeline.figure_jobs_for("inference")
+        assert pipeline.stale_figures(manifest, jobs=routing) == []
+        assert pipeline.stale_figures(manifest, jobs=inference) == ["render_inference_figures"]
+
+    def test_half_outside_check_figures_is_an_error_not_a_no_op(self) -> None:
+        with pytest.raises(SystemExit) as exc:
+            pipeline.main(["--half", "routing"])
+        assert exc.value.code == 2
+
+    def test_an_unregistered_half_is_rejected(self) -> None:
+        with pytest.raises(SystemExit) as exc:
+            pipeline.main(["--check-figures", "--half", "nosuchhalf"])
+        assert exc.value.code == 2
+
+
+class TestInferenceFigureJob:
+    """The inference family is drawn from a seed-only corpus by shipped code; its digest must
+    cover both, and must NOT widen the benchmark halves' closures."""
+
+    @property
+    def _job(self) -> pipeline.FigureJob:
+        return next(j for j in pipeline.FIGURE_JOBS if j.half == "inference")
+
+    def test_the_corpus_inputs_are_part_of_the_digest(self) -> None:
+        """`build_live_pool()` intersects the registry with the router policy to decide which
+        rows survive seeding, so a model rename changes the committed figures."""
+        names = {p.name for p in pipeline._data_inputs("inference")}
+        assert names == {"manifest.json", "models.yaml", "router.yaml"}
+
+    def test_the_shipped_drawing_package_is_part_of_the_digest(self) -> None:
+        inputs = {p for p in self._job.inputs}
+        pkg = pipeline._REPO_ROOT / "src" / "shunt" / "inspect" / "inference"
+        assert pkg in inputs
+        assert pipeline._module_file("shunt.analysis.ope") in inputs
+        assert pipeline._module_file("shunt.db.store") in inputs
+
+    def test_the_inference_package_stays_out_of_the_benchmark_closures(self) -> None:
+        """Adding the inference modules to the routing/escalation digests would re-stale all
+        22 benchmark PNGs on every inference edit — the regression a promotion caused once."""
+        # The `demo` half is exempt for the same reason `inference` is: it DRAWS with that
+        # package, so the package is genuinely one of its inputs. The guard is about the two
+        # MEASUREMENT halves, whose figures the package cannot touch.
+        pkg = pipeline._REPO_ROOT / "src" / "shunt" / "inspect" / "inference"
+        for job in pipeline.FIGURE_JOBS:
+            if job.half in ("inference", "demo"):
+                continue
+            assert not any(pkg == p or pkg in p.parents for p in job.inputs), job.name
+
+    def test_its_outputs_are_the_seven_committed_pngs(self) -> None:
+        assert self._job.outputs == tuple(sorted(self._job.outputs))
+        assert len(self._job.outputs) == 7
+        assert all(o.startswith("inference_") and o.endswith(".png") for o in self._job.outputs)
+        assert self._job.figures_dir.name == "inference"
+        assert self._job.stage == pipeline.FIGURES

@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Final
 
 _ROOT = Path(__file__).resolve().parents[2]
 _LINT_DIR = _ROOT / "tools" / "lint"
@@ -17,6 +18,15 @@ def _run(script: str, *args: str) -> int:
         capture_output=True,
         text=True,
     ).returncode
+
+
+def _output(script: str, *args: str) -> str:
+    """A check's stdout — for the findings whose VALUE is the message, not the exit code."""
+    return subprocess.run(
+        [sys.executable, str(_LINT_DIR / script), *args],
+        capture_output=True,
+        text=True,
+    ).stdout
 
 
 def test_sh001_catches_uppercase_mutable_container(tmp_path: Path) -> None:
@@ -428,22 +438,31 @@ def test_sh008_still_exempts_a_tests_segment(tmp_path: Path) -> None:
 # --- SH009: the figure <-> manifest <-> docs bijection ----------------------------------
 
 
+# The halves the gate knows, and where each keeps its manifest. `inference` is the proof that
+# a half's package need not sit under benchmark/.
+_HALF_PKGS: Final[dict[str, str]] = {
+    "routing": "benchmark/routing",
+    "escalation": "benchmark/escalation",
+    "inference": "src/shunt/inspect/inference",
+}
+
+
 def _figure_tree(
     tmp_path: Path,
     *,
     pngs: tuple[str, ...] = ("kill_gate.png",),
     manifest: tuple[str, ...] | None = None,
     section_slugs: tuple[str, ...] | None = None,
-    title: str = "The gate is untested",
     notes: tuple[str, ...] = ("x is cost.", "175 tasks"),
+    half: str = "routing",
 ) -> Path:
-    """A minimal repo shaped like shunt: one routing figure, its row, and its section."""
+    """A minimal repo shaped like shunt: one half's figure, its row, and its section."""
+    title = "The gate is untested"
     # One PNG directory per half inside the docs tree, so a figure's home and its
     # figures.json row both have to name the same half.
-    figures = tmp_path / "docs" / "assets" / "figures" / "routing"
+    figures = tmp_path / "docs" / "assets" / "figures" / half
     figures.mkdir(parents=True)
-    (tmp_path / "docs" / "assets" / "figures" / "escalation").mkdir()
-    (tmp_path / "benchmark" / "routing").mkdir(parents=True)
+    (tmp_path / _HALF_PKGS[half]).mkdir(parents=True)
     for png in pngs:
         (figures / png).write_bytes(b"\x89PNG")
     rows = {
@@ -458,8 +477,8 @@ def _figure_tree(
         }
         for name in (manifest if manifest is not None else pngs)
     }
-    (tmp_path / "benchmark" / "routing" / "figures.json").write_text(
-        json.dumps({"schema": 1, "half": "routing", "figures": rows})
+    (tmp_path / _HALF_PKGS[half] / "figures.json").write_text(
+        json.dumps({"schema": 1, "half": half, "figures": rows})
     )
     docs = tmp_path / "docs"
     slugs = (
@@ -471,7 +490,7 @@ def _figure_tree(
         f"""
 ### {title} {{#fig-{slug}}}
 
-![Cost versus quality](assets/figures/routing/{slug.replace("-", "_")}.png)
+![Cost versus quality](assets/figures/{half}/{slug.replace("-", "_")}.png)
 
 *175 tasks*
 
@@ -483,9 +502,9 @@ def _figure_tree(
 """
         for slug in slugs
     )
-    (docs / "routing.md").write_text(f"# Routing\n\n## Figures\n{body}\n")
-    (docs / "escalation.md").write_text("# Escalation\n")
-    (tmp_path / "benchmark" / "escalation").mkdir(parents=True)
+    (docs / f"{half}.md").write_text(f"# {half.title()}\n\n## Figures\n{body}\n")
+    # Every other half stays entirely absent — no directory, no manifest, no doc — which is
+    # what a half looks like before its producer lands.
     return tmp_path
 
 
@@ -537,7 +556,9 @@ def test_sh009_catches_a_png_left_outside_every_halfs_directory(tmp_path: Path) 
 
 def test_sh009_catches_a_png_in_the_wrong_halfs_directory(tmp_path: Path) -> None:
     root = _figure_tree(tmp_path)
-    (root / "docs" / "assets" / "figures" / "escalation" / "kill_gate.png").write_bytes(b"\x89PNG")
+    wrong = root / "docs" / "assets" / "figures" / "escalation"
+    wrong.mkdir(parents=True)
+    (wrong / "kill_gate.png").write_bytes(b"\x89PNG")
     assert _run("check_figure_docs.py", "--root", str(root)) == 1
 
 
@@ -571,6 +592,32 @@ def test_sh009_catches_a_figure_whose_notes_block_is_missing(tmp_path: Path) -> 
     doc = root / "docs" / "routing.md"
     doc.write_text(doc.read_text().replace("**Notes.** x is cost.\n175 tasks", ""))
     assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_accepts_a_complete_bijection_for_the_inference_half(tmp_path: Path) -> None:
+    """The inference half keeps its manifest outside benchmark/, so this is the proof that
+    nothing downstream rebuilds `benchmark/<half>` instead of reading the half's package."""
+    root = _figure_tree(tmp_path, half="inference")
+    assert (root / "src" / "shunt" / "inspect" / "inference" / "figures.json").exists()
+    assert _run("check_figure_docs.py", "--root", str(root)) == 0
+
+
+def test_sh009_orphan_message_names_the_halfs_real_manifest(tmp_path: Path) -> None:
+    """The message must point at a path that exists; `benchmark/inference/figures.json` is a
+    debugging trap, because nothing will ever be there."""
+    root = _figure_tree(tmp_path, half="inference", manifest=())
+    out = _output("check_figure_docs.py", "--root", str(root))
+    assert "src/shunt/inspect/inference/figures.json" in out
+    assert "benchmark/inference" not in out
+
+
+def test_sh009_an_entirely_absent_half_is_consistent(tmp_path: Path) -> None:
+    """Before a half's producer lands it has no PNG directory, no manifest and no doc page.
+    That is not a finding — a half only reddens once something describes a figure."""
+    root = _figure_tree(tmp_path)
+    assert not (root / "docs" / "assets" / "figures" / "inference").exists()
+    assert not (root / "docs" / "inference.md").exists()
+    assert _run("check_figure_docs.py", "--root", str(root)) == 0
 
 
 # --- SH007: the frame owns figure creation, titling and saving ---------------------------
@@ -622,6 +669,27 @@ def test_sh007_still_blocks_a_test_that_writes_a_png(tmp_path: Path) -> None:
     """The creation exemption is not a savefig exemption."""
     f = _py(tmp_path, "def test_x(fig):\n    fig.savefig('x.png')\n", name="test_y.py")
     assert _run("check_plot_frame.py", str(f)) == 1
+
+
+def test_sh007_allows_the_inspect_frame_module(tmp_path: Path) -> None:
+    """src/shunt/inspect/plot_frame.py is a legal frame — raw savefig inside it is fine."""
+    frame = tmp_path / "src" / "shunt" / "inspect" / "plot_frame.py"
+    frame.parent.mkdir(parents=True)
+    frame.write_text("import matplotlib.pyplot as plt\nfig = object()\nfig.savefig('x.png')\n")
+    assert _run("check_plot_frame.py", str(frame)) == 0
+
+
+def test_sh007_allows_calling_the_inspect_frame(tmp_path: Path) -> None:
+    """A draw module may create/title/save through the inspect frame's public API."""
+    f = _py(
+        tmp_path,
+        "from shunt.inspect import plot_frame\n"
+        "fig = plot_frame.new_figure(plot_frame.WIDE)\n"
+        "axes = fig.subplots(1, 2)\n"
+        "plot_frame.save(fig, '/tmp/x.png', plot_frame.FigureSpec())\n",
+        name="figures_x.py",
+    )
+    assert _run("check_plot_frame.py", str(f)) == 0
 
 
 def test_sh007_default_tree_is_clean() -> None:

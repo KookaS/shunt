@@ -39,3 +39,7 @@ class Session:
     state: SessionState = SessionState.open
     metadata: dict[str, Any] = field(default_factory=dict)
     decision_provenance: dict[str, Any] | None = None
+    # Client-supplied per-conversation id (opencode sends it in `X-Session-Id` /
+    # `x-session-affinity`). The router keys sessions on it when present, and persists
+    # it so a resumed/forked conversation can reuse its locked model.
+    external_session_id: str | None = None

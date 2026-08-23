@@ -94,7 +94,8 @@ never escalated". The sidecar reads `sessions.decision_provenance` from the outc
 store instead, matching a marker the driver planted in the prompt — so the escalated
 decision is proven to belong to *this tool's* request.
 
-**Why each prompt uses a different `User-Agent`.** A session is keyed on
+**Why each prompt uses a different `User-Agent`.** A session is keyed on the
+tool's conversation id when it sends one (opencode does — `X-Session-Id`), else
 `sha256(source_ip + User-Agent)`, and the request path refreshes an open session's idle
 deadline before sweeping expired ones. Repeat prompts from one identity therefore reuse
 one session and produce **one** decision, however many you send — which silently reports

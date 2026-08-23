@@ -18,6 +18,11 @@
 #   make benchmark-figures Regenerate the standalone routing figures + their manifest (no spend)
 #                       (every figure lands in docs/assets/figures/routing/)
 #   make check-figures  Prove the committed standalone figures are not stale (seconds, no spend)
+#   make inference-figures Regenerate the inference (live-router) figures + manifest (no spend)
+#                       (OUT=/tmp/x renders a throwaway copy from the ambient store instead)
+#   make check-inference-figures Prove the committed inference figures are not stale (seconds)
+#   make seed-bundle    Build the LFS-tracked warm-start seed bundle from committed results.csv
+#   make check-seed-bundle Prove the committed bundle is current (seconds, no spend)
 #   make reconcile-cost Reconcile tracked benchmark cost against the billed bill (no spend)
 #
 # Docs deps are pulled ephemerally with `uv run --with-requirements`, so nothing
@@ -30,7 +35,7 @@
 # cell with `No module named 'minisweagent'`. Pass extra flags via ARGS=…, e.g.
 # `make benchmark-live ARGS="--live --max-cost 2"`.
 
-.PHONY: e2e docs docs-build stop help benchmark benchmark-live offline-replay escalation-eval model-coverage state-capture-check state-capture-mark state-export state-import state-verify replay-inputs routing-report benchmark-figures check-figures reconcile-cost live-smoke
+.PHONY: e2e docs docs-build stop help benchmark benchmark-live offline-replay escalation-eval model-coverage state-capture-check state-capture-mark state-export state-import state-verify replay-inputs routing-report benchmark-figures check-figures inference-figures check-inference-figures demo-figures check-demo-figures seed-bundle check-seed-bundle reconcile-cost live-smoke
 .DEFAULT_GOAL := help
 
 DOCS_REQS := docs/requirements.txt
@@ -58,6 +63,12 @@ help:
 	@echo "make routing-report  Regenerate the routing backtest report (no spend)"
 	@echo "make benchmark-figures Regenerate the standalone routing figures + manifest (no spend)"
 	@echo "make check-figures   Verify the committed standalone figures are current (seconds)"
+	@echo "make inference-figures Regenerate the inference figures + manifest (OUT=/tmp/x for a scratch copy)"
+	@echo "make check-inference-figures Verify the committed inference figures are current (seconds)"
+	@echo "make demo-figures    Redraw the ILLUSTRATIVE demo figures (synthetic, watermarked, evidence of nothing)"
+	@echo "make check-demo-figures Verify the committed demo figures are current (seconds)"
+	@echo "make seed-bundle     Build the LFS-tracked warm-start seed bundle (real fastembed, embeds results.csv)"
+	@echo "make check-seed-bundle Prove the committed seed bundle is current (seconds, no spend)"
 	@echo "make reconcile-cost  Reconcile tracked cost vs the real bill (ARGS=\"--billed 35 --timestamp 2026-07-27T00:00:00\")"
 	@echo "make live-smoke      One real, cheap session through Shunt against a real provider (ARGS=\"--live\")"
 
@@ -162,6 +173,80 @@ benchmark-figures:
 
 check-figures:
 	$(BENCH) benchmark.pipeline --check-figures $(ARGS)
+
+# THE FIGURE-STALENESS TRAP, for both families. A stage certifies only the jobs it
+# REGENERATED, so a target that draws without re-recording leaves the job STALE:
+#   * a bare `make routing-report` renders and never writes the manifest digest;
+#   * `--from report` re-renders the escalation `run_eval` job through _escalation_status()
+#     as a STATUS PROBE (pipeline.py:1004), which never calls write_figure_manifest — so it
+#     burns ~25 min and the job is still stale.
+# The minimal correct repair after touching figure inputs is `--from evaluate`
+# (evaluate -> report -> figures):
+#   $(BENCH) benchmark.pipeline --from evaluate
+# Certification records BOTH digests — the job's inputs and the SHA-256 of each committed
+# output it drew — so `--check-figures` reports four conditions, not one: STALE (inputs moved
+# since the draw), MISSING (no PNG on disk), DRIFTED (the committed bytes are not the bytes
+# certified for that job — a figure edited or redrawn outside the certifying stage) and
+# UNCERTIFIED (the entry predates output digesting, so no output bytes are on record). An
+# input-only gate called two genuinely drifted figures green; DRIFTED and UNCERTIFIED are why
+# it no longer can. All four repair the same way — `--from evaluate`, never a hand edit to
+# benchmark/routing/figure_inputs.json.
+# `shunt/inspect/inference/**` is NOT in the benchmark digest closure (only plot_frame and
+# plot_style are), so inference-figure edits do not re-stale the routing/escalation figures.
+
+# The inference family: the LIVE ROUTER measured on its own outcome store, drawn by shipped
+# code under src/shunt/inspect/inference/ (the rig container renders the same seven with
+# `python -m shunt.inspect.inference`, having no benchmark/ of its own). Two modes, and the
+# difference is the DATABASE, not the code:
+#
+#   make inference-figures                 the COMMITTED docs figures under
+#                                          docs/assets/figures/inference/. Built from the
+#                                          seed-only docs corpus — deterministic, no network,
+#                                          no live rig — and the ONLY mode that may touch the
+#                                          committed manifest.
+#   make inference-figures OUT=/tmp/x      the same seven from whatever SHUNT_DATA_DIR points
+#                                          at (seed + live rows), into /tmp/x, with the
+#                                          manifest diverted to /tmp/figures.json. Never
+#                                          touches the committed set.
+#
+# Exits non-zero when the OPE instrument is inadmissible: F7 refuses before drawing, so a
+# zero here would ship a half-rendered family.
+OUT ?=
+inference-figures:
+	SHUNT_PLOT_STRICT=1 $(BENCH) benchmark.routing.render_inference_figures \
+		$(if $(OUT),--out-dir "$(OUT)",) $(ARGS)
+
+# The cheap staleness gate for the inference half — seconds, draws nothing.
+check-inference-figures:
+	$(BENCH) benchmark.pipeline --check-figures --half inference $(ARGS)
+
+# The DEMO half: the same seven drawings over `benchmark/routing/demo_corpus.py`, a synthetic
+# corpus of 703 sessions (300 drawn from 40 measured atoms, 153 invented, 250 seeded). It exists
+# so `docs/inference-demo.md` can show what a populated panel looks like; NOTHING it draws is a
+# measurement, and every canvas is stamped `SYNTHETIC — NOT MEASURED` by the renderer rather than
+# by the drawing code.
+#
+#   make demo-figures                the COMMITTED demo figures under docs/assets/figures/demo/
+#   make demo-figures OUT=/tmp/x     a scratch copy, manifest diverted beside it
+#
+# SAME STALENESS TRAP as above: this target RENDERS and does not re-record. The demo job's
+# stage is FIGURES, so `--from figures` (make benchmark-figures) is what certifies it.
+demo-figures:
+	SHUNT_PLOT_STRICT=1 $(BENCH) benchmark.demo.render_demo_figures \
+		$(if $(OUT),--out-dir "$(OUT)",) $(ARGS)
+
+check-demo-figures:
+	$(BENCH) benchmark.pipeline --check-figures --half demo $(ARGS)
+
+# The LFS-tracked warm-start seed bundle: precomputed per-embedding-fingerprint embeddings
+# of the benchmark's MEASURED outcome cells, so a fresh deployment can warm the live kNN
+# index without re-embedding. Heavy (real fastembed), so a deliberate target — NOT a
+# pre-commit hook. `check-seed-bundle` is the cheap staleness gate (seconds, no spend).
+seed-bundle:
+	$(BENCH) benchmark.routing.build_seed_bundle $(ARGS)
+
+check-seed-bundle:
+	$(BENCH) benchmark.routing.build_seed_bundle --check $(ARGS)
 
 # Close the loop between tracked benchmark cost and the real provider bill (no spend).
 # --billed is the owner-read Requesty dashboard figure; --timestamp is required.

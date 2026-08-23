@@ -74,11 +74,12 @@ SPEC = FigureSpec(
         "with a 95% Wilson interval. Marker SHAPE carries what a strategy is: circles and "
         "the orange diamond can run in production today, blue squares are blocked — no "
         "router.strategy value names them — an X is a control that must never ship, and a "
-        "star is a bound that is unreachable by design. Marker FILL splits the blue squares, "
-        "and it is the distinction most likely to be misread: a SOLID square is blocked and "
-        "nothing equivalent runs today, while a HOLLOW one marks a mechanism that already "
-        "ships and is on by default under another config surface, where the only thing "
-        "blocked is the strategy NAME. Only the live points "
+        "star is a bound that is unreachable by design. Marker FILL splits the blue squares: "
+        "a SOLID square is blocked and nothing equivalent runs today, while a HOLLOW one "
+        "would mark a mechanism that ships under another config surface with only its NAME "
+        "blocked. NO ROW IS HOLLOW TODAY — the one that was, Session-Cascade, is now live as "
+        "router.strategy: session_cascade, and every remaining blue square is solid, i.e. "
+        "genuinely unrunnable. Only the live points "
         "enter the Pareto test and the shaded mixture region — a frontier anchored on a "
         "strategy the router rejects at boot describes an operating point nobody can buy."
     ),
@@ -114,11 +115,12 @@ SPEC = FigureSpec(
         ),
         (
             "blocked",
-            "no router.strategy value names it. This says nothing about whether the "
-            "MECHANISM runs: a solid square cannot be run today, a hollow one already runs "
-            "in every default install under the config surface named in the legend. Both are "
-            "excluded from the frontier, because the frontier ranks settings an operator can "
-            "choose. Each row's blocker and path to live are in "
+            "no router.strategy value names it, and on this corpus that now means genuinely "
+            "unrunnable: the two remaining blocked cascades verify INSIDE one task, which "
+            "breaks the one-decision-per-session cache-safety spine and is excluded by "
+            "design rather than pending. They are excluded from the frontier, because the "
+            "frontier ranks settings an operator can choose, and they are kept because they "
+            "price what session cadence costs. Each row's blocker and path to live are in "
             "benchmark/routing/strategy_class.py.",
         ),
     ),
@@ -367,8 +369,23 @@ def _draw(
             edgecolors="white" if filled else colour,
             linewidths=0.6 if filled else 1.6,
         )
+        # The label carries its MARKER's colour. Price-Cascade, Session-Cascade and
+        # kNN-cascade sit at one pass rate within $3 of each other, which on a log axis
+        # spanning two decades is a few pixels: all three earn leader lines, the leaders
+        # converge on the same cluster, and the reader is left guessing which name is the
+        # deployable one. Shape already says the class; matching the text to it means the
+        # pairing survives the crowd. Redundant with shape by design — never colour alone.
         labels.append(
-            LabelPoint(cost, perf, name, down * 100, up * 100, xerr_lo=xerr_lo, xerr_hi=xerr_hi)
+            LabelPoint(
+                cost,
+                perf,
+                name,
+                down * 100,
+                up * 100,
+                xerr_lo=xerr_lo,
+                xerr_hi=xerr_hi,
+                color=colour,
+            )
         )
 
     # Hull over LIVE points only. A mixture frontier is the cost-quality a coin-flip

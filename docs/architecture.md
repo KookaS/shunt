@@ -57,18 +57,34 @@ learns from them for subsequent sessions.
 ## Strategy and exploration
 
 Which algorithm the router runs is one value, `router.strategy`, read from the
-`router.yaml` packaged at `src/shunt/config/router.yaml`. Three strategies are
-live-eligible: `knn` (the default), `always_cheap`, and `always_frontier`. That
-list is `LIVE_STRATEGIES` in `src/shunt/router/policy.py`, and it is the whole of
-it — every other strategy the benchmark scores (`oracle`, `oracle_reward`,
-`random`, `knn_cascade`, `price_cascade`, `tier_classifier`) is rejected at boot.
-The reasons differ: `oracle` and `oracle_reward` read the task's own verified
-outcome and `random` is not a router at all; the two cascades are excluded on
-purpose, because a real quality cascade has to verify mid-session and escalate,
-and that is not one cache-safe decision per session; `tier_classifier` orders
-models by a capability rank fitted offline from the outcome matrix, which the live
-path cannot compute. Each blocker and its path to live is recorded in
-`benchmark/routing/strategy_class.py`. Override the file by putting your own in
+`router.yaml` packaged at `src/shunt/config/router.yaml`. Four strategies are
+live-eligible: `knn` (the default), `always_cheap`, `always_frontier`, and
+`session_cascade`. That list is `LIVE_STRATEGIES` in
+`src/shunt/router/policy.py`, and it is the whole of it — every other strategy the
+benchmark scores (`oracle`, `oracle_reward`, `random`, `knn_cascade`,
+`price_cascade`, `tier_classifier`) is rejected at boot. The reasons differ:
+`oracle` and `oracle_reward` read the task's own verified outcome and `random` is
+not a router at all; the two cascades are excluded on purpose and permanently,
+because a real quality cascade has to verify **mid-session** and escalate, and
+that is not one cache-safe decision per session; `tier_classifier` orders models
+by a capability rank fitted offline from the outcome matrix, which the live path
+cannot compute. Each blocker and its path to live is recorded in
+`benchmark/routing/strategy_class.py`.
+
+`session_cascade` is the odd one out: it is a **preset**, not a fourth algorithm —
+`always_cheap` plus [auto-escalation](escalation.md), so the router starts on the
+cheapest model and climbs a rung at the next session boundary on a repeated
+verified failure. It exists because that operating point is what the two blocked
+cascades approximate, at a cadence the cache-safety spine allows. Selecting it
+with escalation disabled is a load error. Because it is neighbour-independent it
+never embeds, exactly like the other two fixed strategies.
+
+It is nonetheless a *separate* strategy from `always_cheap` rather than a flag on it,
+because the two differ on one predicate — `participates_in_escalation`. `always_cheap` and
+`always_frontier` are **pinned controls**: a verified failure may never move their pick,
+since they are the baselines routing comparisons are read against. The cascade is the
+opposite, and the engine branches on that predicate rather than on `consults_neighbors`,
+which is False for all three and cannot tell them apart. Override the file by putting your own in
 `$SHUNT_CONFIG_DIR`, or override single values with the `shunt start` flags — see
 [configuration](configuration.md#tune-the-router).
 
@@ -84,7 +100,7 @@ The knobs are live; exploration behaviour adapts as verified outcomes accumulate
 | Module | Role | On the live path? |
 |---|---|---|
 | **proxy/** | HTTP server: `/health`, `/v1/chat/completions`, `/v1/messages`, `/v1/models` (stub), `/admin/loop-health` (read-only loop-health metrics, aggregates only — no prompts; **unauthenticated, like every route** — see [SECURITY.md](https://github.com/KookaS/shunt/blob/main/SECURITY.md)), streaming passthrough; calls router to decide model on first turn | **Yes** |
-| **session/** | Session lifecycle: ID generation, inactivity timeout, model lock (keeps the session on one model — cache-safety) | **Yes** |
+| **session/** | Session lifecycle: ID generation (the tool's conversation id when it sends one, else a source-IP + user-agent hash), inactivity timeout, model lock (keeps the session on one model — cache-safety) | **Yes** |
 | **models/** | Provider config: model pool, price-derived capability rank, fallback chain | **Yes** (read at startup) |
 | **router/** | Decision core: embed prompt via fastembed, kNN retrieval via hnswlib, selection rule → model chosen via outcome feedback or cold-start | **Yes** — called on first turn; learns from verified outcomes |
 | **capture/** | Off-wire outcome capture: session-close triggers, work-dir resolver, coordinator, background worker | **Yes** — wired at session-close to run verifiers async |
@@ -108,7 +124,7 @@ verified outcomes build a neighbourhood for kNN to search.
 
 ```
 ├── src/shunt/             Router package
-│   ├── cli.py             CLI entry point (shunt start, doctor, explain, escalate, flag, reindex, version)
+│   ├── cli.py             CLI entry point (shunt start, doctor, explain, escalate, flag, reindex, inspect, version)
 │   ├── proxy/             HTTP server: /health, /v1/chat/completions, /v1/messages, /v1/models
 │   │                      (calls router to decide model; cold-starts to cheap default)
 │   ├── router/            Decision core — embed → nearest-neighbour → selection rule
@@ -118,6 +134,10 @@ verified outcomes build a neighbourhood for kNN to search.
 │   ├── db/                SQLite persistence for sessions, outcomes, index
 │   ├── session/           Session lifecycle, inactivity timeout, model lock
 │   ├── models/            Provider config, price-derived capability rank, fallback chain
+│   ├── inspect/           Figure frame, layout contract and diagnostics over the live outcome store (`shunt inspect`, [inspect] extra)
+│   │   └── inference/     Seven-figure inference family over the live store, driven by a figures.json manifest (`python -m shunt.inspect.inference`)
+│   ├── analysis/          Off-policy evaluation (ope.py) and instrument admissibility (admissibility.py) over logged decisions
+│   │                      (shipped rather than benchmark-side: src/shunt/ may not import benchmark/ — SH006 — and the rig image carries no benchmark/ tree)
 │   └── config/            Shipped defaults: models.yaml registry, router.yaml policy
 ├── benchmark/             Offline model-capability and routing evaluation
 ├── docs/                  User documentation (MkDocs)

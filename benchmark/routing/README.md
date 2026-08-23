@@ -7,8 +7,14 @@ Evaluates routing strategies against a task×model performance matrix to answer:
 ```
 routing/
   results.csv                 # THE committed source of truth — per-cell outcomes from live runs
+  seed_live.py                # Seed the LIVE outcome store from measured cells (incremental, skippable)
+  build_seed_bundle.py        # Regenerate the committed LFS seed bundle from results.csv
+  docs_corpus.py              # Cached seed-only store the committed docs figures render from
+  live_split.py               # Held-out task split for the live evaluation (pure hash-threshold)
   data/                       # Curated read-only inputs
     challenges.json           # Index of the 500 swebench_verified specs (challenges, tasks)
+    live_split_manifest.json  # The resolved live-eval holdout: salt, fraction, revision, ids, digest
+    seed/                     # LFS-tracked warm-start bundles (one .npz per embedder fingerprint + plain manifest.json)
   strategies/
     __init__.py               # Strategy protocol
     oracle.py                 # Upper bound: perfect per-task selection
@@ -49,11 +55,14 @@ benchmark/
 There is a **single committed data source of truth**:
 `routing/results.csv` — the **per-cell** outcome cache in long/tidy form
 (the raw benchmark data, see schema below). Everything else is **derived and
-regenerable, never committed**: the **per-strategy** summary
+regenerable**: the **per-strategy** summary
 (`strategy_summary.csv`) is computed in-memory by `summary.py` (used by
 `report.py`, `run_matrix.py`, `run_eval.py`) and written to the gitignored
 `reports/` dir; plots (into `docs/assets/figures/routing/`) and parameter sweeps likewise
-regenerate from `results.csv`.
+regenerate from `results.csv`. The one committed exception is the **warm-start seed
+bundle** (`data/seed/`, LFS-tracked): precomputed embeddings derived from `results.csv`
+so a fresh deployment can warm the live kNN index without re-embedding — regenerate it
+with `make seed-bundle`, prove it current with `make check-seed-bundle`.
 
 **One strategy, one committed number.** `cost_quality_frontier.png` is drawn from the
 same in-memory rows `strategy_summary.csv` is written from, so the scatter and the table
@@ -61,6 +70,41 @@ cannot disagree. The retired `knn_cost_comparison.png` published a *second* (cos
 pair for the kNN router — a proxy 77.7% at \$1.73 against the live engine's number in the
 same report set — which is a correctness bug, not a second view. The proxy publisher was
 deleted; `strategy_summary.csv` is now the single producer of every strategy's (cost, pass).
+
+## Live-evaluation holdout (`live_split.py`)
+
+Membership is `holdout_score(task_id, "live-split-v1") < fraction` — the same hash-threshold
+primitive the calibration holdout uses (`../runner/calibration.py`), under a fifth salt namespace
+that aliases none of the four already in draw (`calib-v1`, `order-v1`, `arm-v1`,
+`frontier-audit-v1`). Three properties follow, and the tests in `tests/test_live_split.py` pin
+each one:
+
+- **Pure.** The split is a function of `(task_id, salt, fraction)` alone. `sample_size`, the
+  benchmark seed, the arm weights, the run order, the enabled model pool and how many cells
+  `results.csv` happens to hold cannot move it.
+- **Over the universe.** The draw runs over every id in `data/challenges.json`, never over the
+  collected subset — a split conditioned on coverage would silently re-draw itself as cells land.
+- **Nested and pinned, and the ratchet is gated in the generator.** Raising `fraction` only adds
+  members. The holdout may therefore be GROWN but never SHRUNK — live cells already collected
+  against the committed ids would be invalidated. Two walls hold that, and only the first is
+  load-bearing:
+  - `write_manifest()` **refuses to write** a manifest that drops any id the on-disk manifest
+    already declares, naming the departed tasks and exiting non-zero. Lowering `DEFAULT_FRACTION`,
+    changing the salt, renaming an id, or bumping `dataset_revision` in a way that drops a member
+    all fail here — at regeneration time, in the same command the maintenance path runs.
+  - `TestHoldoutRatchet` compares the committed manifest against a fresh draw. It catches a
+    *forgotten* regeneration only: both of its sides move together when the constant is changed
+    and the manifest regenerated in one edit, so on its own it is not a ratchet (measured: at
+    `fraction=0.1` with the manifest regenerated, 52 of 97 tasks departed and it still passed). <!-- frozen-value: n=97, date=2026-08-20, run=468883b -->
+
+  A genuine reset is therefore deliberate and greppable: delete
+  `data/live_split_manifest.json` first, then regenerate. Ids are immutable only relative to
+  `challenges.json`'s `dataset_revision`, so the manifest records it and a test fails when the
+  two diverge.
+
+`data/live_split_manifest.json` is the committed, reviewable record (plain JSON, deliberately not
+LFS, like the seed bundle's manifest). Regenerate it with
+`python -m benchmark.routing.live_split`; its `tasks_digest` is the staleness anchor.
 
 ## Instrument validity (`instrument_control.py`) — run this before quoting anything
 

@@ -15,12 +15,49 @@ import numpy as np
 from shunt.proxy.redaction import redact_secrets
 
 from .index import HNSWIndex
-from .loop_health import LoopHealthSnapshot
+from .loop_health import (
+    LiveCostAggregates,
+    LoopHealthSnapshot,
+    StratumCensus,
+    StratumStages,
+)
 from .schema import run_migrations
 
 # Human labels win over automatic Tier-2, which win over the quarantined wire prior.
 # Drives which event's outcome/source becomes the materialized current view (§Q4).
-_SOURCE_PRIORITY: Final[dict[str, int]] = {"wire_tier1": 0, "auto_tier2": 1, "human": 2}
+# benchmark_seed rows are synthetic prior-only data: zero priority means a live/human
+# outcome for the same session always overrides the seeded one.
+_SOURCE_PRIORITY: Final[dict[str, int]] = {
+    "wire_tier1": 0,
+    "benchmark_seed": 0,
+    "auto_tier2": 1,
+    "human": 2,
+}
+
+# The origin discriminator for every live-only aggregate read below. Seeded rows are the
+# replayed benchmark corpus and carry a `bench:`-prefixed session_id; the format is
+# `bench:<sha256(task_id)[:12]>:<model>` and its OWNER is `benchmark/routing/seed_live.py`
+# (the `cell_id` builder). Change it there and this clause must change with it — grep
+# `bench:` from either end to find the other.
+_LIVE_CLAUSE: Final[str] = "session_id NOT LIKE 'bench:%'"
+
+# A session whose most recent outcome_event is a tombstone is NOT an index member. Written
+# once because two readers need it — `_labeled_embeddings_locked` builds the index from it and
+# `stratum_census` counts it — and a drifted second copy would report a stage count the index
+# itself disagrees with.
+#
+# Vacuously TRUE for a session with no events at all, and that is INTENDED: this is a purely
+# SUBTRACTIVE erasure filter ("has never been erased"), and both readers establish membership
+# positively first (a JOIN to `outcomes` / `o.session_id IS NOT NULL`) before applying it. A
+# session that was never labeled cannot have been erased. The census's `labeled` stage instead
+# asks the POSITIVE question (does an untombstoned event exist), which is why the two disagreed
+# on pre-v2 rows the event log never received — repaired by the v5 backfill, not by weakening
+# this predicate.
+_NOT_TOMBSTONED: Final[str] = (
+    "NOT EXISTS (SELECT 1 FROM outcome_events e WHERE e.session_id = s.session_id "
+    "AND e.tombstoned = 1 AND e.event_id = (SELECT MAX(event_id) FROM outcome_events e2 "
+    "WHERE e2.session_id = s.session_id))"
+)
 
 # Single row holding the serialized exploration budget + conservative-gate slack.
 _ROUTER_STATE_KEY: Final[str] = "exploration_state"
@@ -32,6 +69,10 @@ _EMBEDDING_FINGERPRINT_KEY: Final[str] = "embedding_fingerprint"
 # The auto-escalation failure log + per-task decision counters — a third KV consumer under its
 # own key, so a restart does not wipe accrued same-failure counts.
 _ESCALATION_STATE_KEY: Final[str] = "escalation_state"
+
+# The last-applied benchmark seed marker (fingerprint + results digest) — a fourth KV consumer
+# under its own key, so the importer can skip re-importing an unchanged results.csv.
+_SEED_STATE_KEY: Final[str] = "seed_state"
 
 
 @dataclass(frozen=True)
@@ -63,6 +104,9 @@ class OutcomeEvent:
     run_signature: str
     model_fingerprint: str | None = None
     tombstoned: bool = False
+    # Wall-clock when None (the capture path). A replayed corpus passes a fixed stamp so
+    # the rows it writes are reproducible build-to-build.
+    created_at: str | None = None
 
 
 def _exploration_row(row: dict[str, Any]) -> dict[str, Any] | None:
@@ -79,6 +123,61 @@ def _exploration_row(row: dict[str, Any]) -> dict[str, Any] | None:
         "session_id": row["session_id"],
         "outcome": row["tier2_outcome"] or row["tier1_outcome"],
     }
+
+
+def _live_clause(alias: str = "") -> str:
+    """``_LIVE_CLAUSE`` qualified by a table alias, for reads that JOIN on ``session_id``."""
+    if not alias:
+        return _LIVE_CLAUSE
+    return _LIVE_CLAUSE.replace("session_id", f"{alias}.session_id", 1)
+
+
+def _window_start(window_days: int | None) -> str | None:
+    """UTC ISO cutoff *window_days* before now, or None for the whole store."""
+    # Compared against `sessions.timestamp` as a STRING: every writer stamps
+    # `datetime.now(utc).isoformat()`, so the rows are fixed-width UTC ISO-8601 and
+    # lexicographic order is chronological order.
+    if window_days is None:
+        return None
+    now = _datetime.datetime.now(_datetime.timezone.utc)  # noqa: UP017
+    return (now - _datetime.timedelta(days=window_days)).isoformat()
+
+
+def _routing_ope_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Flatten one live routing decision into the record shape ``analysis.ope`` reads."""
+    # The provenance carries `candidate_model_scores` (the routing features) at top level, so
+    # it is spread rather than nested; Tier-2 wins over Tier-1 and an unlabelled decision keeps
+    # outcome=None so the estimator EXCLUDES it rather than inventing a reward.
+    try:
+        provenance = json.loads(row["decision_provenance"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        provenance = {}
+    if not isinstance(provenance, dict):
+        provenance = {}
+    return {
+        **provenance,
+        "session_id": row["session_id"],
+        "model_chosen": row["model_chosen"],
+        "selection_propensity": row["selection_propensity"],
+        "timestamp": row["timestamp"],
+        "outcome": row["tier2_outcome"] or row["tier1_outcome"],
+    }
+
+
+def _stages(row: dict[str, Any], stratum: str) -> StratumStages:
+    """One GROUP BY row of the stratum census as its five stage counts."""
+    return StratumStages(
+        stratum=stratum,
+        stored=int(row["stored"]),
+        embedded=int(row["embedded"] or 0),
+        labeled=int(row["labeled"] or 0),
+        tier2=int(row["tier2"] or 0),
+        indexed=int(row["in_index"] or 0),
+    )
+
+
+def _empty_stages(stratum: str) -> StratumStages:
+    return StratumStages(stratum=stratum, stored=0, embedded=0, labeled=0, tier2=0, indexed=0)
 
 
 def _latest_tier(events: list[sqlite3.Row], tier: int) -> sqlite3.Row | None:
@@ -227,6 +326,7 @@ class OutcomeStore:
         timestamp: str | None = None,
         decision_provenance: dict[str, Any] | None = None,
         provenance: SessionProvenance | None = None,
+        external_session_id: str | None = None,
     ) -> None:
         prov = provenance or SessionProvenance()
         with self._lock:
@@ -237,8 +337,8 @@ class OutcomeStore:
                 INSERT OR REPLACE INTO sessions
                     (session_id, prompt_text, embedding_blob, model_chosen, cost,
                      cache_stats, session_duration_seconds, timestamp, decision_provenance,
-                     cost_known, selection_propensity, model_fingerprint)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     cost_known, selection_propensity, model_fingerprint, external_session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -258,6 +358,7 @@ class OutcomeStore:
                     1 if prov.cost_known else 0,
                     prov.selection_propensity,
                     prov.model_fingerprint,
+                    external_session_id,
                 ),
             )
             self._conn.commit()
@@ -346,7 +447,7 @@ class OutcomeStore:
                 event.model_fingerprint,
                 idempotency_key,
                 1 if event.tombstoned else 0,
-                _now_iso(),
+                event.created_at or _now_iso(),
             ),
         )
         return cursor.rowcount > 0
@@ -360,10 +461,10 @@ class OutcomeStore:
         with self._lock:
             inserted = self._insert_event_locked(event)
             self._conn.commit()
-        self._materialize_outcome(event.session_id)
+        self._materialize_outcome(event.session_id, created_at=event.created_at)
         return inserted
 
-    def _materialize_outcome(self, session_id: str) -> None:
+    def _materialize_outcome(self, session_id: str, created_at: str | None = None) -> None:
         """Rebuild the `outcomes` current-view row for a session from its event log."""
         with self._lock:
             events = self._conn.execute(
@@ -387,7 +488,7 @@ class OutcomeStore:
                 # it — it must never become a routing neighbour. A later Tier-2 event re-runs
                 # this and materializes both tiers.
                 return
-            self._upsert_materialized_outcome(row)
+            self._upsert_materialized_outcome(row, created_at)
             self._conn.commit()
             emb = self._conn.execute(
                 "SELECT embedding_blob FROM sessions WHERE session_id = ?", (session_id,)
@@ -395,7 +496,7 @@ class OutcomeStore:
         if emb is not None and emb["embedding_blob"] is not None:
             self._index.add(session_id, _blob_to_embedding(emb["embedding_blob"]))
 
-    def _upsert_materialized_outcome(self, row: dict[str, Any]) -> None:
+    def _upsert_materialized_outcome(self, row: dict[str, Any], created_at: str | None) -> None:
         """UPSERT the projected row, preserving human_label/time_decay_weight on conflict."""
         self._conn.execute(
             """
@@ -412,13 +513,26 @@ class OutcomeStore:
                 aggregated_confidence = excluded.aggregated_confidence,
                 outcome_source = excluded.outcome_source
             """,
-            {**row, "created_at": _now_iso()},
+            {**row, "created_at": created_at or _now_iso()},
         )
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         with self._lock:
             cursor = self._conn.execute(
                 "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def get_session_by_external_id(self, external_session_id: str) -> dict[str, Any] | None:
+        """The most recent session row for *external_session_id*, or None if never seen."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT * FROM sessions WHERE external_session_id = ? "
+                "ORDER BY timestamp DESC LIMIT 1",
+                (external_session_id,),
             )
             row = cursor.fetchone()
         if row is None:
@@ -443,10 +557,16 @@ class OutcomeStore:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    # ORDER BY rowid is load-bearing on both embedding readers below, not tidiness: HNSWIndex
+    # assigns index slots by list position, so the row order these return IS the slot layout the
+    # persisted .hnsw2 inherits, and published figures read neighbour ids out of it. SQLite
+    # guarantees no order without ORDER BY -- a new index or a version bump could silently
+    # reorder the scan and change a committed figure with no other symptom. Do not remove.
     def get_all_embeddings(self) -> list[tuple[str, bytes]]:
         with self._lock:
             cursor = self._conn.execute(
-                "SELECT session_id, embedding_blob FROM sessions WHERE embedding_blob IS NOT NULL"
+                "SELECT session_id, embedding_blob FROM sessions "
+                "WHERE embedding_blob IS NOT NULL ORDER BY rowid"
             )
             return [(row["session_id"], row["embedding_blob"]) for row in cursor.fetchall()]
 
@@ -464,15 +584,7 @@ class OutcomeStore:
         cursor = self._conn.execute(
             "SELECT s.session_id, s.embedding_blob FROM sessions s "
             "JOIN outcomes o ON o.session_id = s.session_id "
-            "WHERE s.embedding_blob IS NOT NULL "
-            "AND NOT EXISTS ("
-            "    SELECT 1 FROM outcome_events e "
-            "    WHERE e.session_id = s.session_id AND e.tombstoned = 1 "
-            "    AND e.event_id = ("
-            "        SELECT MAX(event_id) FROM outcome_events e2 "
-            "        WHERE e2.session_id = s.session_id"
-            "    )"
-            ")"
+            "WHERE s.embedding_blob IS NOT NULL AND " + _NOT_TOMBSTONED + " ORDER BY s.rowid"
         )
         return [(row["session_id"], row["embedding_blob"]) for row in cursor.fetchall()]
 
@@ -532,6 +644,76 @@ class OutcomeStore:
             rows = [dict(row) for row in cursor.fetchall()]
         return [row for row in (_exploration_row(r) for r in rows) if row is not None]
 
+    def routing_ope_rows(self) -> list[dict[str, Any]]:
+        """Live routing decisions joined to their verified outcome (routing-arm OPE input)."""
+        # `selection_propensity` is written only by the live router — a replayed seed row never
+        # sets it — so the NOT NULL filter already excludes the seeded stratum. `_LIVE_CLAUSE`
+        # is stated anyway so the live-only guarantee survives a seeder that starts writing it.
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT s.session_id, s.model_chosen, s.selection_propensity, "
+                "s.decision_provenance, s.timestamp, o.tier1_outcome, o.tier2_outcome "
+                "FROM sessions s LEFT JOIN outcomes o ON o.session_id = s.session_id "
+                f"WHERE s.selection_propensity IS NOT NULL AND {_live_clause('s')} "
+                "ORDER BY s.timestamp"
+            )
+            rows = [dict(row) for row in cursor.fetchall()]
+        return [_routing_ope_row(row) for row in rows]
+
+    def live_cost_aggregates(self, window_days: int | None = None) -> LiveCostAggregates:
+        """Live inference cost by model over a window — seeded (`bench:`) rows excluded."""
+        start = _window_start(window_days)
+        where = f"WHERE {_LIVE_CLAUSE}"
+        params: list[Any] = []
+        if start is not None:
+            where += " AND timestamp >= ?"
+            params.append(start)
+        with self._lock:
+            known = self._conn.execute(
+                "SELECT model_chosen, COUNT(*) n, COALESCE(SUM(cost), 0) total FROM sessions "
+                f"{where} AND cost_known = 1 GROUP BY model_chosen ORDER BY model_chosen",
+                params,
+            ).fetchall()
+            # Counted, never summed and never zero-filled: cost_known=0 means the provider
+            # reported NO cost, which is UNKNOWN and deliberately distinct from a real 0.0.
+            unknown = self._conn.execute(
+                f"SELECT COUNT(*) c FROM sessions {where} AND cost_known = 0", params
+            ).fetchone()["c"]
+        by_model = [(r["model_chosen"], int(r["n"]), float(r["total"])) for r in known]
+        return LiveCostAggregates(
+            by_model=by_model,
+            total=sum(total for _, _, total in by_model),
+            n_cost_known=sum(n for _, n, _ in by_model),
+            n_cost_unknown=int(unknown),
+            window_days=window_days,
+        )
+
+    def stratum_census(self) -> StratumCensus:
+        """Per-stratum lifecycle counts: stored, embedded, labeled, tier-2, indexed."""
+        # NOT a funnel: `labeled` is counted off `outcome_events` and `tier2` off `outcomes`,
+        # two tables with no shared predicate, so the five stages do not nest. `indexed` reuses
+        # `_NOT_TOMBSTONED`, the same predicate the index is built from, so at least that stage
+        # cannot claim a membership the kNN index disagrees with.
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT ({_live_clause('s')}) is_live, COUNT(*) stored, "
+                "SUM(s.embedding_blob IS NOT NULL) embedded, "
+                "SUM(EXISTS (SELECT 1 FROM outcome_events e3 "
+                "WHERE e3.session_id = s.session_id AND e3.tombstoned = 0)) labeled, "
+                "SUM(o.tier2_outcome IS NOT NULL) tier2, "
+                "SUM(s.embedding_blob IS NOT NULL AND o.session_id IS NOT NULL "
+                f"AND {_NOT_TOMBSTONED}) in_index "
+                "FROM sessions s LEFT JOIN outcomes o ON o.session_id = s.session_id "
+                "GROUP BY is_live"
+            ).fetchall()
+        by_stratum = {int(row["is_live"]): dict(row) for row in rows}
+        return StratumCensus(
+            seeded=(
+                _stages(by_stratum[0], "seeded") if 0 in by_stratum else _empty_stages("seeded")
+            ),
+            live=_stages(by_stratum[1], "live") if 1 in by_stratum else _empty_stages("live"),
+        )
+
     def query_index(self, embedding: np.ndarray, k: int = 20) -> list[tuple[str, float]]:
         """Return ``(session_id, distance)`` for the *k* nearest embedded sessions."""
         hits = self._index.query(embedding, k)
@@ -566,6 +748,21 @@ class OutcomeStore:
             )
             total_cost = cursor.fetchone()["total_cost"]
 
+            # `total_cost` above is the WHOLE-STORE stat and stays that way. On a seeded rig it
+            # is dominated by replayed benchmark spend, so the split below is published beside
+            # it and callers name the stratum they mean instead of guessing.
+            cursor = self._conn.execute(
+                f"SELECT COALESCE(SUM(cost), 0) as c FROM sessions WHERE cost_known = 1 "
+                f"AND {_LIVE_CLAUSE}"
+            )
+            live_total_cost = cursor.fetchone()["c"]
+
+            cursor = self._conn.execute(
+                f"SELECT COALESCE(SUM(cost), 0) as c FROM sessions WHERE cost_known = 1 "
+                f"AND NOT ({_LIVE_CLAUSE})"
+            )
+            seeded_total_cost = cursor.fetchone()["c"]
+
             cursor = self._conn.execute(
                 "SELECT COUNT(*) as count FROM sessions WHERE cost_known = 0"
             )
@@ -583,6 +780,8 @@ class OutcomeStore:
             "session_count": session_count,
             "outcome_count": outcome_count,
             "total_cost": total_cost,
+            "live_total_cost": live_total_cost,
+            "seeded_total_cost": seeded_total_cost,
             "cost_unknown_count": cost_unknown_count,
             "labeled_count": labeled_count,
             "index_size": self._index.count,
@@ -610,20 +809,35 @@ class OutcomeStore:
                     "o.session_id WHERE s.embedding_blob IS NOT NULL"
                 ).fetchone()["c"]
             )
+            # Live rows only, exactly as `routing_ope_rows` reads them: today's seeder writes
+            # no `selection_propensity`, so NOT NULL excludes the seeded stratum incidentally.
+            # `_LIVE_CLAUSE` states the guarantee so a seeder that starts writing one cannot
+            # mix strata into the support floor or /admin/loop-health.
             prop_rows = self._conn.execute(
                 "SELECT model_chosen, COUNT(*) n, AVG(selection_propensity) mean_p, "
                 "MIN(selection_propensity) min_p FROM sessions "
-                "WHERE selection_propensity IS NOT NULL GROUP BY model_chosen"
+                f"WHERE selection_propensity IS NOT NULL AND {_LIVE_CLAUSE} "
+                "GROUP BY model_chosen"
             ).fetchall()
             # Reward-independent: the collapse alarm's input touches only model_chosen —
             # no join to `outcomes`, so no reward can quiet the alarm.
+            # Live rows only. A replayed benchmark corpus is imported in one burst and would
+            # otherwise own the entire recency window, so the collapse alarm would be reading
+            # the benchmark matrix's model distribution as recent router behaviour.
             recent = self._conn.execute(
-                "SELECT model_chosen FROM sessions ORDER BY timestamp DESC LIMIT ?",
+                f"SELECT model_chosen FROM sessions WHERE {_LIVE_CLAUSE} "
+                "ORDER BY timestamp DESC LIMIT ?",
                 (recent_window,),
             ).fetchall()
+            # Live rows only: this feeds `router_cost` on /admin/loop-health, and seeded cost is
+            # replayed benchmark spend, not this router's economics.
             cost_rows = self._conn.execute(
                 "SELECT model_chosen, COUNT(*) n, COALESCE(SUM(cost), 0) total FROM sessions "
-                "WHERE cost_known = 1 GROUP BY model_chosen"
+                f"WHERE cost_known = 1 AND {_LIVE_CLAUSE} GROUP BY model_chosen"
+            ).fetchall()
+            cost_unknown_rows = self._conn.execute(
+                "SELECT model_chosen, COUNT(*) n FROM sessions "
+                f"WHERE cost_known = 0 AND {_LIVE_CLAUSE} GROUP BY model_chosen"
             ).fetchall()
         return LoopHealthSnapshot(
             total_sessions=total,
@@ -636,6 +850,7 @@ class OutcomeStore:
             ],
             recent_choices=[r["model_chosen"] for r in recent],
             cost_by_model=[(r["model_chosen"], int(r["n"]), float(r["total"])) for r in cost_rows],
+            cost_unknown_by_model=[(r["model_chosen"], int(r["n"])) for r in cost_unknown_rows],
         )
 
     def _save_state(self, key: str, state: dict[str, Any]) -> None:
@@ -688,6 +903,14 @@ class OutcomeStore:
         """Read the stored embedding-space fingerprint; None on a fresh/legacy DB."""
         return self._load_state(_EMBEDDING_FINGERPRINT_KEY)
 
+    def save_seed_state(self, state: dict[str, Any]) -> None:
+        """Persist the last-applied benchmark seed marker (fingerprint + results digest)."""
+        self._save_state(_SEED_STATE_KEY, state)
+
+    def load_seed_state(self) -> dict[str, Any] | None:
+        """Read the persisted seed marker; missing or corrupt → None."""
+        return self._load_state(_SEED_STATE_KEY)
+
     def reindex_corpus(self, embedder: ReindexEmbedder) -> dict[str, Any]:
         """Re-embed the whole corpus into *embedder*'s space, atomically (offline command)."""
         # Blobs rewritten in one txn, index built to a temp file then os.replaced, and the
@@ -736,6 +959,19 @@ class OutcomeStore:
                 os.remove(path)
 
     def persist_index(self) -> None:
+        """Write the vector index to disk, or do nothing when it holds no vectors."""
+        # An EMPTY index is a legitimate steady state, not a failure: a fixed strategy
+        # (`always_cheap`, `always_frontier`, `session_cascade`) reports
+        # `consults_neighbors=False`, so the server never warms the embedder and no session
+        # is ever embedded — yet capture still runs and still closes sessions. Letting
+        # `HNSWIndex.save`'s empty-guard escape here raised out of `_append_tier2` BEFORE
+        # `_record_outcome`, so with any fixed strategy AND an armed work_dir every capture
+        # died and no verified outcome was ever recorded — invisible until something needed
+        # one, which `session_cascade` does by construction. The guard stays where it is
+        # (reindex and friends do expect content); this caller is the one that legitimately
+        # has none.
+        if self._index.count == 0:
+            return
         self._index.save(self._index_path)
 
     def close(self) -> None:

@@ -18,6 +18,11 @@ class KnnStrategy:
         """kNN routes on the neighborhood, so it needs warmup + may explore."""
         return True
 
+    @property
+    def participates_in_escalation(self) -> bool:
+        """The default path: a verified failure raises a rung at the next boundary."""
+        return True
+
     def select(
         self,
         neighbors: list[NeighborResult],

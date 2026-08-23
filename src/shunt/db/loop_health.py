@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -38,8 +38,14 @@ class LoopHealthSnapshot:
     verified_labeled: int
     any_labeled: int
     model_propensities: list[tuple[str, int, float, float]]  # model, n, mean_p, min_p
+    # Live rows only (seeded `bench:` rows excluded): a replayed benchmark corpus is imported
+    # in one burst, so it owns the whole recency window and the collapse alarm would read the
+    # benchmark matrix's model distribution as recent router behaviour.
     recent_choices: list[str]  # reward-independent: model_chosen only, no outcome join
-    cost_by_model: list[tuple[str, int, float]]  # model, n, total_cost (cost_known only)
+    cost_by_model: list[tuple[str, int, float]]  # model, n, total_cost (live, cost_known only)
+    # model, n — sessions the provider never reported a cost for. Counted, never zero-filled,
+    # so a consumer of cost_by_model can state its coverage instead of implying completeness.
+    cost_unknown_by_model: list[tuple[str, int]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -81,6 +87,51 @@ class CostObservability:
     cost_ratio: float | None
     n_frontier: int
     n_total: int
+    # Sessions excluded from router_cost because the provider reported no cost. Published so
+    # the number carries its own coverage; a silent exclusion always under-counts.
+    n_cost_unknown: int = 0
+
+
+@dataclass(frozen=True)
+class LiveCostAggregates:
+    """Cost of LIVE inference only — seeded (`bench:`) rows excluded by construction."""
+
+    # Summed over cost_known = 1 alone. n_cost_unknown is the count of rows the provider never
+    # reported a cost for: they are NOT zero-filled, because an unreported cost is UNKNOWN and
+    # a real 0.0 is a measurement.
+    by_model: list[tuple[str, int, float]]  # model, n_cost_known, total
+    total: float
+    n_cost_known: int
+    n_cost_unknown: int
+    window_days: int | None  # None = the whole store
+
+
+@dataclass(frozen=True)
+class StratumStages:
+    """One stratum's five lifecycle counts. NOT a funnel — see the nesting note below."""
+
+    # Deliberately not called a funnel: only `embedded` and `indexed` are structurally
+    # contained in `stored`. `labeled` is counted off the append-only `outcome_events` log
+    # while `tier2` is counted off the materialized `outcomes` view, so no containment holds
+    # between them in either direction and a later stage can legitimately exceed an earlier
+    # one. Readers must render these as five independent counts.
+    stratum: str  # "seeded" | "live"
+    stored: int
+    embedded: int
+    # At least one non-tombstoned event in the append-only log. A Tier-1-only session stops
+    # HERE by design: it is never materialized and never becomes a routing neighbour, which
+    # is precisely the gap this stage exists to make visible.
+    labeled: int
+    tier2: int  # materialized verified outcome
+    indexed: int  # an actual kNN index member
+
+
+@dataclass(frozen=True)
+class StratumCensus:
+    """The seed-vs-live stage counts side by side — the two strata sharing one outcome store."""
+
+    seeded: StratumStages
+    live: StratumStages
 
 
 @dataclass(frozen=True)
@@ -177,7 +228,9 @@ def _routing_collapse(
 
 
 def _cost_observability(
-    rows: list[tuple[str, int, float]], frontier_models: set[str]
+    rows: list[tuple[str, int, float]],
+    frontier_models: set[str],
+    n_cost_unknown: int = 0,
 ) -> CostObservability:
     # Observability only — NOT the kill-gate. The fixed-frontier baseline is a crude
     # counterfactual: the mean realized cost of frontier sessions extrapolated across
@@ -200,6 +253,7 @@ def _cost_observability(
         cost_ratio=ratio,
         n_frontier=frontier_n,
         n_total=n_total,
+        n_cost_unknown=n_cost_unknown,
     )
 
 
@@ -220,5 +274,9 @@ def compute_loop_health(
         routing_collapse=_routing_collapse(
             snapshot.recent_choices, frontier_models, len(candidate_models), thresholds
         ),
-        cost=_cost_observability(snapshot.cost_by_model, frontier_models),
+        cost=_cost_observability(
+            snapshot.cost_by_model,
+            frontier_models,
+            sum(n for _, n in snapshot.cost_unknown_by_model),
+        ),
     )

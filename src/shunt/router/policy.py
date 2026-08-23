@@ -18,15 +18,27 @@ logger = logging.getLogger(__name__)
 
 # Live-eligible routing strategies — the set ``router.strategy`` may name. Benchmark-only
 # strategies (oracle, random) are deliberately absent: they need ground truth or are
-# not routers at all, so they cannot run on live traffic. ``knn_cascade`` is also absent:
-# a true quality-cascade needs mid-session verify-then-escalate, which is not one cache-safe
-# per-session decision (routing once per session is the product's spine), and the upstream
-# fallback chain is availability-only, not quality-based — so it stays benchmark-only.
+# not routers at all, so they cannot run on live traffic. ``knn_cascade`` and
+# ``price_cascade`` are also absent, and stay absent: a WITHIN-TASK quality cascade takes a
+# verified outcome per attempt mid-session, which is not one cache-safe per-session decision
+# (routing once per session is the product's spine), and the upstream fallback chain is
+# availability-only, not quality-based.
+#
+# ``session_cascade`` is the cache-safe operating point those two approximate, and it IS
+# nameable, because it paces the same ladder one attempt per SESSION: cheapest model first,
+# a verified failure walks a rung at the next boundary. It is a PRESET rather than a new
+# selection rule — ``always_cheap`` plus ``escalation.enabled`` — and ``_check_strategy``
+# below refuses it with escalation off so the name cannot mean a bare fixed-cheap router.
 LIVE_STRATEGIES: Final[tuple[str, ...]] = (
     "knn",
     "always_cheap",
     "always_frontier",
+    "session_cascade",
 )
+
+# The preset above is only itself with the escalation layer on: without it the config
+# resolves to plain ``always_cheap`` under a name promising a cascade.
+SESSION_CASCADE_STRATEGY: Final[str] = "session_cascade"
 
 _CONFIG_DIR_ENV: Final[str] = "SHUNT_CONFIG_DIR"
 _CONFIG_FILENAME: Final[str] = "router.yaml"
@@ -197,6 +209,27 @@ class RouterPolicy(BaseModel):
         if self.strategy not in LIVE_STRATEGIES:
             allowed = ", ".join(LIVE_STRATEGIES)
             raise ValueError(f"unknown router.strategy {self.strategy!r}; live-eligible: {allowed}")
+        # A COHERENCE rule, not a precondition (contrast the work_dir NOTE below). The whole
+        # content of the `session_cascade` name is `always_cheap` + the ladder; with the ladder
+        # off the config silently resolves to a fixed cheap router under a name that promises a
+        # cascade, which is the deployability-honesty defect this id exists to remove. It is safe
+        # as a load ERROR — unlike the work_dir case it can never be the default state, because
+        # nothing selects this id by accident.
+        if self.strategy == SESSION_CASCADE_STRATEGY and not self.escalation.enabled:
+            # Name the likeliest CAUSE, not just the state. The commonest way to reach here is
+            # not "the operator wrote enabled: false" — it is a hand-written router.yaml
+            # carrying only `strategy: session_cascade`, because a user file replaces the
+            # packaged one wholesale and `parse_router_policy` reads an ABSENT escalation block
+            # as OFF. Without that sentence the error reads as a contradiction of the docs.
+            raise ValueError(
+                f"router.strategy {SESSION_CASCADE_STRATEGY!r} requires "
+                f"router.escalation.enabled: true — the preset IS always_cheap plus the "
+                f"escalation ladder, and with the ladder off it is a fixed cheap router "
+                f"wearing a cascade's name. If your router.yaml has no `escalation:` block "
+                f"at all, that is why: a user file replaces the packaged one wholesale, and "
+                f"an absent block means OFF. Add `escalation: {{enabled: true}}`, or use "
+                f"'always_cheap'."
+            )
         return self
 
     # NOTE — the escalation/work_dir precondition is deliberately NOT a load error. Escalation's
