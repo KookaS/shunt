@@ -30,6 +30,7 @@ from benchmark.routing.metrics import (
 from benchmark.routing.metrics import (
     compute_cost_decomposition as _compute_cost_decomposition,
 )
+from benchmark.routing.strategies import BilledAttempt
 from benchmark.routing.strategies.knn import kNNStrategy
 
 # ---------------------------------------------------------------------------
@@ -146,11 +147,22 @@ def evaluate_router(
     task_ids: list[str],
     strategy: kNNStrategy | None = None,
 ) -> list[Decision]:
-    """The VERDICT arm: the shipped single-shot kNN router, one decision per task."""
-    # It used to be kNN-cascade, which `LIVE_STRATEGIES` rejects at boot — the gate was
-    # adjudicating "should we ship this" on a strategy the product will not run. The
-    # cascade's mid-session verify-and-escalate is not cache-safe; see
+    """The PRE-REGISTERED verdict arm: the single-shot kNN selection rule, one decision/task."""
+    # It used to be the within-task kNN cascade, which `LIVE_STRATEGIES` rejects at boot — the
+    # gate was adjudicating "should we ship this" on a strategy the product will not run. The
+    # within-task cascade's mid-session verify-and-escalate is not cache-safe; see
     # benchmark/routing/strategy_class.py for the blocker and its path to live.
+    #
+    # AND IT IS STILL NOT THE SHIPPED DEFAULT. `router.strategy` defaults to `session_cascade`
+    # — the cheap-start ladder, which consults no neighbours — and the nearest selectable kNN
+    # configuration, `knn_cascade`, is this pick PLUS the escalation ladder. Either way the
+    # pre-registered arm adjudicates a configuration no operator can select. That is a
+    # pre-existing defect the rename exposed, not one it created: the ladder has been on by
+    # default since escalation shipped, so this arm has never been the shipped router. It is
+    # deliberately NOT repointed, because moving a
+    # pre-registered verdict arm after seeing the data rewrites the registered test. The default
+    # is published beside it instead, on its own clearly-marked non-pre-registered row — see
+    # benchmark/routing/figures/kill_gate.py `_default_basis`.
     if strategy is None:
         knn = config.knn_params()
         strategy = kNNStrategy(
@@ -171,11 +183,15 @@ def evaluate_router(
 # ---------------------------------------------------------------------------
 
 
-def _attempts_by_task(decisions: list[Decision]) -> dict[str, list[tuple[str, float]]]:
+def _attempts_by_task(decisions: list[Decision]) -> dict[str, list[BilledAttempt]]:
     """Group decisions into per-task attempt sequences (a task is one session)."""
-    attempts: dict[str, list[tuple[str, float]]] = {}
+    # A `Decision` collapses a task to (id, model, passed, cost) and carries no token counts, so
+    # these records declare zero tokens. `cache_aware_total` reads model and cost only, and a
+    # zero-token record is inadmissible to the context cost model by construction — the gate is
+    # never the path that publishes a context bracket.
+    attempts: dict[str, list[BilledAttempt]] = {}
     for d in decisions:
-        attempts.setdefault(d[0], []).append((d[1], d[3]))
+        attempts.setdefault(d[0], []).append(BilledAttempt(model=d[1], cost=d[3]))
     return attempts
 
 

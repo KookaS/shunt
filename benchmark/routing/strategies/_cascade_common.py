@@ -6,6 +6,24 @@ escalate to the SAME model or their rows are not comparable. One helper, one sem
 
 from __future__ import annotations
 
+from . import BilledAttempt
+
+
+def billed_attempt(model: str, outcome: dict) -> BilledAttempt:
+    """One attempt's billing record — its cost plus the cell's measured token counts."""
+    # An imputed or never-measured cell carries no token columns at all, so these read 0, and
+    # `context_cost.token_complete_tasks` then drops the whole task rather than inventing a
+    # context size for it. One constructor for every cascade, so the three rows cannot disagree
+    # about what a billed attempt records.
+    return BilledAttempt(
+        model=model,
+        cost=float(outcome.get("cost", 0.0)),
+        in_tok=int(outcome.get("in_tok") or 0),
+        out_tok=int(outcome.get("out_tok") or 0),
+        calls=int(outcome.get("calls") or 0),
+    )
+
+
 # Only reachable on a matrix that prices nothing at all — the cheap end of the shipped
 # ladder, so a degraded cascade still degrades downwards.
 _LAST_RESORT_MODEL = "deepseek-v4-flash"

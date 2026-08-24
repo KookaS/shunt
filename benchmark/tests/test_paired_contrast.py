@@ -65,16 +65,19 @@ def test_paired_bootstrap_ci_brackets_point_estimate() -> None:
 
 
 def test_pick_router_picks_the_best_live_router_not_the_best_row() -> None:
-    # kNN-cascade outranks every live candidate on Reward and is still not the answer:
-    # the router named in the headline has to be one `router.strategy` can be set to.
+    # The blocked within-task cascade outranks every live candidate on Reward and is still
+    # not the answer: the router named in the headline has to be one `router.strategy` can
+    # be set to. `kNN` is in the same position for a different reason — it is a CONTROL, the
+    # selection rule with the ladder removed, which no config value produces.
     rows = [
         {"strategy": "Oracle", "Reward": 9.0, "n_tasks": 5},
         {"strategy": "Always-Frontier", "Reward": 8.0, "n_tasks": 5},
-        {"strategy": "kNN-cascade", "Reward": 7.0, "n_tasks": 5},
+        {"strategy": "kNN-cascade (within-task)", "Reward": 7.0, "n_tasks": 5},
         {"strategy": "kNN", "Reward": 6.5, "n_tasks": 5},
+        {"strategy": "kNN-cascade", "Reward": 6.4, "n_tasks": 5},
         {"strategy": "Always-Cheap", "Reward": 6.0, "n_tasks": 5},
     ]
-    assert run_eval._pick_router(rows) == "kNN"
+    assert run_eval._pick_router(rows) == "kNN-cascade"
 
 
 def test_pick_router_excludes_the_frontier_baseline_even_though_it_is_live() -> None:

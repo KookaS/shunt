@@ -58,29 +58,44 @@ learns from them for subsequent sessions.
 
 Which algorithm the router runs is one value, `router.strategy`, read from the
 `router.yaml` packaged at `src/shunt/config/router.yaml`. Four strategies are
-live-eligible: `knn` (the default), `always_cheap`, `always_frontier`, and
-`session_cascade`. That list is `LIVE_STRATEGIES` in
+live-eligible: `session_cascade` (the default), `knn_cascade`, `always_cheap`, and
+`always_frontier`. That list is `LIVE_STRATEGIES` in
 `src/shunt/router/policy.py`, and it is the whole of it — every other strategy the
-benchmark scores (`oracle`, `oracle_reward`, `random`, `knn_cascade`,
-`price_cascade`, `tier_classifier`) is rejected at boot. The reasons differ:
-`oracle` and `oracle_reward` read the task's own verified outcome and `random` is
-not a router at all; the two cascades are excluded on purpose and permanently,
-because a real quality cascade has to verify **mid-session** and escalate, and
-that is not one cache-safe decision per session; `tier_classifier` orders models
-by a capability rank fitted offline from the outcome matrix, which the live path
-cannot compute. Each blocker and its path to live is recorded in
-`benchmark/routing/strategy_class.py`.
+benchmark scores (`oracle`, `oracle_reward`, `random`,
+`knn_cascade_withintask`, `price_cascade`, `tier_classifier`) is rejected at boot.
+The reasons differ: `oracle` and `oracle_reward` read the task's own verified
+outcome and `random` is not a router at all; the two **within-task** cascades are
+excluded on purpose and permanently, because a real quality cascade has to verify
+**mid-session** and escalate, and that is not one cache-safe decision per session;
+and `tier_classifier` orders models by a capability rank fitted offline
+from the outcome matrix, which the live path cannot compute. Each blocker and its
+path to live is recorded in `benchmark/routing/strategy_class.py`.
 
-`session_cascade` is the odd one out: it is a **preset**, not a fourth algorithm —
-`always_cheap` plus [auto-escalation](escalation.md), so the router starts on the
-cheapest model and climbs a rung at the next session boundary on a repeated
-verified failure. It exists because that operating point is what the two blocked
-cascades approximate, at a cadence the cache-safety spine allows. Selecting it
-with escalation disabled is a load error. Because it is neighbour-independent it
-never embeds, exactly like the other two fixed strategies.
+The benchmark's `knn` row — the kNN selection rule with the ladder removed — is a
+separate case, and it is **not** rejected at boot, because a `router.yaml` never
+resolves to it. That row is a benchmark **control**, kept as the contrast that
+isolates what the ladder buys; the string `knn` written in a config is the
+pre-rename spelling of `knn_cascade` and is migrated to it with a boot warning
+(see below), so no install can select the ladder-less rule.
 
-It is nonetheless a *separate* strategy from `always_cheap` rather than a flag on it,
-because the two differ on one predicate — `participates_in_escalation`. `always_cheap` and
+The two `*_cascade` ids are **presets**, not new selection rules: a base pick plus
+[auto-escalation](escalation.md), so the router starts where the base pick lands
+and climbs a rung at the next session boundary on a repeated verified failure.
+`session_cascade` is the default and its base pick is `always_cheap`, so it always
+starts at the cheapest model; `knn_cascade` swaps that for the kNN neighbourhood
+rule. Selecting either with escalation disabled is a load error. `session_cascade`
+is neighbour-independent, so under the shipped default the router never embeds,
+exactly like the two fixed strategies — per-task routing is what `knn_cascade`
+opts into.
+
+`knn_cascade` was spelled `knn` before it was renamed. That was never an accurate
+name: the kNN pick has participated in escalation since escalation shipped on by
+default, so a default install has always run the ladder. Existing configs are
+migrated automatically with a boot warning, and the alias is kept for at least one
+more minor release.
+
+`session_cascade` is nonetheless a *separate* strategy from `always_cheap` rather than a
+flag on it, because the two differ on one predicate — `participates_in_escalation`. `always_cheap` and
 `always_frontier` are **pinned controls**: a verified failure may never move their pick,
 since they are the baselines routing comparisons are read against. The cascade is the
 opposite, and the engine branches on that predicate rather than on `consults_neighbors`,

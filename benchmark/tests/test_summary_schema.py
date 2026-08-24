@@ -15,7 +15,7 @@ import pytest
 from benchmark import config
 from benchmark.routing.cache_cost import MEASURED, CachePrice
 from benchmark.routing.metrics import compute_pareto
-from benchmark.routing.strategies import Strategy
+from benchmark.routing.strategies import BilledAttempt, Strategy
 
 _REPORT_CSV = Path("benchmark/routing/reports/strategy_summary.csv")
 
@@ -43,7 +43,10 @@ class _Repeater(Strategy):
 
     def select(self, task_id: str, task_meta: dict, matrix: dict) -> str:
         self.cascade_total_cost = 2 * self._cost
-        self.cascade_attempts = [(self._model, self._cost), (self._model, self._cost)]
+        self.cascade_attempts = [
+            BilledAttempt(model=self._model, cost=self._cost),
+            BilledAttempt(model=self._model, cost=self._cost),
+        ]
         self.cascade_scorable = True
         return self._model
 
@@ -209,7 +212,7 @@ class TestPerModelNoteRowsDeriveFromTheResultsTable:
             },
         ]
         assert per_strategy_note_rows(rows) == [
-            "kNN: \\$11.61 cache-aware / \\$11.61 naive, 78.89% (n=180, live, on the frontier)",
+            "kNN: \\$11.61 cache-aware / \\$11.61 naive, 78.89% (n=180, control — never shippable)",
             "Always-Frontier: \\$91.15 cache-aware / \\$91.15 naive, 95.00% "
             "(n=180, live, on the frontier)",
             "Price-Cascade: \\$22.07 cache-aware / \\$22.07 naive, 96.67% "

@@ -12,7 +12,71 @@ This file is the source for the GitHub release notes, so the two cannot disagree
 
 ## [Unreleased]
 
+### Changed
+
+- **The default `router.strategy` is now `session_cascade`, not `knn_cascade`.** Both climb the
+  same session-cadence escalation ladder; they differ only in where the ladder starts.
+  `session_cascade` starts at the cheapest live model, `knn_cascade` at the kNN-selected one.
+  The offline corpus measures the cheap start as the frontier row: **$38.26** cache-aware for
+  kNN-cascade against **$28.71** for Session-Cascade at an identical **96.74%** pass rate, so
+  the shipped default takes the cheaper of two equal-quality points. **The default therefore
+  does no per-task routing** — it never embeds a turn or queries the neighbourhood, and the
+  `policy:` (kNN) and `exploration:` blocks are inert under it. Select `knn_cascade` to get the
+  routing model back; the packaged `router.yaml` says so where the value is set.
+  `always_cheap` and `always_frontier` remain selectable (they are the benchmark's controls)
+  but are no longer advertised in the packaged config — pinning one model is not a reason to
+  run a router. **The `knn` → `knn_cascade` alias is unchanged**: a pre-rename config means
+  kNN routing and keeps resolving to `knn_cascade`, never to the new default.
+
 ### Added
+
+- **`escalation.context_transfer` — what the escalated model is told (opt-in).** `full`
+  (the default, and what has always shipped) forwards your messages untouched. `summary` makes
+  shunt author a handover note on the **first** turn after an escalation that **changed the
+  model** — a rank rung, never a same-model effort rung whose warm prefix compacting would
+  throw away, and never a resumed conversation — and send that in place
+  of the prior conversation, freezing it so every later turn resends byte-identical bytes — a
+  summary regenerated per turn would be a cache miss per turn and cost more than `full`. The
+  note is written by the **outgoing**, pre-escalation model (its prefix is already warm);
+  `context_transfer_model` overrides that and `context_transfer_max_tokens` (default `2000`)
+  caps it. Any failure — error, timeout, empty, over-budget — **degrades to `full`** with the
+  reason recorded; context is never silently dropped. `summary` is the one place shunt puts
+  words into your conversation, so it is disclosed at boot, on `shunt doctor`, as an
+  `X-Shunt-Context` response header and as a `Context:` line in `shunt explain`. There is
+  deliberately no `none`: shunt cannot make your CLI forget, so it would strip on every turn
+  and the strong model could never accumulate state. **Data at rest:** so a resume can restore
+  the exact bytes, the frozen note and the client's leading system blocks (for a coding agent:
+  working directory, git status, recent commits) are stored verbatim, in plaintext, in the
+  session row's `decision_provenance`. Only under `summary`; `full` writes no conversation
+  body beyond `prompt_text`. See
+  [what the escalated model is told](docs/escalation.md#what-the-escalated-model-is-told--context_transfer).
+
+- **The cost-quality plane magnifies its own crowded region.** Five strategies sit at one
+  pass rate inside a third of a decade of cost, and two of their names were printed on top of
+  each other on the published figure. `cost_quality_frontier.png` now redraws that region in an
+  inset panel, with each name stacked on its own leader above its own marker. The panel is
+  **derived, not configured**: the crowd is found by measuring the labels against each other in
+  the rendered figure, the panel is placed in the emptiest region the canvas has, and its bounds
+  are the crowd's own bounding box widened to hold everything it draws. When the strategies
+  spread out and the names fit where they sit, **no panel is drawn at all**, and a crowd the
+  canvas has no room for is named in the figure's notes rather than dropped.
+
+- **The cost of carrying context across an escalation, priced and drawn.** The benchmark
+  measures a cascade whose every rung starts from a fresh context; live, shunt never rewrites
+  `messages`, so the escalated model is resent the whole prior conversation by the CLI,
+  uncached. `cost_quality_frontier.png` now carries a dashed horizontal bracket on each of the two
+  **deployable escalating** strategies, drawn inside the figure's magnified panel. The marker
+  it hangs from is what the benchmark measures — a fresh context on every rung, which is not a
+  config setting — the shaded segment is `context_transfer: summary` (a band, not a tick,
+  because a summariser's compression ratio is not a constant) and the tick at the right end is
+  `context_transfer: full`, the shipped default. The two blocked within-task cascades are
+  deliberately **not** bracketed: the model prices a session-boundary handoff and they have no
+  boundary to price. It is a **cost model** over measured tokens and registry input prices,
+  computed on the subset of tasks whose every billed cell carries real tokens (an imputed cell
+  carries none, and the model raises rather than charging it zero); it asserts no pass rate,
+  and the subset size is published beside every number. `strategy_summary.csv` gains
+  `context_cost_alpha_01`, `context_cost_alpha_03`, `context_cost_alpha_10` and
+  `context_cost_n` — see [benchmark metrics](docs/benchmark.md#routing-evaluation).
 
 - **`shunt inspect` — diagnostic figures over the live outcome store.** A read-only command
   that never spends: it prints the store's census (embedded / labeled / tier-2, seeded vs live,
@@ -21,7 +85,7 @@ This file is the source for the GitHub release notes, so the two cannot disagree
   (`pip install 'shunt-router[inspect]'`); without it the command exits with that instruction
   rather than an ImportError traceback.
 - **The live router, measured — a new documentation half and seven new figures.**
-  [`docs/inference.md`](inference.md) judges the shipped router on its own outcome store rather
+  [`docs/inference.md`](docs/inference.md) judges the shipped router on its own outcome store rather
   than on a replayed benchmark corpus: what live inference cost, whether the choice
   distribution is collapsing, whether near neighbours still predict outcomes, and the
   off-policy value of routing and escalation. The figures ship in the wheel
@@ -32,7 +96,7 @@ This file is the source for the GitHub release notes, so the two cannot disagree
   render comes from a deterministic seed-only store containing no live traffic, and the page
   says so before the first figure.
 - **An illustrative render of those seven figures, on data that is invented.**
-  [`docs/inference-demo.md`](inference-demo.md) draws the same family over
+  [`docs/inference-demo.md`](docs/inference-demo.md) draws the same family over
   `benchmark/routing/demo_corpus.py` — a synthetic corpus of 703 sessions (453 live + 250 seeded):
   300 drawn live sessions resampled from 40 measured atoms, 153 invented live sessions covering
   escalation scenarios, and 250 seeded sessions from benchmark models — so the panels the measured
@@ -80,14 +144,58 @@ This file is the source for the GitHub release notes, so the two cannot disagree
   origin — instead of on `(source_ip, user_agent)` alone. A new conversation id starts a new
   session and takes a fresh routing decision; a resumed or forked conversation re-serves the model
   already locked for it (`session_resume` / `fork_resume`) rather than re-deciding mid-task, which
-  is what keeps a resumed conversation cache-safe. Clients that send no conversation id (Claude
-  Code, aider, plain HTTP) keep the old `(source_ip, user_agent)` grouping — the fallback is
-  unchanged, it simply no longer applies to tools that identify their conversations. Header values
-  are sanitised and length-capped before they reach the store. See
-  [routing](routing.md#session-identity).
+  is what keeps a resumed conversation cache-safe. Header values are sanitised and length-capped
+  before they reach the store. See [routing](docs/routing.md#session-identity).
+- **Clients that send no conversation id are resumable too, by their opening prompt.** Session
+  resolution is now a three-tier cascade: a declared conversation id (`x-shunt-session-id`, then
+  `x-session-id`, then `x-session-affinity`), then a provider cache key (declared, and empty on
+  every provider we serve — no provider exposes one on the request path), then a digest of the
+  conversation's opening prompt. That last tier is what makes Claude Code resumable across a
+  restart: its first system block and first user block are hashed with the resolved repo bound
+  back in as a one-way digest, so appending turns never moves the key and two repos driven by the
+  same CLI with the same opening question do not share one. The working directory, date and git
+  state are normalised out of the SYSTEM block only — the user's own turn is hashed as sent,
+  because the client replays it verbatim on a resume and because normalising it erases the paths
+  and identifiers that tell one task apart from another. A match re-serves the model locked for that conversation
+  (`prefix_resume`). **Live grouping is unchanged**: a header-less client's consecutive requests
+  remain one session under `(source_ip, user_agent)`, which is what per-session cumulative spend
+  and the one-decision-per-session rule are counted on — the digest identifies a conversation
+  across a restart, it does not demultiplex live traffic. Two guards keep a stable-but-not-unique
+  digest from mislabelling: the tier is consulted only for a request that REPLAYS a conversation
+  (an opening request carries one turn and always routes on its own merits, however familiar its
+  question), and a digest whose stored rows DISAGREE on the model they served refuses to resolve,
+  because a cold route is cheaper than attributing one conversation's outcome to another — a
+  backstop, not a guarantee, since two collided conversations served by the same model expose no
+  disagreement to refuse on. The
+  `prefix_digest` COLUMN stores a digest — no prompt text and no filesystem path (schema v6);
+  that is a claim about the column, not about the session row, which stores `prompt_text` as it
+  always has.
 
 ### Changed
 
+- **`router.strategy: knn` is renamed to `knn_cascade`, and `knn` is a deprecated alias.**
+  The name is the documentation, and `knn` misdescribed what that value does: the kNN selection
+  rule has participated in the escalation ladder ever since escalation shipped ON by default,
+  so selecting it has always meant *kNN pick plus session-cadence ladder*, not "selection
+  only". The value is renamed to say that. (`knn_cascade` was briefly the default during this
+  cycle; the entry at the top of this release supersedes that — the shipped default is now
+  `session_cascade`, and `knn` still resolves to `knn_cascade`, never to the new default.)
+  **No behaviour changes for the value itself.** An existing
+  `strategy: knn` is migrated automatically with a one-line boot warning and keeps working for
+  at least one more minor release; `SHUNT_ROUTER_STRATEGY=knn` is aliased the same way. Two
+  consequences worth reading:
+  - Plain kNN **without** the ladder is no longer a selectable deployable option — nothing
+    ever shipped it, and no `router.strategy` value produces it.
+  - A pre-rename config with **no `escalation:` block** now resolves the ladder to
+    **enabled** rather than to off. The absent-block escape hatch still applies to every
+    explicitly-named strategy; it is lifted only where the strategy was defaulted or migrated,
+    because those configs never named a cascade and turning the ladder off under them would
+    both change what they do and refuse to boot. Naming a cascade id explicitly with
+    `escalation.enabled: false` is still a load error.
+  - Every routing decision's provenance now carries `strategy_id`, the config id that produced
+    it, so an analysis can separate cascade sessions from the base selection rule without
+    reinterpreting the reason tokens (`cheapest_above_threshold`, `exploration_untested`,
+    `safe_fallback`, `cold_start`), which are unchanged.
 - **Benchmark-seeded sessions carry a fixed timestamp** (`2020-01-01T00:00:00+00:00`) instead
   of the wall clock at import, so two seed runs from the same bundle write the same rows.
   Intentional rig behaviour change: seeded rows now drop out of the loop-health
@@ -104,6 +212,12 @@ This file is the source for the GitHub release notes, so the two cannot disagree
 
 ### Fixed
 
+- **A resumed conversation no longer silently drops its effort escalation.** Resuming restored
+  the locked model but not the escalated reasoning arm, so a conversation that had already
+  climbed to a higher effort arm was re-served at the model's base effort, with `shunt explain`
+  showing a resume and no arm. The arm is now restored from the stored decision and carried into
+  the new provenance, and it is validated against the resumed model by the effort ladder's own
+  foreign-arm rule — an arm the resumed model does not declare is simply not carried.
 - **`shunt inspect` and `/admin/loop-health` no longer present benchmark spend as inference
   cost.** Every cost and recency aggregate the *live* router publishes now excludes seeded
   (`bench:`) rows: `loop_health`'s `cost_by_model` and `recent_choices`, and the census panel

@@ -15,11 +15,19 @@ from benchmark.routing.session_cascade_control import assert_ladder_quotable
 from benchmark.routing.strategies.fixed import AlwaysCheap, AlwaysFrontier, Random
 from benchmark.routing.strategies.knn import kNNStrategy
 from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
+from benchmark.routing.strategies.knn_session_cascade import kNNSessionCascadeStrategy
 from benchmark.routing.strategies.oracle import Oracle, OracleRewardAware
 from benchmark.routing.strategies.price_cascade import PriceCascade
-from benchmark.routing.strategies.session_cascade import SessionCascadeStrategy
+from benchmark.routing.strategies.session_cascade import (
+    DEFAULT_LADDER,
+    SessionCascadeStrategy,
+)
 from benchmark.routing.strategies.tier_classifier import TierClassifier
 from benchmark.routing.strategy_class import is_live
+
+# The selection knobs the kNN pick accepts. Named explicitly so an unrelated key added under
+# `strategies.knn` cannot reach a constructor that would reject it at run time.
+_KNN_KNOBS: Final[tuple[str, ...]] = ("k", "success_rate_threshold", "min_samples")
 
 
 def _results_file(base_dir: Path, k: int, success_rate: float, min_samples: int) -> Path:
@@ -53,6 +61,7 @@ def get_strategies(
             "random",
             "knn",
             "knn_cascade",
+            "knn_cascade_withintask",
             "price_cascade",
             "session_cascade",
             "tier_classifier",
@@ -60,7 +69,7 @@ def get_strategies(
 
     knn_p = dict(strat_cfg.get("knn", {}))
     cascade_p = dict(strat_cfg.get("knn", {}))
-    cascade_p.update(strat_cfg.get("knn_cascade", {}))
+    cascade_p.update(strat_cfg.get("knn_cascade_withintask", {}))
     tier_p = dict(strat_cfg.get("knn", {}))
     tier_p.update(strat_cfg.get("tier_classifier", {}))
 
@@ -82,11 +91,20 @@ def get_strategies(
     # Session-Cascade takes the PRODUCT's escalation knobs, not the cascade's depth: its ladder
     # length is the model pool's, and what it is parameterised by is the live recurrence policy.
     session_p = dict(strat_cfg.get("session_cascade", {}))
-    # STRUCTURAL: refuse to build the strategy at a ladder its positive control does not cover,
-    # rather than produce a row nobody may quote. Raised here — before any evaluation — so the
-    # failure costs nothing and cannot be mistaken for a result.
-    if "session_cascade" in enabled:
-        assert_ladder_quotable(str(session_p.get("ladder", "rank_only")))
+    # The OPT-IN `knn_cascade` row is the kNN pick on top of that same ladder, so it takes session
+    # knobs verbatim and adds only the selection knobs. No `knn_cascade:` block of its own: a
+    # second copy of the ladder knobs is a second ladder waiting to drift from the one the
+    # Session-Cascade row prices, and the two rows are only comparable at one ladder.
+    knn_session_p = {**{key: knn_p[key] for key in _KNN_KNOBS if key in knn_p}, **session_p}
+    # STRUCTURAL: refuse to build either session-cadence row at a ladder its positive control does
+    # not cover, rather than produce a row nobody may quote. Raised here — before any evaluation —
+    # so the failure costs nothing and cannot be mistaken for a result.
+    # The fallback is the STRATEGY's own default, not a restated literal: gating on a ladder the
+    # row would not have run is a green gate over an uncertified replay.
+    ladder = str(session_p.get("ladder", DEFAULT_LADDER))
+    for cadence_id in ("session_cascade", "knn_cascade"):
+        if cadence_id in enabled:
+            assert_ladder_quotable(ladder)
 
     registry: dict[str, Callable[[], object]] = {
         "oracle": lambda: Oracle(),
@@ -95,7 +113,8 @@ def get_strategies(
         "always_frontier": lambda: AlwaysFrontier(),
         "random": lambda: Random(seed=42),
         "knn": lambda: kNNStrategy(**knn_p),
-        "knn_cascade": lambda: kNNCascadeStrategy(**cascade_p),
+        "knn_cascade": lambda: kNNSessionCascadeStrategy(**knn_session_p),
+        "knn_cascade_withintask": lambda: kNNCascadeStrategy(**cascade_p),
         "price_cascade": lambda: PriceCascade(**price_p),
         "session_cascade": lambda: SessionCascadeStrategy(**session_p),
         "tier_classifier": lambda: TierClassifier(**tier_p),
@@ -149,7 +168,7 @@ def _build_arg_parser(
         "--cascade-max-tries",
         type=int,
         default=cascade_p.get("max_tries", 3),
-        help="Max models to try in kNN-cascade shortlist",
+        help="Max models to try in the kNN-cascade (within-task) shortlist",
     )
     return ap
 
@@ -437,7 +456,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     bm = config.benchmark_params()
     strat_cfg = config.strategies()
     ap = _build_arg_parser(
-        config_path, bm, strat_cfg.get("knn", {}), strat_cfg.get("knn_cascade", {})
+        config_path, bm, strat_cfg.get("knn", {}), strat_cfg.get("knn_cascade_withintask", {})
     )
     args = ap.parse_args()
 

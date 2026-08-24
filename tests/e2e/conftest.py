@@ -30,7 +30,15 @@ _CONTROLLED_ENV: tuple[str, ...] = (
 def app_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., TestClient]:
     """Boot the real served app under a fresh, hermetic environment."""
 
-    def _boot(*, repo: Path | None = None, strategy: str | None = None) -> TestClient:
+    # `knn_cascade`, not the packaged default: this suite's routing assertions were written
+    # against the kNN base pick and its reason vocabulary (`cold_start`,
+    # `cheapest_above_threshold`, `exploration_untested`), which the shipped `session_cascade`
+    # default does not produce — it never consults the neighbourhood. The default is not left
+    # untested by this: `test_routing_escalation.py` boots `session_cascade` explicitly, and
+    # every test that cares about another strategy names it here.
+    default_strategy = "knn_cascade"
+
+    def _boot(*, repo: Path | None = None, strategy: str | None = default_strategy) -> TestClient:
         for name in _CONTROLLED_ENV:
             monkeypatch.delenv(name, raising=False)
         # SHUNT_CONFIG_DIR pointing at an empty tmp dir forces the PACKAGED router.yaml

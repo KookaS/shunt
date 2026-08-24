@@ -33,8 +33,9 @@ _LEGACY = "5a9b847e-legacy"
 _HEALTHY = "healthy-session"
 
 
-def test_schema_version_is_five() -> None:
-    assert SCHEMA_VERSION == 5
+def test_schema_version_is_at_least_five() -> None:
+    # The exact pin lives in test_schema.py; this file only needs v5 to exist.
+    assert SCHEMA_VERSION >= 5
 
 
 def _v4_schema(conn: sqlite3.Connection) -> None:
@@ -111,7 +112,7 @@ def test_a_pre_v2_outcome_with_no_event_is_backfilled() -> None:
     # Dated to the outcome's own created_at, not to migration time — the log's chronology
     # must stay truthful or every recency read over it lies.
     assert rows[0]["created_at"] == "2026-07-20T11:27:23.408753+00:00"
-    assert get_current_version(conn) == 5
+    assert get_current_version(conn) == SCHEMA_VERSION
 
 
 def test_a_tier1_only_legacy_outcome_backfills_as_a_tier1_event() -> None:
@@ -185,13 +186,13 @@ def test_running_the_migration_twice_is_a_no_op() -> None:
     assert [tuple(row) for row in _events(conn, _LEGACY)] == first
 
 
-def test_a_fresh_store_migrates_cleanly_to_five() -> None:
+def test_a_fresh_store_migrates_cleanly_to_the_current_version() -> None:
     conn = sqlite3.connect(":memory:")
     run_migrations(conn)
     assert get_current_version(conn) == SCHEMA_VERSION
     conn.row_factory = sqlite3.Row
     versions = [row["version"] for row in conn.execute("SELECT version FROM schema_version")]
-    assert versions == [1, 2, 3, 4, 5]
+    assert versions == list(range(1, SCHEMA_VERSION + 1))
 
 
 def test_the_census_stops_inverting_once_the_legacy_row_is_backfilled(tmp_path: Path) -> None:
@@ -203,7 +204,8 @@ def test_the_census_stops_inverting_once_the_legacy_row_is_backfilled(tmp_path: 
             store.store_session(f"live-{i}", "p", np.zeros(64, dtype=np.float32), "m", 0.1, {}, 1.0)
             store.store_outcome(f"live-{i}", "success", 1.0, tier2_outcome="success")
         store._conn.execute("DELETE FROM outcome_events WHERE session_id = 'live-0'")
-        store._conn.execute("DELETE FROM schema_version WHERE version = 5")
+        # Every stamp at or above 5, since the current version reads the MAX.
+        store._conn.execute("DELETE FROM schema_version WHERE version >= 5")
         store._conn.commit()
 
         broken = store.stratum_census().live

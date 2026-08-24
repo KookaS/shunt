@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import json
 import logging
 import os
 import signal
@@ -25,6 +26,14 @@ from shunt.db.outcome_index import OutcomeIndexAdapter
 from shunt.db.store import OutcomeStore, SessionProvenance
 from shunt.log_config import configure_logging
 from shunt.models import ModelPool
+from shunt.models.config import resolve_reasoning_arm
+from shunt.proxy.context_transfer import (
+    CONTEXT_TRANSFER_SUMMARY,
+    ContextTransfer,
+    ContextTransferPolicy,
+)
+from shunt.proxy.context_transfer import from_restorable as context_transfer_from_restorable
+from shunt.proxy.prefix import compute_prefix_digest, is_replayed_conversation
 from shunt.proxy.redaction import header_safe, redact_secrets
 from shunt.proxy.router import BudgetExceededError, ProxyRouter, UpstreamError
 from shunt.router.cold_start import ColdStartStrategy
@@ -215,6 +224,7 @@ def _build_engine(  # noqa: PLR0913 (engine-composition wiring from the resolved
         embedder=embedder or Embedder(),
         selection_rule=selection_rule,
         strategy=strategy,
+        strategy_id=policy.strategy,
         neighbor_k=policy.policy.k,
         exploration=_effective_exploration(policy),
         trust_neighbors=trust_neighbors,
@@ -353,6 +363,21 @@ def _log_capture_disclosure(policy: RouterPolicy, resolver: WorkDirResolver) -> 
             "session is labelled automatically. Record outcomes with `shunt flag`, or set "
             "a work_dir."
         )
+    # Shunt authors content here, which nothing else in the request path does. An operator
+    # who never reads router.yaml again must still learn, at boot, that the escalated model
+    # is being handed a summary written by another model instead of their conversation.
+    if policy.escalation.context_transfer == CONTEXT_TRANSFER_SUMMARY:
+        logger.warning(
+            "escalation.context_transfer is 'summary': on the FIRST turn after an escalation "
+            "Shunt REPLACES the prior conversation with a handover note written by %s (max "
+            "%s tokens), frozen and resent unchanged on every later turn. THE MODEL DOES NOT "
+            "SEE WHAT YOU SEE. This breaks pure pass-through — it is the one place Shunt puts "
+            "words in the conversation. Any failure degrades to 'full' (nothing dropped). "
+            "Set escalation.context_transfer: full to turn it off. (docs/escalation.md)",
+            policy.escalation.context_transfer_model or "the outgoing pre-escalation model",
+            policy.escalation.context_transfer_max_tokens,
+        )
+
     # Escalation's ONLY signal is a verified failure, which needs the repo above. Escalation
     # ships ON, so enabled-without-a-work_dir is the common default state — it must not brick
     # the router, but it must NEVER be silent: without this warning an operator would think
@@ -432,11 +457,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         retry_count=_RETRY_COUNT,
         engine=engine,
         max_spend_usd=policy.budget.max_spend_usd,
+        context_transfer=ContextTransferPolicy(
+            mode=policy.escalation.context_transfer,
+            max_tokens=policy.escalation.context_transfer_max_tokens,
+            model=policy.escalation.context_transfer_model,
+        ),
     )
     app.state.session_manager = session_manager
     app.state.model_pool = model_pool
     app.state.router = router
     app.state.outcome_store = outcome_store
+    # The prompt-prefix session key binds the same repo the capture side resolves, so both
+    # read ONE resolver instance — a second one could sample a different launch root.
+    app.state.work_dir_resolver = resolver
     yield
     worker.stop()
     _persist_router_state(engine, outcome_store)  # exact state on a clean shutdown
@@ -543,14 +576,85 @@ def _sanitize_external_id(raw: str | None) -> str | None:
 def _get_external_session_id(request: Request) -> tuple[str | None, str | None]:
     """The (session_id, parent_session_id) pair declared via headers, if any.
 
-    `x-session-affinity` aliases `x-session-id`; forks carry `x-parent-session-id`. Absent
-    or blank values return None so callers fall back to (ip, user_agent).
+    Order: `x-shunt-session-id`, `x-session-id`, `x-session-affinity`; forks carry
+    `x-parent-session-id`. Blank or absent ⇒ None, and the next cascade tier decides.
     """
     session_id = _sanitize_external_id(
-        request.headers.get("x-session-id") or request.headers.get("x-session-affinity")
+        request.headers.get("x-shunt-session-id")
+        or request.headers.get("x-session-id")
+        or request.headers.get("x-session-affinity")
     )
     parent_id = _sanitize_external_id(request.headers.get("x-parent-session-id"))
     return session_id, parent_id
+
+
+def _stored_resume_row(
+    outcome_store: OutcomeStore,
+    external_id: str | None,
+    parent_id: str | None,
+    prefix_digest: str | None,
+) -> tuple[dict[str, Any], str] | None:
+    """The prior session row this request may resume from, tagged by the tier that found it."""
+    # Declared ids first (a client that names its conversation is believed), then the derived
+    # prompt-prefix key — consulted ONLY when no id was declared, so a header-keyed client can
+    # never be re-keyed onto a guess.
+    if external_id is not None:
+        stored = outcome_store.get_session_by_external_id(external_id)
+        if stored and stored.get("model_chosen"):
+            return stored, "session_resume"
+        if parent_id is not None:
+            forked = outcome_store.get_session_by_external_id(parent_id)
+            if forked and forked.get("model_chosen"):
+                return forked, "fork_resume"
+        return None
+    if prefix_digest is not None:
+        # None when the digest is AMBIGUOUS — see `get_session_by_prefix_digest`.
+        stored = outcome_store.get_session_by_prefix_digest(prefix_digest)
+        if stored and stored.get("model_chosen"):
+            return stored, "prefix_resume"
+    return None
+
+
+def _stored_provenance(stored: dict[str, Any]) -> dict[str, Any] | None:
+    """The prior row's `decision_provenance`, decoded from whatever the store handed back."""
+    raw = stored.get("decision_provenance")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return None
+    return raw if isinstance(raw, dict) else None
+
+
+def _resumable_reasoning_arm(
+    model_pool: ModelPool, model: str, stored: dict[str, Any]
+) -> str | None:
+    """The escalated reasoning arm *stored* carries, when it still belongs to *model*."""
+    # A resume that restores the model but drops the arm silently serves the BASE effort of a
+    # conversation that had already escalated — the escalation is undone with no decision
+    # saying so, and `shunt explain` shows a resume with no arm.
+    #
+    # Validity against the resumed model is the effort ladder's own foreign-arm rule
+    # (`resolve_reasoning_arm`): an arm this model does not declare resolves to the model's
+    # default, i.e. no escalation to carry, so nothing is restored. One rule, two callers.
+    raw = _stored_provenance(stored)
+    if raw is None:
+        return None
+    arm = raw.get("escalated_reasoning_arm")
+    if not isinstance(arm, str) or not arm:
+        return None
+    config = model_pool.get_model(model)
+    if config is None or config.reasoning is None:
+        return None
+    return arm if resolve_reasoning_arm(config.reasoning, arm) == arm else None
+
+
+def _resumable_context_transfer(stored: dict[str, Any]) -> ContextTransfer | None:
+    """The frozen `summary` prefix *stored* carries, rebuilt for the resumed session."""
+    raw = _stored_provenance(stored)
+    if raw is None:
+        return None
+    return context_transfer_from_restorable(raw.get("context_transfer_prefix"))
 
 
 def _resume_locked_model(
@@ -558,24 +662,20 @@ def _resume_locked_model(
     session: Session,
     external_id: str | None,
     parent_id: str | None,
+    prefix_digest: str | None = None,
 ) -> None:
-    """Reuse a prior conversation's locked model for a resumed/forked external session.
+    """Reuse a prior conversation's locked model — and its effort arm — on a resume.
 
     Fires only on a fresh in-memory session (model_chosen unset) so an open session is
     never re-routed — cache-safety holds. The reused model must still be routable.
     """
-    if session.model_chosen is not None or external_id is None:
+    if session.model_chosen is not None:
         return
     outcome_store: OutcomeStore = request.app.state.outcome_store
-    stored = outcome_store.get_session_by_external_id(external_id)
-    source = "session_resume"
-    if not stored or not stored.get("model_chosen"):
-        if parent_id is None:
-            return
-        stored = outcome_store.get_session_by_external_id(parent_id)
-        source = "fork_resume"
-    if stored is None:
+    found = _stored_resume_row(outcome_store, external_id, parent_id, prefix_digest)
+    if found is None:
         return
+    stored, source = found
     model = stored.get("model_chosen")
     if not isinstance(model, str) or not model:
         return
@@ -585,7 +685,7 @@ def _resume_locked_model(
     session.model_chosen = model
     session.metadata["model"] = model
     session.metadata["model_source"] = source
-    session.decision_provenance = {
+    provenance: dict[str, Any] = {
         "model_chosen": model,
         "selection_rule_used": source,
         "fallback_chain_triggered": False,
@@ -593,26 +693,101 @@ def _resume_locked_model(
         "auto_escalated": False,
         "new_label_window": False,
     }
+    # The escalated arm rides with the model it was escalated on: same served model, same
+    # cache namespace, request-level reasoning params only. Carried into the provenance too,
+    # so `shunt explain` shows the arm a resumed conversation is actually being served.
+    arm = _resumable_reasoning_arm(model_pool, model, stored)
+    if arm is not None:
+        session.metadata["reasoning_arm"] = arm
+        provenance["escalated_reasoning_arm"] = arm
+    # The frozen summary prefix rides with the model and the arm, for the same reason: a resume
+    # that restores neither model nor prefix would re-send the client's ORIGINAL messages to a
+    # model that was handed a compaction instead — a cache miss on every turn of a session that
+    # exists to avoid exactly that, plus a conversation the model has never seen the start of.
+    transfer = _resumable_context_transfer(stored)
+    if transfer is not None:
+        session.metadata["context_transfer"] = transfer
+        provenance["context_transfer"] = transfer.provenance()
+        restorable = transfer.restorable()
+        if restorable is not None:  # so the NEXT resume of this session restores it too
+            provenance["context_transfer_prefix"] = restorable
+    session.decision_provenance = provenance
     # The resumed conversation is intentionally NOT re-embedded: its original session
     # already represents the task in the kNN corpus, so no last_prompt is recorded.
     logger.info(
-        "session: RESUMED %s external=%s model=%s reason=%s",
+        "session: RESUMED %s external=%s model=%s arm=%s reason=%s",
         session.session_id,
-        external_id,
+        external_id if external_id is not None else "(none)",
         model,
+        arm or "(base)",
         source,
     )
 
 
-def _session_for_request(mgr: SessionManager, request: Request) -> Session:
-    """Open (or reuse) the session for *request*: header-keyed when possible, else (ip, ua)."""
+def _cache_key_session_id(request: Request, body: dict[str, Any]) -> str | None:
+    """Tier 2 of the cascade: a provider cache key as a conversation id. Always None today."""
+    # A provider-side prompt-cache key would be an ideal conversation identity — minted per
+    # cached prefix, and surviving a client restart. No provider Shunt serves exposes one on
+    # the request path: Anthropic takes `cache_control` breakpoints and returns cache token
+    # COUNTS, never a key; OpenAI's prefix caching is automatic and unnamed; the
+    # OpenAI-compatible providers inherit that. The tier is declared and empty rather than
+    # silently absent — one that never fires is worse than one that says why — and the prefix
+    # tier below does the work. Wire a provider in here the day one mints a readable key.
+    del request, body
+    return None
+
+
+def _resolved_work_dir(request: Request, tool_identity: str) -> str | None:
+    """The repo the capture side would resolve for this client, or None when unconfigured."""
+    resolver: WorkDirResolver | None = getattr(request.app.state, "work_dir_resolver", None)
+    return resolver.resolve_identity(tool_identity) if resolver is not None else None
+
+
+def _session_for_request(mgr: SessionManager, request: Request, body: dict[str, Any]) -> Session:
+    """Open (or reuse) the session for *request* through the three-tier resolution cascade."""
+    # 1. A DECLARED CONVERSATION ID — `x-shunt-session-id` / `x-session-id` /
+    #    `x-session-affinity`, with `x-parent-session-id` naming a fork's parent.
+    # 2. A PROVIDER CACHE KEY — declared, and empty on every provider we serve today.
+    # 3. THE PROMPT-PREFIX DIGEST — the tier that makes a header-less client (Claude Code)
+    #    resumable at all, and stops its conversations collapsing onto one shared session.
+    #    Consulted for RESUME only when the request replays a conversation: an opening request
+    #    that happens to repeat an earlier one's first question is a DIFFERENT conversation,
+    #    and resolving it would inherit the old one's model and mislabel its outcomes.
+    #
+    # `(source_ip, user_agent)` is the last resort, for a body with no task text to key on.
     external_id, parent_id = _get_external_session_id(request)
-    identity = f"ext:{external_id}" if external_id else _get_tool_identity(request)
-    session = mgr.find_or_create(identity)
+    if external_id is None:
+        external_id = _cache_key_session_id(request, body)
+    tool_identity = _get_tool_identity(request)
+    prefix_digest = (
+        None
+        if external_id is not None
+        else compute_prefix_digest(body, tool_identity, _resolved_work_dir(request, tool_identity))
+    )
+    # LIVE GROUPING IS UNCHANGED BY THE DIGEST. A header-less client's consecutive requests
+    # stay one session under `(source_ip, user_agent)`, because that is what the per-session
+    # budget cap and the one-decision-per-session rule are counted on. Keying live sessions by
+    # the digest instead would split one client's successive tasks into separate sessions
+    # (breaking cumulative spend) and would rejoin two conversations that opened with the same
+    # question. The digest's job is narrower: identify a conversation ACROSS a restart.
+    session_key = f"ext:{external_id}" if external_id is not None else tool_identity
+    # The CLIENT identity is stamped on the session whatever the grouping key is, so
+    # `capture.work_dirs` still resolves a repo for a conversation-keyed session.
+    session = mgr.find_or_create(session_key, tool_identity)
     if external_id is not None:
         session.external_session_id = external_id
+    if prefix_digest is not None:
+        # Persisted on EVERY turn, opening turn included — the row this writes is what a later
+        # genuine resume looks up, so the write side must not be gated the way the read is.
+        session.prefix_digest = prefix_digest
     mgr.cleanup_expired()
-    _resume_locked_model(request, session, external_id, parent_id)
+    _resume_locked_model(
+        request,
+        session,
+        external_id,
+        parent_id,
+        prefix_digest if is_replayed_conversation(body) else None,
+    )
     return session
 
 
@@ -666,6 +841,7 @@ def _store_session_with_provenance(
             model_fingerprint=router.model_fingerprint(model_name),
         ),
         external_session_id=session.external_session_id,
+        prefix_digest=session.prefix_digest,
     )
 
 
@@ -701,10 +877,17 @@ async def _build_decision_headers(
     # Single choke point for all 9 call sites: everything that reaches this header
     # is redacted, ASCII-only and single-line, so upstream error text can neither
     # leak a key nor split the response.
-    return {
+    headers = {
         "X-Shunt-Decision": header_safe(f"{model_name}; reason={reason}"),
         "X-Shunt-Session-Id": session.session_id,
     }
+    # Announced ONCE, on the turn the conversation the model sees stopped being the
+    # conversation the client sent. Shunt is pure pass-through everywhere else, so a client
+    # has no other way to learn that a summary was substituted for its history.
+    announce = session.metadata.pop("context_transfer_header", None)
+    if announce:
+        headers["X-Shunt-Context"] = header_safe(str(announce))
+    return headers
 
 
 def _error_response_headers(headers: dict[str, str], exc: UpstreamError) -> dict[str, str]:
@@ -791,7 +974,7 @@ async def chat_completions(request: Request) -> Response:
     mgr: SessionManager = request.app.state.session_manager
     router: ProxyRouter = request.app.state.router
 
-    session = _session_for_request(mgr, request)
+    session = _session_for_request(mgr, request, body)
 
     stream = body.get("stream", False)
 
@@ -850,7 +1033,7 @@ async def messages(request: Request) -> Response:
     mgr: SessionManager = request.app.state.session_manager
     router: ProxyRouter = request.app.state.router
 
-    session = _session_for_request(mgr, request)
+    session = _session_for_request(mgr, request, body)
 
     stream = body.get("stream", False)
 

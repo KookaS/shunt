@@ -24,13 +24,13 @@ different meanings, so keep them apart (see the note below the table).
 | `arm_sampling.default_only_models` | collect | Models pinned to their default reasoning arm (no effort sweep). |
 | `collect.*` (`audit_fraction`, `noninferiority_margin`, `phase_a_mode` …) | collect | Knobs for the `cost_optimal` sampler only. |
 | `sample_size`, `seed`, `n_default` | collect | **Which tasks** run and how many (nested order). |
-| `strategies.enabled` | evaluate | **Which routing policies are scored offline** over the cache — `oracle`, `always_cheap`, `always_frontier`, `knn`, `knn_cascade`, `price_cascade`, `session_cascade`, `tier_classifier`. |
-| `strategies.knn.*`, `knn_cascade.*` … | evaluate | Per-policy hyperparameters (`k`, `success_rate_threshold`, `max_tries`). |
+| `strategies.enabled` | evaluate | **Which routing policies are scored offline** over the cache — `oracle`, `always_cheap`, `always_frontier`, `knn`, `knn_cascade`, `knn_cascade_withintask`, `price_cascade`, `session_cascade`, `tier_classifier`. |
+| `strategies.knn.*`, `knn_cascade_withintask.*` … | evaluate | Per-policy hyperparameters (`k`, `success_rate_threshold`, `max_tries`). `knn_cascade` has no block of its own — it takes the `knn` selection knobs and the `session_cascade` ladder knobs, so the two session-cadence rows can never be scored at two different ladders. |
 | `routing.control_model` | evaluate | The fixed-frontier baseline the kill-gate is measured against. |
 
 **The two "strategy" words.** `--strategy` (a CLI flag) chooses *how live data is
 collected*; `strategies:` (a config block) lists *the routing policies scored on that
-data*. A cheap-first cascade is a **policy you evaluate** (`knn_cascade`), never the
+data*. A cheap-first cascade is a **policy you evaluate** (`knn_cascade_withintask`), never the
 way data is collected — a cascade collector would never observe the frontier on easy
 tasks and would bias the baseline (see [the kill-gate and partial-coverage limits](#honest-limits)).
 
@@ -377,8 +377,11 @@ the classifier, the grader, the admissibility adjudicator. Old stamps came from 
 instrument, so they aren't comparable to new ones.
 
 Re-replaying reads the per-step code captures that the live run recorded. Those live in a
-gitignored scratch, so on a fresh checkout you restore them first with `make state-import`
-(committed as ~1.7 MB of deterministic per-trajectory archives). Run **`make replay-inputs`**
+gitignored scratch. `make state-export` packs them into `benchmark/escalation/data/live/state/`
+as ~1.7 MB of deterministic per-trajectory archives, and once that directory is in git a fresh
+checkout restores them with `make state-import` — but **no such export is committed today**, so
+`state-import` currently fails with `no committed state plane` and the captures must come from
+the collecting host. Run **`make replay-inputs`**
 before you start: it lists every input this checkout still lacks — the captures, the ~100 GB of
 instance images, the gold patch rows fetched from the HF dataset — and exits non-zero rather than
 letting a partial run produce numbers that quietly differ.
@@ -475,6 +478,7 @@ Metrics per strategy:
 | rAcc | Fraction of tasks where strategy picked the same model as the oracle |
 | Pareto | True if no other strategy has higher AvgPerf% AND lower **TotalCost_cacheaware** — the cost a deployment actually pays |
 | Pareto_naive | The same frontier computed on raw TotalCost, published beside it so the cache assumption is auditable rather than silent |
+| context_cost_alpha_01 / context_cost_alpha_03 / context_cost_alpha_10 / context_cost_n | A **cost model**, not a measurement: TotalCost_cacheaware re-priced when 10%, 30% and 100% of the context an attempt ends holding is resent to the model an escalation moves to. The 10-30% pair is the router's `context_transfer: summary`, published as a band because a summariser's compression ratio is not a constant; 100% is `context_transfer: full`, the shipped default. That prefix is a cache **miss** by construction — new model, new prefix — so it is charged at the full input rate, never at the cache-read rate. Context size is estimated as `t = 2 × in_tok / calls` (linear prefix growth). Computed on the token-complete subset — the tasks whose every billed cell carries measured tokens, since an imputed cell carries none — whose size is `context_cost_n`; what transfers to the published dollars is the dimensionless surcharge factor. It asserts no pass rate |
 | subset_selected / subset_note | Whether the row was scored on a coverage-selected slice of the sample rather than the whole of it, and the measured difficulty gap between what it scored on and what it dropped. Collection is adaptive, so full coverage tracks difficulty — a subset row is not comparable to a full-sample row |
 | instrument_admissible / instrument_verdict | The two-sided instrument verdict for the SHIPPED selection path, stamped on every row (see [instrument validity](#is-the-router-measuring-anything-instrument-validity)) |
 
@@ -603,8 +607,10 @@ its own when read outside these docs.
 | Always-Cheap | Route all to the cheapest model (derived from the pricing matrix) |
 | Always-Frontier | Route all to the most expensive model |
 | Random | Uniform random per task (mean over seeds) |
-| kNN | Embed task → retrieve similar → cheapest capable model |
-| kNN-cascade | kNN-informed try-verify-escalate |
+| kNN | Embed task → retrieve similar → cheapest capable model. A CONTROL: the selection rule with the escalation ladder removed, which no `router.strategy` value produces |
+| kNN-cascade | The opt-in routing strategy: the kNN pick, then the escalation ladder at session cadence |
+| Session-Cascade | The shipped default: the cheapest model, then that same ladder — no embedding, no neighbourhood query |
+| kNN-cascade (within-task) | kNN-informed try-verify-escalate INSIDE one task — blocked, not deployable |
 | Price-Cascade | Try-verify-escalate in ascending price order — no embeddings, no kNN |
 | Tier-Classifier | Single-shot: predict the crossover tier, route there directly |
 

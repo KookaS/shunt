@@ -10,8 +10,9 @@ from typing import Final
 
 from benchmark import config
 from benchmark.admissibility import AdmissibilityResult
-from benchmark.routing import selection_guard
+from benchmark.routing import selection_guard, validate
 from benchmark.routing.cache_cost import CachePrice, cache_aware_total, cache_prices
+from benchmark.routing.context_cost import BRACKET_ALPHAS, context_bracket
 from benchmark.routing.impute import ImputedMatrix, complete_matrix, is_non_observation
 from benchmark.routing.metrics import (
     bootstrap_ci,
@@ -19,6 +20,7 @@ from benchmark.routing.metrics import (
     compute_metrics,
     compute_pareto,
 )
+from benchmark.routing.strategies import BilledAttempt
 from benchmark.routing.strategies.oracle import OracleRewardAware
 
 SUMMARY_FIELDS: Final[tuple[str, ...]] = (
@@ -58,6 +60,17 @@ SUMMARY_FIELDS: Final[tuple[str, ...]] = (
     # measured difficulty gap when it was. See benchmark/routing/selection_guard.py.
     "subset_selected",
     "subset_note",
+    # The context-transfer cost model: this row's cache-aware total re-priced when 10%, 30% and
+    # 100% of each attempt's ending context is carried to the model that escalation hands it to.
+    # A COST MODEL, not a measurement — it asserts no pass rate — computed on the token-complete
+    # subset whose size is `context_cost_n`. The 10-30% PAIR is the config's
+    # `context_transfer: summary`, published as a band because a summariser's compression ratio
+    # is not a constant; 100% is `context_transfer: full`, the shipped default. See
+    # benchmark/routing/context_cost.py.
+    "context_cost_alpha_01",
+    "context_cost_alpha_03",
+    "context_cost_alpha_10",
+    "context_cost_n",
     # Every published row carries the verdict on the instrument that produced it. A reader who
     # greps ONE line still sees whether the routing pipeline behind it has been shown to recover
     # a signal it is known to contain — which is the difference between "kNN scored 78.53%" and
@@ -80,9 +93,11 @@ DETERMINISTIC_FIELDS: Final[tuple[str, ...]] = (
 )
 
 Decision = tuple[str, str, bool, float]
-# One billed attempt: (model, cost). A single-shot decision is one attempt; a cascade is as many
-# as it made, in billing order.
-Attempt = tuple[str, float]
+# One billed attempt, as a RECORD (`BilledAttempt`) rather than a `(model, cost)` tuple: the
+# context cost model needs the tokens too, and widening a tuple would silently re-bind every
+# positional unpack in the tree. A single-shot decision is one attempt; a cascade is as many as
+# it made, in billing order.
+Attempt = BilledAttempt
 
 
 def complete_scored_matrix(matrix: dict) -> tuple[dict, ImputedMatrix | None]:
@@ -172,7 +187,22 @@ def evaluate_billed(
         # A cascade publishes its per-attempt billing; a single-shot decision IS one attempt.
         # Copied, because the strategy overwrites the attribute on the next `select`.
         billed = getattr(strategy, "cascade_attempts", None)
-        attempts[tid] = list(billed) if billed else [(model, float(cost))]
+        # The single-shot fallback carries the chosen cell's OWN measured tokens, so a
+        # non-cascade row is token-complete on exactly the cells that were really measured —
+        # the same predicate the cascades are judged by, not a privileged zero.
+        attempts[tid] = (
+            list(billed)
+            if billed
+            else [
+                BilledAttempt(
+                    model=model,
+                    cost=float(cost),
+                    in_tok=int(outcome.get("in_tok") or 0),
+                    out_tok=int(outcome.get("out_tok") or 0),
+                    calls=int(outcome.get("calls") or 0),
+                )
+            ]
+        )
     return decisions, unscorable, attempts
 
 
@@ -256,6 +286,47 @@ def _cache_aware_cost(
     return sum(cache_aware_total(attempts.get(tid, []), prices) for tid, _m, _p, _c in decisions)
 
 
+def _context_columns(
+    decisions: list[Decision],
+    attempts: dict[str, list[Attempt]],
+    cache_total: float,
+    matrix: dict,
+) -> dict[str, float | int]:
+    """The context-transfer cost model's published columns for one strategy row."""
+    # WHAT THESE ARE AND ARE NOT. A cost MODEL over measured tokens and real registry input
+    # prices, never a measurement and never a pass rate. See benchmark/routing/context_cost.py.
+    #
+    # WHY A RATIO AND NOT A RAW SUM. The bracket can only be computed on the TOKEN-COMPLETE
+    # subset — imputed cells carry no tokens — which is far smaller than the scored set the
+    # marker's dollars cover. Publishing the subset's own dollars would put the bracket to the
+    # LEFT of the marker on the frontier, comparing two different task sets as if they were one.
+    # So what transfers is the dimensionless SURCHARGE FACTOR C(alpha)/C(0), measured on the
+    # subset and applied to the row's plotted cache-aware total. The assumption that carries is
+    # that the subset's context weight per dollar is representative; it is published as a
+    # limitation on every figure that draws the bracket, alongside n.
+    scoped = {tid: attempts.get(tid, []) for tid, _m, _p, _c in decisions}
+    bracket = context_bracket(scoped, BRACKET_ALPHAS)
+    validate.enforce_bracket_coverage(
+        bracket.tasks, {tid: [a.model for a in scoped[tid]] for tid in bracket.tasks}, matrix
+    )
+    # AN EMPTY SUBSET PUBLISHES NOTHING. A corpus with no token columns leaves the bracket resting
+    # on zero tasks; the three alpha columns are then OMITTED rather than defaulted, because a
+    # default of `cache_total` is the affirmative claim "carrying context costs nothing" and this
+    # row would be making it with n=0 behind it. `context_cost_n` is still written, so the absence
+    # reads as a coverage gap on the row rather than as a missing column. Downstream readers
+    # already tolerate a missing column (`figures.cost_quality_frontier._num`), and its bracket
+    # filter drops a row without one, so no bracket is drawn from nothing.
+    if not bracket.publishable:
+        return {"context_cost_n": bracket.n_tasks}
+    lo, mid, hi = BRACKET_ALPHAS
+    return {
+        "context_cost_alpha_01": round(cache_total * bracket.ratio(lo), 4),
+        "context_cost_alpha_03": round(cache_total * bracket.ratio(mid), 4),
+        "context_cost_alpha_10": round(cache_total * bracket.ratio(hi), 4),
+        "context_cost_n": bracket.n_tasks,
+    }
+
+
 def _strategy_row(  # noqa: PLR0913
     strategy: object,
     matrix: dict,
@@ -323,6 +394,7 @@ def _strategy_row(  # noqa: PLR0913
         "AvgCost_ci_upper": cis.avg_cost[1],
         "subset_selected": selection.is_subset,
         "subset_note": selection.note,
+        **_context_columns(decisions, attempts, cache_total, matrix),
     }
 
 

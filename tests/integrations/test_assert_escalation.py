@@ -330,6 +330,64 @@ def test_an_effort_rung_is_exempt_from_rank_conformance(tmp_path: Path) -> None:
     assert ae._ladder_problems(session, sessions, LADDER) == []
 
 
+def _effort_session(served: str, before: str | None) -> dict[str, Any]:
+    prov: dict[str, Any] = {
+        "auto_escalated": True,
+        "rank_escalation_reason": REAL_REASON,
+        "escalated_reasoning_arm": "high",
+        "escalation_exploration": {"action": "raise_effort", "propensity": 1.0},
+    }
+    if before is not None:
+        prov["pre_escalation_model"] = before
+    return {"session_id": "s4", "model_chosen": served, "provenance": prov}
+
+
+def test_an_effort_rung_that_moved_the_model_is_rejected() -> None:
+    """(i) the defect shape: the tool exited 0 while the effort rung became a rank jump."""
+    problems = ae._effort_rung_problems(_effort_session(HIGHER_MODEL, BASE_MODEL))
+    joined = " | ".join(problems)
+    assert HIGHER_MODEL in joined and BASE_MODEL in joined  # both models named
+    assert "raise_effort" in joined
+    assert len(problems) == 1
+
+
+def test_an_effort_rung_that_kept_the_model_passes() -> None:
+    assert ae._effort_rung_problems(_effort_session(BASE_MODEL, BASE_MODEL)) == []
+
+
+def test_an_effort_rung_with_no_pre_escalation_model_is_rejected() -> None:
+    """An unfalsifiable claim is not a passing one: with nothing to compare, the check fails."""
+    problems = ae._effort_rung_problems(_effort_session(BASE_MODEL, None))
+    assert any("pre_escalation_model" in p for p in problems)
+
+
+def test_a_rank_rung_is_untouched_by_the_effort_cross_check() -> None:
+    session = _effort_session(HIGHER_MODEL, BASE_MODEL)
+    session["provenance"]["escalation_exploration"]["action"] = "raise_rank"
+    assert ae._effort_rung_problems(session) == []
+
+
+def test_the_effort_cross_check_runs_inside_the_verdict(tmp_path: Path) -> None:
+    """Wired, not merely defined: the defect shape must redden `_verdict_problems` itself."""
+    db = tmp_path / "outcomes.db"
+    escalated = {
+        "selection_rule_used": "auto_escalation",
+        "auto_escalated": True,
+        "rank_escalation_reason": REAL_REASON,
+        "model_chosen": HIGHER_MODEL,
+        "pre_escalation_model": BASE_MODEL,
+        "escalated_reasoning_arm": "high",
+        "escalation_exploration": {"action": "raise_effort", "propensity": 1.0},
+    }
+    _make_db(
+        db,
+        [(f"s{i}", BASE_MODEL, {"auto_escalated": False}) for i in (1, 2, 3)]
+        + [("s4", HIGHER_MODEL, escalated)],
+        [("s1", 2, "failure"), ("s2", 2, "failure")],
+    )
+    assert any("became a jump onto a different model" in p for p in _problems(db))
+
+
 @pytest.mark.parametrize(
     "text",
     [

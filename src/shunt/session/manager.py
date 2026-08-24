@@ -74,10 +74,14 @@ class SessionManager:
                 return None
             return self._sessions.get(session_id)
 
-    def find_or_create(self, tool_identity: str) -> Session:
-        """Return the active open session for *tool_identity* or create one."""
+    def find_or_create(self, session_key: str, tool_identity: str | None = None) -> Session:
+        """Return the active open session grouped under *session_key* or create one."""
+        # *session_key* is the GROUPING key — a conversation id, a prompt-prefix digest, or the
+        # (ip, user_agent) identity when nothing better is available. *tool_identity* is the
+        # CLIENT identity stamped on the session (what `capture.work_dirs` is keyed by); it
+        # defaults to *session_key* for callers that group by client identity alone.
         with self._lock:
-            session_id = self._identity_to_session.get(tool_identity)
+            session_id = self._identity_to_session.get(session_key)
             if session_id is not None:
                 session = self._sessions.get(session_id)
                 if session is not None and session.state == SessionState.open:
@@ -93,12 +97,12 @@ class SessionManager:
             now = datetime.now(UTC)
             session = Session(
                 session_id=str(uuid.uuid4()),
-                tool_identity=tool_identity,
+                tool_identity=tool_identity if tool_identity is not None else session_key,
                 start_time=now,
                 last_activity=now,
             )
             self._sessions[session.session_id] = session
-            self._identity_to_session[tool_identity] = session.session_id
+            self._identity_to_session[session_key] = session.session_id
             # A NEW id mid-conversation means a fresh routing decision, i.e. a possible
             # cache-safety break — so creation is worth a line of its own.
             logger.debug("session: CREATED %s", session.session_id)

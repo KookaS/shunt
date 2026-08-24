@@ -54,6 +54,30 @@ Two consequences an operator must plan for:
 Authentication is future work, not a shipped feature. This section exists so that is a
 documented boundary rather than a discovered one.
 
+## Data at rest
+
+Shunt keeps its state in a local SQLite database (`~/.local/share/shunt/outcomes.db` by
+default; relocate with `SHUNT_DATA_DIR`). It is a plain file with no encryption at rest and no
+per-row redaction; its protection is filesystem permissions, the same as the port's protection
+is placement.
+
+Two columns hold conversation text:
+
+- `sessions.prompt_text` — the opening prompt of each session, always.
+- `sessions.decision_provenance` — with `escalation.context_transfer: summary` enabled
+  (**off by default**), this holds the frozen handover note shunt authored *and* the client's
+  leading system blocks verbatim, under `context_transfer_prefix`. For a coding agent those
+  system blocks routinely carry the working directory, git status and recent commit subjects.
+  It is stored so a resumed session can restore the exact bytes it already sent; regenerating
+  or dropping them costs a cache miss on every turn.
+
+Under the default `context_transfer: full`, no conversation body beyond `prompt_text` is
+written. The session-identity `prefix_digest` column is a one-way digest in every mode and
+holds no text and no filesystem path.
+
+If the machine's filesystem is not a trust boundary you are comfortable with, do not enable
+`context_transfer: summary`, and treat the database as sensitive.
+
 ## Known non-issues
 
 Attacks requiring the operator to explicitly disable a security default

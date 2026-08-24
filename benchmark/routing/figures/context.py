@@ -26,11 +26,23 @@ StrategyCells = dict[str, tuple[bool, float, bool]]
 # link them relatively; the MANIFEST that describes them stays beside the code that writes it.
 MANIFEST: Path = Path("benchmark/routing/figures.json")
 
-# "The router" in every figure caption must be the strategy the PRODUCT can be configured
-# with. It read "kNN-cascade" — a strategy `LIVE_STRATEGIES` rejects at boot — so every
-# figure that said "the router" described something no operator can run.
+# "The router" in every figure caption must be a strategy the PRODUCT can be configured with.
+# It read "kNN-cascade" — the BLOCKED within-task row — so every figure that said "the router"
+# described something no operator can run.
 ROUTER_STRATEGY: str = "kNN"
 BASELINE_STRATEGY: str = "Always-Frontier"
+
+# The strategy `router.strategy` actually defaults to. It is NOT `ROUTER_STRATEGY`, and the gap
+# is deliberate: the 5pp non-inferiority gate was pre-registered on the kNN row, and repointing a
+# pre-registered arm after seeing the data would rewrite the verdict. Naming the shipped default
+# EXPOSED that the pre-registered arm adjudicates a configuration no user can select — a
+# pre-existing defect, not one the rename creates — so the default is published BESIDE the
+# pre-registered row, explicitly marked as not pre-registered.
+#
+# EVERY FIGURE READS THIS NAME RATHER THAN SPELLING ONE. The kill gate's non-pre-registered row,
+# the frontier's subtitle and the frontier's context bracket all resolve the default here, so
+# moving the default is one edit and cannot leave a figure quoting the previous one.
+DEFAULT_STRATEGY: str = "Session-Cascade"
 
 
 @dataclass(frozen=True)

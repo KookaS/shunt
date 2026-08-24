@@ -19,10 +19,15 @@ from shunt.router.policy import CapturePolicy, EscalationPolicy, ExplorationPoli
 def _policy(
     *,
     enabled: bool = True,
-    strategy: str = "knn",
+    strategy: str | None = None,
     work_dir: str | None = None,
     escalation_off: bool = False,
 ) -> RouterPolicy:
+    # The shipped default is a cascade preset, and naming one explicitly with the ladder off is
+    # a load error — so an escalation-off case has to name a NON-cascade strategy. That is not a
+    # workaround: `always_cheap` is what an operator who turns the ladder off actually runs.
+    if strategy is None:
+        strategy = "always_cheap" if escalation_off else "knn_cascade"
     return RouterPolicy(
         strategy=strategy,
         exploration=ExplorationPolicy(enabled=enabled),

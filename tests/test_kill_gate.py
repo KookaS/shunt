@@ -17,7 +17,7 @@ from benchmark import config, validate_results
 from benchmark.routing import cache_cost, censoring
 from benchmark.routing import metrics as metrics_mod
 from benchmark.routing.cache_cost import CachePrice
-from benchmark.routing.strategies import knn
+from benchmark.routing.strategies import BilledAttempt, knn
 from benchmark.runner import kill_gate
 
 
@@ -901,6 +901,11 @@ class TestCacheCostScopingProperty:
         assert cache_cost.cache_cost_is_scoped_to_tasks(sorted(full), attempts, prices) is True
 
 
+def _att(model: str, cost: float) -> BilledAttempt:
+    """A billing record with no tokens — all the cache-aware cost model reads."""
+    return BilledAttempt(model=model, cost=cost)
+
+
 class TestMetricsAndKillGateShareScopingPredicate:
     """The two copies of the ruling resolve the SAME predicate — metrics.py's
     ``_assert_cache_cost_scoping`` and the kill gate's bootstrap — so they cannot
@@ -908,7 +913,7 @@ class TestMetricsAndKillGateShareScopingPredicate:
 
     def test_both_accept_a_task_scoped_sample(self):
         tids = ["t1", "t2", "t3"]
-        attempts = {"t1": [("m", 10.0)], "t2": [("m", 10.0)], "t3": [("m", 10.0)]}
+        attempts = {"t1": [_att("m", 10.0)], "t2": [_att("m", 10.0)], "t3": [_att("m", 10.0)]}
         prices = {"m": _cache_price("m")}
         metrics_mod._assert_cache_cost_scoping(tids, attempts, prices)  # must not raise
         assert cache_cost.cache_cost_is_scoped_to_tasks(tids, attempts, prices) is True
@@ -920,8 +925,8 @@ class TestMetricsAndKillGateShareScopingPredicate:
         state: dict[str, str | None] = {"prev": None}
 
         def flat_cache_cost(attempts, prices):
-            total = sum(c for _m, c in attempts)
-            model = attempts[-1][0] if attempts else None
+            total = sum(a.cost for a in attempts)
+            model = attempts[-1].model if attempts else None
             if state["prev"] is not None and model is not None and state["prev"] == model:
                 total -= 1.0
             state["prev"] = model
@@ -931,7 +936,7 @@ class TestMetricsAndKillGateShareScopingPredicate:
         monkeypatch.setattr(metrics_mod, "cache_aware_total", flat_cache_cost)
 
         tids = ["t1", "t2", "t3"]
-        attempts = {"t1": [("m", 10.0)], "t2": [("m", 10.0)], "t3": [("m", 10.0)]}
+        attempts = {"t1": [_att("m", 10.0)], "t2": [_att("m", 10.0)], "t3": [_att("m", 10.0)]}
         prices = {"m": _cache_price("m")}
         with pytest.raises(RuntimeError, match="not scoped per task"):
             metrics_mod._assert_cache_cost_scoping(tids, attempts, prices)
@@ -944,8 +949,8 @@ class TestMetricsAndKillGateShareScopingPredicate:
         state: dict[str, str | None] = {"prev": None}
 
         def flat_cache_cost(attempts, prices):
-            total = sum(c for _m, c in attempts)
-            model = attempts[-1][0] if attempts else None
+            total = sum(a.cost for a in attempts)
+            model = attempts[-1].model if attempts else None
             if state["prev"] is not None and model is not None and state["prev"] == model:
                 total -= 1.0
             state["prev"] = model

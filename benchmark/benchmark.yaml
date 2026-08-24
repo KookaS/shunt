@@ -18,10 +18,11 @@ strategies:
     - oracle              # upper bound (perfect knowledge, best quality)
     - always_frontier     # baseline: always the most expensive model
     - always_cheap        # baseline: always the cheapest model
-    - knn                 # shipped algorithm: predict by nearest neighbors
-    - knn_cascade         # kNN-informed try-verify-escalate
+    - knn                 # CONTROL: the selection rule with the ladder removed
+    - knn_cascade         # the kNN pick, then the ladder at session cadence (opt-in routing)
+    - knn_cascade_withintask  # blocked: kNN-informed try-verify-escalate INSIDE one task
     - price_cascade       # zero-ML floor: cheapest-first try-verify-escalate, no embeddings
-    - session_cascade     # the SHIPPED escalation ladder at session cadence (cache-safe analogue)
+    - session_cascade     # THE SHIPPED DEFAULT: the escalation ladder at session cadence (cache-safe)
     - tier_classifier     # single-shot: predict crossover tier, route there directly
     # - oracle_reward      # same as oracle with different cost weight
     # - random             # not useful for comparison
@@ -29,7 +30,11 @@ strategies:
     k: 20
     success_rate_threshold: 0.6   # lower = more cost savings, higher = more reliability
     min_samples: 3
-  knn_cascade:
+  # NOTE: `knn_cascade` (opt-in routing) has NO block of its own. It takes the kNN knobs
+  # above and the `session_cascade` ladder knobs below verbatim, so the two session-cadence rows
+  # can never be scored at two different ladders. The block below configures the BLOCKED
+  # within-task row only.
+  knn_cascade_withintask:
     max_tries: 3
     success_rate_threshold: 0.6
   tier_classifier:

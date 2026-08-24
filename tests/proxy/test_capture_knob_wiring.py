@@ -43,7 +43,10 @@ def test_zero_reruns_is_rejected_rather_than_silently_disabling_escalation() -> 
 
 
 def test_escalation_off_skips_the_rerun_wrapper_but_keeps_the_timeout() -> None:
+    # `always_cheap`, not the default: naming a cascade preset explicitly with the ladder off
+    # is a load error, and a config that turns escalation off is running a fixed router.
     policy = RouterPolicy(
+        strategy="always_cheap",
         escalation=EscalationPolicy(enabled=False),
         capture=CapturePolicy(verify_timeout_seconds=42.0),
     )

@@ -10,6 +10,7 @@ import pytest
 
 from benchmark.routing import cache_cost, selection_guard, session_cascade_control
 from benchmark.routing.metrics import bootstrap_ci
+from benchmark.routing.strategies import BilledAttempt
 from benchmark.routing.strategies.price_cascade import PriceCascade
 from benchmark.routing.summary import SUMMARY_FIELDS, compute_strategy_rows, evaluate_billed
 
@@ -29,19 +30,20 @@ class TestCacheAwareCost:
     def test_a_repeat_of_the_same_model_banks_its_discount(self):
         prices = {"m": _price("m", share=1.0, discount=0.5)}
         # Two attempts on one model: the second is half price at share 1.0, hit 1.0, discount 0.5.
-        assert cache_cost.cache_aware_total([("m", 10.0), ("m", 10.0)], prices) == 15.0
+        assert cache_cost.cache_aware_total([_att("m", 10.0), _att("m", 10.0)], prices) == 15.0
 
     def test_a_switch_banks_nothing(self):
         prices = {"m": _price("m", 1.0, 0.5), "n": _price("n", 1.0, 0.5)}
-        assert cache_cost.cache_aware_total([("m", 10.0), ("n", 10.0)], prices) == 20.0
+        assert cache_cost.cache_aware_total([_att("m", 10.0), _att("n", 10.0)], prices) == 20.0
 
     def test_only_adjacent_repeats_bank(self):
         prices = {"m": _price("m", 1.0, 0.5), "n": _price("n", 1.0, 0.5)}
         # m, n, m is three cold prefixes — the discount is not a per-model tally.
-        assert cache_cost.cache_aware_total([("m", 10.0), ("n", 10.0), ("m", 10.0)], prices) == 30.0
+        attempts = [_att("m", 10.0), _att("n", 10.0), _att("m", 10.0)]
+        assert cache_cost.cache_aware_total(attempts, prices) == 30.0
 
     def test_an_unpriced_model_is_charged_in_full_not_dropped(self):
-        assert cache_cost.cache_aware_total([("ghost", 4.0), ("ghost", 4.0)], {}) == 8.0
+        assert cache_cost.cache_aware_total([_att("ghost", 4.0), _att("ghost", 4.0)], {}) == 8.0
 
 
 class TestMeasuredInputShare:
@@ -101,6 +103,12 @@ class TestCostConfidenceInterval:
     def test_no_decisions_yields_zero_bounds_not_a_crash(self):
         cis = bootstrap_ci([], [], n_bootstrap=10)
         assert cis.total_cost == (0.0, 0.0)
+
+
+def _att(model: str, cost: float) -> BilledAttempt:
+    """A billing record with no tokens — enough for the cache model, inadmissible to the alpha
+    model."""
+    return BilledAttempt(model=model, cost=cost)
 
 
 def _matrix() -> dict:
@@ -181,7 +189,7 @@ class TestBilledAttempts:
 
         prices = {"frontier": _price("frontier", 1.0, 1.0)}
         decisions = [("t1", "frontier", True, 10.0), ("t2", "frontier", True, 10.0)]
-        attempts = {"t1": [("frontier", 10.0)], "t2": [("frontier", 10.0)]}
+        attempts = {"t1": [_att("frontier", 10.0)], "t2": [_att("frontier", 10.0)]}
         assert summary_mod._cache_aware_cost(decisions, attempts, prices) == 20.0
 
     def test_the_summary_does_bank_a_within_task_repeat(self):
@@ -189,20 +197,20 @@ class TestBilledAttempts:
 
         prices = {"m": _price("m", 1.0, 1.0)}
         decisions = [("t1", "m", True, 20.0)]
-        attempts = {"t1": [("m", 10.0), ("m", 10.0)]}
+        attempts = {"t1": [_att("m", 10.0), _att("m", 10.0)]}
         assert summary_mod._cache_aware_cost(decisions, attempts, prices) == 10.0
 
     def test_a_cascade_publishes_every_attempt_not_just_the_total(self):
         m = _matrix()
         _dec, _uns, attempts = evaluate_billed(PriceCascade(max_tries=1), m, ["t1"])
-        assert attempts["t1"] == [("cheap", 1.0), ("frontier", 10.0)]
+        assert [(a.model, a.cost) for a in attempts["t1"]] == [("cheap", 1.0), ("frontier", 10.0)]
 
     def test_attempts_reconcile_with_the_collapsed_total(self):
         # Two accounting paths for one bill is how a cache-aware column silently disagrees with
         # the naive one it sits beside; this pins them together.
         strategy = PriceCascade(max_tries=1)
         strategy.select("t1", {}, _matrix())
-        assert sum(c for _m, c in strategy.cascade_attempts) == pytest.approx(
+        assert sum(a.cost for a in strategy.cascade_attempts) == pytest.approx(
             strategy.cascade_total_cost
         )
 
@@ -210,7 +218,7 @@ class TestBilledAttempts:
         from benchmark.routing.strategies.fixed import AlwaysFrontier
 
         _dec, _uns, attempts = evaluate_billed(AlwaysFrontier(), m := _matrix(), ["t1"])
-        assert m and attempts["t1"] == [("frontier", 10.0)]
+        assert m and [(a.model, a.cost) for a in attempts["t1"]] == [("frontier", 10.0)]
 
 
 class TestLadderCertificationBlock:

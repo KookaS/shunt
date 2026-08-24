@@ -22,7 +22,7 @@ from shunt.router.policy import (
 
 def test_defaults_are_shipped_values() -> None:
     p = RouterPolicy()
-    assert p.strategy == "knn"
+    assert p.strategy == "session_cascade"
     assert p.policy == KnnPolicy(k=20, success_rate_threshold=0.6, min_samples=3)
     assert p.exploration.enabled is True
     assert p.exploration.explore_budget_frac == pytest.approx(0.4)
@@ -64,11 +64,12 @@ def test_unknown_strategy_rejected() -> None:
         RouterPolicy(strategy="oracle")
 
 
-@pytest.mark.parametrize("name", ["knn_cascade", "price_cascade"])
+@pytest.mark.parametrize("name", ["knn_cascade_withintask", "price_cascade"])
 def test_within_task_cascades_are_not_live_eligible(name: str) -> None:
     # Both are WITHIN-TASK cascades: they take a verified outcome per attempt mid-session,
     # which is not one cache-safe per-session decision. The exclusion is permanent and by
-    # design, so this is a wall, not a not-yet. The cache-safe analogue is `session_cascade`.
+    # design, so this is a wall, not a not-yet. The cache-safe analogues are the two
+    # session-cadence presets, `knn_cascade` and `session_cascade`.
     assert name not in LIVE_STRATEGIES
     with pytest.raises(ValidationError, match="unknown router.strategy"):
         RouterPolicy(strategy=name)
@@ -146,8 +147,10 @@ def test_escalation_enabled_with_a_work_dir_or_map_is_accepted() -> None:
 
 
 def test_escalation_can_still_be_explicitly_disabled() -> None:
-    # Turning it off remains a supported, documented config.
-    assert RouterPolicy(escalation=EscalationPolicy(enabled=False)).escalation.enabled is False
+    # Turning it off remains a supported, documented config — on a strategy that is not a
+    # cascade preset, where the coherence rule refuses it (see the cascade tests above).
+    policy = RouterPolicy(strategy="always_cheap", escalation=EscalationPolicy(enabled=False))
+    assert policy.escalation.enabled is False
 
 
 @pytest.mark.parametrize("name", LIVE_STRATEGIES)
@@ -157,7 +160,7 @@ def test_all_live_strategies_accepted(name: str) -> None:
 
 def test_extra_key_forbidden() -> None:
     with pytest.raises(ValidationError):
-        RouterPolicy.model_validate({"strategy": "knn", "bogus": 1})
+        RouterPolicy.model_validate({"strategy": "knn_cascade", "bogus": 1})
 
 
 def test_parse_router_policy_unwraps_router_key() -> None:
@@ -281,13 +284,15 @@ def test_models_default_is_empty() -> None:
 
 
 def test_models_field_parses_a_list() -> None:
-    p = RouterPolicy.model_validate({"strategy": "knn", "models": ["qwen3.7-plus", "kimi-k3"]})
+    p = RouterPolicy.model_validate(
+        {"strategy": "knn_cascade", "models": ["qwen3.7-plus", "kimi-k3"]}
+    )
     assert p.models == ["qwen3.7-plus", "kimi-k3"]
 
 
 def test_models_extra_key_still_forbidden() -> None:
     with pytest.raises(ValidationError):
-        RouterPolicy.model_validate({"strategy": "knn", "models": [], "bogus": 1})
+        RouterPolicy.model_validate({"strategy": "knn_cascade", "models": [], "bogus": 1})
 
 
 def test_packaged_router_yaml_models_are_all_in_the_packaged_registry() -> None:
@@ -309,11 +314,14 @@ def test_budget_default_is_unlimited() -> None:
     # null = unlimited is the shipped default; an absent `budget:` block is NOT an
     # opt-in to a cap (unlike escalation), so an old config stays behaviour-identical.
     assert RouterPolicy().budget.max_spend_usd is None
-    assert parse_router_policy({"router": {"strategy": "knn"}}).budget.max_spend_usd is None
+    parsed = parse_router_policy(
+        {"router": {"strategy": "knn_cascade", "escalation": {"enabled": True}}}
+    )
+    assert parsed.budget.max_spend_usd is None
 
 
 def test_budget_key_is_accepted() -> None:
-    p = RouterPolicy.model_validate({"strategy": "knn", "budget": {"max_spend_usd": 0.5}})
+    p = RouterPolicy.model_validate({"strategy": "knn_cascade", "budget": {"max_spend_usd": 0.5}})
     assert p.budget.max_spend_usd == pytest.approx(0.5)
 
 
@@ -332,4 +340,78 @@ def test_budget_rejects_negative_cap(value: float) -> None:
 
 def test_budget_unknown_key_still_forbidden() -> None:
     with pytest.raises(ValidationError):
-        RouterPolicy.model_validate({"strategy": "knn", "budget": {"bogus": 1}})
+        RouterPolicy.model_validate({"strategy": "knn_cascade", "budget": {"bogus": 1}})
+
+
+class TestTheKnnCascadeRenameDoesNotBrickExistingConfigs:
+    """`strategy: knn` was the pre-rename spelling of `knn_cascade`; it must keep booting."""
+
+    def test_the_default_is_a_cascade_but_not_the_knn_one(self) -> None:
+        # The kNN pick has participated in escalation since escalation shipped ON, so `knn`
+        # named something the router never did. The default says what it does — and it is the
+        # CHEAP-START cascade, because that is the measured frontier row.
+        assert RouterPolicy().strategy == "session_cascade"
+        assert "knn" not in LIVE_STRATEGIES
+
+    def test_a_pre_rename_strategy_is_aliased(self) -> None:
+        assert parse_router_policy({"router": {"strategy": "knn"}}).strategy == "knn_cascade"
+
+    def test_a_pre_rename_config_with_no_escalation_block_still_boots(self) -> None:
+        # THE BRICK CASE. The absent-block escape hatch resolves to OFF, and a cascade id with
+        # the ladder off is a load error — so without the carve-out below, every pre-escalation
+        # config in the world would stop booting on upgrade.
+        policy = parse_router_policy({"router": {"strategy": "knn"}})
+        assert policy.escalation.enabled is True
+
+    def test_the_alias_never_resolves_to_the_new_default(self) -> None:
+        # `strategy: knn` means kNN ROUTING. The shipped default moved to `session_cascade`,
+        # which does not consult the neighbourhood at all — resolving the alias there would
+        # silently migrate every pre-rename install off the routing model, which is a
+        # data-losing migration wearing a rename's clothes.
+        for raw in (
+            {"router": {"strategy": "knn"}},
+            {"router": {"strategy": "knn", "escalation": {"enabled": True}}},
+        ):
+            assert parse_router_policy(raw).strategy == "knn_cascade"
+
+    def test_a_config_with_no_strategy_and_no_escalation_block_still_boots(self) -> None:
+        policy = parse_router_policy({"router": {"policy": {"k": 5}}})
+        assert policy.strategy == "session_cascade"
+        assert policy.escalation.enabled is True
+
+    def test_the_defaulted_cascade_with_the_ladder_off_warns_and_boots(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # The default was ALREADY a cascade id before it moved, so this branch is not newly
+        # reachable — but it is the commonest way to turn escalation off (name nothing, write
+        # `escalation: {enabled: false}`), and it must stay a warning rather than a load error
+        # whichever cascade the default names.
+        with caplog.at_level("WARNING"):
+            policy = parse_router_policy({"router": {"escalation": {"enabled": False}}})
+        assert policy.strategy == "session_cascade"
+        assert policy.escalation.enabled is False
+        assert any("defaults to" in r.getMessage() for r in caplog.records)
+
+    def test_an_explicit_default_cascade_with_the_ladder_off_is_a_load_error(self) -> None:
+        with pytest.raises(ValidationError, match="requires router.escalation.enabled"):
+            parse_router_policy(
+                {"router": {"strategy": "session_cascade", "escalation": {"enabled": False}}}
+            )
+
+    def test_the_escape_hatch_still_holds_for_an_explicit_strategy(self) -> None:
+        # The carve-out is narrow: only a DEFAULTED or ALIASED strategy resolves the absent
+        # block to ON. A file that names its own strategy keeps the old reading.
+        policy = parse_router_policy({"router": {"strategy": "always_cheap"}})
+        assert policy.escalation.enabled is False
+
+    def test_an_explicit_cascade_with_the_ladder_off_is_still_a_load_error(self) -> None:
+        with pytest.raises(ValidationError, match="requires router.escalation.enabled"):
+            parse_router_policy(
+                {"router": {"strategy": "knn_cascade", "escalation": {"enabled": False}}}
+            )
+
+    def test_the_env_override_is_aliased_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # An operator exporting the pre-rename SHUNT_ROUTER_STRATEGY must not be refused at
+        # boot by a rename they never saw.
+        monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn")
+        assert apply_env_overrides(RouterPolicy()).strategy == "knn_cascade"

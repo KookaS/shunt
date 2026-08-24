@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from . import Strategy
-from ._cascade_common import cheapest_priced_model, frontier_model, measured_models_by_price
+from . import BilledAttempt, Strategy
+from ._cascade_common import (
+    billed_attempt,
+    cheapest_priced_model,
+    frontier_model,
+    measured_models_by_price,
+)
 
 
 class PriceCascade(Strategy):
@@ -21,7 +26,7 @@ class PriceCascade(Strategy):
         # Per-attempt (model, cost), in billing order — what the cache-aware cost model reads.
         # A cascade re-serving one model on consecutive attempts is exactly where the discount
         # lands, and the collapsed `cascade_total_cost` cannot express that adjacency.
-        self.cascade_attempts: list[tuple[str, float]] = []
+        self.cascade_attempts: list[BilledAttempt] = []
         # False when any tried cell is unmeasured — the true cost/outcome is unknown, so
         # this decision is a coverage gap, not a real fail@$0.
         self.cascade_scorable: bool = True
@@ -55,7 +60,7 @@ class PriceCascade(Strategy):
             if not outcome:
                 self.cascade_scorable = False
             attempt_cost = float(outcome.get("cost", 0.0))
-            self.cascade_attempts.append((model, attempt_cost))
+            self.cascade_attempts.append(billed_attempt(model, outcome))
             self.cascade_total_cost += attempt_cost
             if outcome.get("pass", False):
                 return model

@@ -254,13 +254,16 @@ def band_height_inches(spec: FigureSpec, width_in: float) -> float:
     return _BAND_PAD_TOP_IN + text_in + gaps_in + _BAND_PAD_BOTTOM_IN
 
 
-def attach_band(fig: Figure, spec: FigureSpec) -> float:
-    """Draw the title band and reserve the rect below it. Returns the band's top in px."""
+def reserve_band(fig: Figure, spec: FigureSpec) -> float:
+    """Shrink the layout to leave the band its room, drawing nothing. Returns its top in px."""
+    # Split out of `attach_band` so a figure that MEASURES its own axes can do so against the
+    # final geometry. The band takes about a fifth of the canvas height, so an axes measured
+    # before it is reserved is a fifth too tall — and a layout decision taken on that geometry
+    # (a label collision test, a free-space search) is decided on an axes box that never exists.
+    # Idempotent: `attach_band` calls this and sets the same rect again.
     width_in, height_in = fig.get_size_inches()
-    blocks = _band_blocks(spec, width_in)
-    if not blocks:
+    if not _band_blocks(spec, width_in):
         return float(fig.bbox.y1)
-
     band_in = band_height_inches(spec, width_in)
     top = 1.0 - band_in / height_in
     engine = fig.get_layout_engine()
@@ -271,6 +274,17 @@ def attach_band(fig: Figure, spec: FigureSpec) -> float:
         # Legacy path for a figure built outside `new_figure`; constrained layout is
         # the supported one because it also accounts for colorbars.
         fig.subplots_adjust(top=min(top, 0.98))
+    return float(fig.bbox.y1 * top)
+
+
+def attach_band(fig: Figure, spec: FigureSpec) -> float:
+    """Draw the title band and reserve the rect below it. Returns the band's top in px."""
+    width_in, height_in = fig.get_size_inches()
+    blocks = _band_blocks(spec, width_in)
+    if not blocks:
+        return float(fig.bbox.y1)
+
+    band_top = reserve_band(fig, spec)
 
     y = 1.0 - _BAND_PAD_TOP_IN / height_in
     for lines, pt, colour, weight in blocks:
@@ -287,7 +301,7 @@ def attach_band(fig: Figure, spec: FigureSpec) -> float:
             linespacing=_LINE_SPACING,
         )
         y -= (len(lines) * pt * _LINE_SPACING / 72.0 + _BLOCK_GAP_IN) / height_in
-    return float(fig.bbox.y1 * top)
+    return band_top
 
 
 # ------------------------------------------------------------------------ figures

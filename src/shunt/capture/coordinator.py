@@ -151,7 +151,15 @@ class WorkDirResolver:
         return None
 
     def resolve(self, session: Session) -> str | None:
-        mapped = self._work_dirs.get(session.tool_identity)
+        return self.resolve_identity(session.tool_identity)
+
+    def resolve_identity(self, tool_identity: str) -> str | None:
+        """The repo for a client identity — the same answer `resolve` gives for its session.
+
+        Split out because the prompt-prefix session key must bind the repo BEFORE a session
+        object exists; both callers must read one resolution, never two.
+        """
+        mapped = self._work_dirs.get(tool_identity)
         if mapped:
             return mapped
         return self._work_dir or self._launch_root or None

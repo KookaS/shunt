@@ -256,3 +256,107 @@ class TestPlaceLabels:
         # With six identical points the later labels cannot sit adjacent to their marker,
         # so at least one must be connected rather than left floating ambiguously.
         assert any(t.arrow_patch is not None for t in ax.texts)
+
+
+class TestLabelClusters:
+    """A crowd is detected from the LABELS' own extents, never from a written-down window."""
+
+    @staticmethod
+    def _axes():
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        ax.set_xlim(0, 10)
+        ax.set_ylim(0, 10)
+        return fig, ax
+
+    def test_points_that_are_far_apart_form_no_cluster(self):
+        fig, ax = self._axes()
+        points = [ps.LabelPoint(1.0, 1.0, "a"), ps.LabelPoint(9.0, 9.0, "b")]
+        assert ps.label_clusters(ax, points) == []
+
+    def test_coincident_points_are_one_cluster_holding_all_of_them(self):
+        fig, ax = self._axes()
+        points = [ps.LabelPoint(5.0, 5.0, f"strategy-{i}") for i in range(4)]
+        (cluster,) = ps.label_clusters(ax, points)
+        assert cluster.members == (0, 1, 2, 3)
+        assert (cluster.x0, cluster.x1, cluster.y0, cluster.y1) == (5.0, 5.0, 5.0, 5.0)
+
+    def test_a_longer_name_crowds_at_a_distance_a_short_one_does_not(self):
+        # The whole durability claim in one assertion: the threshold is the label's width,
+        # so the same two coordinates cluster or not depending on what is written there.
+        fig, ax = self._axes()
+        near = [ps.LabelPoint(4.0, 5.0, "x"), ps.LabelPoint(6.0, 5.0, "y")]
+        wide = [
+            ps.LabelPoint(4.0, 5.0, "a-very-long-strategy-name"),
+            ps.LabelPoint(6.0, 5.0, "another-long-strategy-name"),
+        ]
+        assert ps.label_clusters(ax, near) == []
+        assert len(ps.label_clusters(ax, wide)) == 1
+
+    def test_two_separate_crowds_are_returned_densest_first(self):
+        fig, ax = self._axes()
+        points = [ps.LabelPoint(1.0, 1.0, f"left-{i}") for i in range(3)]
+        points += [ps.LabelPoint(9.0, 9.0, f"right-{i}") for i in range(2)]
+        clusters = ps.label_clusters(ax, points)
+        assert [len(c.members) for c in clusters] == [3, 2]
+
+
+class TestFreeRegion:
+    def test_returns_none_when_every_placement_is_blocked(self):
+        assert ps.free_region(0.4, 0.4, [(0.0, 0.0, 1.0, 1.0)]) is None
+
+    def test_avoids_the_obstacles_it_is_given(self):
+        found = ps.free_region(0.3, 0.3, [(0.0, 0.0, 0.6, 1.0)])
+        assert found is not None
+        assert found[0] >= 0.6
+
+    def test_prefers_the_placement_furthest_from_anything(self):
+        # One obstacle on the left edge: the emptiest placement is hard against the right.
+        found = ps.free_region(0.2, 0.2, [(0.0, 0.0, 0.2, 1.0)])
+        assert found is not None
+        assert found[2] > 0.7
+
+    def test_a_box_larger_than_the_axes_never_fits(self):
+        assert ps.free_region(1.2, 0.2, []) is None
+
+
+class TestStackLabels:
+    @staticmethod
+    def _axes():
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        ax.set_xlim(0, 10)
+        ax.set_ylim(0, 10)
+        return fig, ax
+
+    def test_every_name_is_placed_and_carries_a_leader(self):
+        fig, ax = self._axes()
+        points = [ps.LabelPoint(5.0 + 0.05 * i, 5.0, f"strategy-{i}") for i in range(4)]
+        assert ps.stack_labels(ax, points, fontsize=6.0) == []
+        assert len(ax.texts) == 4
+        assert all(t.arrow_patch is not None for t in ax.texts)
+
+    def test_each_name_sits_on_its_own_level(self):
+        fig, ax = self._axes()
+        points = [ps.LabelPoint(5.0 + 0.05 * i, 5.0, f"strategy-{i}") for i in range(4)]
+        ps.stack_labels(ax, points, fontsize=6.0)
+        offsets = sorted(t.xyann[1] for t in ax.texts)
+        assert len(set(offsets)) == len(offsets)
+
+    def test_a_name_wider_than_the_panel_is_reported_not_dropped(self):
+        fig, ax = self._axes()
+        points = [ps.LabelPoint(5.0, 5.0, "x" * 400)]
+        assert ps.stack_labels(ax, points, fontsize=8.0) == ["x" * 400]
+        assert not ax.texts
+
+    def test_empty_input_is_a_noop(self):
+        fig, ax = self._axes()
+        assert ps.stack_labels(ax, []) == []

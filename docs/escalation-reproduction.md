@@ -117,7 +117,12 @@ what is in git. Re-deriving each step's verified outcome replays the agent's wor
 in containers and needs inputs that cannot be committed — the SWE-bench instance
 images and the gold dataset rows. `make replay-inputs` enumerates every input this
 checkout still lacks and exits non-zero rather than half-running. The per-step
-state capture *is* committed: `make state-import` restores it into the local
-scratch, `make state-verify` proves the restore matches what its index binds, and
-`make state-export` is how it was packed. See `benchmark/README.md` for what is and
+state capture is *committable but not yet committed*: `make state-export` packs it on
+the collection host into `benchmark/escalation/data/live/state/`, and once that
+directory is in git `make state-import` restores it into the local scratch and
+`make state-verify` proves the restore matches what its index binds. This checkout
+does not have it — the only committed file under that prefix is `state_capture.json`,
+the capture-health audit, not the diffs themselves — so `state-import` and
+`state-verify` currently fail with `no committed state plane`, and `make replay-inputs`
+lists `state.archives` among what is missing. See `benchmark/README.md` for what is and
 is not reproducible offline.

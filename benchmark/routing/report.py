@@ -297,7 +297,7 @@ def _evaluate_strategies(
     """Per strategy: ``(decisions, unscorable)`` from ``summary.evaluate``."""
     # Delegates rather than re-implementing. The private copy that used to live here
     # dropped a cascade's failed-probe cost and skipped the censoring check, so the
-    # regret plot charged kNN-cascade $3.09 less than strategy_summary.csv did and
+    # regret plot charged the within-task kNN cascade $3.09 less than strategy_summary.csv did and
     # printed a headline regret the CSV contradicted.
     return {
         name: summary.evaluate(factory(), matrix, tasks) for name, factory in factory_map.items()

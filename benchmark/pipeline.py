@@ -570,6 +570,7 @@ _ROUTING_ANALYSIS: Final[tuple[str, ...]] = (
     "benchmark.routing",
     "benchmark.routing.cache_cost",
     "benchmark.routing.censoring",
+    "benchmark.routing.context_cost",
     "benchmark.routing.figures",
     "benchmark.routing.figures.context",
     "benchmark.routing.impute",
@@ -583,6 +584,7 @@ _ROUTING_ANALYSIS: Final[tuple[str, ...]] = (
     "benchmark.routing.strategies.knn",
     "benchmark.routing.strategies.oracle",
     "benchmark.routing.summary",
+    "benchmark.routing.validate",
     # The frame, the shared style helpers and the instrument adjudicator ship in the wheel;
     # benchmark/plot_frame.py, benchmark/routing/plot_style.py and benchmark/admissibility.py are
     # re-export shims, so digesting only those would certify a figure drawn by changed code.
@@ -591,7 +593,7 @@ _ROUTING_ANALYSIS: Final[tuple[str, ...]] = (
     "shunt.inspect.plot_style",
 )
 # plot_timing additionally derives from the report/summary machinery, whose own closure reaches
-# the run_eval/validate path — those modules join its digest too.
+# the run_eval path — those modules join its digest too.
 _TIMING_ANALYSIS: Final[tuple[str, ...]] = (
     *_ROUTING_ANALYSIS,
     "benchmark.routing.authenticity",
@@ -600,7 +602,6 @@ _TIMING_ANALYSIS: Final[tuple[str, ...]] = (
     "benchmark.routing.integrity",
     "benchmark.routing.report",
     "benchmark.routing.run_eval",
-    "benchmark.routing.validate",
 )
 
 
@@ -817,6 +818,7 @@ _INFERENCE_ANALYSIS: Final[tuple[str, ...]] = (
     "benchmark.config",
     "benchmark.routing",
     "benchmark.routing.censoring",
+    "benchmark.routing.context_cost",
     "benchmark.routing.docs_corpus",
     "benchmark.routing.seed_live",
     # The drawing is all SHIPPED code — the same modules the rig container renders from, where

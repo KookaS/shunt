@@ -52,7 +52,9 @@ benchmark/
       oracle.py                           Best per-task (upper bound)
       fixed.py                            Always-cheap, always-frontier, random
       knn.py                              Embed task → retrieve neighbours → cheapest capable
-      knn_cascade.py                      kNN-informed try-verify-escalate
+      knn_cascade.py                      kNN-informed try-verify-escalate (within one task)
+      knn_session_cascade.py              The opt-in `knn_cascade`: kNN pick + the session ladder
+      session_cascade.py                  The shipped default: always-cheap pick + the session ladder
       _template.py                        Skeleton for a new strategy
     run_eval.py                           Evaluate all strategies × tasks
     metrics.py                            Reward, regret, efficiency
@@ -78,6 +80,7 @@ The evaluator iterates tasks, calls `select()` per strategy, looks up the outcom
 | AvgPerf% | `pass_count / total_tasks × 100` | % of tasks solved |
 | TotalCost | `sum(cost of every billed attempt)` | Raw dollar cost, cache-blind |
 | TotalCost_cacheaware | `TotalCost − Σ(cost × input_share × hit_rate × discount)` over consecutive same-model attempts | Dollar cost once repeat-model caching is priced. `input_share` is the cost-weighted input share of the model's MEASURED token mix; `discount` is `1 − cache_read_price/input_price` from the registry; only `hit_rate` is assumed |
+| context_cost_alpha_α | `TotalCost_cacheaware × C(α)/C(0)` where `C(α) = Σ[α·t_{i-1}·input_price_i + billed_i]` and `t = 2·in_tok/calls` | Cost model for carrying context across an escalation. The carried prefix is a cache MISS (a new model receiving a prefix it has never seen), so it is priced at full input rate. `C(0)` is `TotalCost` exactly, which is what makes the surcharge the only thing α moves. Computed on the token-complete subset (`context_cost_n`); asserts no pass rate. Published at α = 0.1, 0.3 and 1.0: the 0.1-0.3 band is `context_transfer: summary`, α = 1.0 is `context_transfer: full` (the shipped default), and α = 0 is the marker itself — a fresh context per rung, which is what the offline replay does and is deliberately not a config value |
 | Reward | `1.0 × pass_rate − γ × total_cost` | Cost-aware utility |
 | CumReg | `sum(oracle_reward − strategy_reward)` | Regret vs oracle — reward lost by not routing optimally |
 | rAcc | fraction of tasks routed to the oracle's model | Routing accuracy |
@@ -115,8 +118,18 @@ shown as a price word rather than a number. The measured comparison is in
 | **Always-Frontier** | Always most expensive model (derived from pricing matrix). Maximum cost baseline. |
 | **Random** | Random model per task (mean over N seeds). Null baseline. |
 
-Additional strategies in `strategies/`: kNN, kNN-cascade, Price-Cascade (the zero-ML
-price-ascending cascade — the floor a learned router has to beat), and Tier-Classifier.
+Additional strategies in `strategies/`: kNN (a control — the selection rule without the
+ladder), Session-Cascade (**the shipped default**: the session-cadence escalation ladder
+over an always-cheap pick), kNN-cascade (the opt-in `knn_cascade`: that same ladder over
+the kNN pick), kNN-cascade (within-task) and Price-Cascade (the zero-ML price-ascending
+cascade — the floor a learned router has to beat), and Tier-Classifier.
+
+**Every rung of a replayed cascade starts from a fresh tree and a fresh context.** That is
+a property of this harness, not of the product: the matrix records one outcome per
+(task, model) pair, run independently, so a cascade's second attempt is scored as if the
+stronger model had been handed the untouched original task. A live escalation is not like
+that, and the difference is stated once in
+[what the escalated model is told](escalation.md#offline-vs-live-cascade).
 
 ## Equal-coverage scoring — monotone-rank imputation
 

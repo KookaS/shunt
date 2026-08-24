@@ -6,7 +6,10 @@
 # pins strategy to always_cheap via SHUNT_ROUTER_STRATEGY; escalation and
 # capture are inert here because no capture work_dir is ever resolved.
 router:
-  strategy: knn
+  # The shipped default: start at the cheapest live model and let repeated verified failures
+  # climb the ladder. It does NOT consult the neighbourhood — `knn_cascade` is the opt-in that
+  # does, and the kNN/exploration knobs below are inert under this strategy.
+  strategy: session_cascade
 
   policy:
     k: 20
@@ -30,6 +33,11 @@ router:
     rank_shortlist: 3
     exploration_epsilon: 0.0
     exploration_seed: null
+    context_transfer: full        # full | summary — `summary` makes shunt AUTHOR the escalated
+                                  # model's context (disclosed at boot / doctor / explain /
+                                  # X-Shunt-Context); failures degrade to `full`. No `none`.
+    context_transfer_max_tokens: 2000
+    context_transfer_model: null  # null ⇒ the outgoing, pre-escalation model (its prefix is warm)
 
   capture:
     work_dir: null
@@ -45,4 +53,4 @@ router:
   # The single $0 model in this directory's models.yaml — the only model the
   # free-tier smoke may ever route to.
   models:
-    - gpt-oss-20b-free
+    - nemotron-nano-9b-free

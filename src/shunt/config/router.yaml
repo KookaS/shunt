@@ -4,28 +4,50 @@
 # Env vars (SHUNT_ROUTER_STRATEGY, SHUNT_EXPLORATION_ENABLED,
 # SHUNT_EXPLORE_BUDGET_FRAC) and CLI flags win over both.
 router:
-  # Active algorithm — one of: knn | always_cheap | always_frontier | session_cascade.
+  # Active algorithm. Two operating points are offered, and they differ in ONE thing — where
+  # the ladder starts. Both climb the SAME escalation ladder configured below: one rung at the
+  # next SESSION boundary when a verified failure recurs, never mid-conversation.
   #
-  # `session_cascade` is a PRESET, not a fourth selection rule: it is `always_cheap` plus the
-  # escalation ladder below, i.e. start on the cheapest model and let a verified failure walk a
-  # rung at the next SESSION boundary. It is the live spelling of the benchmark's
-  # `Session-Cascade` row, and the cache-safe operating point the blocked offline cascades
-  # (`price_cascade`, `knn_cascade`) approximate at one decision per ATTEMPT — which this
-  # product does not do, and will not. Selecting it with `escalation.enabled: false` is a load
-  # error. It needs a `capture.work_dir` to be anything at all (see below).
+  # `session_cascade` is the DEFAULT. It starts every task at the CHEAPEST live model and lets
+  # repeated verified failures climb. It does NOT consult the neighbourhood: no embedding, no
+  # kNN lookup, no per-task model choice — the routing model is opt-in, and this is not it.
+  # What you get is a cheap-start cascade whose cost is bounded by how often your work actually
+  # fails. It is the default because it is the measured frontier row: on the offline corpus it
+  # reaches the same pass rate as the kNN-started cascade for materially less money.
   #
-  # The default stays `knn`. That is a deliberate hold, not an oversight: the measured
-  # Session-Cascade row is always_cheap-based, so making it the default would change the
-  # shipped router's behaviour on the strength of a corpus whose cells are 35% imputed. Opt in.
-  strategy: knn
+  # `knn_cascade` starts each task at the model the kNN pick selects — embed the first turn,
+  # look up verified neighbours, take the cheapest model clearing the success bar — and then
+  # climbs the same ladder from there. Choose it when you want the routing model itself, and
+  # accept paying for a smarter start. It was previously spelled `knn`, which read as
+  # "selection only, no escalation" and was a lie about the behaviour; `knn` is still accepted
+  # as a migration alias (with a warning) for at least one minor release, and it resolves to
+  # `knn_cascade` — never to the new default, because it means kNN routing. Plain kNN WITHOUT
+  # the ladder is not selectable, because nothing ever shipped it.
+  #
+  # Exploration (below) applies to `knn_cascade` only: there is nothing to explore over when
+  # the base pick is fixed at the cheapest model.
+  #
+  # Selecting either with `escalation.enabled: false` is a load error — with the ladder off
+  # the name promises a cascade the install does not run. Both need a `capture.work_dir` for
+  # the ladder to be anything at all (see below); without one, `session_cascade` IS
+  # `always_cheap` and a boot warning says so.
+  #
+  # `always_cheap` and `always_frontier` remain selectable — they pin one model and are the
+  # baselines the benchmark measures against — but they are not offered here, because pinning
+  # one model is not a reason to run a router.
+  strategy: session_cascade
 
-  # Knobs for the active strategy.
+  # Knobs for the kNN pick. Read only under `knn_cascade` — the default cascade starts at the
+  # cheapest model and never queries the neighbourhood, so these values are inert until you
+  # select the routing strategy above.
   policy:
     k: 20
     success_rate_threshold: 0.6   # lower = more cost savings, higher = more reliability
     min_samples: 3
 
-  # Cost-aware Thompson-sampling exploration. Shipped ON so the router can gather
+  # Cost-aware Thompson-sampling exploration. Applies to `knn_cascade` ONLY: it perturbs the
+  # kNN base pick, and the default `session_cascade` has no base pick to perturb, so under the
+  # shipped strategy this whole block is inert. Shipped ON so the router can gather
   # evidence, but be clear about what that costs today: outcome capture is manual
   # (`shunt flag`), and the one offline replay measured exploration at -2.8pp pass
   # rate and +$0.013/task with its learning benefit set to zero. Set
@@ -103,6 +125,30 @@ router:
     # one, so it introduces no model switch the policy would not already make (cache-safe).
     exploration_epsilon: 0.0      # 0 = deterministic; 0.1-0.3 while collecting identifiable data
     exploration_seed: null        # null ⇒ the router draws one and records it on every decision
+    # What the ESCALATED model receives of the conversation that ran on the cheaper one.
+    #   full    (DEFAULT) — pure pass-through. Shunt forwards your messages untouched, which is
+    #             what has always shipped and what every published cost number assumes. The
+    #             escalated model re-reads the whole conversation, UNCACHED (new model ⇒ new
+    #             prefix), at full input price.
+    #   summary — on the FIRST turn after an escalation THAT CHANGED THE MODEL (a rank rung;
+    #             never a same-model effort rung, whose warm prefix compacting would throw
+    #             away, and never a resumed conversation), Shunt replaces the prior conversation
+    #             with a handover note it AUTHORS, then freezes that prefix and resends it
+    #             byte-identically on every later turn (a summary regenerated per turn is a
+    #             cache miss per turn, which costs more than `full`).
+    # `summary` is the ONE place Shunt puts words into your conversation: the model does not
+    # see what you see. It is therefore disclosed at boot, in `shunt doctor`, on the wire
+    # (`X-Shunt-Context`) and in `shunt explain`. Any failure — an error, a timeout, an empty
+    # or over-budget note — degrades to `full`, with the reason recorded; context is never
+    # silently dropped. There is deliberately NO `none`: Shunt can drop context from the
+    # request it forwards, but cannot make your CLI forget, so `none` would strip on every
+    # turn and the strong model could never accumulate state. See docs/escalation.md.
+    context_transfer: full        # full | summary
+    context_transfer_max_tokens: 2000   # ceiling on the authored note; over-budget ⇒ `full`
+    # Who writes the note. null ⇒ the OUTGOING, pre-escalation model — it is the cheaper one
+    # and its prefix is already warm, so it re-serves a cache hit. Naming the INCOMING model
+    # would pay the full uncached prefill this whole feature exists to avoid.
+    context_transfer_model: null
 
   # Off-wire automatic outcome capture. At each session's close shunt re-runs the resolved
   # repo's test suite (pytest/jest/go/cargo, auto-detected) off the wire and records the

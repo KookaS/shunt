@@ -109,6 +109,11 @@ def test_exits_nonzero_when_no_provider_key_resolves(cli_env: Path) -> None:
 
 def test_exits_zero_once_a_key_resolves(cli_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
+    # DEEPSEEK too: the shipped default is `session_cascade`, which routes its first request
+    # deterministically to the cheapest model (deepseek-v4-flash), so its key is REQUIRED for
+    # the install to be serviceable at all. Setting only REQUESTY fails this for a reason
+    # unrelated to what the test is about.
+    monkeypatch.setenv("DEEPSEEK_API_KEY", _FAKE_KEY)
     _run()  # must not raise SystemExit
 
 
@@ -139,6 +144,11 @@ def test_json_output_carries_no_key_value(
     cli_env: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
+    # DEEPSEEK too: the shipped default is `session_cascade`, which routes its first request
+    # deterministically to the cheapest model (deepseek-v4-flash), so its key is REQUIRED for
+    # the install to be serviceable at all. Setting only REQUESTY fails this for a reason
+    # unrelated to what the test is about.
+    monkeypatch.setenv("DEEPSEEK_API_KEY", _FAKE_KEY)
     _run(as_json=True)
     out = capsys.readouterr().out
     assert _FAKE_KEY not in out
@@ -156,6 +166,11 @@ def test_reports_escalation_inert_when_no_work_dir_resolves(
     cli_env: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
+    # DEEPSEEK too: the shipped default is `session_cascade`, which routes its first request
+    # deterministically to the cheapest model (deepseek-v4-flash), so its key is REQUIRED for
+    # the install to be serviceable at all. Setting only REQUESTY fails this for a reason
+    # unrelated to what the test is about.
+    monkeypatch.setenv("DEEPSEEK_API_KEY", _FAKE_KEY)
     # Launch somewhere that is not a git repo with tests, so nothing resolves.
     monkeypatch.chdir(cli_env)
     _run()
@@ -169,6 +184,11 @@ def test_reports_escalation_armed_for_a_repo_with_tests(
     cli_env: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
+    # DEEPSEEK too: the shipped default is `session_cascade`, which routes its first request
+    # deterministically to the cheapest model (deepseek-v4-flash), so its key is REQUIRED for
+    # the install to be serviceable at all. Setting only REQUESTY fails this for a reason
+    # unrelated to what the test is about.
+    monkeypatch.setenv("DEEPSEEK_API_KEY", _FAKE_KEY)
     repo = _repo_with_tests(cli_env / "repo")
     _run(work_dir=repo)
     out = capsys.readouterr().out
@@ -183,6 +203,11 @@ def test_resolved_work_dir_without_a_test_framework_is_inert_not_armed(
     # way a launch dir is, so escalation can resolve a repo and still have nothing to run.
     # Reporting that as ARMED would be the exact false-confidence this command must prevent.
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
+    # DEEPSEEK too: the shipped default is `session_cascade`, which routes its first request
+    # deterministically to the cheapest model (deepseek-v4-flash), so its key is REQUIRED for
+    # the install to be serviceable at all. Setting only REQUESTY fails this for a reason
+    # unrelated to what the test is about.
+    monkeypatch.setenv("DEEPSEEK_API_KEY", _FAKE_KEY)
     repo = _repo_without_tests(cli_env / "bare")
     _run(work_dir=repo)
     out = capsys.readouterr().out
@@ -195,6 +220,11 @@ def test_escalation_inert_does_not_make_the_install_unserviceable(
 ) -> None:
     # Inert escalation is a degraded state, not a broken one — the router still routes.
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
+    # DEEPSEEK too: the shipped default is `session_cascade`, which routes its first request
+    # deterministically to the cheapest model (deepseek-v4-flash), so its key is REQUIRED for
+    # the install to be serviceable at all. Setting only REQUESTY fails this for a reason
+    # unrelated to what the test is about.
+    monkeypatch.setenv("DEEPSEEK_API_KEY", _FAKE_KEY)
     monkeypatch.chdir(cli_env)
     report = doctor_report(work_dir=None, launch_dir=str(cli_env))
     assert report.serviceable is True
@@ -226,6 +256,9 @@ def test_embedder_reports_not_cached_on_an_empty_cache(
     cli_env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
+    # The embedder verdict depends on whether the ACTIVE strategy consults it, and the shipped
+    # default (`session_cascade`) does not — so this branch has to name the strategy that does.
+    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn_cascade")
     monkeypatch.setenv("SHUNT_EMBED_CACHE_DIR", str(cli_env / "empty-cache"))
     check = _check(doctor_report(work_dir=None, launch_dir=str(cli_env)), "embedder")
     assert check.warn is True
@@ -549,6 +582,9 @@ def test_unreadable_populated_cache_is_not_reported_as_absent(
     # read was reported "NOT cached ... will download ... not an error". All three clauses
     # wrong — it IS cached, the download will hit the same EACCES, and it IS an error.
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
+    # The embedder verdict depends on whether the ACTIVE strategy consults it, and the shipped
+    # default (`session_cascade`) does not — so this branch has to name the strategy that does.
+    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn_cascade")
     cache = cli_env / "locked-cache"
     _plant_model_cache(cache)
     monkeypatch.setenv("SHUNT_EMBED_CACHE_DIR", str(cache))
@@ -609,6 +645,11 @@ def test_empty_host_probes_loopback_like_the_server_binds(
     # An empty SHUNT_HOST binds every interface under uvicorn exactly as 0.0.0.0 does. Probing
     # it literally made doctor declare a working config unserviceable.
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
+    # DEEPSEEK too: the shipped default is `session_cascade`, which routes its first request
+    # deterministically to the cheapest model (deepseek-v4-flash), so its key is REQUIRED for
+    # the install to be serviceable at all. Setting only REQUESTY fails this for a reason
+    # unrelated to what the test is about.
+    monkeypatch.setenv("DEEPSEEK_API_KEY", _FAKE_KEY)
     monkeypatch.setenv("SHUNT_HOST", "")
     report = doctor_report(work_dir=None, launch_dir=str(cli_env))
     assert _check(report, "port").ok is True

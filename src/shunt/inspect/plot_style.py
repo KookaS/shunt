@@ -200,6 +200,17 @@ def _rects_overlap(
     return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
 
 
+def _inside(
+    inner: tuple[float, float, float, float], outer: tuple[float, float, float, float]
+) -> bool:
+    return (
+        inner[0] >= outer[0]
+        and inner[1] >= outer[1]
+        and inner[2] <= outer[2]
+        and inner[3] <= outer[3]
+    )
+
+
 def _label_rect(
     cx: float, cy: float, dx: float, dy: float, text: str, fontsize: float
 ) -> tuple[float, float, float, float]:
@@ -209,6 +220,17 @@ def _label_rect(
     x0 = cx + dx - (0.0 if dx > 0 else w if dx < 0 else w / 2.0)
     y0 = cy + dy - (0.0 if dy > 0 else h if dy < 0 else h / 2.0)
     return (x0, y0, x0 + w, y0 + h)
+
+
+def label_extent(text: str, fontsize: float) -> tuple[float, float]:
+    """(width, height) in POINTS that a direct label of this text reserves."""
+    # The one place a caller may ask how big a label is. It exists so a panel that has to
+    # HOLD a set of labels sizes itself from the same estimate the collision search uses,
+    # rather than from a second constant that drifts away from it.
+    return (
+        len(text) * fontsize * _LABEL_ADVANCE + 2 * _LABEL_PAD_PT,
+        fontsize * _LABEL_HEIGHT + 2 * _LABEL_PAD_PT,
+    )
 
 
 def _data_anchored(ax: Axes, text: Text) -> bool:
@@ -284,6 +306,7 @@ def place_labels(  # noqa: C901 (a single offset-search loop; splitting it hides
     fontsize: float = 8.0,
     color: str = "#333333",
     marker_pad_pt: float = 9.0,
+    obstacles: Sequence[tuple[float, float, float, float]] = (),
 ) -> None:
     """Direct-label points at the nearest free offset; a leader line only as a fallback."""
     # Replaces a margin-column labeller that spread EVERY label down the right edge
@@ -303,7 +326,11 @@ def place_labels(  # noqa: C901 (a single offset-search loop; splitting it hides
     fig = ax.get_figure(root=True)
     scale = (fig.dpi if fig is not None else 72.0) / 72.0
     pad_px = marker_pad_pt * scale
-    taken: list[tuple[float, float, float, float]] = []
+    # Anything on the axes this function cannot see for itself — the legend, a magnified
+    # inset panel — arrives here as a display-pixel rectangle. Without them a label is free
+    # to land on the legend, which is how a key ends up with a strategy name printed across
+    # it. Empty by default, so every caller that has no such artist places exactly as before.
+    taken: list[tuple[float, float, float, float]] = [tuple(r) for r in obstacles]  # type: ignore[misc]
     # Every marker and every error bar is an obstacle, including those of points
     # that have not been labelled yet — otherwise the first label placed wins a slot
     # the second point's own error bar occupies.
@@ -373,6 +400,97 @@ def place_labels(  # noqa: C901 (a single offset-search loop; splitting it hides
         )
 
 
+def stack_labels(
+    ax: Axes,
+    points: Sequence[LabelPoint],
+    fontsize: float = 8.0,
+    color: str = "#333333",
+    *,
+    obstacles: Sequence[tuple[float, float, float, float]] = (),
+    marker_pad_pt: float = 6.0,
+) -> list[str]:
+    """Label a crowd on stacked levels, each name directly over its own marker on a leader."""
+    # WHY THIS EXISTS BESIDE `place_labels`. The offset search is the right answer when a point
+    # has room somewhere around it. It is the WRONG answer once markers are closer together than
+    # the names are wide: every candidate near the point is nearer some OTHER marker, `_owns`
+    # rejects them all, and the leader fallback — which cannot apply an ownership test, because
+    # by then no slot passes one — puts the name beside a neighbour with a short line pointing
+    # at that neighbour's marker. A confidently mispaired label is worse than a crowded one.
+    #
+    # A ladder cannot mispair. Each name is CENTRED on its own marker's x and lifted to the
+    # lowest level that is free, so the leader is vertical and lands on the marker it names, and
+    # reading the levels left to right is reading the markers left to right. It costs vertical
+    # room, which is exactly what a magnified panel has and a crowded plane does not.
+    #
+    # Returns the texts it could NOT place, so a caller is never told a crowd was labelled when
+    # part of it was silently dropped.
+    if not points:
+        return []
+    fig = ax.get_figure(root=True)
+    scale = (fig.dpi if fig is not None else 72.0) / 72.0
+    pad = marker_pad_pt * scale
+    frame = (ax.bbox.x0, ax.bbox.y0, ax.bbox.x1, ax.bbox.y1)
+    taken: list[tuple[float, float, float, float]] = [tuple(r) for r in obstacles]  # type: ignore[misc]
+    marks: list[tuple[float, float]] = []
+    for p in points:
+        px, py = ax.transData.transform((p.x, p.y))
+        marks.append((float(px), float(py)))
+        taken.append((float(px) - pad, float(py) - pad, float(px) + pad, float(py) + pad))
+    unplaced: list[str] = []
+    for (px, py), p in sorted(zip(marks, points, strict=True), key=lambda pair: pair[0][0]):
+        width, height = (v * scale for v in label_extent(p.text, fontsize))
+        step = height + 0.25 * height
+        placed = False
+        for level in range(_STACK_LEVELS):
+            for direction in (1.0, -1.0):
+                dy = direction * (pad + level * step) + (0.0 if direction > 0 else -height)
+                dx = _clamp_shift(px, width, frame)
+                rect = (px + dx - width / 2, py + dy, px + dx + width / 2, py + dy + height)
+                if not _inside(rect, frame) or any(_rects_overlap(rect, t) for t in taken):
+                    continue
+                taken.append(rect)
+                _stacked_annotation(ax, p, fontsize, color, (dx / scale, (dy + height / 2) / scale))
+                placed = True
+                break
+            if placed:
+                break
+        if not placed:
+            unplaced.append(p.text)
+    return unplaced
+
+
+_STACK_LEVELS: Final[int] = 8
+
+
+def _clamp_shift(px: float, width: float, frame: tuple[float, float, float, float]) -> float:
+    """How far a centred label must slide to stay inside the frame (0 when it already is)."""
+    left, right = px - width / 2, px + width / 2
+    if left < frame[0]:
+        return frame[0] - left
+    if right > frame[2]:
+        return frame[2] - right
+    return 0.0
+
+
+def _stacked_annotation(
+    ax: Axes, p: LabelPoint, fontsize: float, color: str, offset: tuple[float, float]
+) -> None:
+    """One ladder rung: the name, centred, on a leader back to its own marker."""
+    ax.annotate(
+        p.text,
+        xy=(p.x, p.y),
+        xycoords="data",
+        xytext=offset,
+        textcoords="offset points",
+        fontsize=fontsize,
+        color=p.color or color,
+        ha="center",
+        va="center",
+        annotation_clip=True,
+        arrowprops={"arrowstyle": "-", "color": "#aaaaaa", "lw": 0.6, "shrinkA": 2, "shrinkB": 3},
+    )
+
+
 _LEADER_SLOTS: Final[tuple[tuple[float, float], ...]] = (
     (34.0, 12.0),
     (34.0, -12.0),
@@ -416,6 +534,160 @@ def _leader_label(
         annotation_clip=True,
         arrowprops=dict(arrowstyle="-", color="#999999", lw=0.6, shrinkA=2, shrinkB=2),
     )
+
+
+# ---------------------------------------------------------------------------
+# Crowd detection and free-space search.
+#
+# `place_labels` searches 8 directions x 3 radii and then falls back to a leader slot, and
+# on a dense enough cluster the FALLBACK SLOTS collide too — which is not crowding, it is
+# data loss: two names print on the same pixels and neither is readable. Tuning the offsets
+# does not fix that, because the room simply is not there. What fixes it is drawing the
+# crowd somewhere else, magnified, and the two functions below are the inputs that decision
+# needs: which points are actually crowded, and where the canvas is empty enough to put a
+# panel. Both are computed from the rendered geometry, so a figure whose data spreads out
+# stops magnifying by itself rather than pointing a hardcoded window at an empty region.
+# ---------------------------------------------------------------------------
+
+Rect = tuple[float, float, float, float]
+
+
+@dataclass(frozen=True)
+class LabelCluster:
+    """Points whose preferred labels overlap, plus the DATA box their markers span."""
+
+    members: tuple[int, ...]
+    x0: float
+    x1: float
+    y0: float
+    y1: float
+
+
+def _preferred_rects(
+    ax: Axes, points: Sequence[LabelPoint], fontsize: float, scale: float
+) -> list[Rect]:
+    """Where `place_labels` would put each label on its FIRST try, in display pixels."""
+    # The first candidate is _LABEL_DIRECTIONS[0] at _LABEL_RADII[0] — read from the same
+    # constants the search uses, so a change there cannot leave this measuring a slot the
+    # placer no longer tries.
+    dirx, diry = _LABEL_DIRECTIONS[0]
+    radius = _LABEL_RADII[0]
+    out: list[Rect] = []
+    for p in points:
+        px, py = ax.transData.transform((p.x, p.y))
+        out.append(
+            _label_rect(
+                float(px),
+                float(py),
+                dirx * radius * scale,
+                diry * radius * scale,
+                p.text,
+                fontsize * scale,
+            )
+        )
+    return out
+
+
+def label_clusters(
+    ax: Axes,
+    points: Sequence[LabelPoint],
+    fontsize: float = 8.0,
+    *,
+    marker_pad_pt: float = 9.0,
+) -> list[LabelCluster]:
+    """Single-linkage groups of points whose labels cannot all be placed where they sit."""
+    # The linkage threshold is the LABEL's own extent — `_label_rect` on the placer's first
+    # candidate — never a pixel constant. A longer name, a bigger font or a wider panel all
+    # move the threshold on their own, which is what keeps this from rotting when the data,
+    # the strategy set or the canvas changes.
+    if len(points) < 2:
+        return []
+    fig = ax.get_figure(root=True)
+    scale = (fig.dpi if fig is not None else 72.0) / 72.0
+    rects = _preferred_rects(ax, points, fontsize, scale)
+    pad = marker_pad_pt * scale
+    marks: list[Rect] = []
+    for p in points:
+        px, py = ax.transData.transform((p.x, p.y))
+        marks.append((float(px) - pad, float(py) - pad, float(px) + pad, float(py) + pad))
+
+    parent = list(range(len(points)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(points)):
+        for j in range(i + 1, len(points)):
+            # Either the two names would print on each other, or the two markers are so close
+            # that no label between them could be attributed to one of them.
+            if _rects_overlap(rects[i], rects[j]) or _rects_overlap(marks[i], marks[j]):
+                parent[find(i)] = find(j)
+
+    groups: dict[int, list[int]] = {}
+    for i in range(len(points)):
+        groups.setdefault(find(i), []).append(i)
+
+    clusters = [
+        LabelCluster(
+            members=tuple(sorted(idx)),
+            x0=min(points[k].x for k in idx),
+            x1=max(points[k].x for k in idx),
+            y0=min(points[k].y for k in idx),
+            y1=max(points[k].y for k in idx),
+        )
+        for idx in groups.values()
+        if len(idx) >= 2
+    ]
+    # Densest first: a caller with room for one panel must magnify the worst crowd, and a
+    # caller that runs out of room must be able to say which crowd it could not draw.
+    return sorted(clusters, key=lambda c: (-len(c.members), c.members))
+
+
+def _overlap_area(a: Rect, b: Rect) -> float:
+    return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+
+
+def _gap(a: Rect, b: Rect) -> float:
+    """Euclidean gap between two axis-aligned rects (0 when they touch or overlap)."""
+    dx = max(b[0] - a[2], a[0] - b[2], 0.0)
+    dy = max(b[1] - a[3], a[1] - b[3], 0.0)
+    return math.hypot(dx, dy)
+
+
+def free_region(
+    width: float,
+    height: float,
+    obstacles: Sequence[Rect],
+    *,
+    margin: float = 0.02,
+    steps: int = 40,
+) -> Rect | None:
+    """The emptiest placement in AXES FRACTION for a box of this size, or None if none is."""
+    # Emptiest is computed, not chosen: every candidate position on a grid is scored against
+    # the obstacle rects the caller declares (markers, intervals, the filled region, the
+    # legend, any panel already placed), the ones that touch anything are discarded outright,
+    # and the winner is the survivor furthest from its nearest obstacle. Returning None is a
+    # real answer — a caller that cannot fit a panel must say so rather than draw it over the
+    # legend.
+    span_x, span_y = 1.0 - 2.0 * margin - width, 1.0 - 2.0 * margin - height
+    if span_x < 0.0 or span_y < 0.0:
+        return None
+    best: Rect | None = None
+    best_gap = -1.0
+    for i in range(steps + 1):
+        x0 = margin + span_x * i / steps
+        for j in range(steps + 1):
+            y0 = margin + span_y * j / steps
+            cand = (x0, y0, x0 + width, y0 + height)
+            if any(_overlap_area(cand, o) > 0.0 for o in obstacles):
+                continue
+            gap = min((_gap(cand, o) for o in obstacles), default=1.0)
+            if gap > best_gap:
+                best, best_gap = cand, gap
+    return best
 
 
 # ---------------------------------------------------------------------------

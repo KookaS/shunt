@@ -32,9 +32,12 @@ it is enabled and **inert**, doing nothing at all. `doctor` says which.
 It exits non-zero only when the router could not serve a request at all: no provider key
 resolves, the registry or `router.yaml` will not load, every model's circuit breaker is
 open, or the bind address is unusable. A degraded-but-working install still exits `0`.
-Note that the embedder verdict depends on `router.strategy`: under `knn` a missing or
-unreadable weights cache is fatal, while under `always_cheap` / `always_frontier` nothing
-embeds at all, so the same cache is only a warning.
+Note that the embedder verdict depends on `router.strategy`, and that the **default**
+lands on the lenient side. Only `knn_cascade` embeds; under it a missing or unreadable
+weights cache is **fatal**. Under the default `session_cascade` — and under `always_cheap`
+and `always_frontier` — nothing embeds at all, so the same cache is a **warning**, and
+`doctor` names the strategy in the message so the downgrade is never silent. Downloading
+the weights is only worth doing if you intend to switch the routing model on.
 
 `--json` emits the same report with a stable shape: every check name is always present,
 in the same order, each carrying an explicit `status` of `ok`, `warn`, `fail`, or
@@ -231,7 +234,7 @@ models:
       arms:
         - id: low
           rank: 0
-          api: { reasoning_effort: low }     # merged verbatim into the request
+          api: { reasoning_effort: low }     # merged into the request (see below)
         - id: medium
           rank: 1
           api: { reasoning_effort: medium }
@@ -239,6 +242,13 @@ models:
           rank: 2
           api: { reasoning_effort: high }
 ```
+
+Keys the OpenAI SDK itself accepts (`reasoning_effort`, `max_tokens`, `temperature`, …)
+are sent as request parameters. Anything else — provider-specific keys such as
+`thinking`, `enable_thinking` or `output_config` — is sent inside `extra_body`, which the
+SDK forwards into the JSON body untouched. The split is an allowlist read from the
+installed SDK, so a provider key you add here reaches the provider instead of being
+rejected as an unknown parameter.
 
 A model with no `reasoning:` block runs at a single implicit `default` arm, exactly
 as before — the field is optional and backward-compatible. The benchmark scores each
@@ -258,30 +268,48 @@ place, so a single directory holds everything you edit.
 
 ### Choose the strategy
 
-`router.strategy` takes one of four values.
+`router.strategy` takes one of four values. Two of them are operating points you would
+actually run a router for — they differ only in where the escalation ladder starts — and two
+are pinned controls kept for baselines.
 
 | Value | What it does |
 |---|---|
-| `knn` (default) | Embed the first turn, look up verified neighbours, take the cheapest model clearing the success bar. [The routing model](routing.md). |
-| `always_cheap` | Cheapest healthy model, every session. No embedding, no index. |
+| `session_cascade` (default) | **Start cheap and climb.** Every session begins on the cheapest healthy model; a repeated verified failure raises a rung at the next session boundary, and the climbed rung persists for that repo. It does **not** consult the neighbourhood — no embedding, no index, no per-task model choice — so the `policy:` and `exploration:` blocks are inert under it. It is the default because the offline corpus measures it at the same pass rate as the kNN start for materially less money. |
+| `knn_cascade` | **Route smart, then climb.** Embed the first turn, look up verified neighbours, take the cheapest model clearing the success bar ([the routing model](routing.md)) — then climb the same ladder from there. This is the opt-in that turns per-task routing on. Spelled `knn` before the rename; that value still works, with a warning, and still resolves here rather than to the new default. |
+| `always_cheap` | Cheapest healthy model, every session. No embedding, no index, no climbing. |
 | `always_frontier` | Strongest healthy model, every session. |
-| `session_cascade` | **Start cheap and climb.** `always_cheap` plus the escalation ladder: a repeated verified failure raises a rung at the next session boundary, and the climbed rung persists for that repo. |
 
-`session_cascade` is a preset, not a fourth algorithm — it is exactly `always_cheap` with
+Both `*_cascade` values are presets, not new algorithms — a base pick with
 [auto-escalation](escalation.md) on, named so you can select the operating point in one
 line instead of assembling it. Two consequences follow from that, and both are enforced
 rather than documented-and-hoped:
 
-- Setting it with `escalation.enabled: false` is a **load error**. With the ladder off the
-  config is a fixed cheap router wearing a cascade's name. Note the trap: your `router.yaml`
-  replaces the packaged one **wholesale**, and an *absent* `escalation:` block reads as OFF
-  (so an old config cannot be flipped on behind your back). A file containing only
-  `strategy: session_cascade` therefore fails to boot — spell the block out, as below.
+- Naming one explicitly with `escalation.enabled: false` is a **load error**. With the
+  ladder off the config is a fixed router wearing a cascade's name. Note the trap: your
+  `router.yaml` replaces the packaged one **wholesale**, and an *absent* `escalation:` block
+  reads as OFF for any strategy you name yourself (so an old config cannot be flipped on
+  behind your back). A file containing only `strategy: session_cascade` therefore fails to
+  boot — spell the block out, as below. The one exception is a file that names **no**
+  strategy, or the legacy `strategy: knn`: those resolve the ladder to **on**, because they
+  never named a cascade and turning it off would change what a pre-rename install does.
 - It needs a repo to test. Without a resolvable `capture.work_dir` there is no verified
   failure, so nothing ever climbs and you are running `always_cheap`. The router warns
   twice at boot in that state; see [Record verified outcomes automatically](#record-verified-outcomes-automatically).
 
-It reports its own reason token, `session_cascade`, rather than `always_cheap` — the two
+Two consequences of the default that are easy to miss, because they are absences:
+**the default does no routing at all** — it never embeds a turn, never queries the
+neighbourhood, never scores candidates — so the `exploration:` block below is **inert**
+under it (it perturbs a kNN base pick that is never made), and `shunt doctor` treats a
+missing embedding-weights cache as a warning rather than a failure. Setting
+`strategy: knn_cascade` is what turns [the routing model](routing.md) on; on the offline
+corpus that cost more than it bought, which is why it is not the default — see
+[the two priced against each other](results.md#the-shipped-default-and-the-routing-model-priced-against-it).
+
+Both cascades' published costs are **offline replays whose rungs each start from a fresh
+tree and a fresh context**; a live escalation inherits both from the rung below it, in a
+direction nothing here measures — [stated once](escalation.md#offline-vs-live-cascade).
+
+`session_cascade` reports its own reason token, `session_cascade`, rather than `always_cheap` — the two
 pick the same model but differ on whether a verified failure may later move it, and that
 difference has to be visible in `shunt explain` and in `X-Shunt-Decision`. The climb itself
 shows up as `auto_escalation` and `escalation_floor` on later sessions.
@@ -306,8 +334,8 @@ router:
 This is the live spelling of the benchmark's `Session-Cascade` row. What it is *not* is a
 within-task cascade: Shunt makes one model decision per session and never switches inside
 a cached turn, so it cannot try a cheap model, read your tests, and retry bigger within one
-task. The offline `price_cascade` / `knn_cascade` rows measure that, are rejected at boot,
-and stay that way — [Results](results.md#routing-results) carries what the difference costs.
+task. The offline `price_cascade` / `knn_cascade_withintask` rows measure that, are rejected
+at boot, and stay that way — [Results](results.md#routing-results) carries what the difference costs.
 
 ### Choose which models are live-routable
 
@@ -345,7 +373,7 @@ so restate every setting you care about:
 
 ```yaml
 router:
-  strategy: knn
+  strategy: knn_cascade
   models:
     - qwen3.7-plus
     - deepseek-v4-flash
@@ -359,7 +387,7 @@ Because those overrides stack, the config actually in force is not always the fi
 last edited. Shunt prints it at startup, so you never have to guess:
 
 ```
-Shunt config | strategy=knn
+Shunt config | strategy=knn_cascade
 Shunt config | knn: k=20 success_rate_threshold=0.60 min_samples=3
 Shunt config | exploration: enabled=True budget_frac=0.15 conservative_alpha=0.10 ...
 Shunt config | budget: max_spend_usd=unlimited
@@ -375,7 +403,7 @@ env var:
 
 | What | Flag on `shunt start` | Environment variable |
 |------|----------------------|----------------------|
-| Active strategy | `--strategy knn` | `SHUNT_ROUTER_STRATEGY` |
+| Active strategy | `--strategy knn_cascade` | `SHUNT_ROUTER_STRATEGY` |
 | Exploration on/off | `--explore` / `--no-explore` | `SHUNT_EXPLORATION_ENABLED` |
 | Exploration budget | `--explore-budget-frac 0.2` | `SHUNT_EXPLORE_BUDGET_FRAC` |
 | Log verbosity | `--log-level debug` | `SHUNT_LOG_LEVEL` |
@@ -400,7 +428,10 @@ A flag beats an env var, an env var beats your file, and your file replaces the
 shipped one wholesale — it is not merged key by key, so copy the packaged file
 before editing it.
 
-Exploration ships on, but its effect is limited today. Outcomes can be recorded
+Exploration ships `enabled: true`, but under the **shipped default strategy it never
+fires at all**: it perturbs the kNN base pick, and `session_cascade` makes no such pick.
+The whole `exploration:` block is inert until you set `strategy: knn_cascade`. Even then
+its effect is limited today: outcomes can be recorded
 manually via `shunt flag <session_id> good|bad`, or automatically once you configure a
 capture work_dir (below); with neither, the outcome count typically stays near zero and
 the exploration branch rarely fires. Exploration costs nothing extra today because it
@@ -554,6 +585,10 @@ router:
     rank_shortlist: 3           # the 3 cheapest ranks are rungs; the rung above them is the top rank
     exploration_epsilon: 0.0    # 0 = deterministic; above 0 randomizes flagged checkpoints
     exploration_seed: null      # null ⇒ the router draws a seed and records it on every decision
+    context_transfer: full      # full | summary — `summary` makes shunt author the escalated
+                                # model's context; disclosed, opt-in, degrades to full on failure
+    context_transfer_max_tokens: 2000
+    context_transfer_model: null  # null ⇒ the outgoing, pre-escalation model writes the note
 ```
 
 | Field | Default | Meaning |
@@ -565,6 +600,9 @@ router:
 | `rank_shortlist` | `3` | How many of the *cheapest* ranks the ladder walks one at a time. The rung that leaves them jumps straight to the **top rank** instead of buying every model in between — rank order is price order, and each intermediate rung costs another `escalate_after_n` recurrences to leave. `0` restores the every-rank walk. See [the ladder](escalation.md#the-rank-rung-is-a-shortlist-not-every-model). |
 | `exploration_epsilon` | `0.0` | Fraction of *flagged* checkpoints where the escalation is randomly withheld, so its value becomes measurable. `0.0` is fully deterministic. A **separate** opt-in: `enabled: true` alone never randomizes. |
 | `exploration_seed` | `null` | Seed for that randomization. `null` means shunt draws one and records it on every decision, so any logged propensity stays reproducible. |
+| `context_transfer` | `full` | What the **escalated** model receives of the conversation that ran on the cheaper one. `full` is pure pass-through. `summary` makes shunt author a handover note and send that instead, once, frozen for the rest of the session — **the model then does not see what you see**. It fires only on a rung that actually changes the model (a same-model effort rung keeps its warm prefix, so compacting it would cost more than it saves), and never decided afresh on a resumed conversation — a resume restores the frozen note along with the model, so the prefix stays warm. Disclosed at boot, on `shunt doctor`, as an `X-Shunt-Context` header and in `shunt explain`. There is no `none`. See [what the escalated model is told](escalation.md#what-the-escalated-model-is-told--context_transfer). |
+| `context_transfer_max_tokens` | `2000` | Ceiling on the authored note. A note over budget is not truncated — the transfer degrades to `full`. |
+| `context_transfer_model` | `null` | Who writes the note. `null` means the **outgoing**, pre-escalation model: it is cheaper and its prefix is already warm, so it re-serves a cache hit. |
 
 Escalation triggers only on **confirmed, verified capability failures** — the test suite
 re-run via `work_dir` at session close. A manual `shunt flag <session_id> bad` feeds the
