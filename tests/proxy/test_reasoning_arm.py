@@ -51,7 +51,10 @@ async def test_escalated_arm_reaches_upstream_and_overrides_client(router: Proxy
         _payload, model_name, _reason = await router.route_chat_completion(body, session)
 
     kwargs = mock_ac.call_args.kwargs
-    assert kwargs["enable_thinking"] is True  # the "think" arm's api param reached upstream
+    # `enable_thinking` is NOT an OpenAI SDK kwarg — it rides in extra_body, which the SDK
+    # forwards into the JSON body verbatim. Spliced in as a kwarg it raised TypeError instead.
+    assert kwargs["extra_body"] == {"enable_thinking": True}
+    assert "enable_thinking" not in kwargs
     assert "reasoning_effort" not in kwargs  # client-supplied reasoning was overridden/removed
     assert model_name == "qwen3.7-plus"  # cache-safe: served model unchanged by the effort step
 
@@ -64,6 +67,7 @@ async def test_no_arm_leaves_request_untouched(router: ProxyRouter) -> None:
         mock_ac.return_value = _response()
         await router.route_chat_completion(body, session)
     assert "enable_thinking" not in mock_ac.call_args.kwargs
+    assert "extra_body" not in mock_ac.call_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -118,8 +122,8 @@ async def test_escalated_arm_not_leaked_to_fallback_sibling() -> None:
     assert model_name == "sib"  # fell back
     head_kwargs = next(kw for name, kw in seen if name == "head")
     sib_kwargs = next(kw for name, kw in seen if name == "sib")
-    assert head_kwargs.get("enable_thinking") is True  # head DID get its escalated arm
-    assert "enable_thinking" not in sib_kwargs  # the sibling did NOT — no leak across fallback
+    assert head_kwargs.get("extra_body") == {"enable_thinking": True}  # head got its arm
+    assert "extra_body" not in sib_kwargs  # the sibling did NOT — no leak across fallback
 
 
 def test_apply_reasoning_arm_skips_arm_foreign_to_the_served_model() -> None:

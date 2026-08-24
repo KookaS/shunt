@@ -190,3 +190,32 @@ def test_snapshot_reads_coverage_and_propensity_from_store(store: OutcomeStore) 
     # Propensity aggregates by model; here all share model "m".
     models = {m for m, *_ in snap.model_propensities}
     assert models == {"m"}
+
+
+# ── Verification progress: the counter that is NOT gated on an embedding ────────
+def test_verified_outcomes_counts_unembedded_sessions_label_coverage_cannot(
+    store: OutcomeStore,
+) -> None:
+    """A non-embedding strategy's verified outcome is invisible to `label_coverage`."""
+    # The shipped default (`session_cascade`) never embeds, so `sessions.embedding_blob` is
+    # NULL and every `label_coverage` counter — all of which join on that column — reads 0
+    # however many outcomes land. `verification.verified_outcomes` is the strategy-independent
+    # counter, and it is what the escalation ladder's own input looks like from outside.
+    store.store_session("no-emb", "p", None, "m", 1.0, {}, 1.0)
+    store.append_outcome_event(OutcomeEvent("no-emb", 2, "auto_tier2", "failure", 1.0, "r1"))
+
+    snap = store.loop_health_snapshot()
+    assert snap.total_sessions == 1
+    assert snap.eligible_sessions == 0  # nothing embedded
+    assert snap.verified_labeled == 0  # ...so kNN coverage sees nothing
+    assert snap.verified_outcomes == 1  # ...while the loop itself is demonstrably running
+
+    health = compute_loop_health(snap, frontier_models=set(), candidate_models={"m"})
+    assert health.verification.verified_outcomes == 1
+    assert health.verification.total_sessions == 1
+
+    # An imported benchmark row arrives already labeled; counting it would let a seed import
+    # make a dead verification loop look alive, so the counter is LIVE rows only.
+    store.store_session("bench:seeded", "p", None, "m", 1.0, {}, 1.0)
+    store.append_outcome_event(OutcomeEvent("bench:seeded", 2, "auto_tier2", "success", 1.0, "r2"))
+    assert store.loop_health_snapshot().verified_outcomes == 1

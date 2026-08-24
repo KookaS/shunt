@@ -39,9 +39,14 @@ services:
         N = int(os.environ["SHUNT_ESC_PROMPTS"])
 
 
+        # `verification.verified_outcomes`, NOT `label_coverage.verified_labeled`: the latter
+        # is the kNN-corpus coverage counter, gated on the session carrying an embedding, so
+        # under the shipped default strategy (`session_cascade`, which never embeds) it reads 0
+        # forever and this poll could only time out. `verified_outcomes` counts the same Tier-2
+        # outcomes with no embedding predicate — the signal the escalation ladder runs on.
         def verified() -> int:
             with urllib.request.urlopen(f"{BASE}/admin/loop-health") as resp:
-                return int(json.load(resp)["label_coverage"]["verified_labeled"])
+                return int(json.load(resp)["verification"]["verified_outcomes"])
 
 
         def wait_verified(target: int, timeout: float = 300.0) -> None:
@@ -50,10 +55,10 @@ services:
             while time.monotonic() < deadline:
                 seen = verified()
                 if seen >= target:
-                    print(f"verified_labeled={seen} (>= {target})", flush=True)
+                    print(f"verified_outcomes={seen} (>= {target})", flush=True)
                     return
                 time.sleep(1)
-            raise SystemExit(f"timed out waiting for verified_labeled >= {target}")
+            raise SystemExit(f"timed out waiting for verified_outcomes >= {target}")
 
 
         def send(i: int) -> None:

@@ -25,16 +25,32 @@ class TestHindsightIsNeverDeployable:
 
     def test_only_the_products_own_allowlist_is_live(self):
         # The whole point of the module: the benchmark cannot mint its own "deployable".
-        for name in ("kNN", "Always-Frontier", "Always-Cheap"):
+        for name in ("kNN-cascade", "Always-Frontier", "Always-Cheap"):
             assert strategy_class.is_live(name)
-        for name in ("kNN-cascade", "Price-Cascade", "Tier-Classifier"):
+        for name in ("kNN-cascade (within-task)", "Price-Cascade", "Tier-Classifier"):
             assert not strategy_class.is_live(name)
             assert strategy_class.classify(name).path_to_live
 
-    def test_the_figures_router_is_live(self):
-        # Every caption that says "the router" resolves through this constant.
-        assert strategy_class.is_live(context.ROUTER_STRATEGY)
+    def test_the_bare_selection_rule_is_a_control_with_no_route(self):
+        # `knn` left LIVE_STRATEGIES when the kNN strategy was renamed to `knn_cascade`: the kNN
+        # pick has always run WITH the escalation ladder, so the pick alone is a contrast,
+        # not a configuration. A CONTROL takes no path_to_live — there is no route and there
+        # should not be one.
+        found = strategy_class.classify("kNN")
+        assert found.cls is strategy_class.StrategyClass.CONTROL
+        assert found.path_to_live is None
+
+    def test_the_figures_default_router_is_live(self):
+        # Every caption that says "the shipped default" resolves through this constant.
+        assert strategy_class.is_live(context.DEFAULT_STRATEGY)
         assert strategy_class.is_live(context.BASELINE_STRATEGY)
+
+    def test_the_kill_gates_pre_registered_arm_is_deliberately_not_live(self):
+        # A pre-registered verdict arm may not be repointed after seeing the data, so the
+        # gate keeps adjudicating the kNN row even though no router.strategy names it. That
+        # gap is published on the canvas beside the default's own row, not hidden.
+        assert not strategy_class.is_live(context.ROUTER_STRATEGY)
+        assert context.ROUTER_STRATEGY != context.DEFAULT_STRATEGY
 
 
 class TestDollarsSurviveMathtext:

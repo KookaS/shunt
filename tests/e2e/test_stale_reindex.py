@@ -88,6 +88,9 @@ def _boot(
     monkeypatch.setenv("SHUNT_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("SHUNT_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("SHUNT_EXPLORATION_ENABLED", "0")
+    # The stale-space refusal is only observable on a strategy that queries the index; the
+    # shipped default (`session_cascade`) never embeds, so it names the kNN one.
+    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn_cascade")
     # Hermetic by construction: dropping the fake injection fails loudly instead of
     # downloading ~600MB (embedder.py:16-19).
     monkeypatch.setenv("SHUNT_DISALLOW_REAL_EMBEDDER", "1")

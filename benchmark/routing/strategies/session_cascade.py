@@ -49,8 +49,12 @@ from shunt.router.escalation import (
     next_rung_rank,
 )
 
-from . import Strategy
-from ._cascade_common import cheapest_priced_model, measured_models_by_price
+from . import BilledAttempt, Strategy
+from ._cascade_common import (
+    billed_attempt,
+    cheapest_priced_model,
+    measured_models_by_price,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -62,6 +66,12 @@ _MAX_SESSIONS: int = 60
 # The reason `_ladder_action` stamps when neither axis has headroom left. Matched rather than
 # re-derived: it is the product's own end-of-ladder signal.
 _CEILING: str = "escalation_ceiling"
+
+# The ladder a session-cadence row runs when nothing names one. Declared here, beside the
+# constructor default it feeds, because `run_eval` has to gate the row on the ladder it will
+# ACTUALLY run: a caller that restated a different fallback would ask the positive control to
+# certify one ladder while the strategy replayed another.
+DEFAULT_LADDER: str = "effort_then_rank"
 
 
 @dataclass(frozen=True)
@@ -113,7 +123,7 @@ class _Trace:
     # Per-session (model, cost), in billing order. The session ladder re-serves its rank floor
     # across consecutive sessions, so this sequence — not the collapsed total — is what the
     # cache-aware cost model needs to see.
-    attempts: list[tuple[str, float]] = field(default_factory=list)
+    attempts: list[BilledAttempt] = field(default_factory=list)
 
     @property
     def hops(self) -> int:
@@ -130,7 +140,7 @@ class SessionCascadeStrategy(Strategy):
         self,
         escalate_after_n: int = 2,
         stale_window: int = 10,
-        ladder: str = "effort_then_rank",
+        ladder: str = DEFAULT_LADDER,
         max_sessions: int = _MAX_SESSIONS,
         arm_results: Mapping[str, Mapping[str, Mapping[str, dict]]] | None = None,
         arm_ladders: Mapping[str, ArmLadder] | None = None,
@@ -158,7 +168,7 @@ class SessionCascadeStrategy(Strategy):
         # reported cost is every billed session, not just the returned model's cell.
         self.cascade_total_cost: float = 0.0
         self.cascade_tried_models: list[str] = []
-        self.cascade_attempts: list[tuple[str, float]] = []
+        self.cascade_attempts: list[BilledAttempt] = []
         self.cascade_scorable: bool = True
         # Instrumentation — proves the escalation path is actually exercised rather than assumed.
         self.session_path: list[tuple[str, str]] = []
@@ -177,25 +187,42 @@ class SessionCascadeStrategy(Strategy):
         if not rungs:
             self._publish(_Trace(path=[], cost=0.0, scorable=False, passed=False, unmeasured=0))
             return cheapest_priced_model(matrix)
-        trace = self._run_task(task_id, matrix, rungs)
+        floor = self._initial_rank_floor(task_id, matrix, rungs)
+        trace = self._run_task(task_id, matrix, rungs, floor)
         self._publish(trace)
-        return trace.path[-1][0] if trace.path else rungs[0]
+        return trace.path[-1][0] if trace.path else rungs[floor]
 
     def trace(self, task_id: str, matrix: dict) -> _Trace:
         """The full replay record for one task — the reporting entry point."""
         rungs = measured_models_by_price(matrix)
         if not rungs:
             return _Trace(path=[], cost=0.0, scorable=False, passed=False, unmeasured=0)
-        return self._run_task(task_id, matrix, rungs)
+        return self._run_task(
+            task_id, matrix, rungs, self._initial_rank_floor(task_id, matrix, rungs)
+        )
+
+    def _initial_rank_floor(self, task_id: str, matrix: dict, rungs: Sequence[str]) -> int:
+        """The rung the FIRST session opens on — 0 (cheapest) for the always_cheap base pick."""
+        # The seam a kNN-seeded cascade overrides: everything below this line is the ladder, and
+        # the ladder must not differ between the two rows, so the only thing a subclass changes
+        # is where the climb starts.
+        del task_id, matrix, rungs
+        return 0
 
     # ------------------------------------------------------------------
     # Replay
     # ------------------------------------------------------------------
-    def _run_task(self, task_id: str, matrix: dict, rungs: Sequence[str]) -> _Trace:
+    def _run_task(
+        self,
+        task_id: str,
+        matrix: dict,
+        rungs: Sequence[str],
+        initial_rank_floor: int = 0,
+    ) -> _Trace:
         """One task's whole session sequence, driven by the shared escalation runner."""
         ladders = self._ladders()
         log: list[FailureEvent] = []
-        rank_floor = 0
+        rank_floor = max(0, min(initial_rank_floor, len(rungs) - 1))
         effort_arm: str | None = None
         trace = _Trace(path=[], cost=0.0, scorable=True, passed=False, unmeasured=0)
         pending: FailureEvent | None = None
@@ -320,7 +347,7 @@ class SessionCascadeStrategy(Strategy):
             trace.unmeasured += 1
             return
         session_cost = float(outcome.get("cost", 0.0))
-        trace.attempts.append((model, session_cost))
+        trace.attempts.append(billed_attempt(model, outcome))
         trace.cost += session_cost
 
     @staticmethod

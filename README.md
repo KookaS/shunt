@@ -201,6 +201,12 @@ flowchart LR
   end
 ```
 
+**The routing model is opt-in.** A default install runs
+`router.strategy: session_cascade` — start on the cheapest model, let a repeated verified
+failure climb it — and that path skips the whole left-hand box above: no embedding, no
+neighbourhood query, no candidate scoring. Set `router.strategy: knn_cascade` to switch
+the routing model on. What follows describes that opt-in.
+
 **The routing model** reads the first turn's `user` and `tool` text — the system
 prompt is dropped, it would swamp the clip window — clips it, and embeds it with a
 CPU-only fastembed model. That vector queries an HNSW index of past sessions whose
@@ -343,13 +349,22 @@ Three figures below carry the headline. The other seventeen, each with how to
 read it and what it cannot support, are in [routing](docs/routing.md#figures) and
 [escalation](docs/escalation.md#figures).
 
-**Does the shipped router beat always-frontier at equal quality?** No. This is the
-pre-registered non-inferiority test at δ=5pp, on three evidence bases, and on all
-three the kNN router is **worse** by more than the margin — Δ=−16.1pp on the
-completed basis, with the interval excluding the bar. It does spend far less, but
-that is a saving bought at a quality loss that was pre-registered as
-unacceptable, not a saving at equal quality. The cache-safe result above sits in
-the escalation layer *over* base routing; it does not repair this.
+**Does the shipped router beat always-frontier at equal quality?** The figure carries two
+different arms and two different answers, and the labels say which is which.
+
+The **pre-registered** arm is the bare kNN *selection rule* — routing with the ladder
+removed — at δ=5pp on three evidence bases, and on all three it is **worse** by more than
+the margin (Δ=−16.8pp [−22.9, −10.8] on the completed basis, `inferior`, the interval <!-- generated-by: benchmark/routing/figures/kill_gate.py -->
+excluding the bar). It spends far less, but that is a saving bought at a quality loss
+pre-registered as unacceptable. The **shipped default** — `session_cascade`, the
+cheapest-model start with the escalation ladder on top — clears the bar: Δ=+1.6pp [−0.2, +3.5], `non_inferior`, <!-- generated-by: benchmark/routing/figures/kill_gate.py -->
+at still under half the baseline's bill. It was **not** pre-registered, so read it as an
+observation and not as the gate being met.
+
+Both are published, because the honest version of this is that the rename **exposed a
+pre-existing defect**: the pre-registered arm adjudicates a configuration no operator can
+select. Repointing the gate after seeing the data would rewrite the registered test, so
+the arm stays where it is and the shipped default is drawn beside it.
 
 ![The kill gate](docs/assets/figures/routing/kill_gate.png)
 
@@ -398,19 +413,45 @@ it is the only row the cache term moves.
 | Oracle (hindsight — a bound, never deployable) | 96.7% | 94.0–98.9 | $18.33 | $18.33 |
 | Price-Cascade (blocked — not deployable) | 96.7% | 94.0–98.9 | $27.11 | $27.11 |
 | **Session-Cascade, `rank_shortlist=3` (`strategy: session_cascade`)** | **96.7%** | 94.0–98.9 | $33.56 | **$28.71** |
-| kNN-cascade (blocked — not deployable) | 96.7% | 94.0–98.9 | $30.44 | $30.44 |
+| kNN-cascade (within-task) (blocked — not deployable) | 96.7% | 94.0–98.9 | $30.44 | $30.44 |
+| kNN-cascade (`strategy: knn_cascade` — the opt-in routing model) | 96.7% | 94.0–98.9 | $43.01 | $38.26 |
 | Always-Frontier | 95.1% | 91.9–97.8 | $96.02 | $96.02 |
-| kNN | 78.3% | 72.3–84.2 | $13.21 | $13.21 |
+| kNN (control — the pick with the ladder removed; not selectable) | 78.3% | 72.3–84.2 | $13.21 | $13.21 |
 | Always-Cheap | 75.5% | 69.0–81.5 | $1.50 | $1.50 |
 | Tier-Classifier (blocked — not deployable) | 65.8% | — | $11.53 | $11.53 |
 
-`Session-Cascade` is the row you can actually buy at that quality. It is
-`router.strategy: session_cascade` — a preset meaning `always_cheap` plus the
-escalation ladder (`escalation.enabled: true`, `escalation.rank_shortlist: 3`) —
-so it starts on the cheapest model and climbs a rung at the next **session**
-boundary on a repeated verified failure. On a paired per-task bootstrap it costs
+`Session-Cascade` **is the shipped default** — `router.strategy: session_cascade`,
+a preset meaning `always_cheap` plus the escalation ladder
+(`escalation.enabled: true`, `escalation.rank_shortlist: 3`) — so a default install
+starts on the cheapest model and climbs a rung at the next **session** boundary on a
+repeated verified failure. Say plainly what that means: **the default does no
+routing.** It never embeds a turn, never queries the neighbourhood, never scores
+candidates. The routing model is `router.strategy: knn_cascade`, and it is opt-in.
+Two things follow that are easy to miss: exploration is inert under the default, and
+`shunt doctor` downgrades a missing embedding-weights cache from a failure to a
+warning, because nothing needs it.
+
+`kNN-cascade` is that opt-in — the kNN pick with the same ladder on top — and on this
+corpus it is **dominated by the default**: both reach 96.7%, and opening the ladder on
+the kNN pick instead of on the cheapest model costs $9.55 more cache-aware for no
+measured quality. We publish that because we measured it. One reason to think it flatters
+the cheap start: both rows assume every failure recurs identically (the replay data carries
+no failing-check identity), which is the fastest climb the policy could ever make and is
+worth most to the row that starts at the bottom. Live, escalation needs two confirmed
+same-key failures in a ten-decision window, so climbing is slower and each wasted rung is a
+whole failed session — which is where a better first pick would pay. That is an argument,
+not a result; nothing in this corpus quantifies it. See
+[Results](docs/results.md#the-shipped-default-and-the-routing-model-priced-against-it).
+
+Both cascade rows are **offline replays whose every rung starts from a fresh tree and a
+fresh context**. Live they do not: the escalated model inherits the cheap rung's edits and
+the whole prior conversation, uncached. What that does to quality is untested and its
+direction is unknown —
+[the divergence, stated once](docs/escalation.md#offline-vs-live-cascade).
+
+On a paired per-task bootstrap `Session-Cascade` costs
 **$1.37 more than `Price-Cascade`** (95% CI [+0.82, +2.00]) and is **not
-distinguishable from `kNN-cascade`** (−$1.23, [−3.42, +0.73]). Against
+distinguishable from `kNN-cascade (within-task)`** (−$1.23, [−3.42, +0.73]). Against
 Always-Frontier: **−$66.12** ([−74.19, −57.90]). That $1.37 is the entire price
 of being cache-safe, and it is what the two blocked rows below now exist to
 measure.
@@ -420,7 +461,7 @@ tries models in ascending price order and stops at the first one whose patch
 passes — which needs a verified outcome **mid-session**, so the router rejects
 `price_cascade` at boot. **You cannot buy that row, and you never will**: one
 model decision per session is the cache-safety spine, not a to-do. The learned
-`kNN-cascade` costs *more* for the same 96.7% and is blocked for the same reason.
+`kNN-cascade (within-task)` costs *more* for the same 96.7% and is blocked for the same reason.
 The learned `kNN` row sits 1.7pp above `Always-Cheap`, inside noise: on this
 corpus the embedding does not buy routing quality. See
 [Results](docs/results.md#routing-results).

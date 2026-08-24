@@ -956,6 +956,30 @@ def test_sh014_checks_image_targets_too(tmp_path: Path) -> None:
     assert _run("check_docs_links.py", "--root", str(root)) == 1
 
 
+def test_sh014_catches_a_broken_link_in_a_root_level_file(tmp_path: Path) -> None:
+    # The blind spot: `check()` iterated docs_dir only, so CHANGELOG.md and every other
+    # root-level markdown file was outside the gate by construction.
+    root = _docs_tree(tmp_path, "clean\n")
+    (root / "CHANGELOG.md").write_text("see [gone](docs/never-existed.md)\n")
+    assert _run("check_docs_links.py", "--root", str(root), str(root / "CHANGELOG.md")) == 1
+
+
+def test_sh014_catches_a_broken_link_under_examples(tmp_path: Path) -> None:
+    root = _docs_tree(tmp_path, "clean\n")
+    example = root / "examples" / "integrations" / "curl"
+    example.mkdir(parents=True)
+    (example / "README.md").write_text("[compose](./compose.yaml)\n")
+    assert _run("check_docs_links.py", "--root", str(root), str(example / "README.md")) == 1
+
+
+def test_sh014_lets_a_root_file_link_into_the_docs_tree(tmp_path: Path) -> None:
+    # The two grammars: escaping docs_dir is an error for a page mkdocs publishes, and the
+    # NORMAL form for a file GitHub renders. A root file linking docs/ must not be flagged.
+    root = _docs_tree(tmp_path, "clean\n")
+    (root / "CHANGELOG.md").write_text("see [the page](docs/page.md)\n")
+    assert _run("check_docs_links.py", "--root", str(root), str(root / "CHANGELOG.md")) == 0
+
+
 def test_sh014_honours_the_same_line_noqa(tmp_path: Path) -> None:
     root = _docs_tree(tmp_path, "See [it](nope.md). <!-- noqa: SH014 -->\n")
     assert _run("check_docs_links.py", "--root", str(root)) == 0

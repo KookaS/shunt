@@ -106,8 +106,9 @@ def test_same_failure_twice_escalates_next_session(
     model3, reason3 = parse_decision(r3.headers["X-Shunt-Decision"])
     assert reason3 == "auto_escalation"
     assert model3 == "qwen3.7-plus"  # effort rung: same model, higher reasoning arm
-    # The escalated arm reaches the WIRE: the outbound call carries enable_thinking.
-    assert mock_acompletion.call_args_list[2].kwargs.get("enable_thinking") is True
+    # The escalated arm reaches the WIRE. `enable_thinking` is not an OpenAI SDK kwarg, so it
+    # travels in extra_body — spliced in as a kwarg the SDK rejected it with a TypeError.
+    assert mock_acompletion.call_args_list[2].kwargs.get("extra_body") == {"enable_thinking": True}
 
 
 # ── Escalation semantics ──────────────────────────────────────────────────────
@@ -183,7 +184,7 @@ def test_second_recurrence_reaches_the_rank_rung(
     model3, reason3 = parse_decision(r3.headers["X-Shunt-Decision"])
     assert reason3 == "auto_escalation"
     assert model3 == "qwen3.7-plus"
-    assert mock_acompletion.call_args_list[2].kwargs.get("enable_thinking") is True
+    assert mock_acompletion.call_args_list[2].kwargs.get("extra_body") == {"enable_thinking": True}
     close_session(client, sid3)
     # The escalation RETIRED the window at decide-time, so s3's own red restarts the
     # count at 1 — two MORE same-key failures are needed for the next rung.
@@ -310,14 +311,14 @@ def test_escalated_arm_persists_across_turns_same_session(
     r3, sid3 = _drive_session(client)  # escalated, left OPEN
     model3, reason3 = parse_decision(r3.headers["X-Shunt-Decision"])
     assert reason3 == "auto_escalation"
-    assert mock_acompletion.call_args_list[2].kwargs.get("enable_thinking") is True
+    assert mock_acompletion.call_args_list[2].kwargs.get("extra_body") == {"enable_thinking": True}
 
     r4 = post_completion(client, chat_body())  # 2nd turn, same session, no close
     assert r4.headers["X-Shunt-Session-Id"] == sid3
     model4, reason4 = parse_decision(r4.headers["X-Shunt-Decision"])
     assert model4 == model3
     assert reason4 == "auto_escalation"
-    assert mock_acompletion.call_args_list[3].kwargs.get("enable_thinking") is True
+    assert mock_acompletion.call_args_list[3].kwargs.get("extra_body") == {"enable_thinking": True}
     close_session(client, sid3)
     wait_capture_idle(client)
 
@@ -344,7 +345,7 @@ def test_streaming_escalation(routed_app: tuple[TestClient, Path], mock_acomplet
     assert "data: [DONE]" in r3.text
     kwargs3 = mock_acompletion.call_args_list[2].kwargs
     assert kwargs3.get("stream") is True
-    assert kwargs3.get("enable_thinking") is True
+    assert kwargs3.get("extra_body") == {"enable_thinking": True}
     close_session(client, r3.headers["X-Shunt-Session-Id"])
     wait_capture_idle(client)
 
@@ -371,7 +372,7 @@ def test_anthropic_messages_escalation(
     model3, reason3 = parse_decision(r3.headers["X-Shunt-Decision"])
     assert reason3 == "auto_escalation"
     assert model3 == "qwen3.7-plus"
-    assert mock_acompletion.call_args_list[2].kwargs.get("enable_thinking") is True
+    assert mock_acompletion.call_args_list[2].kwargs.get("extra_body") == {"enable_thinking": True}
     assert r3.json()["content"][0]["text"] == "Hello back"
 
 
@@ -433,6 +434,27 @@ def test_session_cascade_starts_cheap_then_climbs(
         # Effort rung first: the served model is unchanged, so the cache namespace is too.
         # A rank step here would be the cache-safety spine broken, not a better cascade.
         assert model3 == cheapest
+
+
+def test_session_cascade_verified_outcome_is_visible_over_http(
+    app_factory: Any, tmp_path: Path, mock_acompletion: Any
+) -> None:
+    """The default strategy's verified outcomes must be observable on /admin/loop-health."""
+    # The handshake harness's escalation drivers are bare HTTP clients: they cannot reach the
+    # engine's failure log, so they pace their prompts by polling this endpoint for a landed
+    # verified outcome. They used to poll `label_coverage.verified_labeled`, which joins on
+    # `sessions.embedding_blob IS NOT NULL` — a kNN-corpus question — and `session_cascade`
+    # never embeds, so that counter is 0 forever and all three legs timed out. Guard the
+    # strategy-independent counter here rather than in the Docker harness alone.
+    repo = make_repo(tmp_path / "visible-repo", kind="red")
+    with app_factory(repo=repo, strategy="session_cascade") as client:
+        _r1, sid1 = _drive_session(client)
+        close_session(client, sid1)
+        wait_failure_count(client, str(repo), 1)
+
+        health = client.get("/admin/loop-health").json()
+        assert health["label_coverage"]["verified_labeled"] == 0  # embedding-gated, by design
+        assert health["verification"]["verified_outcomes"] >= 1
 
 
 def test_always_cheap_allocates_the_cheapest_model(app_factory: Any, mock_acompletion: Any) -> None:

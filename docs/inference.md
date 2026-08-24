@@ -112,6 +112,15 @@ coverage in F2 panel B; they are never summed, and never zero-filled into the to
 A cost total under 100% coverage is a lower bound, and the coverage bar is how you
 see by how much.
 
+**An escalation costs more live than the benchmark's cascade rows say.** Those rows are an
+offline replay in which every rung starts from a fresh context; here, shunt forwards your
+messages untouched, so the model an escalation moves to is resent the whole prior
+conversation by your CLI — a cache miss by construction, at full input price. The frontier
+figure's dashed bracket prices that range offline; this page cannot check it against live
+traffic, for the reason in the next paragraph. The full statement of what offline and live
+do differently is [in one place](escalation.md#offline-vs-live-cascade), and
+`escalation.context_transfer` is the knob over it.
+
 **`cache_stats` is not a token ledger.** The proxy records exactly two fields per
 session — the cache tax it paid and the prompt length in tokens. It carries **no
 cache-write tokens, no completion tokens, and no provider column**. So this page can

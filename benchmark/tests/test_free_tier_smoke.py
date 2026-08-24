@@ -17,14 +17,14 @@ FREE_TIER_DIR = Path(__file__).resolve().parents[2] / "configs" / "free-tier"
 
 
 def _model(
-    model_id: str = "openai/gpt-oss-20b:free",
+    model_id: str = "nvidia/nemotron-nano-9b-v2:free",
     base_url: str = "https://openrouter.ai/api/v1",
     price: float = 0.0,
     provider: str = "openrouter",
 ) -> ModelConfig:
     """A ModelConfig shaped like the free-tier registry row."""
     return ModelConfig(
-        name="gpt-oss-20b-free",
+        name="nemotron-nano-9b-free",
         model_id=model_id,
         provider=provider,
         base_url=base_url,
@@ -126,8 +126,8 @@ def test_verdict_write_is_atomic_and_leaves_no_temp_sibling(tmp_path: Path) -> N
 def test_free_tier_config_loads_and_ranks_the_free_model_first() -> None:
     pool = live_smoke.build_pool(FREE_TIER_DIR / "models.yaml", FREE_TIER_DIR / "router.yaml")
     expected = live_smoke.cheapest_live_model(pool)
-    assert pool.model_names() == ["gpt-oss-20b-free"]
-    assert expected.model_id == "openai/gpt-oss-20b:free"
+    assert pool.model_names() == ["nemotron-nano-9b-free"]
+    assert expected.model_id == "nvidia/nemotron-nano-9b-v2:free"
     assert expected.api_key_env_var == "OPENROUTER_API_KEY"
     assert free_tier_smoke.free_tier_refusal(expected) is None
 
@@ -206,5 +206,5 @@ def test_free_tier_models_load_via_shunt_config_dir(monkeypatch, tmp_path) -> No
     from shunt.models.config import ModelPool
 
     pool = ModelPool.load()
-    assert pool.model_names() == ["gpt-oss-20b-free"]
-    assert pool.ranked_models()[0].model_id == "openai/gpt-oss-20b:free"
+    assert pool.model_names() == ["nemotron-nano-9b-free"]
+    assert pool.ranked_models()[0].model_id == "nvidia/nemotron-nano-9b-v2:free"

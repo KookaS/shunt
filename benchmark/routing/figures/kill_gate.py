@@ -48,10 +48,10 @@ _DECISION_COLOR: Final[dict[str, str]] = {
 }
 
 SPEC = FigureSpec(
-    title="The shipped router misses the pre-registered 5pp bar on every evidence basis",
+    title="The pre-registered arm misses the 5pp bar on every basis; the shipped default clears it",
     reading=(
         "Left: one row per evidence basis. The dot is the paired pass-rate difference "
-        "(the shipped kNN router minus fixed-frontier) in percentage points, the whisker its "
+        "(the kNN selection rule minus fixed-frontier) in percentage points, the whisker its "
         "95% paired interval, and the dashed red line the pre-registered non-inferiority "
         "margin of -5pp. A row is green only when the Tango score test rejects H0 at that "
         "margin, red when the router is proven WORSE by more than the margin, grey when the "
@@ -60,12 +60,27 @@ SPEC = FigureSpec(
     ),
     goal=(
         "Read both panels together, in that order. The left panel is the gate: a saving on "
-        "the right is only admissible once the left one is green. It is not — the shipped "
-        "router's quality deficit is several times the margin, and the whisker excludes it "
-        "on every basis, so the spend reduction beside it is bought at a quality loss that "
-        "was pre-registered as unacceptable rather than at equal quality."
+        "the right is only admissible once the left one is green. On the pre-registered rows "
+        "it is not — that arm's quality deficit is several times the margin and the whisker "
+        "excludes it on every basis, so the spend reduction beside it is bought at a loss that "
+        "was pre-registered as unacceptable rather than at equal quality. The bottom row is a "
+        "different arm and a different verdict: the shipped default clears the bar, at four "
+        "times the pre-registered arm's bill and still under half the baseline's. It was not "
+        "pre-registered, so read it as an observation, not as the gate being met."
     ),
     definitions=(
+        (
+            "the two router rows",
+            # Read off ctxmod.DEFAULT_STRATEGY rather than spelled out: this string named
+            # `kNN-cascade` for a release after the shipped default moved, so the terms
+            # block described a row the canvas no longer draws. The label and the prose now
+            # cannot disagree.
+            f"The {ctxmod.ROUTER_STRATEGY} row is the selection rule with the escalation "
+            "ladder removed — the pre-registered verdict arm, and not a value "
+            f"router.strategy accepts. The {ctxmod.DEFAULT_STRATEGY} row is what a default "
+            "install runs: one decision per session, cheapest-first, with the ladder on "
+            "top, published without pre-registration.",
+        ),
         (
             "non-inferiority",
             "H0: router quality <= baseline - delta, tested by the Tango score statistic on "
@@ -89,6 +104,12 @@ SPEC = FigureSpec(
         "The margin is read from benchmark.yaml:collect.noninferiority_margin, so the bar "
         "on the canvas is the one that was pre-registered rather than one chosen after "
         "seeing the result.",
+        "The pre-registration named the kNN selection rule as the verdict arm, and it is kept "
+        "there: repointing it after seeing the data would rewrite the registered test. But "
+        "router.strategy defaults to session_cascade, so the shipped default is drawn beside it on "
+        "its own row, labelled NOT pre-registered. The gap is a pre-existing defect the rename "
+        "exposed, not one it created — the pre-registered arm adjudicates a configuration no "
+        "operator can select.",
     ),
     limitations=(
         "The cost panel is naive per-task cost. The gate's real criterion is cache-aware "
@@ -196,7 +217,26 @@ def evidence_bases(ctx: ctxmod.RoutingContext, margin: float) -> list[Basis]:
     )
     if found is not None:
         bases.append(found)
+    bases.extend(_default_basis(ctx, margin))
     return bases
+
+
+def _default_basis(ctx: ctxmod.RoutingContext, margin: float) -> list[Basis]:
+    """The SHIPPED DEFAULT's row, marked as not pre-registered, or [] when it was not scored."""
+    # The gate's verdict arm stays the kNN row it was pre-registered on. But `router.strategy`
+    # defaults to the cascade, so a reader who takes the pre-registered row home has read a
+    # verdict about a configuration nobody runs. Both are drawn, and the label — not a footnote —
+    # says which one the pre-registration covers.
+    default = ctxmod.DEFAULT_STRATEGY
+    found = _basis(
+        f"{default} — shipped default, NOT pre-registered",
+        ctx.pass_map(default),
+        ctx.pass_map(ctxmod.BASELINE_STRATEGY),
+        ctx.cost_map(default),
+        ctx.cost_map(ctxmod.BASELINE_STRATEGY),
+        margin,
+    )
+    return [found] if found is not None else []
 
 
 def _draw_forest(ax: Axes, bases: list[Basis], margin: float) -> None:
@@ -277,7 +317,7 @@ def _draw_cost(ax: Axes, bases: list[Basis]) -> None:
     ax.set_xlim(max(lo * 0.45, 1e-4), hi * 4.5)
     ax.set_ylim(-0.7, len(bases) - 0.3)
     ax.plot([], [], "D", color=_BASELINE_C, ms=6, label="fixed-frontier")
-    ax.plot([], [], "o", color=_ROUTER_C, ms=6, label=f"{ctxmod.ROUTER_STRATEGY} router (live)")
+    ax.plot([], [], "o", color=_ROUTER_C, ms=6, label="that row's router arm")
     ax.legend(fontsize=7.5, loc="lower right", frameon=False)
     ax.grid(axis="x", color="#eeeeee", lw=0.6)
     ax.set_axisbelow(True)
@@ -302,8 +342,8 @@ def _annotations(bases: list[Basis], margin: float, banner: str | None) -> Annot
     caveat = None
     if inferior:
         caveat = (
-            f"{len(inferior)} of {len(bases)} bases: the router is WORSE by more than the "
-            "margin. The saving is not at equal quality."
+            f"{len(inferior)} of {len(bases)} rows: WORSE by more than the margin. Those "
+            "rows' savings are not at equal quality."
         )
     elif discordant <= _THIN_DISCORDANCE:
         caveat = (

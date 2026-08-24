@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from benchmark import config
+from benchmark.routing.strategies import BilledAttempt
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -136,9 +137,7 @@ def cache_prices(
     return out
 
 
-def cache_aware_total(
-    attempts: Sequence[tuple[str, float]], prices: Mapping[str, CachePrice]
-) -> float:
+def cache_aware_total(attempts: Sequence[BilledAttempt], prices: Mapping[str, CachePrice]) -> float:
     """Total cost of a billed attempt sequence once a repeat of the same model banks its
     discount."""
     # Adjacency is the whole model: the discount applies when the PREVIOUS billed attempt served
@@ -147,19 +146,22 @@ def cache_aware_total(
     # PER TASK (see ``cache_cost_is_scoped_to_tasks``): a whole-task resample keeps each task's
     # own attempt sequence intact, so within-task adjacency survives and the resampled total is
     # the statistic it is named after.
+    # Unpacked BY ATTRIBUTE, never positionally: `BilledAttempt` carries five fields and is
+    # deliberately not iterable, so a caller still handing this a `(model, cost)` tuple fails
+    # loudly here instead of pricing `in_tok` as a dollar amount.
     savings = 0.0
     previous: str | None = None
-    for model, cost in attempts:
-        price = prices.get(model)
-        if previous is not None and model == previous and price is not None:
-            savings += cost * price.saving_fraction
-        previous = model
-    return sum(cost for _model, cost in attempts) - savings
+    for attempt in attempts:
+        price = prices.get(attempt.model)
+        if previous is not None and attempt.model == previous and price is not None:
+            savings += attempt.cost * price.saving_fraction
+        previous = attempt.model
+    return sum(a.cost for a in attempts) - savings
 
 
 def cache_cost_is_scoped_to_tasks(
     task_ids: Sequence[str],
-    attempts: Mapping[str, Sequence[tuple[str, float]]],
+    attempts: Mapping[str, Sequence[BilledAttempt]],
     prices: Mapping[str, CachePrice],
 ) -> bool:
     """True iff each task's cache-aware cost is invariant to the other tasks."""

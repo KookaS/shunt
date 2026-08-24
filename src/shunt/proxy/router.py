@@ -6,24 +6,35 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import inspect
 import json
 import logging
 import math
 import os
 import threading
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from typing import TYPE_CHECKING, Any, Final
 
 import openai
 from openai import AsyncOpenAI
+from openai.resources.chat.completions import AsyncCompletions
 from starlette.concurrency import run_in_threadpool
 
 from shunt.models import ModelConfig, ModelPool
 from shunt.models.config import arm_api_params
 from shunt.models.config import model_fingerprint as _resolve_fingerprint
+from shunt.proxy.context_transfer import (
+    CONTEXT_TRANSFER_SUMMARY,
+    ESCALATED_SOURCES,
+    ContextTransfer,
+    ContextTransferPolicy,
+)
+from shunt.proxy.context_transfer import apply as apply_context_transfer
+from shunt.proxy.context_transfer import resolve as resolve_context_transfer
 from shunt.proxy.redaction import redact_secrets
 from shunt.proxy.wire_signals import WireSignalCollector
+from shunt.router.engine import _void_exploration
 from shunt.session import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -97,6 +108,65 @@ class BudgetExceededError(UpstreamError):
 
     def __init__(self, message: str) -> None:
         super().__init__(message, status_code=402)
+
+
+class UnsupportedRequestParamError(UpstreamError):
+    """Raised when the kwargs Shunt built are not accepted by the installed OpenAI SDK."""
+
+    # OURS, not the provider's. The SDK raises TypeError before a byte leaves the process, so
+    # every candidate in the fallback chain would fail identically — walking the chain converts
+    # a programming error into a mislabelled "provider outage" and stamps the escalation that
+    # never reached the wire as served. 500 (not 502) says the fault is on this side.
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, status_code=500)
+
+
+@functools.lru_cache(maxsize=1)
+def sdk_completion_params() -> frozenset[str]:
+    """Kwarg names the INSTALLED OpenAI SDK's chat-completion method actually accepts."""
+    # Read off the real signature rather than hardcoded: the SDK's parameter list is explicit
+    # (no **kwargs), so anything not named here is a TypeError at call time, and a hand-written
+    # guess would rot on the next SDK bump. Only VAR_KEYWORD would widen it, and the split below
+    # deliberately keeps the named allowlist even then — a provider-specific param belongs in
+    # extra_body regardless of whether the SDK would silently swallow it.
+    params = inspect.signature(AsyncCompletions.create).parameters
+    return frozenset(
+        name
+        for name, param in params.items()
+        if name != "self" and param.kind is not param.VAR_KEYWORD
+    )
+
+
+# Request keys an arm's `api:` block may never set: each one IS the request, not a parameter of
+# it, so accepting one would silently rewrite the call the router already decided on.
+_RESERVED_REQUEST_KEYS: frozenset[str] = frozenset(
+    {"messages", "model", "stream", "extra_body", "extra_headers", "api_key", "base_url"}
+)
+
+
+def split_api_params(params: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split registry `api:` params into (SDK kwargs, provider-specific extra_body)."""
+    # ALLOWLIST, never a blocklist. The registry's `api:` blocks are free-form provider dicts
+    # (`thinking`, `enable_thinking`, `output_config`, …) and only a handful are OpenAI SDK
+    # kwargs; a blocklist passes every key a future registry gains straight into the TypeError
+    # this function exists to prevent.
+    # Registry `api:` blobs are free dicts, and a handful of SDK kwarg names ARE the request
+    # rather than a parameter of it: `messages` would overwrite the conversation, `model` would
+    # re-target the call, `stream` would flip the response shape the caller already committed to,
+    # and `extra_body` would clobber the provider bag this function is filling. Refuse them
+    # outright — the benchmark's sibling (`benchmark/runner/infer.py::_scaffold_model_kwargs`)
+    # makes the same boundary check against the routing target's auth keys. No shipped arm sets
+    # one today; this is the guard that keeps it that way.
+    reserved = _RESERVED_REQUEST_KEYS & params.keys()
+    if reserved:
+        raise ValueError(f"reasoning arm sets reserved request key(s) {sorted(reserved)}")
+    allowed = sdk_completion_params()
+    native: dict[str, Any] = {}
+    extra: dict[str, Any] = {}
+    for key, value in params.items():
+        (native if key in allowed else extra)[key] = value
+    return native, extra
 
 
 @functools.lru_cache(maxsize=32)
@@ -561,6 +631,18 @@ def _response_finish_reason(response: Any) -> str | None:
     return getattr(choice, "finish_reason", None) or None
 
 
+def _completion_text(response: Any) -> str:
+    """The first choice's assistant text, or "" when the response carries none."""
+    # Deliberately total: an empty string is a degrade signal the caller already handles,
+    # so a shape the SDK did not promise must not raise out of the summariser seam.
+    choices = getattr(response, "choices", None)
+    if not choices:
+        return ""
+    message = getattr(choices[0], "message", None)
+    content = getattr(message, "content", None) if message is not None else None
+    return content if isinstance(content, str) else ""
+
+
 def _openai_response_to_anthropic(response: Any) -> dict[str, Any]:
     """Convert an OpenAI-format *ModelResponse* to an Anthropic /v1/messages response dict."""
     choice = response.choices[0] if response.choices and len(response.choices) > 0 else None
@@ -602,11 +684,16 @@ class ProxyRouter:
         retry_count: int = 3,
         engine: RouterEngine | None = None,
         max_spend_usd: float | None = None,
+        context_transfer: ContextTransferPolicy | None = None,
     ) -> None:
         self._pool = model_pool
         self._sessions = session_manager
         self.retry_count = retry_count
         self._engine = engine
+        # `escalation.context_transfer*`, resolved at boot. None (and the `full` default) is
+        # pure pass-through — the router never touches `messages`, which is what has always
+        # shipped and what every published cost number assumes.
+        self._context_transfer = context_transfer or ContextTransferPolicy()
         # Per-session spend hard-cap from router.budget.max_spend_usd; None = unlimited.
         self._max_spend_usd = max_spend_usd
         # Accumulates structured, non-model-authored wire signals (tool_result.is_error,
@@ -720,6 +807,48 @@ class ProxyRouter:
         self._wire_collector.observe_terminal_stop(normalized, session)
         return payload, model_name, model_name
 
+    def _void_unserved_escalation(self, session: Session, model_name: str, why: str) -> None:
+        """Strip THIS session's rung claim from the provenance when it never reached the wire."""
+        # `auto_escalated: true` is a claim that a REQUEST carrying the escalated rung was served.
+        # When the locked model's turn failed — a rejected kwarg, an outage, a fallback to a
+        # sibling — nothing of the kind happened, and leaving the claim standing turns a broken
+        # rung into a logged success that the verdict tool, the outcome index and the off-policy
+        # estimator all read as a served escalation.
+        #
+        # THE GUARD IS `auto_escalated`, NOT THE ARM, and both halves of that matter.
+        #  * An EFFORT rung carries an arm; a RANK rung (`engine._apply_rank`) carries none. Under
+        #    the old arm-keyed guard a rank rung served by a fallback returned early and kept
+        #    claiming the ladder reached the model that ran — the served model is corrected at
+        #    persist time, but the RUNG attribution was not.
+        #  * A RESUMED session carries an arm with `auto_escalated: False` — it inherited the rung,
+        #    it did not climb one this turn (`server._resume_locked_model`). Voiding on the arm
+        #    popped that arm out of the persisted provenance, and since persisted provenance is
+        #    the ONLY restore source, one transient fallback permanently downgraded every later
+        #    resume to base effort. Under-claiming is NOT recoverable there, so a resume is left
+        #    strictly alone: it made no claim about this turn to withdraw.
+        provenance = session.decision_provenance
+        if not isinstance(provenance, dict) or not provenance.get("auto_escalated"):
+            return
+        voided = _void_exploration(dict(provenance))
+        arm = voided.pop("escalated_reasoning_arm", None)
+        rung = f"arm {arm!r}" if arm else "rank rung"
+        voided["auto_escalated"] = False
+        voided["fallback_chain_triggered"] = True
+        voided["escalation_not_served"] = f"{rung} on {model_name}: {why}"
+        session.decision_provenance = voided
+        # ONE-WAY, and `session.metadata["reasoning_arm"]` is deliberately left in place: the
+        # ladder position is the engine's, so a later healthy turn still serves the arm (same
+        # model, same cache namespace). Only the CLAIM is dropped, and it is never re-asserted —
+        # under-claiming an escalation is recoverable HERE (the engine still holds the rung),
+        # which is exactly what is not true of the resumed session excluded above.
+        logger.warning(
+            "escalation NOT served: session=%s model=%s arm=%s (%s) — provenance de-claimed",
+            session.session_id,
+            model_name,
+            arm,
+            why,
+        )
+
     async def _route_with_fallback(
         self,
         openai_kwargs: dict[str, Any],
@@ -736,6 +865,11 @@ class ProxyRouter:
         # in-flight SSE stream for the duration (measured 1.50s for 3 concurrent turns
         # of a 0.5s embed).
         model_name = await run_in_threadpool(self._get_or_lock_model, session, prompt_text)
+        # The ONE place the forwarded conversation may be rewritten. Everywhere else Shunt is
+        # pure pass-through; here, and only on an escalated session under `summary`, it
+        # replaces the prior conversation with content it authored. Disclosed at boot, on
+        # `shunt doctor`, on the wire (X-Shunt-Context) and in `shunt explain`.
+        await self._transfer_context(openai_kwargs, session, model_name)
         chain = self._pool.fallback_chain(model_name)
         last_error: Exception | None = None
 
@@ -752,6 +886,13 @@ class ProxyRouter:
 
             try:
                 response = await self._try_model(candidate, attempt_kwargs)
+            except UnsupportedRequestParamError:
+                # NOT a provider failure and NOT a fallback trigger. The chain exists for
+                # upstream outages; a kwarg the SDK will not accept fails identically on every
+                # candidate, so walking on would burn the chain and then record a "successful
+                # escalation" onto a model the arm never reached. Surface it.
+                self._void_unserved_escalation(session, model_name, "sdk rejected the arm params")
+                raise
             except UpstreamError as exc:
                 if exc.status_code in (400, 401, 403):
                     raise  # fail fast — auth / bad request
@@ -775,6 +916,11 @@ class ProxyRouter:
                 continue
             session.metadata["last_turn_served_model"] = candidate
             if candidate != model_name:
+                # A fallback sibling gets its own defaults, so the escalated arm resolved for the
+                # locked model never reached the wire; the provenance must stop claiming it did.
+                self._void_unserved_escalation(
+                    session, model_name, f"served by fallback candidate {candidate}"
+                )
                 logger.info(
                     "serving: session=%s locked=%s served=%s",
                     session.session_id,
@@ -787,6 +933,136 @@ class ProxyRouter:
             f"All models exhausted. Last error: {last_error}",
             status_code=getattr(last_error, "status_code", 502) if last_error else 502,
         )
+
+    async def _transfer_context(
+        self, openai_kwargs: dict[str, Any], session: Session, model_name: str
+    ) -> None:
+        """Compact the escalated session's inherited conversation, once, and reuse it after."""
+        # FOUR conditions, all required: the mode is `summary`; this session is serving an
+        # escalated rung (`auto_escalation` / `escalation_floor` — a base pick has nothing to
+        # transfer FROM); the escalation actually CHANGED THE MODEL; and the decision is taken
+        # on the FIRST request of the session, never mid-conversation. Later turns re-apply the
+        # frozen prefix without calling the summariser again — regenerating it per turn is a
+        # cache MISS per turn, which costs more than `full` and is the whole reason this is
+        # frozen rather than recomputed.
+        #
+        # A resumed session (`session_resume` / `fork_resume` / `prefix_resume`) is excluded by
+        # the second condition and must stay excluded: a resume continues an existing
+        # conversation on an ALREADY-LOCKED model, so there is no escalation boundary to
+        # compact at and nothing was transferred anywhere.
+        messages = openai_kwargs.get("messages") or []
+        transfer = session.metadata.get("context_transfer")
+        # An ALREADY-DECIDED transfer is re-applied first, ahead of every gate below: the decision
+        # is once-per-session and the same frozen bytes must be resent for the session's life
+        # (that is what keeps the prefix cache warm). It reaches here either from this process's
+        # own earlier turn or, after an idle-timeout eviction, restored from the store on resume —
+        # whose `model_source` is `session_resume`, which the escalation gates below reject.
+        if isinstance(transfer, ContextTransfer):
+            openai_kwargs["messages"] = apply_context_transfer(transfer, messages)
+            return
+        if self._context_transfer.mode != CONTEXT_TRANSFER_SUMMARY:
+            return
+        if session.metadata.get("model_source") not in ESCALATED_SOURCES:
+            return
+        if not self._escalation_changed_model(session, model_name):
+            return
+        # `last_turn_served_model` is stamped after every served turn, so its absence is
+        # "first request of this session". A session that reached its second turn without
+        # a decision is one where the mode was switched on mid-flight; it stays `full`.
+        if "last_turn_served_model" in session.metadata:
+            return
+        transfer = await resolve_context_transfer(
+            messages,
+            self._context_transfer,
+            self._summariser_model(session, model_name),
+            self._summarise,
+        )
+        self._record_transfer(session, transfer)
+        openai_kwargs["messages"] = apply_context_transfer(transfer, messages)
+
+    def _escalation_changed_model(self, session: Session, model_name: str) -> bool:
+        """Whether this escalation moved to a DIFFERENT model — the only case worth compacting."""
+        # The ladder's first rung is an EFFORT step: `_apply_effort` keeps the same model on
+        # purpose, precisely so the cache namespace — hence the warm prefix — is unchanged.
+        # Substituting a summary there would convert a cache HIT into a MISS and pay a
+        # summariser call for the privilege: strictly worse than doing nothing, on the exact
+        # axis this feature exists to optimise. Only a RANK step (or a floor lift) hands the
+        # conversation to a model that has never seen it, and only that is a transfer at all.
+        #
+        # FAIL CLOSED: an absent or unusable `pre_escalation_model` means "do not fire". The
+        # key is stamped by the engine at escalation time, so its absence means this turn was
+        # not routed by the path that can tell the two rungs apart — and firing on a maybe
+        # would break cache safety on exactly the rung that was designed to preserve it.
+        outgoing = (session.decision_provenance or {}).get("pre_escalation_model")
+        if not isinstance(outgoing, str) or not outgoing:
+            return False
+        return outgoing != model_name
+
+    def _summariser_model(self, session: Session, model_name: str) -> str:
+        """Who writes the summary: the configured model, else the OUTGOING pre-escalation one."""
+        # The outgoing model is the cheaper one AND the one already holding this conversation
+        # in its prefix cache, so it re-serves a cache hit. Summarising with the INCOMING model
+        # would pay the full uncached prefill this feature exists to avoid.
+        configured = self._context_transfer.model
+        if configured:
+            return configured
+        provenance = session.decision_provenance or {}
+        outgoing = provenance.get("pre_escalation_model")
+        # The `_escalation_changed_model` gate above already refused an absent/unusable key, so
+        # the fallback is unreachable on the firing path; it stays so this stays a total
+        # function rather than an assertion in the request path.
+        return outgoing if isinstance(outgoing, str) and outgoing else model_name
+
+    async def _summarise(
+        self, model_name: str, messages: list[dict[str, Any]], max_tokens: int | None
+    ) -> str:
+        """One un-retried upstream call for the handover note (the mockable summariser seam)."""
+        config = self._pool.get_model(model_name)
+        if config is None:
+            raise UpstreamError(f"Unknown summariser model: {model_name}", status_code=400)
+        kwargs: dict[str, Any] = {"messages": messages}
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        response = await _acompletion(config, **kwargs)
+        return _completion_text(response)
+
+    def _record_transfer(self, session: Session, transfer: ContextTransfer) -> None:
+        """Freeze the decision on the session and stamp every disclosure surface."""
+        # The frozen prefix lives HERE, on the session, for the life of the session: the same
+        # tuple of message objects is resent every turn, which is what makes the forwarded
+        # bytes identical. It is kept with the boundary it replaces rather than as a bare
+        # prefix key, because a prefix without that boundary cannot be re-applied.
+        session.metadata["context_transfer"] = transfer
+        record = transfer.provenance()
+        provenance: dict[str, Any] = {
+            **(session.decision_provenance or {}),
+            "context_transfer": record,
+        }
+        # The frozen prefix is persisted too (under its own key, so `shunt explain` still prints
+        # the counts and not the summary body). The in-memory session dies at the idle timeout;
+        # without this, a resumed conversation restores the model and the arm but drops the
+        # prefix, and every later turn resends the client's original messages uncached.
+        restorable = transfer.restorable()
+        if restorable is not None:
+            provenance["context_transfer_prefix"] = restorable
+        session.decision_provenance = provenance
+        # One-shot: the response header announces the turn on which the conversation the model
+        # sees stopped being the conversation the user sees.
+        if transfer.mode == CONTEXT_TRANSFER_SUMMARY:
+            session.metadata["context_transfer_header"] = CONTEXT_TRANSFER_SUMMARY
+            logger.warning(
+                "context transfer: session=%s escalated to %s and is being sent a SUMMARY "
+                "written by %s in place of %d message(s) — the model does not see what the "
+                "user sees",
+                session.session_id,
+                session.model_chosen,
+                transfer.summariser,
+                transfer.consumed,
+            )
+        else:
+            session.metadata["context_transfer_header"] = (
+                f"full; requested=summary; degraded={transfer.degraded_reason}"
+            )
 
     def _apply_reasoning_arm(
         self, openai_kwargs: dict[str, Any], session: Session, model_name: str
@@ -806,7 +1082,19 @@ class ProxyRouter:
         if arm not in {a.id for a in config.reasoning.arms}:
             return
         openai_kwargs.pop("reasoning_effort", None)  # client-supplied reasoning is overridden
-        openai_kwargs.update(arm_api_params(config, arm))
+        # Only SDK-native params may be spliced in as kwargs; everything else the registry
+        # declares (`thinking`, `enable_thinking`, `output_config`, …) is provider-specific and
+        # travels in `extra_body`, which the SDK forwards into the JSON body untouched. Passing
+        # them as kwargs raised TypeError on EVERY arm of every thinking model — the escalation
+        # ladder's first rung never reached a provider.
+        native, extra = split_api_params(arm_api_params(config, arm))
+        openai_kwargs.update(native)
+        if extra:
+            # Merge, never clobber: the caller may already carry an extra_body of its own.
+            existing = openai_kwargs.get("extra_body")
+            openai_kwargs["extra_body"] = (
+                {**existing, **extra} if isinstance(existing, dict) else dict(extra)
+            )
 
     async def _try_model(self, model_name: str, openai_kwargs: dict[str, Any]) -> Any:
         """Attempt routing through *model_name* with retries."""
@@ -827,6 +1115,13 @@ class ProxyRouter:
         for attempt in range(self.retry_count):
             try:
                 return await _acompletion(config, **openai_kwargs)
+            except TypeError as exc:
+                # OUR bug, caught before the wire: the SDK rejected a kwarg Shunt assembled.
+                # Never retried and never fallen back from — see UnsupportedRequestParamError.
+                raise UnsupportedRequestParamError(
+                    f"request params rejected by the installed OpenAI SDK for model "
+                    f"{model_name}: {exc}"
+                ) from exc
             except Exception as exc:
                 if not _is_retryable(exc):
                     # A real HTTP status (e.g. 400/401/403) fails fast; an unknown

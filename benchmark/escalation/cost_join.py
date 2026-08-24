@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Final
 from benchmark import config
 from benchmark.escalation import session_eval
 from benchmark.routing import cache_cost
+from benchmark.routing.strategies import BilledAttempt
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -136,7 +137,13 @@ def _cache_aware(
     """The cache-aware currency, bound to the per-model prices the corpus's models resolve to."""
 
     def total(attempts: Sequence[tuple[str, float]]) -> float:
-        return cache_cost.cache_aware_total(attempts, prices)
+        # The escalation corpus joins on (model, cost) only — a trajectory carries no per-turn
+        # token accounting — so the records handed to the shared cost model declare zero tokens.
+        # That is honest here: `cache_aware_total` reads model and cost and nothing else, and a
+        # zero-token record is inadmissible to the context cost model by construction.
+        return cache_cost.cache_aware_total(
+            [BilledAttempt(model=m, cost=c) for m, c in attempts], prices
+        )
 
     return total
 

@@ -53,6 +53,8 @@ import numpy as np
 
 from benchmark.admissibility import AdmissibilityResult, admissibility_verdict
 from benchmark.routing.scripts import knn_nulls
+from benchmark.routing.strategies import Strategy
+from benchmark.routing.strategies.knn_session_cascade import kNNSessionCascadeStrategy
 from benchmark.routing.strategies.session_cascade import SessionCascadeStrategy
 from shunt.router.escalation import EscalationConfig, next_rung_rank
 
@@ -121,18 +123,42 @@ def build_control_matrix(depths: np.ndarray) -> dict:
     }
 
 
-def _strategy(escalate_after_n: int, rank_shortlist: int | None) -> SessionCascadeStrategy:
+class _FixedRungPicker(Strategy):
+    """A selector planted on a KNOWN rung — the seeded leg's stand-in for the real kNN pick."""
+
+    def __init__(self, rung: int) -> None:
+        self._rung = rung
+
+    @property
+    def name(self) -> str:
+        """Never plotted; the seeded leg only ever reads this strategy's billed cost."""
+        return "control-fixed-rung"
+
+    def select(self, task_id: str, task_meta: dict, matrix: dict) -> str:
+        """The planted opening rung, identical for every task — the floor under test."""
+        del task_id, task_meta, matrix
+        return CONTROL_MODELS[self._rung]
+
+
+def _strategy(
+    escalate_after_n: int, rank_shortlist: int | None, initial_rung: int | None = None
+) -> SessionCascadeStrategy:
     """The replay under test, with both config sources injected so it reads no repo state."""
     # `arm_ladders={}` is not a stub of the effort rung: with no ladder every model is served on
     # its one implicit arm, which is what a rank-only ladder does, and the effort rung is scored
     # nowhere in this gate because the corpus cannot support it (see the module header).
-    return SessionCascadeStrategy(
-        ladder="rank_only",
-        escalate_after_n=escalate_after_n,
-        arm_results={},
-        arm_ladders={},
-        rank_shortlist=rank_shortlist,
-    )
+    # `initial_rung` selects the SEEDED leg: the same ladder, opened by a planted pick instead of
+    # at the cheapest rung. Only the picker is replaced — every billing rule below it is shared.
+    common = {
+        "ladder": "rank_only",
+        "escalate_after_n": escalate_after_n,
+        "arm_results": {},
+        "arm_ladders": {},
+        "rank_shortlist": rank_shortlist,
+    }
+    if initial_rung is None:
+        return SessionCascadeStrategy(**common)  # type: ignore[arg-type]
+    return kNNSessionCascadeStrategy(picker=_FixedRungPicker(initial_rung), **common)  # type: ignore[arg-type]
 
 
 def rung_sequence(rank_shortlist: int | None) -> list[int]:
@@ -162,10 +188,13 @@ def _expected_hop_depths(rank_shortlist: int | None) -> set[int]:
 
 
 def replay_costs(
-    matrix: dict, escalate_after_n: int, rank_shortlist: int | None = None
+    matrix: dict,
+    escalate_after_n: int,
+    rank_shortlist: int | None = None,
+    initial_rung: int | None = None,
 ) -> tuple[np.ndarray, list[int]]:
     """Per-task replayed cost and hop depth, in task order — the assembled instrument's output."""
-    strategy = _strategy(escalate_after_n, rank_shortlist)
+    strategy = _strategy(escalate_after_n, rank_shortlist, initial_rung)
     costs: list[float] = []
     hops: list[int] = []
     for tid in matrix["results"]:
@@ -175,11 +204,13 @@ def replay_costs(
     return np.asarray(costs, dtype=float), hops
 
 
-def _correlation(costs: np.ndarray, depths: np.ndarray) -> float:
-    """Pearson r on the escalation-requiring subset (depth >= 1); 0.0 when either side is flat."""
+def _correlation(costs: np.ndarray, depths: np.ndarray, min_depth: int = 1) -> float:
+    """Pearson r on the escalation-requiring subset (depth >= min_depth), else 0.0 if flat."""
     # The subset is chosen from the PLANTED depths, never from the replay's own output, so the
-    # positive and null legs are scored over exactly the same task indices.
-    keep = depths >= 1
+    # positive and null legs are scored over exactly the same task indices. The seeded leg raises
+    # `min_depth` to its floor: below the floor the router never routes, so those tasks carry no
+    # depth signal by construction and scoring them would credit the instrument for a constant.
+    keep = depths >= min_depth
     x = np.asarray(costs, dtype=float)[keep]
     y = depths.astype(float)[keep]
     if x.size < 2 or float(np.std(x)) == 0.0 or float(np.std(y)) == 0.0:
@@ -285,6 +316,130 @@ def run_control(
     )
 
 
+# The rung the SEEDED leg plants its pick on. 1, not 0: it must be above the bottom (or the leg
+# is the base control again) and below the top (or nothing can escalate above it). With four rungs
+# that leaves exactly one task depth BELOW the floor, which is the population leg (b) scores.
+SEEDED_FLOOR: Final[int] = 1
+
+
+def _floor_billing_failure(costs: np.ndarray, depths: np.ndarray, floor: int) -> str | None:
+    """The reason the seeded floor is not honoured, or ``None`` when it is.
+
+    Returns rather than raises: this is the ONE constraint the seeded leg carries that the base
+    leg cannot, so it has to reach the leg's ``admissible`` verdict, not bypass it as a crash.
+    """
+    # THE FAILURE MODE UNIQUE TO THIS ROW. A router that opens on the kNN pick never routes BELOW
+    # that pick, so a task the cheapest rung would have solved is still paid for at the picked
+    # rung. An implementation that quietly clamped the floor back to 0 would look healthier than
+    # the shipped default is, and the correlation leg above could not see it: those tasks are
+    # outside its subset by construction. So this is checked directly, on the exact cost.
+    #
+    # AND WHY THE VERDICT CANNOT REST ON THE CORRELATION ALONE. Measured, not assumed: seeding the
+    # floor shifts every SCORED task's cost by the same constant (-0.02 here, because the scored
+    # subset is depth >= floor and the floor only changes which rung opens, not which rung solves),
+    # and Pearson r is shift-invariant — so the seeded leg's `positive_score` is bit-identical to
+    # the base leg's (0.94491118252307 at the shipped knobs). A leg whose only statistic cannot
+    # move independently of another leg certifies nothing on its own. This check is what makes the
+    # seeded leg falsifiable separately: it reads the below-floor population, which the
+    # correlation excludes by construction and which the base leg bills differently.
+    below = np.asarray(costs, dtype=float)[depths < floor]
+    if below.size == 0:
+        return (
+            f"seeded control planted floor {floor} with no task below it, so nothing constrains it"
+        )
+    expected = _COSTS[floor]
+    if not bool(np.allclose(below, expected)):
+        return (
+            f"the seeded session-cascade control billed a below-floor task at something other "
+            f"than its floor: expected every depth<{floor} task to cost {expected} (rung "
+            f"{CONTROL_MODELS[floor]}), observed {sorted(set(below.tolist()))}. The seeded rank "
+            f"floor is not being honoured, so the shipped-default row understates its own cost."
+        )
+    return None
+
+
+def run_seeded_control(
+    *,
+    escalate_after_n: int = 2,
+    n_perm: int = knn_nulls.DEFAULT_PERMUTATIONS,
+    seed: int = 0,
+    rank_shortlist: int | None = None,
+    floor: int = SEEDED_FLOOR,
+) -> AdmissibilityResult:
+    """The kNN-seeded leg: the same replay opened on a planted rung instead of the cheapest."""
+    depths = np.repeat(np.arange(len(CONTROL_MODELS)), _PER_DEPTH)
+    costs, hops = replay_costs(
+        build_control_matrix(depths), escalate_after_n, rank_shortlist, initial_rung=floor
+    )
+    floor_failure = _floor_billing_failure(costs, depths, floor)
+    positive = _correlation(costs, depths, min_depth=floor)
+
+    rng = np.random.default_rng(seed + 2)
+    draws = np.array(
+        [
+            _correlation(
+                replay_costs(
+                    build_control_matrix(rng.permutation(depths)),
+                    escalate_after_n,
+                    rank_shortlist,
+                    initial_rung=floor,
+                )[0],
+                depths,
+                min_depth=floor,
+            )
+            for _ in range(n_perm)
+        ]
+    )
+    band = knn_nulls.band_of(draws)
+    shuffle_rng = np.random.default_rng(seed + 20_011)
+    shuffled = float(
+        np.median(
+            [
+                _correlation(
+                    replay_costs(
+                        build_control_matrix(shuffle_rng.permutation(depths)),
+                        escalate_after_n,
+                        rank_shortlist,
+                        initial_rung=floor,
+                    )[0],
+                    depths,
+                    min_depth=floor,
+                )
+                for _ in range(5)
+            ]
+        )
+    )
+    verdict = admissibility_verdict(
+        positive, shuffled, chance_level=CHANCE_LEVEL, chance_band=(band.hi - band.lo) / 2.0
+    )
+    if floor_failure is not None:
+        # The floor is a precondition of the row, not a footnote: fail the leg, do not crash the
+        # process, so `main()`'s `all(v.admissible ...)` sees an INADMISSIBLE seeded leg beside an
+        # unaffected base leg — which is what "this row is not quotable" has to look like.
+        verdict = replace(
+            verdict,
+            admissible=False,
+            reason=f"INADMISSIBLE: {floor_failure}",
+        )
+    return replace(
+        verdict,
+        numbers={
+            **verdict.numbers,
+            "n_tasks": int(depths.size),
+            "seeded_floor": floor,
+            "floor_billing": "honoured" if floor_failure is None else "VIOLATED",
+            "floor_rung": CONTROL_MODELS[floor],
+            "below_floor_billed": _COSTS[floor],
+            "n_scored": int((depths >= floor).sum()),
+            "escalate_after_n": escalate_after_n,
+            "n_perm": n_perm,
+            "hop_depths_observed": sorted(set(hops)),
+            "null_lo": band.lo,
+            "null_hi": band.hi,
+        },
+    )
+
+
 def main() -> int:
     """Run the gate at the configured escalation policy and print the verdict."""
     ap = argparse.ArgumentParser(description=__doc__)
@@ -306,15 +461,27 @@ def main() -> int:
     shortlist = (
         args.rank_shortlist if args.rank_shortlist is not None else knobs.get("rank_shortlist")
     )
-    verdict = run_control(
-        escalate_after_n=n,
-        n_perm=args.permutations,
-        rank_shortlist=None if shortlist is None else int(shortlist),
-    )
-    print(f"[session-cascade] {verdict.reason}")
-    for key, value in verdict.numbers.items():
-        print(f"  {key}: {value}")
-    return 0 if verdict.admissible else 1
+    kwargs = {
+        "escalate_after_n": n,
+        "n_perm": args.permutations,
+        "rank_shortlist": None if shortlist is None else int(shortlist),
+    }
+    # BOTH session-cadence rows are gated here, because they are one instrument opened at two
+    # rungs: `Session-Cascade` starts at the cheapest model, `kNN-cascade` at the kNN pick. A
+    # verdict may be quoted for a row only if ITS leg is admissible — and note what "its leg"
+    # buys: the two legs' correlation statistic is shift-invariant and therefore IDENTICAL by
+    # construction, so the seeded leg's independent content is its floor-billing check alone
+    # (`floor_billing` in its numbers). Read the seeded row as "the shared ladder recovers depth,
+    # AND the seeded floor is billed", never as a second, independent recovery of the signal.
+    legs = {
+        "session-cascade": run_control(**kwargs),
+        "knn-cascade (seeded floor)": run_seeded_control(**kwargs),
+    }
+    for label, verdict in legs.items():
+        print(f"[{label}] {verdict.reason}")
+        for key, value in verdict.numbers.items():
+            print(f"  {key}: {value}")
+    return 0 if all(v.admissible for v in legs.values()) else 1
 
 
 if __name__ == "__main__":

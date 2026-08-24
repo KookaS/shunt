@@ -9,8 +9,10 @@
 #
 # * ``GET /admin/loop-health`` — aggregates only (label coverage, propensities, collapse
 #   alarms). It carries no escalation field at all, so it cannot decide this verdict. The
-#   *driver* still polls it, because ``verified_labeled`` is the one progress counter a
-#   bare-HTTP client can reach.
+#   *driver* still polls it, because ``verification.verified_outcomes`` is the one progress
+#   counter a bare-HTTP client can reach. NOT ``label_coverage.verified_labeled``: that block
+#   is kNN-corpus coverage, gated on the session carrying an embedding, and the shipped default
+#   strategy never embeds.
 # * ``shunt explain <session_id>`` — prints the decision's provenance, including
 #   ``Escalation:``. It needs a session id, which is precisely what a header-swallowing
 #   CLI denies us. Used below as the human-readable receipt once the id is known.
@@ -241,6 +243,8 @@ def load_ladder_spec() -> LadderSpec:
 #   (g) at most one step per recurrence — no two adjacent escalated sessions, which is what the
 #       retirement of the consumed failure window guarantees;
 #   (h) `shunt explain` names the ESCALATED model, not the base pick.
+#   (i) a rung logged as `raise_effort` really did KEEP the model — the served model is
+#       the pre-escalation one, since that is the whole definition of the cache-safe rung.
 #
 # NOT asserted, and deliberately not faked: "never mid-cached-turn". The store holds ONE row per
 # session with ONE model, so a mid-session switch is not representable in it — there is no
@@ -330,6 +334,36 @@ def _ladder_problems(
     return problems
 
 
+def _effort_rung_problems(session: dict[str, Any]) -> list[str]:
+    """(i) a `raise_effort` rung must have kept the model — that IS what the rung means."""
+    # The gap this closes: the tool read the provenance's own claim of success and never asked
+    # the store what was SERVED. A live run where the effort rung failed on the wire and the
+    # fallback chain served a DIFFERENT model exited 0 — the tool reported the router escalated
+    # as designed while the cache-safe rung had silently become a rank jump. `raise_effort` is
+    # defined as "same model, request-level reasoning params only"; a served model that differs
+    # from the pre-escalation one falsifies the record, whatever the flags say.
+    prov = session["provenance"]
+    record = prov.get("escalation_exploration")
+    if not isinstance(record, dict) or str(record.get("action")) != "raise_effort":
+        return []
+    served = str(session["model_chosen"])
+    before = prov.get("pre_escalation_model")
+    if not isinstance(before, str) or not before:
+        return [
+            "the decision logs an `escalation_exploration` action of 'raise_effort' but carries "
+            "no `pre_escalation_model`, so the claim that the model was KEPT cannot be checked "
+            "against the store at all"
+        ]
+    if served != before:
+        return [
+            f"the decision logs a 'raise_effort' rung — same model, request-level reasoning "
+            f"params only — but the served model is {served!r} while the pre-escalation model "
+            f"was {before!r}: the cache-safe effort rung became a jump onto a different model, "
+            "and the provenance records it as having worked"
+        ]
+    return []
+
+
 def _is_ladder_step(session: dict[str, Any]) -> bool:
     """A decision that STEPPED the ladder, as opposed to one merely held at the rung it owns."""
     # `escalation_floor` is also stamped `auto_escalated: true` — it is the router refusing to
@@ -400,6 +434,7 @@ def _verdict_problems(
     problems: list[str] = []
     problems.extend(_ladder_problems(session, sessions, ladder))
     problems.extend(_cadence_problems(sessions, ladder))
+    problems.extend(_effort_rung_problems(session))
 
     # (d) the reason
     reason = prov.get("rank_escalation_reason")

@@ -24,7 +24,7 @@ from benchmark.routing.strategy_class import StrategyClass  # noqa: E402
 _N180_ROWS = (
     ("Oracle", "15.18", "96.67"),
     ("Price-Cascade", "22.07", "96.67"),
-    ("kNN-cascade", "24.95", "96.67"),
+    ("kNN-cascade (within-task)", "24.95", "96.67"),
     ("Session-Cascade", "27.68", "96.67"),
     ("Always-Frontier", "91.15", "95.00"),
     ("kNN", "11.61", "78.89"),
@@ -98,7 +98,7 @@ class TestCheapestPricesOnlyAClassThatExists:
     def test_present_class_still_returns_its_cheapest_price(self) -> None:
         band = [
             ("Oracle", StrategyClass.BOUND, 15.18, 96.67),
-            ("kNN-cascade", StrategyClass.BLOCKED, 24.95, 96.67),
+            ("kNN-cascade (within-task)", StrategyClass.BLOCKED, 24.95, 96.67),
             ("Price-Cascade", StrategyClass.BLOCKED, 22.07, 96.67),
         ]
         assert live_gap._cheapest(band, StrategyClass.BOUND) == 15.18

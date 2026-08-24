@@ -184,7 +184,7 @@ def test_an_old_config_without_an_escalation_block_reports_why_it_is_off(
     # that, or the operator hunts for a knob that is not what turned escalation off.
     config_dir = cli_env / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
-    (config_dir / "router.yaml").write_text("router:\n  strategy: knn\n")
+    (config_dir / "router.yaml").write_text("router:\n  strategy: always_cheap\n")
 
     _run()
 
@@ -192,6 +192,22 @@ def test_an_old_config_without_an_escalation_block_reports_why_it_is_off(
     assert "Escalation:     DISABLED" in out
     assert "no `escalation:` block in the file" in out
     assert "Reason: disabled" in out
+
+
+def test_a_pre_rename_knn_config_without_an_escalation_block_stays_enabled(
+    cli_env: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The non-brick rule: `strategy: knn` is the pre-rename spelling of the escalating
+    # default, so the absent-block escape hatch must NOT turn the ladder off under it —
+    # that would silently change what every pre-rename install does.
+    config_dir = cli_env / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "router.yaml").write_text("router:\n  strategy: knn\n")
+
+    _run()
+
+    out = capsys.readouterr().out
+    assert "Escalation:     enabled" in out
 
 
 def test_unresolved_work_dir_reports_escalation_as_inert(

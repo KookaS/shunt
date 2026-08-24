@@ -215,6 +215,11 @@ make state-import   # restore them byte-identically on a fresh checkout
 make state-verify   # prove the committed capture restores to what its index binds
 ```
 
+No export is committed in this repository yet: the only file under
+`escalation/data/live/state*` is `state_capture.json`, the per-step capture-health audit,
+which holds no diffs. Until `make state-export` is run on the collecting host and its output
+committed, `state-import` and `state-verify` fail with `no committed state plane`.
+
 A checkout missing them raises `SnapshotsMissingError` rather than replaying a partial
 run, because filesystem absence cannot be told from "this run captured nothing".
 

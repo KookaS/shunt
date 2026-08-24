@@ -9,36 +9,62 @@ import os
 from pathlib import Path
 from typing import Final
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
 from shunt.models.config import strict_yaml_load
+from shunt.proxy.context_transfer import (
+    CONTEXT_TRANSFER_FULL,
+    CONTEXT_TRANSFER_MODES,
+)
 from shunt.router.escalation import ESCALATION_LADDERS, EscalationConfig
 
 logger = logging.getLogger(__name__)
 
 # Live-eligible routing strategies — the set ``router.strategy`` may name. Benchmark-only
 # strategies (oracle, random) are deliberately absent: they need ground truth or are
-# not routers at all, so they cannot run on live traffic. ``knn_cascade`` and
-# ``price_cascade`` are also absent, and stay absent: a WITHIN-TASK quality cascade takes a
-# verified outcome per attempt mid-session, which is not one cache-safe per-session decision
-# (routing once per session is the product's spine), and the upstream fallback chain is
-# availability-only, not quality-based.
+# not routers at all, so they cannot run on live traffic. The WITHIN-TASK quality cascades
+# are absent and stay absent: they take a verified outcome per attempt mid-session, which is
+# not one cache-safe per-session decision (routing once per session is the product's spine),
+# and the upstream fallback chain is availability-only, not quality-based.
 #
-# ``session_cascade`` is the cache-safe operating point those two approximate, and it IS
-# nameable, because it paces the same ladder one attempt per SESSION: cheapest model first,
-# a verified failure walks a rung at the next boundary. It is a PRESET rather than a new
-# selection rule — ``always_cheap`` plus ``escalation.enabled`` — and ``_check_strategy``
-# below refuses it with escalation off so the name cannot mean a bare fixed-cheap router.
+# The two SESSION-cadence cascades below are the cache-safe operating points those approximate,
+# and they ARE nameable, because they pace the same ladder one attempt per SESSION: a base pick
+# first, a verified failure walks a rung at the next boundary. They are PRESETS rather than new
+# selection rules — a base selection rule plus ``escalation.enabled`` — and ``_check_strategy``
+# below refuses either with escalation off so the name cannot mean a bare non-escalating router.
+#
+# ``session_cascade`` is the SHIPPED DEFAULT (see ``router.yaml``): the ladder opens at the
+# cheapest model and consults no neighbourhood, so a default install never embeds.
+# ``knn_cascade`` is the OPT-IN routing strategy, and its name is the honest one for what a kNN
+# install has always run: the kNN pick has carried ``participates_in_escalation = True`` since
+# escalation shipped ON, so a config reading ``strategy: knn`` was already a kNN pick plus the
+# ladder. Plain kNN WITHOUT the ladder is no longer a selectable deployable option; ``knn`` is
+# accepted only as a migration alias (see ``parse_router_policy``).
 LIVE_STRATEGIES: Final[tuple[str, ...]] = (
-    "knn",
+    "knn_cascade",
     "always_cheap",
     "always_frontier",
     "session_cascade",
 )
 
-# The preset above is only itself with the escalation layer on: without it the config
-# resolves to plain ``always_cheap`` under a name promising a cascade.
+# The presets above are only themselves with the escalation layer on: without it each config
+# resolves to its plain base selection rule under a name promising a cascade.
 SESSION_CASCADE_STRATEGY: Final[str] = "session_cascade"
+KNN_CASCADE_STRATEGY: Final[str] = "knn_cascade"
+_CASCADE_IDS: Final[frozenset[str]] = frozenset({SESSION_CASCADE_STRATEGY, KNN_CASCADE_STRATEGY})
+
+# The pre-rename spelling of ``knn_cascade``. Accepted for at least one minor release so an
+# existing router.yaml keeps booting; see ``parse_router_policy`` for the resolution rules.
+LEGACY_STRATEGY_ALIASES: Final[dict[str, str]] = {"knn": KNN_CASCADE_STRATEGY}
+
+# Per-cascade error vocabulary: the base selection rule the preset wraps, and the id an operator
+# who genuinely wants that rule WITHOUT the ladder should name instead. `knn_cascade` has no such
+# alternative — plain kNN stopped being selectable with this rename — so it points at the nearest
+# non-escalating fixed router rather than at a name that no longer exists.
+_CASCADE_BASES: Final[dict[str, tuple[str, str]]] = {
+    SESSION_CASCADE_STRATEGY: ("always_cheap", "always_cheap"),
+    KNN_CASCADE_STRATEGY: ("the kNN pick", "always_cheap"),
+}
 
 _CONFIG_DIR_ENV: Final[str] = "SHUNT_CONFIG_DIR"
 _CONFIG_FILENAME: Final[str] = "router.yaml"
@@ -93,12 +119,42 @@ class EscalationPolicy(BaseModel):
     # taken, which loses overlap on the other side.
     exploration_epsilon: float = Field(default=0.0, ge=0.0, lt=1.0)
     exploration_seed: int | None = Field(default=None)
+    # What the ESCALATED model receives of the conversation that ran on the cheaper one.
+    # `full` (default) is pure pass-through: Shunt forwards the client's messages untouched,
+    # which is what has always shipped. `summary` makes Shunt AUTHOR content — it replaces the
+    # prior conversation with a compaction on the first turn after an escalation — so it is
+    # opt-in, disclosed at boot, on `shunt doctor`, on the wire (`X-Shunt-Context`) and in
+    # `shunt explain`. There is deliberately no `none`: Shunt can drop context from the request
+    # it forwards but cannot make the CLI forget, so `none` would have to strip on EVERY turn
+    # and the strong model could never accumulate state — a broken router, not a variant.
+    context_transfer: str = Field(default=CONTEXT_TRANSFER_FULL)
+    # Ceiling on the authored summary, in tokens. The summariser is asked for this budget and
+    # an over-budget answer degrades to `full` rather than being truncated mid-sentence.
+    context_transfer_max_tokens: int | None = Field(default=2000, gt=0)
+    # Which model writes the summary. null ⇒ the OUTGOING, pre-escalation model: it is the
+    # cheaper one and its prefix is already warm, so it re-serves a cached prefix. Naming the
+    # INCOMING model would pay the full uncached prefill this feature exists to avoid.
+    context_transfer_model: str | None = Field(default=None)
 
     @model_validator(mode="after")
     def _check_ladder(self) -> EscalationPolicy:
         if self.ladder not in ESCALATION_LADDERS:
             joined = ", ".join(ESCALATION_LADDERS)
             raise ValueError(f"unknown escalation.ladder {self.ladder!r}; allowed: {joined}")
+        if self.context_transfer not in CONTEXT_TRANSFER_MODES:
+            joined = ", ".join(CONTEXT_TRANSFER_MODES)
+            extra = (
+                ""
+                if self.context_transfer != "none"
+                else (
+                    " — `none` is deliberately not offered: Shunt cannot make the client forget, "
+                    "so it would strip context on every turn"
+                )
+            )
+            raise ValueError(
+                f"unknown escalation.context_transfer {self.context_transfer!r}; "
+                f"allowed: {joined}{extra}"
+            )
         return self
 
     def to_config(self) -> EscalationConfig:
@@ -189,7 +245,7 @@ class RouterPolicy(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    strategy: str = "knn"
+    strategy: str = SESSION_CASCADE_STRATEGY
     policy: KnnPolicy = Field(default_factory=KnnPolicy)
     exploration: ExplorationPolicy = Field(default_factory=ExplorationPolicy)
     escalation: EscalationPolicy = Field(default_factory=EscalationPolicy)
@@ -205,7 +261,7 @@ class RouterPolicy(BaseModel):
     models: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _check_strategy(self) -> RouterPolicy:
+    def _check_strategy(self, info: ValidationInfo) -> RouterPolicy:
         if self.strategy not in LIVE_STRATEGIES:
             allowed = ", ".join(LIVE_STRATEGIES)
             raise ValueError(f"unknown router.strategy {self.strategy!r}; live-eligible: {allowed}")
@@ -215,20 +271,36 @@ class RouterPolicy(BaseModel):
         # cascade, which is the deployability-honesty defect this id exists to remove. It is safe
         # as a load ERROR — unlike the work_dir case it can never be the default state, because
         # nothing selects this id by accident.
-        if self.strategy == SESSION_CASCADE_STRATEGY and not self.escalation.enabled:
+        if self.strategy in _CASCADE_IDS and not self.escalation.enabled:
+            if not _strategy_was_written(info):
+                # NOT an error, on purpose: the operator turned the ladder off and never named a
+                # cascade — `router.strategy` merely DEFAULTS to one. Refusing here would brick
+                # the commonest way to disable escalation (`escalation: {enabled: false}` and
+                # nothing else), which is a supported, documented config. The name is still
+                # misleading in that state, so it is a loud warning rather than silence.
+                logger.warning(
+                    "router.escalation.enabled is false while router.strategy defaults to %r, "
+                    "so the ladder that name promises does not run — this install is a bare "
+                    "%s. That is a supported configuration; name the strategy explicitly "
+                    "to make the intent visible, or set escalation.enabled: true.",
+                    self.strategy,
+                    _CASCADE_BASES[self.strategy][0],
+                )
+                return self
             # Name the likeliest CAUSE, not just the state. The commonest way to reach here is
             # not "the operator wrote enabled: false" — it is a hand-written router.yaml
-            # carrying only `strategy: session_cascade`, because a user file replaces the
+            # carrying only `strategy: <a cascade id>`, because a user file replaces the
             # packaged one wholesale and `parse_router_policy` reads an ABSENT escalation block
             # as OFF. Without that sentence the error reads as a contradiction of the docs.
+            base, alternative = _CASCADE_BASES[self.strategy]
             raise ValueError(
-                f"router.strategy {SESSION_CASCADE_STRATEGY!r} requires "
-                f"router.escalation.enabled: true — the preset IS always_cheap plus the "
-                f"escalation ladder, and with the ladder off it is a fixed cheap router "
+                f"router.strategy {self.strategy!r} requires "
+                f"router.escalation.enabled: true — the preset IS {base} plus the "
+                f"escalation ladder, and with the ladder off it is nothing but {base}, "
                 f"wearing a cascade's name. If your router.yaml has no `escalation:` block "
                 f"at all, that is why: a user file replaces the packaged one wholesale, and "
                 f"an absent block means OFF. Add `escalation: {{enabled: true}}`, or use "
-                f"'always_cheap'."
+                f"{alternative!r}."
             )
         return self
 
@@ -244,6 +316,22 @@ class RouterPolicy(BaseModel):
     # and in the docs. Revisit as a hard error only if escalation gains a signal needing no repo.
 
 
+# The validation-context key recording whether `router.strategy` was WRITTEN by the operator
+# (as opposed to defaulted, or migrated from the retired `knn` spelling). Only an explicitly
+# written cascade id turns the escalation-coherence rule into a load error; see `_check_strategy`.
+_STRATEGY_WRITTEN: Final[str] = "strategy_was_written"
+
+
+def _strategy_was_written(info: ValidationInfo) -> bool:
+    """True unless the caller declared the strategy defaulted/migrated. Absent context ⇒ True."""
+    # Fail CLOSED: a direct `RouterPolicy(...)` construction carries no context, and there the
+    # caller did name the strategy, so the strict reading is the correct one.
+    context = info.context
+    if not isinstance(context, dict):
+        return True
+    return bool(context.get(_STRATEGY_WRITTEN, True))
+
+
 def parse_router_policy(data: dict[str, object] | None) -> RouterPolicy:
     """Validate a ``router:`` config mapping into a RouterPolicy (defaults if empty)."""
     if not data:
@@ -251,15 +339,62 @@ def parse_router_policy(data: dict[str, object] | None) -> RouterPolicy:
     router_section = data.get("router", data)
     if router_section is None:  # a present-but-null `router:` key → defaults, not a crash
         return RouterPolicy()
+    if not isinstance(router_section, dict):
+        return RouterPolicy.model_validate(router_section)
+    written = isinstance(router_section.get("strategy"), str) and (
+        router_section["strategy"] not in LEGACY_STRATEGY_ALIASES
+    )
+    return RouterPolicy.model_validate(
+        _migrate_router_section(router_section), context={_STRATEGY_WRITTEN: written}
+    )
+
+
+def _migrate_router_section(raw: dict[str, object]) -> dict[str, object]:
+    """Rewrite a pre-rename ``router:`` mapping so it still boots, with a warning per rewrite."""
+    written = raw.get("strategy")
+    migrated = LEGACY_STRATEGY_ALIASES.get(written) if isinstance(written, str) else None
+    aliased = migrated is not None
+    section = dict(raw)
+    if migrated is not None:
+        section["strategy"] = migrated
+        logger.warning(
+            "router.strategy %r is the pre-rename spelling of %r and has been migrated "
+            "automatically — behaviour unchanged, because a kNN install has always run the "
+            "escalation ladder on top of the kNN pick. Note this is NOT the shipped default, "
+            "which is %r. Update router.yaml; the alias is kept for at least one minor "
+            "release, then removed.",
+            written,
+            migrated,
+            SESSION_CASCADE_STRATEGY,
+        )
+    if "escalation" in section:
+        return section
     # ESCAPE HATCH — an `escalation:` block that is ABSENT is an OLD config, not an opt-in.
     # A user policy file replaces the packaged one wholesale (no key-by-key merge), so a
     # config that predates the escalation block never had a chance to write
     # `escalation.enabled` — yet the schema's default_factory would silently flip it ON.
     # An absent key therefore means OFF (the operator never opted in); only an explicit
     # `enabled: true`, the packaged file, or the bare code default ships escalation ON.
-    if isinstance(router_section, dict) and "escalation" not in router_section:
-        router_section = {**router_section, "escalation": {"enabled": False}}
-    return RouterPolicy.model_validate(router_section)
+    #
+    # THE ONE EXCEPTION, and why it is not a hole in the hatch: a strategy that was ALIASED or
+    # DEFAULTED never named a cascade, so the operator cannot have meant "the cascade without
+    # the ladder". Resolving those to OFF would hand every pre-rename config to the coherence
+    # rule below and brick it at boot — a rename that stops existing installs is a worse defect
+    # than the one it fixes. An EXPLICIT cascade id still falls through to OFF and still raises,
+    # because there the error is the point: the operator typed a cascade name and the file says
+    # nothing about the ladder, which is exactly what that message explains.
+    if written is None or aliased:
+        section["escalation"] = {"enabled": True}
+        logger.warning(
+            "router.yaml names no `escalation:` block, and its strategy was defaulted or "
+            "migrated, so the escalation ladder resolves to ENABLED — that is what %r means "
+            "and what this install has always run. Write `escalation: {enabled: false}` to "
+            "turn it off.",
+            section.get("strategy", SESSION_CASCADE_STRATEGY),
+        )
+        return section
+    section["escalation"] = {"enabled": False}
+    return section
 
 
 def _env_bool(raw: str) -> bool:
@@ -280,13 +415,18 @@ def apply_env_overrides(policy: RouterPolicy) -> RouterPolicy:
         return policy
 
     data = policy.model_dump()
+    # The overlay re-validates, so it has to carry the same explicitness the file did — otherwise
+    # a policy that loaded fine (defaulted strategy, ladder off) would be refused on re-entry.
+    context = {_STRATEGY_WRITTEN: strategy is not None}
     if strategy is not None:
-        data["strategy"] = strategy
+        # The same alias the file path takes: an operator exporting the pre-rename
+        # SHUNT_ROUTER_STRATEGY=knn must not be refused at boot by a rename.
+        data["strategy"] = LEGACY_STRATEGY_ALIASES.get(strategy, strategy)
     if enabled is not None:
         data["exploration"]["enabled"] = _env_bool(enabled)
     if budget is not None:
         data["exploration"]["explore_budget_frac"] = float(budget)
-    return RouterPolicy.model_validate(data)
+    return RouterPolicy.model_validate(data, context=context)
 
 
 def _user_config_path() -> Path:

@@ -46,6 +46,9 @@ class LoopHealthSnapshot:
     # model, n — sessions the provider never reported a cost for. Counted, never zero-filled,
     # so a consumer of cost_by_model can state its coverage instead of implying completeness.
     cost_unknown_by_model: list[tuple[str, int]] = field(default_factory=list)
+    # Verified (Tier-2) outcomes with NO embedding predicate — see `VerificationProgress`.
+    # Defaulted so a snapshot built for the kNN metrics alone stays constructible.
+    verified_outcomes: int = 0
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,22 @@ class LabelCoverage:
     any_labeled: int
     verified_coverage: float
     labeled_coverage: float
+
+
+# ``LabelCoverage`` above answers a kNN question — what share of EMBEDDABLE sessions carry a
+# label — so every one of its counters is gated on ``sessions.embedding_blob IS NOT NULL`` and
+# reads 0 by construction under a strategy that never embeds. The shipped default,
+# ``session_cascade``, is exactly such a strategy, and its escalation ladder is driven by these
+# very outcomes; without the block below, ``/admin/loop-health`` reports nothing at all about the
+# verification loop a default install actually runs.
+@dataclass(frozen=True)
+class VerificationProgress:
+    """Verified (Tier-2) outcomes recorded, whether or not the session was embedded."""
+
+    total_sessions: int
+    # LIVE rows only (seeded `bench:` ids excluded): a benchmark corpus is imported already
+    # labeled, so counting it would let a seed import make a dead loop look alive.
+    verified_outcomes: int
 
 
 @dataclass(frozen=True)
@@ -137,6 +156,7 @@ class StratumCensus:
 @dataclass(frozen=True)
 class LoopHealth:
     label_coverage: LabelCoverage
+    verification: VerificationProgress
     propensity_support: list[ModelPropensity]
     support_deficient_models: list[str]
     routing_collapse: RoutingCollapse
@@ -269,6 +289,10 @@ def compute_loop_health(
     support = _propensity_support(snapshot.model_propensities, candidate_models, thresholds)
     return LoopHealth(
         label_coverage=_label_coverage(snapshot),
+        verification=VerificationProgress(
+            total_sessions=snapshot.total_sessions,
+            verified_outcomes=snapshot.verified_outcomes,
+        ),
         propensity_support=support,
         support_deficient_models=[p.model for p in support if p.support_deficient],
         routing_collapse=_routing_collapse(

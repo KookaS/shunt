@@ -429,6 +429,75 @@ What the floor does, precisely:
   the per-task rank floor are all snapshotted, so a restart resumes a half-climbed
   ladder rather than forgetting it and starting the climb over.
 
+### What the escalated model is told — `context_transfer` {#what-the-escalated-model-is-told--context_transfer}
+
+When a rung is climbed, the next session runs on a **different model**, and your CLI resends
+the whole conversation to it. That prefix is a cache **miss** by construction — a new model
+means a new prefix — so the escalated turn pays full input price for everything said so far.
+`escalation.context_transfer` is the knob over what happens to that inherited conversation.
+
+| Value | What shunt forwards |
+|---|---|
+| `full` (default) | Your messages, untouched. Pure pass-through, exactly as shunt has always behaved, and what every published cost number assumes. |
+| `summary` | On the **first** turn after an escalation that **changed the model**, shunt replaces the prior conversation with a handover note **it authors**, then freezes that note and resends it byte-identically on every later turn. |
+
+It fires on a **rank** rung, never an **effort** one. The effort rung keeps the same model
+precisely so the cache namespace — and the warm prefix — survives; substituting a summary
+there would turn a cache hit into a miss and pay for a summariser call to do it. Only a step
+that hands the conversation to a model which has never seen it is a transfer at all. A
+*resumed* conversation never authors one either: it continues on an already-locked model, so
+there is no escalation boundary to compact at. If the conversation it resumes had already
+been summarised, the frozen note is restored with the model and re-sent unchanged — the
+decision is not retaken, and the prefix stays warm across the resume.
+
+**`summary` means the model does not see what you see.** This is the one place shunt puts
+words into your conversation rather than carrying it, so it is off by default and it is
+disclosed everywhere it can be:
+
+- a **boot warning** naming the writer and the token ceiling;
+- a line on `shunt doctor`, under the escalation check;
+- an **`X-Shunt-Context`** response header on the turn the substitution happens;
+- a `Context:` line in `shunt explain <session>`, saying who wrote the note and how many
+  messages it replaced.
+
+The note is written by the **outgoing**, pre-escalation model (override with
+`context_transfer_model`). That model is the cheap one and its prefix is already warm, so it
+re-serves a cache hit; asking the *incoming* model would pay exactly the uncached prefill the
+feature exists to avoid. The note is frozen on the session for the same reason: a summary
+regenerated per turn is a cache miss per turn, which costs **more** than `full`.
+
+Anything that goes wrong — an error, a timeout, an empty answer, a note over
+`context_transfer_max_tokens` — **degrades to `full`**, with a WARNING and a
+`degraded_reason` recorded in the session's provenance. One attempt, no retry loop. Context is
+never silently dropped: the fallback is the expensive-but-correct path.
+
+**What we have actually observed, and what we have not.** On a live rig, an escalated turn
+under `summary` sent roughly a fifth of the tokens the same conversation sent under `full`
+<!-- frozen-value: n=1, date=2026-08-23, run=rig-context-transfer -->, and the frozen note
+behaved as designed — the prefix stayed fixed while only the tail grew. That token reduction
+is the bulk of the saving and it is measured. What is **not** measured is the second-order
+benefit: on that run the provider reported no cache read for the frozen prefix on later
+turns, most likely because the note was too short to meet the provider's minimum cacheable
+prefix. We could not separate "below the provider's threshold" from "shunt is not presenting
+a cacheable prefix", so treat the warm-prefix half of the rationale above as an intended
+mechanism rather than a demonstrated one. `full` remains the default, and every published
+cost number assumes it.
+
+**What it writes to disk.** Restoring a frozen note after a restart means restoring the exact
+bytes, so the note and the leading system blocks it was built from are stored in the session
+row (`decision_provenance.context_transfer_prefix`) in **plaintext**, in shunt's local SQLite
+database. For a coding agent those system blocks routinely carry your working directory, git
+status and recent commit subjects. Nothing is redacted and the file is not encrypted — its
+protection is filesystem permissions. This applies only with `summary` enabled, which is off
+by default; under `full` no conversation body beyond the session's opening `prompt_text` is
+written. See [SECURITY.md](https://github.com/KookaS/shunt/blob/main/SECURITY.md) for the
+data-at-rest summary.
+
+There is deliberately no `none`. Shunt can drop context from the request it forwards, but it
+cannot make your CLI forget — the client resends its history every turn — so `none` would have
+to strip on *every* turn, and the strong model could never accumulate state. That is a broken
+router, not a transfer mode.
+
 ## Why it is built this way
 
 The design is mostly a series of refusals, and each one is worth knowing before you
@@ -517,6 +586,38 @@ Be honest with yourself about where this does nothing:
   still validating; it ships ON, but treat it as unproven (consider disabling it)
   until that holds for your own workflow.
 
+### The benchmark measures a different cascade from the one inference runs {#offline-vs-live-cascade}
+
+Every published cascade number is an **offline replay**, and the replay and the running
+router do not climb the same ladder.
+
+Offline, each rung starts from a **fresh tree and a fresh context**: the attempt is scored as
+if the stronger model had been handed the original task, untouched. Live, the escalated model
+inherits a **dirty tree** — the cheap rung's edits are still sitting in your repo — and,
+because shunt never rewrites `messages`, it also inherits **the whole prior conversation**,
+resent by your CLI and uncached.
+
+Two consequences, and they are not symmetric:
+
+- **The cost gap is priced, roughly.** Carrying that conversation is a cache miss by
+  construction, so it is charged at full input rate. The dashed bracket in the magnified
+  panel of [the frontier figure](routing.md#fig-cost-quality-frontier) re-prices both
+  deployable escalating strategies, ticked at `summary` (drawn as a band, because a
+  summariser's compression ratio is not a constant) and at `full`, the shipped default. The
+  marker the bracket hangs from is what the offline benchmark measures — a fresh context on
+  every rung, which no config setting reproduces. It is a cost model over measured tokens,
+  not a measurement, and `context_transfer: summary` above exists to shrink that end of it.
+- **The quality gap is not priced at all.** The assumption that a fresh-tree rung and a
+  dirty-tree rung reach **equal quality** is **untested**, and testing it is N² expensive —
+  every rung would have to be re-run from every predecessor's leftovers. Worse, the workspace
+  difference is a confound in an **unknown direction**: escalation only fires on a confirmed
+  RED tree, so the escalated model starts from a problem that is **partially solved** (which
+  may help it) and **partially wrong** (which may mislead it). Nothing in this corpus
+  separates the two, so we do not claim a sign, let alone a size.
+
+Read every cascade cost as an offline lower bound whose live quality is unestablished in
+either direction.
+
 ### Pros and cons at a glance
 
 **Why use this model.** Because a model's self-report is the least trustworthy signal
@@ -535,6 +636,7 @@ and the full [limitations](#limitations-read-before-relying-on-it) are above; th
 | Different failures never aggregate; success clears the slate | An unenumerated runner's volatile output never accumulates recurrence |
 | Escalated turns are non-policy; collapse guard caps runaway escalation | Ships ON, but the trigger is unproven at live cadence (null detector); ladder value observational |
 | SWE-only by design today, but runner-extensible (see above) | Requires Shunt beside your code + toolchain on the same machine |
+| | Every published cascade number is an offline replay from a fresh tree; a live rung inherits a dirty one, in an [unknown direction](#offline-vs-live-cascade) |
 
 ## Turn it on (it is already on — arm it)
 
@@ -560,12 +662,14 @@ router warns at boot which layer (if any) is armed; if none, escalation is enabl
 The full knob reference is in
 [Configuration](configuration.md#auto-escalate-on-repeated-verified-failure).
 
-### Escalation applies to whichever base strategy you run
+### Which base strategies the ladder applies to
 
-The ladder is a layer over base routing, not part of any one algorithm, so it works the same
-whether `router.strategy` is `knn`, `always_cheap` or `always_frontier`. If what you want is
-the whole cheap-first-then-climb behaviour as one setting, `router.strategy: session_cascade`
-is that preset — `always_cheap` plus this layer, refused at load if you turn the layer off.
+The ladder is a layer over base routing, not part of any one algorithm — but it does not
+apply to every strategy. `always_cheap` and `always_frontier` are **pinned controls**: a
+verified failure never moves them, because they are the baselines a routing comparison is
+read against. The two strategies the ladder runs under are the ones named for it:
+`session_cascade` (the default — the cheapest model, then this layer) and `knn_cascade`
+(the kNN pick, then this layer). Both are refused at load if you turn the layer off.
 See [Choose the strategy](configuration.md#choose-the-strategy).
 
 What it is not, and cannot become: a cascade *inside* one task. Shunt makes one model decision

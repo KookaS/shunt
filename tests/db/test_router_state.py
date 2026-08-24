@@ -30,7 +30,7 @@ def test_run_migrations_idempotent() -> None:
     versions = [
         row[0] for row in conn.execute("SELECT version FROM schema_version ORDER BY version")
     ]
-    assert versions == [1, 2, 3, 4, 5]
+    assert versions == list(range(1, SCHEMA_VERSION + 1))
 
 
 def test_v2_db_migrates_to_v3_with_rows_intact() -> None:

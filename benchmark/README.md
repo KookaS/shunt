@@ -55,10 +55,18 @@ statuses below are the current audit of that contract:
   `git diff HEAD` captures from `runner/artifacts/step_snapshots/`, which is **gitignored**
   (`step_snapshots.SNAPSHOT_ROOT`; ~74 MB / 792 trajectories on the collecting host), and a
   checkout without them raises `SnapshotsMissingError` — deliberately, since filesystem absence
-  cannot be told from "this run captured nothing". `runner/snapshot_archive.py` closes that half:
-  `make state-export` packs the captures into `escalation/data/live/state/` as one deterministic
-  `.tar.gz` per trajectory (34 105 506 B of diffs → 1 647 548 B on disk, ~1.5 MB in a packfile;
-  plain git, not LFS), and `make state-import` restores them byte-identically on any checkout.
+  cannot be told from "this run captured nothing". `runner/snapshot_archive.py` is the machinery that
+  can close that half: `make state-export`, run **on the collection host**, packs the captures
+  into `escalation/data/live/state/` as one deterministic `.tar.gz` per trajectory plus an
+  `index.json` (34 105 506 B of diffs → 1 647 548 B on disk, ~1.5 MB in a packfile; plain git,
+  not LFS), and `make state-import` then restores them byte-identically on any checkout that has
+  that directory. **No such export is committed today.** `git ls-files
+  'benchmark/escalation/data/live/state*'` returns exactly one file — `state_capture.json`, the
+  per-step capture-health audit written by `runner/state_capture_audit.py`, which records whether
+  each trajectory's captures were clean; it is *not* the state plane and holds no diffs. Until an
+  export is committed, `make state-import` and `make state-verify` fail with `no committed state
+  plane at benchmark/escalation/data/live/state`, and `make replay-inputs` reports
+  `state.archives` unsatisfied.
   **Two inputs remain outside git and always will:** the instance images (~100 GB) and the gold
   `patch`/`test_patch` rows, which `offline_replay._dataset_row` fetches from the HF dataset at
   replay time *pinned* to `swebench_specs.DATASET_REVISION` (the same pin `build_challenges` uses,

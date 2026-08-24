@@ -24,6 +24,8 @@ import socket
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from shunt.proxy.context_transfer import CONTEXT_TRANSFER_SUMMARY
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
 # finishes, so "the directory is non-empty" reported a truncated model as healthy.
 _MIN_MODEL_BYTES = 1024 * 1024
 
-# How each degraded cache state reads when the active strategy never embeds. The knn wording
+# How each degraded cache state reads when the active strategy never embeds. The kNN wording
 # ("the first routed request downloads it") is a promise about behaviour that simply does not
 # happen under a fixed strategy, so it needs its own phrasing rather than a shared one.
 _CACHE_WORDING: Final[dict[str, str]] = {
@@ -362,12 +364,13 @@ def _embedder_check(strategy: str, needs_neighbors: bool) -> Check:
         return Check("embedder", f"{model_name} — weights cached in {cache}")
     if not needs_neighbors:
         # Every remaining state is a degraded cache, and none of them can break a fixed
-        # strategy — WARN so the operator still sees it before switching to knn, ok so the
+        # strategy — WARN so the operator still sees it before switching to knn_cascade, ok so the
         # exit code keeps telling the truth about whether a request can be served.
         return Check(
             "embedder",
             f"{model_name} — the cache at {cache} is {_CACHE_WORDING[state]}. "
-            f"{_embedder_unused_note(strategy)} Fix it before switching to a knn strategy.",
+            f"{_embedder_unused_note(strategy)} Fix it before switching to a "
+            f"neighbour-consulting strategy.",
             warn=True,
         )
     if state == "unreadable":
@@ -451,6 +454,30 @@ def _port_check() -> Check:
 
 
 def _escalation_check(policy: RouterPolicy, work_dir: str | None) -> Check:
+    """The ladder's state, plus the context-transfer disclosure when one is armed."""
+    check = _escalation_state_check(policy, work_dir)
+    note = _context_transfer_note(policy)
+    if note is None:
+        return check
+    # Appended rather than reported as its own check: CHECK_ORDER is a contract a `--json`
+    # consumer keys on, and this is a property of the escalation the check already describes.
+    return Check(check.name, f"{check.detail}\n{note}", ok=check.ok, warn=True)
+
+
+def _context_transfer_note(policy: RouterPolicy) -> str | None:
+    """The one line a user must see before trusting what the escalated model was told."""
+    if policy.escalation.context_transfer != CONTEXT_TRANSFER_SUMMARY:
+        return None
+    writer = policy.escalation.context_transfer_model or "the outgoing pre-escalation model"
+    return (
+        f"context_transfer: SUMMARY — on the first turn after an escalation shunt replaces "
+        f"the prior conversation with a note written by {writer} (max "
+        f"{policy.escalation.context_transfer_max_tokens} tokens), then resends it unchanged. "
+        f"THE MODEL DOES NOT SEE WHAT YOU SEE. Failures degrade to 'full' (nothing dropped)."
+    )
+
+
+def _escalation_state_check(policy: RouterPolicy, work_dir: str | None) -> Check:
     """ENABLED and ARMED are different states — the distinction this command exists for."""
     # A user learns escalation is inert only from a boot warning in the logs today, and the
     # two ways it goes inert are different: no repo resolved at all, or a repo that resolves

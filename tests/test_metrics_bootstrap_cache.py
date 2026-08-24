@@ -12,6 +12,7 @@ from benchmark.routing import cache_cost
 from benchmark.routing import metrics as metrics_mod
 from benchmark.routing.cache_cost import CachePrice, cache_aware_total
 from benchmark.routing.metrics import bootstrap_ci
+from benchmark.routing.strategies import BilledAttempt
 from benchmark.routing.strategies.fixed import AlwaysFrontier
 from benchmark.routing.summary import SUMMARY_FIELDS, compute_strategy_rows
 
@@ -27,6 +28,11 @@ def _price(model: str, share: float, discount: float) -> CachePrice:
     )
 
 
+def _att(model: str, cost: float) -> BilledAttempt:
+    """A billing record with no tokens — all the cache-aware cost model reads."""
+    return BilledAttempt(model=model, cost=cost)
+
+
 class TestCacheCostPerTaskScoping:
     """A task's cache cost is invariant to the set and order of the other tasks."""
 
@@ -38,10 +44,10 @@ class TestCacheCostPerTaskScoping:
         # t1 holds the ONLY within-task repeat — the only place a discount may fire.
         # t2 routes to the same model as t1 but is an INDEPENDENT session: cold prefix.
         attempts = {
-            "t1": [("m", 10.0), ("m", 10.0)],
-            "t2": [("m", 10.0)],
-            "t3": [("frontier", 10.0)],
-            "t4": [("m", 5.0)],
+            "t1": [_att("m", 10.0), _att("m", 10.0)],
+            "t2": [_att("m", 10.0)],
+            "t3": [_att("frontier", 10.0)],
+            "t4": [_att("m", 5.0)],
         }
 
         def cost(tid: str) -> float:
@@ -68,9 +74,9 @@ class TestCacheAwareBootstrapCI:
         # t1 repeats m within the task (second attempt discounted: 15); t2/t3 single (10 each).
         decisions = [("t1", "m", True, 20.0), ("t2", "m", True, 10.0), ("t3", "m", True, 10.0)]
         attempts = {
-            "t1": [("m", 10.0), ("m", 10.0)],
-            "t2": [("m", 10.0)],
-            "t3": [("m", 10.0)],
+            "t1": [_att("m", 10.0), _att("m", 10.0)],
+            "t2": [_att("m", 10.0)],
+            "t3": [_att("m", 10.0)],
         }
         cis = bootstrap_ci(decisions, decisions, n_bootstrap=300, attempts=attempts, prices=prices)
         point = cache_aware_total(attempts["t1"], prices) + 10.0 + 10.0
@@ -87,7 +93,7 @@ class TestCacheAwareBootstrapCI:
 
     def test_half_specified_cache_scope_is_refused(self):
         decisions = [("t1", "m", True, 10.0)]
-        attempts = {"t1": [("m", 10.0)]}
+        attempts = {"t1": [_att("m", 10.0)]}
         with pytest.raises(ValueError, match="BOTH"):
             bootstrap_ci(decisions, decisions, n_bootstrap=10, attempts=attempts)
 
@@ -127,8 +133,8 @@ class TestScopingGuard:
         def flat_cache_cost(attempts, prices):
             # A cross-run cache model: the discount bleeds between tasks through hidden
             # state — task B inherits task A's warm prefix, as the old flat implementation did.
-            total = sum(c for _m, c in attempts)
-            model = attempts[-1][0] if attempts else None
+            total = sum(a.cost for a in attempts)
+            model = attempts[-1].model if attempts else None
             if state["prev"] is not None and model is not None and state["prev"] == model:
                 total -= 1.0
             state["prev"] = model
@@ -136,7 +142,7 @@ class TestScopingGuard:
 
         monkeypatch.setattr(metrics_mod, "cache_aware_total", flat_cache_cost)
         decisions = [("t1", "m", True, 10.0), ("t2", "m", True, 10.0), ("t3", "m", True, 10.0)]
-        attempts = {"t1": [("m", 10.0)], "t2": [("m", 10.0)], "t3": [("m", 10.0)]}
+        attempts = {"t1": [_att("m", 10.0)], "t2": [_att("m", 10.0)], "t3": [_att("m", 10.0)]}
         with pytest.raises(RuntimeError, match="not scoped per task"):
             bootstrap_ci(
                 decisions,
@@ -148,7 +154,7 @@ class TestScopingGuard:
 
     def test_guard_stays_silent_on_scoped_data(self):
         decisions = [("t1", "m", True, 10.0), ("t2", "m", True, 10.0)]
-        attempts = {"t1": [("m", 10.0)], "t2": [("m", 10.0)]}
+        attempts = {"t1": [_att("m", 10.0)], "t2": [_att("m", 10.0)]}
         cis = bootstrap_ci(
             decisions,
             decisions,

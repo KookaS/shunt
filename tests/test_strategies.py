@@ -247,7 +247,7 @@ class TestkNNCascadeStrategy:
         from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
 
         strategy = kNNCascadeStrategy()
-        assert strategy.name == "kNN-cascade"
+        assert strategy.name == "kNN-cascade (within-task)"
 
 
 class TestCascadeNeverRetriesAModel:

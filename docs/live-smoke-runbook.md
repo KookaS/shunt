@@ -62,6 +62,10 @@ From the shunt repo root:
 # Inject the real key for the expected model's provider (never written to a file).
 export DEEPSEEK_API_KEY=sk-...
 
+# The run-log directory is gitignored scratch, so a fresh clone does not have it and the
+# shell would open the redirect before python could create it. Make it first.
+mkdir -p benchmark/runner/artifacts/live-smoke
+
 # Run supervised and tee the output to a run log.
 uv run python benchmark/runner/live_smoke.py --live 2>&1 \
   | tee benchmark/runner/artifacts/live-smoke/owner-run.log

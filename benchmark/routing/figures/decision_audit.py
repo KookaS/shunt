@@ -31,7 +31,7 @@ _UNDER = "#C62828"
 _FREE = "#BDBDBD"
 
 SPEC = FigureSpec(
-    title="The shipped router's errors go both ways — it loses tasks, not just money",
+    title="The kNN selection rule's errors go both ways — it loses tasks, not just money",
     reading=(
         "Left: rows are the model the router chose, columns the cheapest model that actually "
         "solved the task. The diagonal is an exact hit. BELOW it the router paid for a model "
@@ -43,7 +43,7 @@ SPEC = FigureSpec(
         "Read the two error columns against each other. Over-provisioning is the bill for "
         "guessing high and costs only money; under-provisioning costs a task that some "
         "dearer model would have solved, and no threshold recovers it after the fact. The "
-        "shipped router is a single-shot kNN prediction with no verify-and-escalate step, "
+        "rule plotted here is a single-shot kNN prediction with no verify-and-escalate step, "
         "so both are reachable — an earlier draft of this figure read the empty "
         "under-provisioned column of a CASCADE as a property of the router itself."
     ),
@@ -229,7 +229,7 @@ def _annotations(audit: Audit) -> Annotations:
 
 
 def render(ctx: ctxmod.RoutingContext, chosen: dict[str, str]) -> Path | None:
-    """Draw routing_decision_audit.png from the shipped router's per-task picks."""
+    """Draw routing_decision_audit.png from the kNN selection rule's per-task picks."""
     if not chosen:
         return None
     audit = build_audit(chosen, ctx.completed.get("results", {}), ctx.models_by_price)

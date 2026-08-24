@@ -528,10 +528,10 @@ def strategies() -> dict:
 
 
 def knn_params() -> dict:
-    """Merged kNN + kNN-cascade strategy params (cascade keys override knn)."""
+    """Merged kNN + within-task-cascade strategy params (cascade keys override knn)."""
     strat = strategies()
     params = dict(strat.get("knn", {}))
-    params.update(strat.get("knn_cascade", {}))
+    params.update(strat.get("knn_cascade_withintask", {}))
     return params
 
 
@@ -839,6 +839,7 @@ def validate(config_path: str | Path | None = None) -> list[str]:
         "random",
         "knn",
         "knn_cascade",
+        "knn_cascade_withintask",
         "price_cascade",
         "session_cascade",
         "tier_classifier",

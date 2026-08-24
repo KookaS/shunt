@@ -319,7 +319,9 @@ def test_build_engine_passes_knn_policy_k_to_query(
 
     store = OutcomeStore(db_path=str(tmp_path / "k.db"))
     try:
-        policy = RouterPolicy(policy=KnnPolicy(k=9))
+        # `knn_cascade` explicitly: the shipped default no longer consults the neighbourhood,
+        # so under it there is no kNN query for `k` to reach.
+        policy = RouterPolicy(strategy="knn_cascade", policy=KnnPolicy(k=9))
         engine = _build_engine(model_pool, session_manager, store, policy)
         index = FakeOutcomeIndex(count=100, neighbors=_knn_neighbors())
         engine._outcome_index = index
@@ -557,7 +559,9 @@ def test_mismatch_engine_serves_cold_start_no_query(
             model_pool,
             session_manager,
             store,
-            RouterPolicy(),
+            # `knn_cascade`: the stale-space refusal is only observable on a strategy that
+            # would otherwise query the index.
+            RouterPolicy(strategy="knn_cascade"),
             embedder=FakeEmbedder(),
             trust_neighbors=False,
         )

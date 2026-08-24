@@ -66,6 +66,9 @@ def warm_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestCl
     monkeypatch.setenv("SHUNT_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("SHUNT_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("SHUNT_EXPLORATION_ENABLED", "0")
+    # The shipped default is the CHEAP-START cascade, which never queries the neighbourhood.
+    # This test is about the kNN path, so it names the strategy that runs one.
+    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn_cascade")
     # SHUNT_DISALLOW_REAL_EMBEDDER keeps the test hermetic by construction: dropping the
     # FakeEmbedder injection below would fail loudly instead of downloading ~600MB.
     monkeypatch.setenv("SHUNT_DISALLOW_REAL_EMBEDDER", "1")

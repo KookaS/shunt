@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     import numpy as np
     import numpy.typing as npt
 
-from shunt.models.config import ModelConfig, ReasoningConfig
+from shunt.models.config import ModelConfig, ReasoningConfig, resolve_reasoning_arm
 from shunt.router.budget import ConservativeGate, ExplorationBudget
 from shunt.router.cold_start import ColdStartStrategy
 from shunt.router.embedder import Embedder
@@ -233,6 +233,7 @@ class RouterEngine:
         budget: ExplorationBudget | None = None,
         conservative_gate: ConservativeGate | None = None,
         strategy: RoutingStrategy | None = None,
+        strategy_id: str | None = None,
         neighbor_k: int = 20,
         trust_neighbors: bool = True,
         escalation: EscalationConfig | None = None,
@@ -250,6 +251,13 @@ class RouterEngine:
         # Default strategy = knn (wraps the selection rule) so engine-only callers keep
         # today's behavior; the server injects the strategy named by router.strategy.
         self._strategy: RoutingStrategy = strategy or KnnStrategy(self._selection_rule)
+        # The CONFIG id `router.strategy` named, carried onto every decision's provenance so an
+        # analysis can filter sessions by the strategy that produced them. The reason tokens
+        # cannot serve that: kNN emits a vocabulary (`cheapest_above_threshold`,
+        # `exploration_untested`, `safe_fallback`, `cold_start`) read by `shunt explain` and the
+        # inference figures, so renaming those to carry the strategy would break every consumer.
+        # None for engine-only callers (the offline benchmark), where no config id exists.
+        self._strategy_id = strategy_id
         self._neighbor_k = neighbor_k
         # False when the configured embedding fingerprint mismatches the stored corpus:
         # the stored vectors are in a foreign space, so kNN over them is garbage. Decided
@@ -710,6 +718,9 @@ class RouterEngine:
         self, session_id: str, model_name: str, reason: str, provenance: dict[str, Any]
     ) -> tuple[str, str, dict[str, Any]]:
         """Apply auto-escalation (if enabled) to the base decision, then advance the counter."""
+        # Every exit of `decide` funnels through here, so this is the one stamp point.
+        if self._strategy_id is not None:
+            provenance = {**provenance, "strategy_id": self._strategy_id}
         task_key = self._task_key(session_id)
         if task_key is None:
             return (model_name, reason, provenance)
@@ -873,17 +884,16 @@ class RouterEngine:
         if reasoning is None:
             return (0, 0, None, None)  # no arms → indices 0/0 → the ladder steps tier
         ids = [arm.id for arm in sorted(reasoning.arms, key=lambda a: a.rank)]
-        cur_arm = self._task_effort_arm.get(task_key, reasoning.default_arm)
-        if cur_arm not in ids:
-            # A persisted arm FOREIGN to this model. The effort ladder is per-task, the routed
-            # model per-decision, so base routing can re-pick a different model than the one the
-            # arm was escalated on. A foreign id has no `next_arm_above`: reporting it as headroom
-            # made `_apply_effort` return None, the directive was voided, the failure window was
-            # never retired, and escalation deadlocked before ever reaching the rank rung. Reset
-            # to THIS model's default — the fresh model climbs its own effort ladder from the
-            # bottom, exactly as a rank step starts a new model at its own default arm.
-            self._task_effort_arm[task_key] = reasoning.default_arm
-            cur_arm = reasoning.default_arm
+        stored_arm = self._task_effort_arm.get(task_key, reasoning.default_arm)
+        # A persisted arm FOREIGN to this model resets to THIS model's default — the fresh
+        # model climbs its own effort ladder from the bottom, exactly as a rank step starts a
+        # new model at its own default arm. (A foreign id has no `next_arm_above`: reporting it
+        # as headroom made `_apply_effort` return None, the directive was voided, the failure
+        # window was never retired, and escalation deadlocked before reaching the rank rung.)
+        # The rule itself lives in `resolve_reasoning_arm`, shared with session resume.
+        cur_arm = resolve_reasoning_arm(reasoning, stored_arm)
+        if cur_arm != stored_arm:
+            self._task_effort_arm[task_key] = cur_arm
         cur_index = ids.index(cur_arm)
         return (cur_index, len(ids) - 1, cur_arm, reasoning)
 
@@ -984,6 +994,12 @@ class RouterEngine:
             **provenance,
             "model_chosen": model_chosen,
             "selection_rule_used": selection_rule_used,
+            # The model this turn escalated AWAY from — the base pick, which the incoming
+            # dict still names because it was built before escalation ran. Recorded because
+            # the OUTGOING model is the one whose prefix is already warm: it is what a
+            # `summary` context transfer summarises with, and it is what makes an effort rung
+            # (same model in and out) distinguishable from a rank rung after the fact.
+            "pre_escalation_model": provenance.get("model_chosen"),
             "rank_escalation_reason": directive.reason,
             "auto_escalated": True,
             "new_label_window": directive.new_label_window,

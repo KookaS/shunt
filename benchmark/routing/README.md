@@ -20,7 +20,8 @@ routing/
     oracle.py                 # Upper bound: perfect per-task selection
     fixed.py                  # Always-cheap, always-frontier, random
     knn.py                    # kNN retrieval (shunt's approach)
-    knn_cascade.py            # kNN-informed verify-and-escalate
+    knn_cascade.py            # kNN-informed verify-and-escalate, WITHIN one task (blocked)
+    knn_session_cascade.py    # THE OPT-IN `knn_cascade`: kNN pick + the session-cadence ladder
   exploration_replay.py       # Direct-Method replay of the SHIPPED exploration policy on the dense slice
   run_eval.py                 # Evaluate all strategies
   instrument_control.py       # Positive control + destroyed-signal null (both selection rules)
@@ -384,10 +385,11 @@ docker compose -f benchmark/compose.yaml run --rm benchmark  # simulated loop + 
 | Always-Cheap | Route all to cheapest model (derived from pricing matrix) |
 | Always-Frontier | Route all to most expensive model (derived from pricing matrix) |
 | Random | Uniform random (mean over seeds) |
-| kNN | Embed task → retrieve similar → cheapest capable |
-| kNN-cascade | kNN-informed try-verify-escalate |
+| kNN | Embed task → retrieve similar → cheapest capable (a CONTROL: the pick without the ladder) |
+| kNN-cascade | The opt-in routing strategy (`router.strategy: knn_cascade`): the kNN pick, then the session-cadence escalation ladder |
+| kNN-cascade (within-task) | kNN-informed try-verify-escalate INSIDE one task (blocked) |
 | Price-Cascade | Try-verify-escalate in ascending price order — no embeddings, no kNN |
-| Session-Cascade | The shipped escalation ladder at session cadence: one decision per session, effort rung then rank rung, climbed rank persisting, cache-safe analogue |
+| Session-Cascade | **The shipped default.** The escalation ladder at session cadence: one decision per session, effort rung then rank rung, climbed rank persisting, cache-safe analogue |
 | Tier-Classifier | Single-shot: predict the crossover tier, route there directly |
 
 ## Challenge store

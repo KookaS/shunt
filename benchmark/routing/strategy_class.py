@@ -49,12 +49,13 @@ class Classification:
 DISPLAY_TO_ID: Final[Mapping[str, str]] = MappingProxyType(
     {
         "kNN": "knn",
+        "kNN-cascade": "knn_cascade",
         "Always-Cheap": "always_cheap",
         "Always-Frontier": "always_frontier",
         "Oracle": "oracle",
         "Oracle-reward": "oracle_reward",
         "Random": "random",
-        "kNN-cascade": "knn_cascade",
+        "kNN-cascade (within-task)": "knn_cascade_withintask",
         "Price-Cascade": "price_cascade",
         "Session-Cascade": "session_cascade",
         "Tier-Classifier": "tier_classifier",
@@ -70,8 +71,8 @@ _CASCADE_BLOCKER: Final[str] = (
 # what it costs. State the SHORTFALL with the route, so nobody reads "there is a path" as
 # "the blocked row's number is available": paying one decision per session instead of one per
 # attempt costs +$1.37 [+0.82, +2.00] paired against Price-Cascade, and is not distinguishable
-# from kNN-cascade (-$1.23 [-3.42, +0.73]). That is the price of the cache-safety spine, and
-# it is the whole of what these two rows now measure.
+# from kNN-cascade (within-task) (-$1.23 [-3.42, +0.73]). That is the price of the cache-safety
+# spine, and it is the whole of what these two rows now measure.
 _CASCADE_PATH: Final[str] = (
     "TAKEN: the same ladder, paced one decision per session, is selectable as "
     "`router.strategy: session_cascade` (src/shunt/router/policy.py LIVE_STRATEGIES) — "
@@ -79,8 +80,9 @@ _CASCADE_PATH: Final[str] = (
     "frontier because the engine's per-task rank floor persists the climbed rung across "
     "sessions (engine.py `_lift_to_rank_floor`). Session-Cascade "
     "(strategies/session_cascade.py) measures what that cadence costs: +$1.37 paired against "
-    "Price-Cascade, indistinguishable from kNN-cascade. What stays blocked is the WITHIN-TASK "
-    "cadence itself, and permanently: it is excluded by design, not pending. These two rows "
+    "Price-Cascade, indistinguishable from kNN-cascade (within-task). What stays blocked is "
+    "the WITHIN-TASK cadence itself, and permanently: it is excluded by design, not "
+    "pending. These two rows "
     "are kept as the comparator that prices session cadence, not as unbuilt work"
 )
 
@@ -100,6 +102,11 @@ _NON_LIVE: Final[Mapping[str, Classification]] = MappingProxyType(
             StrategyClass.BOUND,
             "picks the best REALIZED (model, arm) for the query task (report.py:315)",
         ),
+        "kNN": Classification(
+            StrategyClass.CONTROL,
+            "the selection rule with the escalation ladder removed. No `router.strategy` value "
+            "produces it; it is kept as the contrast that isolates what the ladder buys",
+        ),
         "Random": Classification(
             StrategyClass.CONTROL,
             "draws its candidate set from the query task's own results row "
@@ -112,7 +119,9 @@ _NON_LIVE: Final[Mapping[str, Classification]] = MappingProxyType(
             "the live exploration layer (src/shunt/router/exploration.py) already "
             "implements cost-aware Thompson sampling over the neighbourhood",
         ),
-        "kNN-cascade": Classification(StrategyClass.BLOCKED, _CASCADE_BLOCKER, _CASCADE_PATH),
+        "kNN-cascade (within-task)": Classification(
+            StrategyClass.BLOCKED, _CASCADE_BLOCKER, _CASCADE_PATH
+        ),
         "Price-Cascade": Classification(StrategyClass.BLOCKED, _CASCADE_BLOCKER, _CASCADE_PATH),
         "Tier-Classifier": Classification(
             StrategyClass.BLOCKED,

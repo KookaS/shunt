@@ -198,7 +198,7 @@ class TestAdmissibilityGate:
         monkeypatch.setattr(
             control,
             "_strategy",
-            lambda n, shortlist: cls(
+            lambda n, shortlist, initial_rung=None: cls(
                 ladder="rank_only",
                 escalate_after_n=n,
                 arm_results={},

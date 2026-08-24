@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from statistics import mean
 
 from benchmark.routing.cache_cost import CachePrice, cache_aware_total
+from benchmark.routing.strategies import BilledAttempt
 
 
 def mcnemar_exact_p(b: int, c: int) -> float:
@@ -188,7 +189,7 @@ class BootstrapCIs:
 
 def _assert_cache_cost_scoping(
     task_ids: Sequence[str],
-    attempts: Mapping[str, list[tuple[str, float]]],
+    attempts: Mapping[str, list[BilledAttempt]],
     prices: Mapping[str, CachePrice],
 ) -> None:
     """Refuse to bootstrap cache-aware cost unless each task's cost is its own.
@@ -212,7 +213,7 @@ def bootstrap_ci(
     n_bootstrap: int = 1000,
     gamma: float = 0.1,
     seed: int = 42,
-    attempts: Mapping[str, list[tuple[str, float]]] | None = None,
+    attempts: Mapping[str, list[BilledAttempt]] | None = None,
     prices: Mapping[str, CachePrice] | None = None,
 ) -> BootstrapCIs:
     """Task-resampled 95% percentile CIs on AvgPerf%, CumReg, TotalCost and AvgCost."""
@@ -247,9 +248,7 @@ def bootstrap_ci(
             f"{sorted(missing)} — a missing oracle row is a coverage gap, not a zero"
         )
 
-    cache_scope: tuple[Mapping[str, list[tuple[str, float]]], Mapping[str, CachePrice]] | None = (
-        None
-    )
+    cache_scope: tuple[Mapping[str, list[BilledAttempt]], Mapping[str, CachePrice]] | None = None
     if attempts is not None and prices is not None:
         _assert_cache_cost_scoping(task_ids, attempts, prices)
         cache_scope = (attempts, prices)

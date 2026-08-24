@@ -236,6 +236,19 @@ def resolve_models(registry: Registry) -> dict[str, ModelConfig]:
     return resolved
 
 
+def resolve_reasoning_arm(reasoning: ReasoningConfig, arm_id: str | None) -> str:
+    """The arm *arm_id* actually resolves to on this reasoning bracket."""
+    # *arm_id* when the bracket declares it, and the bracket's ``default_arm`` when it does not.
+    # The effort ladder is keyed per task while the routed model is decided per session, so an
+    # arm persisted against one model can be FOREIGN to the model in hand; a foreign id has no
+    # rank position and no ``next_arm_above``, which is what silently voided escalation
+    # directives before this reset existed. One rule, shared by the escalation ladder and by
+    # session resume, so a resumed conversation cannot re-derive a different answer.
+    if arm_id is not None and any(arm.id == arm_id for arm in reasoning.arms):
+        return arm_id
+    return reasoning.default_arm
+
+
 def arm_api_params(model: ModelConfig, arm_id: str) -> dict[str, Any]:
     """Resolve one model's reasoning arm to its verbatim request params."""
     # {} for the implicit "default" arm of a model with no declared reasoning

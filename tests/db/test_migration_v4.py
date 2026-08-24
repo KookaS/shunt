@@ -89,7 +89,7 @@ def test_v4_migration_is_idempotent() -> None:
     versions = [
         row[0] for row in conn.execute("SELECT version FROM schema_version ORDER BY version")
     ]
-    assert versions == [1, 2, 3, 4, 5]
+    assert versions == list(range(1, SCHEMA_VERSION + 1))
     cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
     assert "external_session_id" in cols
 

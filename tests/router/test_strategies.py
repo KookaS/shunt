@@ -102,7 +102,7 @@ class TestRegistry:
     @pytest.mark.parametrize(
         "name,cls",
         [
-            ("knn", KnnStrategy),
+            ("knn_cascade", KnnStrategy),
             ("always_cheap", AlwaysCheapStrategy),
             ("always_frontier", AlwaysFrontierStrategy),
             ("session_cascade", SessionCascadeStrategy),
@@ -119,8 +119,11 @@ class TestRegistry:
         assert strategy.select([], pool)[0] == "c1"
 
     def test_unknown_strategy_raises(self) -> None:
+        # `knn` is the RETIRED spelling. The alias is resolved one layer up, in
+        # `parse_router_policy`; the registry itself knows only live ids, so a caller that
+        # bypassed the policy layer with the old name must be refused rather than served.
         with pytest.raises(ValueError, match="unknown"):
-            build_strategy("knn_cascade", SelectionRule())
+            build_strategy("knn", SelectionRule())
 
     def test_the_control_contract_and_the_cascade_are_opposites(self) -> None:
         # The invariant `test_a_fixed_strategy_is_a_pinned_control_and_never_escalates`
@@ -166,3 +169,38 @@ class TestConsultsNeighbors:
     def test_fixed_strategies_do_not(self) -> None:
         assert AlwaysCheapStrategy().consults_neighbors is False
         assert AlwaysFrontierStrategy().consults_neighbors is False
+
+
+class TestExplorationStaysWiredToTheStrategyThatExplores:
+    """`EXPLORATORY_STRATEGIES` is keyed by strategy ID, so a rename can silently unwire it."""
+
+    def test_the_knn_cascade_id_is_exploratory(self) -> None:
+        # A rename that moves the kNN cascade's ID without moving this set switches Thompson
+        # exploration off for every install that selected it — no error, no other failing
+        # test, because `server.py` simply skips the wiring for a name it does not find.
+        from shunt.router.strategies import EXPLORATORY_STRATEGIES
+
+        assert "knn_cascade" in EXPLORATORY_STRATEGIES
+
+    def test_the_default_strategy_is_deliberately_not_exploratory(self) -> None:
+        # The shipped default is `session_cascade`, whose base pick is fixed at the cheapest
+        # model — there is no per-task choice to explore over, so exploration is inert under
+        # it BY DESIGN. Pinned so the inertness stays a decision rather than an accident: if
+        # the default ever moves back to a neighbour-consulting strategy, this fails and the
+        # move gets to be deliberate.
+        from shunt.proxy.server import _effective_exploration
+        from shunt.router.policy import RouterPolicy
+        from shunt.router.strategies import EXPLORATORY_STRATEGIES
+
+        policy = RouterPolicy()
+        assert policy.strategy not in EXPLORATORY_STRATEGIES
+        assert policy.exploration.enabled is True  # the block is ON; the strategy ignores it
+        assert _effective_exploration(policy) is None
+
+    def test_every_exploratory_strategy_consults_neighbours(self) -> None:
+        # Exploration samples over the kNN neighbourhood, so a strategy that never looks at
+        # neighbours cannot explore — listing one here would arm a layer with no input.
+        from shunt.router.strategies import EXPLORATORY_STRATEGIES
+
+        for name in EXPLORATORY_STRATEGIES:
+            assert build_strategy(name, SelectionRule()).consults_neighbors is True

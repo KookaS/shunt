@@ -13,9 +13,12 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from benchmark.routing import censoring
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 # Violation codes — one per invariant (stable identifiers for reporting/tests).
 ACCOUNTING_HOLE: Final[str] = "ACCOUNTING_HOLE"
@@ -27,6 +30,7 @@ MALFORMED_NUMERIC: Final[str] = "MALFORMED_NUMERIC"
 MALFORMED_TIMESTAMP: Final[str] = "MALFORMED_TIMESTAMP"
 SUSPICIOUS_ZERO: Final[str] = "SUSPICIOUS_ZERO"
 MISSING_COLLECTION_FIELD: Final[str] = "MISSING_COLLECTION_FIELD"
+BRACKET_OVER_COVERAGE: Final[str] = "BRACKET_OVER_COVERAGE"
 
 # Registry price fields (both the load_pricing and the _pricing_dict spellings).
 _PRICE_KEYS: Final[tuple[str, ...]] = (
@@ -321,3 +325,75 @@ def enforce_row(row: dict, pricing: dict) -> None:
     errors = [v for v in validate_row(row, pricing) if v.severity is Severity.ERROR]
     if errors:
         raise DataIntegrityError(errors, row)
+
+
+def enforce_bracket_coverage(
+    bracket_tasks: Sequence[str], billed_models: Mapping[str, Sequence[str]], matrix: dict
+) -> None:
+    """Refuse a context-cost bracket that rests on a path through an imputed cell."""
+    # WHY THIS IS NOT A COUNT CEILING. The obvious ceiling — "no more than the tasks measured on
+    # every model" — is wrong by a factor of two here, because a bracket needs tokens only on the
+    # models a task's realized path actually BILLED, which is one to three of six. The real
+    # invariant is per-path, so this is what is enforced: no task counted in a bracket may have
+    # billed an IMPUTED cell, because an imputed cell carries no token columns at all and would
+    # enter the cost model as a free, context-less attempt.
+    #
+    # It is also a genuine cross-check rather than a restatement. `context_cost` selects its
+    # subset on the TOKEN columns; this re-derives the same exclusion from the independent
+    # `imputed` flag the completion stamps. The two agreeing is evidence; the two disagreeing is
+    # the bug (a real cell whose tokens were never recorded, or an imputed cell that acquired
+    # some) and it fails closed.
+    #
+    # AND WHY A TASK WITH NO BILLED MODELS IS AN OFFENDER, NOT A PASS. `billed_models.get(tid, ())`
+    # makes `any()` False, so a task absent from the mapping used to satisfy this gate vacuously —
+    # an EMPTY mapping passed for every task in the bracket. A bracket task always billed at least
+    # one attempt by construction (it is token-complete), so an empty path is a broken caller, and
+    # a gate that reads "nothing to check" as "checked" is the failure this one exists to stop.
+    results = matrix.get("results", {})
+    pathless = sorted(tid for tid in bracket_tasks if not billed_models.get(tid))
+    offenders = sorted(
+        tid
+        for tid in bracket_tasks
+        if any(
+            bool((results.get(tid, {}).get(model) or {}).get("imputed"))
+            for model in billed_models.get(tid, ())
+        )
+    )
+    n_scored = len(results)
+    if len(set(bracket_tasks)) > n_scored:
+        raise DataIntegrityError(
+            [
+                Violation(
+                    Severity.ERROR,
+                    BRACKET_OVER_COVERAGE,
+                    f"context-cost bracket claims {len(set(bracket_tasks))} task(s) but the "
+                    f"scored matrix holds {n_scored}",
+                )
+            ]
+        )
+    if offenders:
+        head = ", ".join(offenders[:5])
+        raise DataIntegrityError(
+            [
+                Violation(
+                    Severity.ERROR,
+                    BRACKET_OVER_COVERAGE,
+                    f"{len(offenders)} task(s) in a context-cost bracket billed an IMPUTED "
+                    f"cell, which carries no measured tokens: {head}. The token-complete "
+                    "filter has been bypassed.",
+                )
+            ]
+        )
+    # LAST, so the more specific over-coverage and IMPUTED diagnoses keep naming the defect.
+    if pathless:
+        raise DataIntegrityError(
+            [
+                Violation(
+                    Severity.ERROR,
+                    BRACKET_OVER_COVERAGE,
+                    f"{len(pathless)} task(s) in a context-cost bracket billed NO model: "
+                    f"{', '.join(pathless[:5])}. The bracket cannot be checked against the "
+                    "imputed flag, so it fails closed rather than passing vacuously.",
+                )
+            ]
+        )

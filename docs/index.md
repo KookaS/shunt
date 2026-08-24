@@ -12,22 +12,31 @@ the hard tail to a frontier one, learning that line from your own passing tests.
 What runs today: the proxy speaks both the OpenAI and Anthropic wire formats,
 calls the router to decide the session model on the first turn, and forwards every request to that model.
 Outcomes are recorded automatically at session close via off-wire test re-execution (when configured
-with a `work_dir`), or manually via `shunt flag`. The shipped config turns exploration on;
-as verified outcomes accumulate, exploration costs are bounded by the budget and weighted by the
-router's confidence — see [configuration](configuration.md#tune-the-router).
+with a `work_dir`), or manually via `shunt flag`.
+
+**What a default install decides, precisely.** The shipped `router.strategy` is
+`session_cascade`: start every session on the cheapest healthy model, and let a repeated
+verified failure raise a rung at the next session boundary. That path does **no per-task
+routing** — it never embeds a turn, never queries the neighbourhood, never scores
+candidates. The kNN routing model below is what `router.strategy: knn_cascade` turns on,
+and it is opt-in. (The `exploration:` block ships `enabled: true` but only perturbs a kNN
+base pick, so it too is inert under the default — see
+[configuration](configuration.md#tune-the-router).)
 
 ```mermaid
 graph LR
   A[Agent] -->|base_url| B[Shunt proxy]
-  B -->|calls on 1st turn| C{kNN router}
+  B -->|calls on 1st turn| C{"Router<br/>default: cheapest model<br/>opt-in: kNN pick"}
   C -->|cold-start / learned| D[Chosen model]
   V[Verifiers] -->|session close| R[Verified outcomes]
   R -->|learn| C
 ```
 
-The solid path is what runs: router chooses a model on the first turn, verifiers record
+The solid path is what runs: the router chooses a model on the first turn, verifiers record
 outcomes at session close (via off-wire test execution when configured), and the router
-learns from those outcomes for future sessions.
+learns from those outcomes for future sessions. Under the default strategy the learning
+loop feeds the **escalation** ladder rather than a per-task pick; switching to
+`knn_cascade` is what makes those outcomes decide the first turn too.
 
 ## An honest result
 

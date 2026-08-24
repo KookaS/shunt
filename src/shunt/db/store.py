@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as _datetime
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -22,6 +23,8 @@ from .loop_health import (
     StratumStages,
 )
 from .schema import run_migrations
+
+logger = logging.getLogger(__name__)
 
 # Human labels win over automatic Tier-2, which win over the quarantined wire prior.
 # Drives which event's outcome/source becomes the materialized current view (§Q4).
@@ -327,6 +330,7 @@ class OutcomeStore:
         decision_provenance: dict[str, Any] | None = None,
         provenance: SessionProvenance | None = None,
         external_session_id: str | None = None,
+        prefix_digest: str | None = None,
     ) -> None:
         prov = provenance or SessionProvenance()
         with self._lock:
@@ -337,8 +341,9 @@ class OutcomeStore:
                 INSERT OR REPLACE INTO sessions
                     (session_id, prompt_text, embedding_blob, model_chosen, cost,
                      cache_stats, session_duration_seconds, timestamp, decision_provenance,
-                     cost_known, selection_propensity, model_fingerprint, external_session_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     cost_known, selection_propensity, model_fingerprint, external_session_id,
+                     prefix_digest)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -359,6 +364,7 @@ class OutcomeStore:
                     prov.selection_propensity,
                     prov.model_fingerprint,
                     external_session_id,
+                    prefix_digest,
                 ),
             )
             self._conn.commit()
@@ -538,6 +544,43 @@ class OutcomeStore:
         if row is None:
             return None
         return dict(row)
+
+    def get_session_by_prefix_digest(self, prefix_digest: str) -> dict[str, Any] | None:
+        """The most recent session row for *prefix_digest* — or None when it is AMBIGUOUS."""
+        # A prefix digest is derived, not declared: two genuinely different conversations can
+        # land on one digest (same client, same repo, same opening question). Resuming the
+        # wrong one would attach this conversation's verified outcome to another conversation's
+        # decision — a corrupted training label, which is strictly worse than routing cold. So
+        # the digest resolves ONLY when the rows carrying it agree on what they are: one model
+        # and at most one declared conversation id. Any disagreement returns None and the caller
+        # opens a fresh session.
+        #
+        # Rows written by the same resumed lineage agree by construction (the resume relocks
+        # the same model), so the ordinary case is unaffected by the row-per-turn writes.
+        with self._lock:
+            counts = self._conn.execute(
+                "SELECT COUNT(DISTINCT model_chosen), COUNT(DISTINCT external_session_id) "
+                "FROM sessions WHERE prefix_digest = ?",
+                (prefix_digest,),
+            ).fetchone()
+            distinct_models, distinct_external = int(counts[0]), int(counts[1])
+            if distinct_models == 0:
+                return None
+            if distinct_models > 1 or distinct_external > 1:
+                logger.warning(
+                    "session: AMBIGUOUS prefix digest %s… (%d models, %d external ids) — "
+                    "refusing to resume; a fresh session is routed instead",
+                    prefix_digest[:12],
+                    distinct_models,
+                    distinct_external,
+                )
+                return None
+            cursor = self._conn.execute(
+                "SELECT * FROM sessions WHERE prefix_digest = ? ORDER BY timestamp DESC LIMIT 1",
+                (prefix_digest,),
+            )
+            row = cursor.fetchone()
+        return dict(row) if row is not None else None
 
     def get_outcome(self, session_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -809,6 +852,19 @@ class OutcomeStore:
                     "o.session_id WHERE s.embedding_blob IS NOT NULL"
                 ).fetchone()["c"]
             )
+            # NO embedding predicate, and that is the point: the two counters above answer a
+            # kNN-corpus question and read 0 by construction under a strategy that never embeds
+            # (`session_cascade`, the shipped default). This one reports whether the verification
+            # loop — the input the escalation ladder is built on — is producing anything at all.
+            # Live rows only, like every other progress figure here: an imported benchmark
+            # corpus arrives already labeled, and counting it would let a seed import make a
+            # dead verification loop look alive.
+            verified_outcomes = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) c FROM outcomes "
+                    f"WHERE tier2_outcome IS NOT NULL AND {_LIVE_CLAUSE}"
+                ).fetchone()["c"]
+            )
             # Live rows only, exactly as `routing_ope_rows` reads them: today's seeder writes
             # no `selection_propensity`, so NOT NULL excludes the seeded stratum incidentally.
             # `_LIVE_CLAUSE` states the guarantee so a seeder that starts writing one cannot
@@ -844,6 +900,7 @@ class OutcomeStore:
             eligible_sessions=eligible,
             verified_labeled=verified,
             any_labeled=any_labeled,
+            verified_outcomes=verified_outcomes,
             model_propensities=[
                 (r["model_chosen"], int(r["n"]), float(r["mean_p"]), float(r["min_p"]))
                 for r in prop_rows

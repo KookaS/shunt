@@ -43,3 +43,7 @@ class Session:
     # `x-session-affinity`). The router keys sessions on it when present, and persists
     # it so a resumed/forked conversation can reuse its locked model.
     external_session_id: str | None = None
+    # One-way digest of the conversation's opening prefix, bound to the client identity and
+    # the resolved repo. The resume key for clients that send no conversation id at all; None
+    # when a digest could not be derived. Never a prompt, never a path — see proxy/prefix.py.
+    prefix_digest: str | None = None

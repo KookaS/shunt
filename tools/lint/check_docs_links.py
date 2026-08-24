@@ -19,13 +19,24 @@
 #
 # Whole-tree scan (the SH004/SH011/SH012 shape): a link breaks when its TARGET is deleted
 # or moved, which a staged-file list never sees. `pass_filenames: false` + `always_run`.
+# File arguments are honoured anyway, so the gate can also be pointed at one document.
+#
+# TWO LINK GRAMMARS, because two renderers read this repository. A document INSIDE docs_dir is
+# published by mkdocs, which resolves a relative target against docs_dir — so escaping the tree
+# is an error there however real the file is. A document OUTSIDE docs_dir (CHANGELOG.md, the
+# root health files, examples/**/README.md) is read on GitHub, which resolves relative to the
+# file — so linking `docs/escalation.md` from CHANGELOG.md is CORRECT, and the only failure
+# available is a target that does not exist. Both were previously unchecked: `check()` iterated
+# docs_dir alone, so every markdown file outside it was outside the gate by construction.
 #
 # Escape hatch: `<!-- noqa: SH014 -->` on the same line.
 
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -79,6 +90,8 @@ def _check_file(md: Path, docs_dir: Path, root: Path) -> list[Finding]:
     text = md.read_text(encoding="utf-8")
     lines = text.splitlines()
     findings: list[Finding] = []
+    # Which renderer publishes THIS file decides which rule applies — see the module header.
+    published_by_mkdocs = md.resolve().is_relative_to(docs_dir.resolve())
     for lineno, target in _targets(text):
         if "noqa: SH014" in (lines[lineno - 1] if lineno <= len(lines) else ""):
             continue
@@ -87,7 +100,7 @@ def _check_file(md: Path, docs_dir: Path, root: Path) -> list[Finding]:
             continue
         resolved = (md.parent / path).resolve()
         rel = md.relative_to(root)
-        if not resolved.is_relative_to(docs_dir.resolve()):
+        if published_by_mkdocs and not resolved.is_relative_to(docs_dir.resolve()):
             findings.append(
                 Finding(
                     str(rel),
@@ -105,13 +118,31 @@ def _check_file(md: Path, docs_dir: Path, root: Path) -> list[Finding]:
     return findings
 
 
-def check(root: Path) -> list[Finding]:
-    """Every broken relative link under the tree's docs_dir."""
+def _tracked_markdown(root: Path) -> list[Path]:
+    """Every version-controlled `.md` in the repository, or a glob fallback outside a checkout."""
+    # Tracked-only on purpose: an agent wrapper drops untracked CLAUDE.md / scratch notes at the
+    # root, and a gate that fails on a file the repository does not ship is noise, not coverage.
+    argv = ["git", "-C", str(root), "ls-files", "-z", "--", "*.md"]
+    try:
+        out = subprocess.run(  # noqa: S603
+            argv, capture_output=True, check=True, text=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return sorted(p for p in root.rglob("*.md") if ".venv" not in p.parts)
+    return sorted((root / name) for name in out.split("\0") if name)
+
+
+def check(root: Path, files: Sequence[Path] | None = None) -> list[Finding]:
+    """Every broken relative link, in `files` when given, else across all tracked markdown."""
     docs_dir = _docs_dir(root)
-    if not docs_dir.is_dir():
-        return []
+    # With no file list, scan WIDER than docs_dir: the docs tree is the mkdocs half, and the
+    # other half — CHANGELOG.md, the root health files, examples/**/README.md — renders on
+    # GitHub and was never scanned at all.
+    candidates = _tracked_markdown(root) if files is None else [f.resolve() for f in files]
     findings: list[Finding] = []
-    for md in sorted(docs_dir.rglob("*.md")):
+    for md in candidates:
+        if not md.is_file() or not md.resolve().is_relative_to(root.resolve()):
+            continue
         findings.extend(_check_file(md, docs_dir, root))
     return findings
 
@@ -119,9 +150,14 @@ def check(root: Path) -> list[Finding]:
 def main(argv: list[str]) -> int:
     """Report every broken link and exit 1 when any exists."""
     root = _ROOT
-    if "--root" in argv:
-        root = Path(argv[argv.index("--root") + 1]).resolve()
-    findings = check(root)
+    rest = list(argv)
+    if "--root" in rest:
+        i = rest.index("--root")
+        root = Path(rest[i + 1]).resolve()
+        del rest[i : i + 2]
+    # Honour a passed file list (`pass_filenames: true`, or a manual invocation on one doc);
+    # with none, scan the whole repository, which is what catches a link broken by a MOVE.
+    findings = check(root, [Path(a).resolve() for a in rest] or None)
     for f in findings:
         print(f"{f.path}:{f.line}:{f.col}: [{_CODE} ERROR] {f.message}")  # noqa: T201
     if findings:

@@ -32,9 +32,14 @@ recorded cost of **$0**.
 The smoke routes through a **dedicated config directory**,
 [`configs/free-tier/`](https://github.com/KookaS/shunt/blob/main/configs/free-tier/models.yaml),
 selected with `SHUNT_CONFIG_DIR`. It contains a single model — currently
-`openai/gpt-oss-20b:free` (verified `$0` in the public OpenRouter catalog on
-2026-08-11) — priced at 0/0 per 1M tokens, plus a router policy that mirrors the
+`nvidia/nemotron-nano-9b-v2:free` (verified `$0` in the public OpenRouter catalog on
+2026-08-23) — priced at 0/0 per 1M tokens, plus a router policy that mirrors the
 shipped one with `models:` listing only that model.
+
+`:free` slugs are retired without notice: the previous pin, `openai/gpt-oss-20b:free`,
+now returns 404 pointing at the paid `openai/gpt-oss-20b`, which is not a substitute in
+a zero-cost smoke. Re-verify a slug against `https://openrouter.ai/api/v1/models`
+before changing this config.
 
 This separation is deliberate. A `$0` model in the **shipped** registry
 (`src/shunt/config/models.yaml`) would rank cheapest-first and silently change

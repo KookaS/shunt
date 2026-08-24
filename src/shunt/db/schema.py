@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 CREATE_SESSIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -137,6 +137,20 @@ WHERE NOT EXISTS (SELECT 1 FROM outcome_events e WHERE e.session_id = o.session_
 """
 
 
+# ── schema v6: prompt-prefix session identity (resume for clients that send no id) ──
+# Claude Code and other header-less clients cannot be resumed by `external_session_id`,
+# so the router derives a stable per-conversation digest from the request's opening
+# prefix (first system block + first user block, volatile injections normalised) bound
+# to the client identity and a digest of the resolved repo. Persisted here so a restarted
+# or expired conversation can find its own prior row. Nullable: header-keyed and
+# prefix-less traffic keeps NULL. The stored value is a one-way digest — no prompt text
+# and no filesystem path is recoverable from it.
+MIGRATE_V6_PREFIX_DIGEST = "ALTER TABLE sessions ADD COLUMN prefix_digest TEXT"
+CREATE_PREFIX_DIGEST_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_sessions_prefix_digest ON sessions(prefix_digest)
+"""
+
+
 def get_current_version(conn: sqlite3.Connection) -> int:
     cursor = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
@@ -145,6 +159,11 @@ def get_current_version(conn: sqlite3.Connection) -> int:
         return 0
     cursor = conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version")
     return int(cursor.fetchone()[0])
+
+
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """Whether *table* already carries *column* — the ALTER's second guard."""
+    return any(row[1] == column for row in conn.execute(f"PRAGMA table_info({table})"))
 
 
 def run_migrations(conn: sqlite3.Connection) -> None:
@@ -190,4 +209,15 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         # Repair-only: touches no healthy row (every post-v2 outcome already has an event).
         conn.execute(MIGRATE_V5_BACKFILL_OUTCOME_EVENTS)
         conn.execute("INSERT INTO schema_version (version, applied_at) VALUES (5, datetime('now'))")
+        conn.commit()
+
+    if current < 6:
+        # Additive, backward-compatible: one nullable column plus its index; every pre-v6
+        # row keeps NULL and is simply never a prefix-resume candidate.
+        # The version stamp is the primary guard; the column check keeps the ALTER safe when a
+        # stamp is rolled back (a repair re-runs the earlier steps against a newer table).
+        if not _has_column(conn, "sessions", "prefix_digest"):
+            conn.execute(MIGRATE_V6_PREFIX_DIGEST)
+        conn.execute(CREATE_PREFIX_DIGEST_INDEX)
+        conn.execute("INSERT INTO schema_version (version, applied_at) VALUES (6, datetime('now'))")
         conn.commit()

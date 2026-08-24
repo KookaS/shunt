@@ -123,9 +123,9 @@ def test_flag_beats_env_which_beats_file(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setenv("SHUNT_EXPLORE_BUDGET_FRAC", "0.5")
     monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "always_frontier")
 
-    # File alone: 0.1 / knn.
+    # File alone: 0.1 / knn_cascade (the file's `knn` is the pre-rename alias).
     assert load_router_policy().exploration.explore_budget_frac == pytest.approx(0.1)
-    assert load_router_policy().strategy == "knn"
+    assert load_router_policy().strategy == "knn_cascade"
 
     _apply_router_flag_overrides(_parse(["--strategy", "always_cheap"]))
     policy = apply_env_overrides(load_router_policy())

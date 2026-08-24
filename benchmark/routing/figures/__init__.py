@@ -8,9 +8,16 @@ from __future__ import annotations
 
 from benchmark.routing.figures.context import (
     BASELINE_STRATEGY,
+    DEFAULT_STRATEGY,
     ROUTER_STRATEGY,
     RoutingContext,
     build_context,
 )
 
-__all__ = ["BASELINE_STRATEGY", "ROUTER_STRATEGY", "RoutingContext", "build_context"]
+__all__ = [
+    "BASELINE_STRATEGY",
+    "DEFAULT_STRATEGY",
+    "ROUTER_STRATEGY",
+    "RoutingContext",
+    "build_context",
+]

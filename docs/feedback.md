@@ -167,8 +167,13 @@ feedback endpoint yet — feedback is the `shunt` CLI, which is why a container 
   not count), whether the collapse guard is suppressing escalation, and what the next
   decision would do. Read-only — see
   [Inspect it](configuration.md#inspect-it-shunt-escalate).
-- `GET /admin/loop-health` — label coverage, propensity support, and a
-  **reward-independent** routing-collapse alarm. The alarm keys on the model-choice
+- `GET /admin/loop-health` — label coverage, verification progress, propensity support, and a
+  **reward-independent** routing-collapse alarm. Read the two count blocks for what they are:
+  `label_coverage` is **kNN-corpus** coverage, so every counter in it is restricted to sessions
+  that carry an embedding and it reads `0` under the default `session_cascade` strategy, which
+  never embeds. `verification.verified_outcomes` counts the same verified (Tier-2) outcomes with
+  no such restriction — it is the counter that tells you the verification loop feeding
+  auto-escalation is alive whichever strategy you run. The alarm keys on the model-choice
   distribution alone, so a degenerate loop that keeps reward looking fine while the
   policy ossifies onto one model cannot hide from it. Every cost and recency figure it
   reports covers **live sessions only** — rows imported from the benchmark corpus

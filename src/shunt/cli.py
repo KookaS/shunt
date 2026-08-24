@@ -91,6 +91,28 @@ def _version(args: argparse.Namespace) -> None:
     print(f"shunt-router {__version__}")
 
 
+def _print_context_transfer(prov: dict[str, object]) -> None:
+    """Print the `Context:` line whenever a session's conversation was rewritten."""
+    # Same argument as the `Reasoning arm:` line: nothing else in the explanation shows that
+    # the conversation this session ran on was not the conversation the client sent. A summary
+    # transfer means the model did not see what the user saw, and a session explained without
+    # that line reads identically to a plain pass-through one.
+    transfer = prov.get("context_transfer")
+    if not isinstance(transfer, dict):
+        return
+    if transfer.get("mode") == "summary":
+        print(
+            f"Context:        summary written by {transfer.get('summariser', '?')} replaced "
+            f"{transfer.get('replaced_messages', '?')} message(s) — the model did not see "
+            f"the full conversation"
+        )
+    else:
+        print(
+            "Context:        full (summary requested, degraded: "
+            f"{transfer.get('degraded_reason', '?')})"
+        )
+
+
 def _explain(args: argparse.Namespace) -> None:
     from shunt.db.store import OutcomeStore
 
@@ -122,6 +144,7 @@ def _explain(args: argparse.Namespace) -> None:
     arm = prov.get("escalated_reasoning_arm")
     if arm:
         print(f"Reasoning arm:  {arm}  (escalated)")
+    _print_context_transfer(prov)
     print(f"Router propensity: {prov.get('router_propensity', '?')}")
     print()
 

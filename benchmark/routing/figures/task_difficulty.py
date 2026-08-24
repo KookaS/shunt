@@ -26,16 +26,16 @@ _BAND = "#0072B2"
 _UNSOLVED = "#C62828"
 
 SPEC = FigureSpec(
-    title="The shipped router sends most of every difficulty bucket to the cheapest model",
+    title="The kNN selection rule sends most of every difficulty bucket to the cheapest model",
     reading=(
         "Left: how many tasks each capability band is the cheapest sufficient answer for, "
         "weakest band on the left, plus the tasks no enabled model solved. Right: for each "
         "count of solving models — the corpus's own difficulty measure — the share of tasks "
-        "the shipped kNN router sent to each model, as stacked bars with the task count "
+        "the kNN selection rule sent to each model, as stacked bars with the task count "
         "above."
     ),
     goal=(
-        "Compare the stacks across the right panel's buckets. The shipped router is kNN: it "
+        "Compare the stacks across the right panel's buckets. The rule plotted here is kNN: it "
         "predicts ONCE from the neighbourhood and does not escalate, so a stack that barely "
         "moves from the hardest bucket to the easiest means the prediction is barely "
         "conditioning on difficulty at all. Read embedding_signal.png for why — the input it "
@@ -59,7 +59,7 @@ SPEC = FigureSpec(
     limitations=(
         "An imputed cell is always a pass, so a task's band is a LOWER bound on the "
         "capability it truly needs and the solving-model count is an upper bound.",
-        "The right panel is NOT circular for the shipped router — kNN decides before any "
+        "The right panel is NOT circular for the rule plotted — kNN decides before any "
         "outcome for this task exists — but it is not independent either: the neighbours it "
         "reads and the solving-model count it is plotted against come from one matrix.",
         "'No enabled model solved it' counts the six models at their DEFAULT arms. "
