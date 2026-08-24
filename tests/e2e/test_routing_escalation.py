@@ -436,6 +436,27 @@ def test_session_cascade_starts_cheap_then_climbs(
         assert model3 == cheapest
 
 
+def test_session_cascade_verified_outcome_is_visible_over_http(
+    app_factory: Any, tmp_path: Path, mock_acompletion: Any
+) -> None:
+    """The default strategy's verified outcomes must be observable on /admin/loop-health."""
+    # The handshake harness's escalation drivers are bare HTTP clients: they cannot reach the
+    # engine's failure log, so they pace their prompts by polling this endpoint for a landed
+    # verified outcome. They used to poll `label_coverage.verified_labeled`, which joins on
+    # `sessions.embedding_blob IS NOT NULL` — a kNN-corpus question — and `session_cascade`
+    # never embeds, so that counter is 0 forever and all three legs timed out. Guard the
+    # strategy-independent counter here rather than in the Docker harness alone.
+    repo = make_repo(tmp_path / "visible-repo", kind="red")
+    with app_factory(repo=repo, strategy="session_cascade") as client:
+        _r1, sid1 = _drive_session(client)
+        close_session(client, sid1)
+        wait_failure_count(client, str(repo), 1)
+
+        health = client.get("/admin/loop-health").json()
+        assert health["label_coverage"]["verified_labeled"] == 0  # embedding-gated, by design
+        assert health["verification"]["verified_outcomes"] >= 1
+
+
 def test_always_cheap_allocates_the_cheapest_model(app_factory: Any, mock_acompletion: Any) -> None:
     """Routing allocated to the cheap end of the pool on a fixed strategy."""
     with app_factory(repo=None, strategy="always_cheap") as client:

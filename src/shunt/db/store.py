@@ -852,6 +852,19 @@ class OutcomeStore:
                     "o.session_id WHERE s.embedding_blob IS NOT NULL"
                 ).fetchone()["c"]
             )
+            # NO embedding predicate, and that is the point: the two counters above answer a
+            # kNN-corpus question and read 0 by construction under a strategy that never embeds
+            # (`session_cascade`, the shipped default). This one reports whether the verification
+            # loop — the input the escalation ladder is built on — is producing anything at all.
+            # Live rows only, like every other progress figure here: an imported benchmark
+            # corpus arrives already labeled, and counting it would let a seed import make a
+            # dead verification loop look alive.
+            verified_outcomes = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) c FROM outcomes "
+                    f"WHERE tier2_outcome IS NOT NULL AND {_LIVE_CLAUSE}"
+                ).fetchone()["c"]
+            )
             # Live rows only, exactly as `routing_ope_rows` reads them: today's seeder writes
             # no `selection_propensity`, so NOT NULL excludes the seeded stratum incidentally.
             # `_LIVE_CLAUSE` states the guarantee so a seeder that starts writing one cannot
@@ -887,6 +900,7 @@ class OutcomeStore:
             eligible_sessions=eligible,
             verified_labeled=verified,
             any_labeled=any_labeled,
+            verified_outcomes=verified_outcomes,
             model_propensities=[
                 (r["model_chosen"], int(r["n"]), float(r["mean_p"]), float(r["min_p"]))
                 for r in prop_rows

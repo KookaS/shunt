@@ -9,8 +9,10 @@
 #
 # * ``GET /admin/loop-health`` — aggregates only (label coverage, propensities, collapse
 #   alarms). It carries no escalation field at all, so it cannot decide this verdict. The
-#   *driver* still polls it, because ``verified_labeled`` is the one progress counter a
-#   bare-HTTP client can reach.
+#   *driver* still polls it, because ``verification.verified_outcomes`` is the one progress
+#   counter a bare-HTTP client can reach. NOT ``label_coverage.verified_labeled``: that block
+#   is kNN-corpus coverage, gated on the session carrying an embedding, and the shipped default
+#   strategy never embeds.
 # * ``shunt explain <session_id>`` — prints the decision's provenance, including
 #   ``Escalation:``. It needs a session id, which is precisely what a header-swallowing
 #   CLI denies us. Used below as the human-readable receipt once the id is known.

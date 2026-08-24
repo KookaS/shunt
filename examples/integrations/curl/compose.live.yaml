@@ -125,9 +125,11 @@ services:
           while [ "$$(( $$(date +%s) - $$(cat /tmp/last_send) ))" -lt "$$need" ]; do sleep 1; done
         }
 
+        # `verification.verified_outcomes`, NOT `label_coverage.verified_labeled`: the latter
+        # is embedding-gated and reads 0 forever under the non-embedding default strategy.
         verified() {
           curl -sf "$$BASE/admin/loop-health" \
-            | grep -o '"verified_labeled":[0-9]*' | head -n1 | cut -d: -f2
+            | grep -o '"verified_outcomes":[0-9]*' | head -n1 | cut -d: -f2
         }
 
         wait_verified() {
@@ -135,11 +137,11 @@ services:
           while [ "$$tries" -lt 300 ]; do
             v="$$(verified || echo 0)"
             if [ -n "$$v" ] && [ "$$v" -ge "$$1" ]; then
-              echo "verified_labeled=$$v (>= $$1)"; return 0
+              echo "verified_outcomes=$$v (>= $$1)"; return 0
             fi
             tries=$$((tries + 1)); sleep 1
           done
-          echo "timed out waiting for verified_labeled >= $$1 (last=$$v)" >&2
+          echo "timed out waiting for verified_outcomes >= $$1 (last=$$v)" >&2
           return 1
         }
 

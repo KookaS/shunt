@@ -14,7 +14,7 @@
 #      path), which is what fires the off-wire verifier against the red /repo.
 #   3. So: p1 opens S1 · p2 closes S1 → failure 1 · p3 closes S2 → failure 2 ·
 #      p4 is decided with two same-key verified failures in the log → auto_escalation.
-#   4. Between prompts we POLL /admin/loop-health for verified_labeled rather than
+#   4. Between prompts we POLL /admin/loop-health for verified_outcomes rather than
 #      sleeping on a guess. The one genuine wait is the inactivity deadline itself —
 #      a configured duration, read from the same env var the router reads.
 #
@@ -59,9 +59,15 @@ services:
           while [ "$$(( $$(date +%s) - $$(cat /tmp/last_send) ))" -lt "$$need" ]; do sleep 1; done
         }
 
+        # `verification.verified_outcomes`, NOT `label_coverage.verified_labeled`. The latter
+        # is the kNN-corpus coverage counter and is gated on the session carrying an embedding,
+        # so under the shipped default strategy (`session_cascade`, which never embeds) it is 0
+        # forever and this poll could only ever time out. `verified_outcomes` counts the same
+        # Tier-2 outcomes with no embedding predicate — the signal the escalation ladder itself
+        # runs on, which is what this scenario is waiting for.
         verified() {
           curl -sf "$$BASE/admin/loop-health" \
-            | grep -o '"verified_labeled":[0-9]*' | head -n1 | cut -d: -f2
+            | grep -o '"verified_outcomes":[0-9]*' | head -n1 | cut -d: -f2
         }
 
         # Bounded poll on OBSERVED state — the pattern tests/e2e/helpers.py uses.
@@ -73,11 +79,11 @@ services:
           while [ "$$tries" -lt 300 ]; do
             v="$$(verified || echo 0)"
             if [ -n "$$v" ] && [ "$$v" -ge "$$1" ]; then
-              echo "verified_labeled=$$v (>= $$1)"; return 0
+              echo "verified_outcomes=$$v (>= $$1)"; return 0
             fi
             tries=$$((tries + 1)); sleep 1
           done
-          echo "timed out waiting for verified_labeled >= $$1 (last=$$v)" >&2
+          echo "timed out waiting for verified_outcomes >= $$1 (last=$$v)" >&2
           return 1
         }
 
