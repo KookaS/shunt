@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Default cheap model — cold-start placeholder (kNN replaces this later)
-_DEFAULT_MODEL = "qwen3.7-plus"
+_DEFAULT_MODEL = "deepseek-v4-flash"
 
 # Request fields forwarded upstream. `tools`/`tool_choice` are the load-bearing entries:
 # Shunt sits in front of CODING AGENTS, which are tool-calling clients, and omitting them

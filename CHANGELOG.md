@@ -14,6 +14,17 @@ This file is the source for the GitHub release notes, so the two cannot disagree
 
 ### Changed
 
+- **The live pool drops the models measurement shows to be strictly dominated.** `router.yaml`'s
+  `models:` list now holds only the measured-evidence pool — `deepseek-v4-flash`,
+  `zai-glm-5.2`, `kimi-k3`, plus the frontier escalation tail. `qwen3.7-plus`, `gpt-5-mini` and
+  `kimi-k2.5` are removed from live inference: all three are worse or no better than
+  `deepseek-v4-flash` at 3.8–8.6× the price, and `gpt-5-mini` is measured **net-harmful** as an
+  escalation rung (helps 4 / hurts 36, p < 1e-6). They stay in the registry and in
+  `benchmark/benchmark.yaml` (so the benchmark keeps measuring them), but the router never picks
+  them. The cold-start default moves with them to `deepseek-v4-flash`. The ladder now steps
+  `zai-glm-5.2` instead of the flat-to-harmful rungs; a residual skip of `kimi-k3` (price-slotted
+  inside the shortlist jump) is documented in `docs/escalation.md`.
+
 - **The default `router.strategy` is now `session_cascade`, not `knn_cascade`.** Both climb the
   same session-cadence escalation ladder; they differ only in where the ladder starts.
   `session_cascade` starts at the cheapest live model, `knn_cascade` at the kNN-selected one.

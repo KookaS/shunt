@@ -37,20 +37,20 @@ from tests.e2e.hyperparameter_helpers import (
     write_policy,
 )
 
-_QWEN = "qwen3.7-plus"
+_MID = "zai-glm-5.2"
 _CHEAP = "deepseek-v4-flash"
 _FRONTIER = "claude-fable-5"
 
 
 def _seed_single_cluster_corpus(client: TestClient, *, n_a: int, n_b: int) -> None:
-    """Seed *n_a* qwen successes on TASK_A and *n_b* on TASK_B (all one model)."""
+    """Seed *n_a* zai-glm-5.2 successes on TASK_A and *n_b* on TASK_B (all one model)."""
     store = client.app.state.outcome_store
     for i in range(n_a):
         seed_outcome(
             store,
             session_id=f"seed-a-{i}",
             text=TASK_A,
-            model=_QWEN,
+            model=_MID,
             cost=0.01,
             outcome="success",
         )
@@ -59,7 +59,7 @@ def _seed_single_cluster_corpus(client: TestClient, *, n_a: int, n_b: int) -> No
             store,
             session_id=f"seed-b-{i}",
             text=TASK_B,
-            model=_QWEN,
+            model=_MID,
             cost=0.01,
             outcome="success",
         )
@@ -71,10 +71,10 @@ def _seed_single_cluster_corpus(client: TestClient, *, n_a: int, n_b: int) -> No
 @pytest.mark.parametrize(
     ("k", "expected_reason"),
     [
-        # k=1 returns a single neighbour (qwen) — fewer samples than min_samples=3,
+        # k=1 returns a single neighbour (zai-glm-5.2) — fewer samples than min_samples=3,
         # so nothing qualifies and the router escalates to the cheapest untested model.
         pytest.param(1, "exploration_untested", id="k=1"),
-        # k=10 returns a qualifying neighbourhood of qwen successes → cheapest wins.
+        # k=10 returns a qualifying neighbourhood of zai-glm-5.2 successes → cheapest wins.
         pytest.param(10, "cheapest_above_threshold", id="k=10"),
     ],
 )
@@ -99,9 +99,9 @@ def test_k_changes_the_neighbourhood_decision(
             post_completion(client, chat_body(content=TASK_A)).headers["X-Shunt-Decision"]
         )
         if expected_reason == "exploration_untested":
-            assert model == cheapest_untested(client, _QWEN)
+            assert model == cheapest_untested(client, _MID)
         else:
-            assert model == _QWEN
+            assert model == _MID
         assert reason == expected_reason
 
 
@@ -134,13 +134,13 @@ def test_success_rate_threshold_changes_eligibility(
     )
     with app_factory() as client:
         store = client.app.state.outcome_store
-        # TASK_A: 9 qwen successes + 3 qwen failures → weighted success 0.75.
+        # TASK_A: 9 zai-glm-5.2 successes + 3 zai-glm-5.2 failures → weighted success 0.75.
         for i in range(9):
             seed_outcome(
                 store,
                 session_id=f"sa-{i}",
                 text=TASK_A,
-                model=_QWEN,
+                model=_MID,
                 cost=0.01,
                 outcome="success",
             )
@@ -149,7 +149,7 @@ def test_success_rate_threshold_changes_eligibility(
                 store,
                 session_id=f"fa-{i}",
                 text=TASK_A,
-                model=_QWEN,
+                model=_MID,
                 cost=0.01,
                 outcome="failure",
             )
@@ -159,7 +159,7 @@ def test_success_rate_threshold_changes_eligibility(
                 store,
                 session_id=f"sb-{i}",
                 text=TASK_B,
-                model=_QWEN,
+                model=_MID,
                 cost=0.01,
                 outcome="success",
             )
@@ -167,9 +167,9 @@ def test_success_rate_threshold_changes_eligibility(
             post_completion(client, chat_body(content=TASK_A)).headers["X-Shunt-Decision"]
         )
         if expected_reason == "exploration_untested":
-            assert model == cheapest_untested(client, _QWEN)
+            assert model == cheapest_untested(client, _MID)
         else:
-            assert model == _QWEN
+            assert model == _MID
         assert reason == expected_reason
 
 
@@ -199,16 +199,16 @@ def test_min_samples_gates_qualification(
         ),
     )
     with app_factory() as client:
-        # Exactly 20 qwen outcomes: just enough to end cold start, and the whole
-        # neighbourhood is one qwen group whose size is *min_samples*'s gate.
+        # Exactly 20 zai-glm-5.2 outcomes: just enough to end cold start, and the whole
+        # neighbourhood is one zai-glm-5.2 group whose size is *min_samples*'s gate.
         _seed_single_cluster_corpus(client, n_a=6, n_b=14)
         model, reason = parse_decision(
             post_completion(client, chat_body(content=TASK_A)).headers["X-Shunt-Decision"]
         )
         if expected_reason == "exploration_untested":
-            assert model == cheapest_untested(client, _QWEN)
+            assert model == cheapest_untested(client, _MID)
         else:
-            assert model == _QWEN
+            assert model == _MID
         assert reason == expected_reason
 
 
@@ -230,7 +230,7 @@ def test_min_samples_gates_qualification(
             "always_frontier",
             id="strategy=always_frontier",
         ),
-        pytest.param("knn", _QWEN, "cold_start", id="strategy=knn"),
+        pytest.param("knn", _CHEAP, "cold_start", id="strategy=knn"),
     ],
 )
 def test_strategy_env_override_changes_the_served_model(
@@ -283,12 +283,12 @@ def test_exploration_enabled_switch_is_observable_on_the_wire(
             post_completion(client, chat_body()).headers["X-Shunt-Decision"]
         )
         if enabled == "1":
-            # Seed 12 makes the first decision diverge from greedy (an upshift).
+            # Seed 15 makes the first decision diverge from greedy (an upshift).
             assert reason == "exploration"
-            assert model == _CHEAP
+            assert model == _MID
         else:
             assert reason == "cheapest_above_threshold"
-            assert model == _QWEN
+            assert model == _CHEAP
         assert reason == expected_reason
 
 
@@ -315,9 +315,10 @@ def test_explore_budget_frac_binds_the_number_of_explorations(
     expected_explorations: int,
 ) -> None:
     reset_cold_start_env(monkeypatch)
-    # Seed 16 (not the 12 the sibling tests use) makes the FIRST decision diverge AND
-    # diverge again after the default budget re-opens — the config that discriminates.
-    pin_exploration_rng(monkeypatch, seed=16)
+    # Seed 10 makes the FIRST decision diverge AND diverge again after the default budget
+    # re-opens (30 decisions: exactly 1 exploration at frac=0.05, 3 at frac=0.4) — the
+    # config that discriminates.
+    pin_exploration_rng(monkeypatch, seed=10)
     client = app_factory(repo=None)
     monkeypatch.setenv("SHUNT_EXPLORATION_ENABLED", "1")
     monkeypatch.setenv("SHUNT_EXPLORE_BUDGET_FRAC", budget_frac)

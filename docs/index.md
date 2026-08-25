@@ -172,6 +172,7 @@ trust rules: [Feedback](feedback.md).
 - [Configuration](configuration.md) — add provider keys and register models
 - [Feedback](feedback.md) — how outcomes are captured (auto + manual) and learned from
 - [The routing model](routing.md) — what the session's model choice reads, how it decides, and where it stops
+- [Model triage](model-selection.md) — which models earn a slot in the live pool: the routine frontier with its Wilson-CI band, the escalation rung, and what gets dropped
 - [Error detection & auto-escalation](escalation.md) — how a verified failure is detected and, on repeat, escalates a rung (ships enabled; armed when a repo is resolved)
 - [The escalation claim](escalation-claim.md) — what we do and do not assert about escalation, with its pre-registered falsifiers and their verdicts
 - [Escalation dataset](escalation-data-card.md) — what the escalation corpus is: provenance, census, known defects, access mechanics

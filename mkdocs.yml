@@ -39,6 +39,7 @@ nav:
   - Configuration: configuration.md
   - Feedback: feedback.md
   - The routing model: routing.md
+  - Model triage: model-selection.md
   - Error detection & auto-escalation: escalation.md
   - The escalation claim: escalation-claim.md
   - Escalation dataset: escalation-data-card.md

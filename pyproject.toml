@@ -188,7 +188,7 @@ select = [
 ]
 # Custom AST checks in tools/lint/ (SH0xx) — declared external so `# noqa: SH001`
 # opt-outs coexist with ruff without tripping its invalid-noqa detection.
-external = ["SH001", "SH002", "SH003", "SH004", "SH005"]
+external = ["SH001", "SH002", "SH003", "SH004", "SH005", "SH015"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10

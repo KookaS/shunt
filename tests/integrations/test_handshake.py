@@ -72,7 +72,7 @@ def test_models_endpoint_lists_fake_registry(
     resp = client.get("/v1/models")
     assert resp.status_code == 200
     ids = [row["id"] for row in resp.json()["data"]]
-    assert "qwen3.7-plus" in ids  # the cold-start model must be discoverable
+    assert "deepseek-v4-flash" in ids  # the cold-start model must be discoverable
 
 
 def test_openai_wire_roundtrip(handshake_client: tuple[TestClient, FakeUpstream]) -> None:

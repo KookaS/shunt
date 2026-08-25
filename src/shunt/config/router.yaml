@@ -205,27 +205,37 @@ router:
     max_spend_usd: null
 
   # Which registry models (src/shunt/config/models.yaml) the live router may pick.
-  # Empty/absent = every registry model. This is core + the latest frontier models,
-  # EXCLUDING the superseded claude-opus-4-6 (it stays in the registry as the old
-  # kill-gate baseline, just not live by default). A model absent from this list is
-  # known to the registry but NOT chosen for live inference. The frontier entries
-  # need their provider's key or the router marks them unhealthy and falls back —
-  # and in the SHIPPED registry that key is REQUESTY_API_KEY for all of them. Every
-  # model in models.yaml is `provider: requesty` except deepseek-v4-flash, which
-  # reads DEEPSEEK_API_KEY. Do NOT set ANTHROPIC_API_KEY / OPENAI_API_KEY /
-  # GEMINI_API_KEY expecting these rows to light up: the shipped entries reach those
-  # vendors THROUGH Requesty, so those variables are never read. Each direct-vendor
-  # fragment in examples/providers/ carries its own env var, but only the vendors
-  # with a fragment there are covered — of the three variables above, only
-  # OPENAI_API_KEY has one (examples/providers/openai.yaml); there is no Anthropic
-  # or Gemini fragment, so those two variables are read by nothing that ships.
+  # Empty/absent = every registry model. This is the MEASURED-EVIDENCE pool:
+  # the cheap base the data supports, the two escalation targets measured
+  # net-helpful on the committed corpus, and the latest frontier models.
+  # EXCLUDED: the superseded claude-opus-4-6 (it stays in the registry as the old
+  # kill-gate baseline, just not live by default) and the cheap/mid models
+  # (qwen3.7-plus, gpt-5-mini, kimi-k2.5) that measurement shows to be STRICTLY
+  # DOMINATED by deepseek-v4-flash — worse or no better at 3.8-8.6x the price, and
+  # gpt-5-mini is measured NET-HARMFUL as an escalation rung (helps 4 / hurts 36,
+  # p < 1e-6 on the committed corpus). They stay in the registry and in the
+  # benchmark (benchmark/benchmark.yaml `models:`) so the verdict stays revisable,
+  # but a model absent from this list is known to the registry but NOT chosen for
+  # live inference. Removing them also makes the price-ranked escalation ladder
+  # approximately capability-ranked: the ladder steps deepseek-v4-flash ->
+  # zai-glm-5.2 (the first measured net-helpful rung), a research-estimated
+  # frontier slot (gemini-3.1-pro) sits inside the shortlist walk, and the
+  # jump to the top rank SKIPS kimi-k3 (the best-measured rung) — the
+  # residual defect. The frontier entries need their provider's key or the router marks them
+  # unhealthy and falls back — and in the SHIPPED registry that key is
+  # REQUESTY_API_KEY for all of them. Every model in models.yaml is `provider:
+  # requesty` except deepseek-v4-flash, which reads DEEPSEEK_API_KEY. Do NOT set
+  # ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY expecting these rows to
+  # light up: the shipped entries reach those vendors THROUGH Requesty, so those
+  # variables are never read. Each direct-vendor fragment in examples/providers/
+  # carries its own env var, but only the vendors with a fragment there are covered
+  # — of the three variables above, only OPENAI_API_KEY has one
+  # (examples/providers/openai.yaml); there is no Anthropic or Gemini fragment, so
+  # those two variables are read by nothing that ships.
   # Authoritative per provider: the `api_key_env_var` field in models.yaml.
   # Benchmark model selection is separate (benchmark/benchmark.yaml `models:`).
   models:
-    - qwen3.7-plus
     - deepseek-v4-flash
-    - gpt-5-mini
-    - kimi-k2.5
     - zai-glm-5.2
     - kimi-k3
     - gemini-3.1-pro

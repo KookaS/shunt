@@ -178,6 +178,22 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      # SH015 makes the model-triage rule structural: a model earns a live-pool slot iff it
+      # clears the routine frontier's Wilson-CI band OR is a net-helpful escalation rung. The
+      # gate recomputes triage_default() over the committed corpus and fails when any
+      # router.yaml live-pool model is a DROP. Whole-tree scan (the SH004/SH005 shape): the
+      # failure is a POLICY edit, and an always_run gate catches a models: list change that
+      # leaves a dominated model live. BLOCKING.
+      - id: sh015-model-triage
+        name: SH015 live-pool models clear the triage frontier
+        # SH015 is the one gate that imports the shipped package (triage -> shunt -> pydantic),
+        # so it must run under the project venv, not the ambient python a bare `git commit`
+        # hook sees (AGENTS.md: "run everything through uv"). The gate still bootstraps repo
+        # root + src/ so it also works without the editable install.
+        entry: uv run python tools/lint/check_model_triage.py
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: sh013-workflow-timeouts
         name: SH013 every workflow job declares timeout-minutes
         entry: python tools/lint/check_workflow_timeouts.py

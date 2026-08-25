@@ -6,7 +6,7 @@
 tool: pydantic-ai
 wire: openai
 service: pydantic-ai
-expected_model: qwen3.7-plus
+expected_model: deepseek-v4-flash
 best_effort: true    # continue-on-error: pydantic-ai's model/provider API drifts across versions
 
 # Scenarios this tool runs (workflow matrix = tool x scenario):

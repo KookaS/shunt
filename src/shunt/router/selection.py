@@ -31,7 +31,7 @@ class ModelPoolProtocol(Protocol):
     def is_healthy(self, name: str) -> bool: ...
 
 
-_DEFAULT_COLD_START_MODEL = "qwen3.7-plus"
+_DEFAULT_COLD_START_MODEL = "deepseek-v4-flash"
 # Raw library default for a bare SelectionRule(). Production does NOT use this: the server
 # builds the rule from KnnPolicy.success_rate_threshold (shipped 0.6), the single source.
 _DEFAULT_MIN_SUCCESS_RATE = 0.7

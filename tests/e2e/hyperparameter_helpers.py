@@ -30,9 +30,9 @@ EMBEDDER = FakeEmbedder()
 # The exploration RNG pin (mirrors tests/e2e/test_exploration.py): the engine builds
 # its Thompson sampler with an unseeded ``np.random.default_rng()``, so the tests pin
 # unseeded draws to this seed while preserving explicit seeds (the FakeEmbedder relies
-# on those for per-text vectors). Seed 12 makes the first decision on the exploration
+# on those for per-text vectors). Seed 15 makes the first decision on the exploration
 # corpus below explore; the whole path then runs bit-for-bit the same every time.
-_RNG_SEED = 12
+_RNG_SEED = 15
 _REAL_DEFAULT_RNG = np.random.default_rng
 
 
@@ -120,9 +120,10 @@ def seed_outcome(
 def seed_exploration_corpus(store: OutcomeStore) -> None:
     """Write the deterministic verified corpus the exploration knobs read back."""
     # Mirrors tests/e2e/test_exploration.py: 24 Tier-2 sessions split between the two
-    # models, both near the 0.6 success threshold (qwen 8/12 passes, deepseek 6/12),
-    # the pricier at cost 5.0 vs 1.0 — the precondition that lets the Thompson layer
-    # sometimes diverge from the greedy pick and end cold start (>=20 effective Tier-2).
+    # live-pool models, both near the 0.6 success threshold (deepseek 9/12 passes,
+    # zai-glm-5.2 5/12), the pricier at cost 5.0 vs 1.0 — the precondition that lets the
+    # Thompson layer sometimes diverge from the greedy pick and end cold start (>=20
+    # effective Tier-2).
     counter = 0
 
     def add(session_id: str, model: str, cost: float, outcome: str) -> None:
@@ -150,9 +151,9 @@ def seed_exploration_corpus(store: OutcomeStore) -> None:
         counter += 1
 
     for i in range(12):
-        add(f"seed-qwen-{i}", "qwen3.7-plus", 1.0, "success" if i < 8 else "failure")
+        add(f"seed-ds-{i}", "deepseek-v4-flash", 1.0, "success" if i < 9 else "failure")
     for i in range(12):
-        add(f"seed-ds-{i}", "deepseek-v4-flash", 5.0, "success" if i < 6 else "failure")
+        add(f"seed-glm-{i}", "zai-glm-5.2", 5.0, "success" if i < 5 else "failure")
 
 
 def reset_cold_start_env(monkeypatch: pytest.MonkeyPatch) -> None:

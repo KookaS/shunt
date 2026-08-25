@@ -910,13 +910,18 @@ def _ladder_notes(sc: SessionCadenceReport) -> tuple[str, ...]:
     if not sc.ladder_visits:
         return ()
     reached = [m for m in sc.ladder_visits if m in sc.frontier_models]
-    before = [m for m in sc.ladder_visits if m not in sc.frontier_models]
-    return (
+    never = [m for m in sc.frontier_models if m not in sc.ladder_visits]
+    other = [m for m in sc.ladder_visits if m not in sc.frontier_models]
+    sentence = (
         f"the shipped ladder (rank_shortlist={sc.rank_shortlist}) walks "
-        f"{' -> '.join(sc.ladder_visits)} over this corpus's price order: of the escalate arm it "
-        f"reaches {', '.join(reached) or 'nothing'}, and only after billing "
-        f"{', '.join(before) or 'no other rung'} first",
+        f"{' -> '.join(sc.ladder_visits)} over the shipped pool's price order: of the "
+        f"escalate arm it reaches {', '.join(reached) or 'nothing'}"
     )
+    if never:
+        sentence += f", and never reaches {', '.join(never)}"
+    if other and reached and reached[0] != sc.ladder_visits[0]:
+        sentence += f", stepping through {', '.join(other)} first"
+    return (sentence,)
 
 
 _SHORT_ARM: Final[dict[str, str]] = {

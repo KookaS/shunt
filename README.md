@@ -698,13 +698,15 @@ Seven things would move it, in the order they block each other:
    coverage) and emit a paired difference between their cost figures. Until both
    exist, no cost claim about escalation is inferable from this repository.
 7. **Ladder composition.** The ladder ranks by price, and price order is not
-   capability order: it buys `gpt-5-mini` (measured **net-harmful**, −0.168,
-   n=190) and jumps over `zai-glm-5.2` (measured **net-helpful**, +0.155, n=84).
-   No setting fixes this. Sweeping `rank_shortlist` over {0,1,2,3,4,5} leaves
-   pass rate at 96.74% with an *identically zero* paired difference, and the only
-   variant that drops `gpt-5-mini` is not distinguishable from the default on
-   cache-aware cost (−$1.09, 95% CI [−2.20, +0.10]) — the knob picks a prefix of
-   the price order, and the measured capability order is a different order. A
+   capability order: it used to buy `gpt-5-mini` (measured **net-harmful**, −0.168,
+   n=190) and jump over `zai-glm-5.2` (measured **net-helpful**, +0.155, n=84). The
+   pool change removed the dominated models from the shipped router, so the ladder
+   now buys `zai-glm-5.2`; what remains is that the price order still skips
+   `kimi-k3` (measured **net-helpful**, +0.236, n=110) because a research-estimated
+   frontier slot falls inside the shortlist walk. No setting fixes this. Sweeping
+   `rank_shortlist` over {0,1,2,3,4,5} leaves pass rate at 96.74% with an
+   *identically zero* paired difference — the knob picks a prefix of the price
+   order, and the measured capability order is a different order. A
    capability-ordered ladder is the fix and it is a feature, not a knob: the
    resolver exists but ships the price prior verbatim and is not wired to the
    escalation path.

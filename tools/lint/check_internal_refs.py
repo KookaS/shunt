@@ -63,6 +63,12 @@ _PATTERNS = (
         r"\bdecisions?/\d"
     ),
     re.compile(r"\bdecisions?\s+\d{4}\b", re.IGNORECASE),  # prose form  # noqa: SHUNT-ISO
+    # Identifier separator forms the prose pattern above misses: a snake_case function or
+    # variable name ending in ``decision_<year>`` has no word boundary before "decision"
+    # (the preceding "_" is a word char) and none after the year. The character class covers
+    # the siblings the gate's decision vocab uses; "(?!\d)" keeps it a 4-digit year token,
+    # not a run of a longer number.  # noqa: SHUNT-ISO
+    re.compile(r"(?<![A-Za-z0-9])decisions?[_\s/-]\d{4}(?!\d)"),
     re.compile(r"\bproject/\w+/(?:backlog|journal|report|roadmap|vision)"),  # internal docs
     re.compile(r"\bMonth-?\d"),
     re.compile(r"see backlog", re.IGNORECASE),  # noqa: SHUNT-ISO (this gate's own vocab)

@@ -161,11 +161,11 @@ def test_verify_headers_pass() -> None:
 
 def test_verify_headers_wrong_model_fails() -> None:
     headers = {
-        "X-Shunt-Decision": "qwen3.7-plus; reason=always_cheap",
+        "X-Shunt-Decision": "zai-glm-5.2; reason=always_cheap",
         "X-Shunt-Session-Id": "sess-1",
     }
     problems = live_smoke.verify_headers(200, headers, "deepseek-v4-flash", "always_cheap")
-    assert any("qwen3.7-plus" in p for p in problems)
+    assert any("zai-glm-5.2" in p for p in problems)
 
 
 def test_verify_headers_missing_session_fails() -> None:

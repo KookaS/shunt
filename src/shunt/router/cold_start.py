@@ -9,14 +9,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_COLD_START_MODEL = "qwen3.7-plus"
-_DEFAULT_FALLBACK_MODELS: Final = ["deepseek-v4-flash", "zai-glm-5.2"]
+_COLD_START_MODEL = "deepseek-v4-flash"
+_DEFAULT_FALLBACK_MODELS: Final = ["zai-glm-5.2"]
 
 
 class ColdStartStrategy:
-    """Cold-start routing policy: while active, route to cheap qwen3.7-plus
-    (falling back through the chain if unhealthy); kNN takes over once inactive.
-    Ends when count_tier2 >= threshold_tier2 OR count_labeled >= threshold_tier1.
+    """Cold-start routing policy: while active, route to the cheapest live model
+    (deepseek-v4-flash, falling back through the chain if unhealthy); kNN takes over
+    once inactive. Ends when count_tier2 >= threshold_tier2 OR count_labeled >= threshold_tier1.
     """
 
     def __init__(
@@ -71,7 +71,7 @@ class ColdStartStrategy:
         return ne_labeled < self._threshold_tier1
 
     def select(self, model_pool: ModelPoolProtocol) -> str:
-        """Return the cold-start model — prefers qwen3.7-plus, falling back
+        """Return the cold-start model — prefers deepseek-v4-flash, falling back
         through the configured chain then escalating through the pool if
         unhealthy.
         """

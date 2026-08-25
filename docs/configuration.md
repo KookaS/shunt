@@ -346,12 +346,19 @@ The registry (`models.yaml`) defines every model shunt *knows*. `router.yaml`'s
 router:
   models:                 # live-routable models; each name must exist in the registry
     - deepseek-v4-flash
-    - qwen3.7-plus
-    - gpt-5-mini
-    - kimi-k2.5
     - zai-glm-5.2
     - kimi-k3
+    - gemini-3.1-pro
+    - gpt-5.6-sol
+    - claude-fable-5
+    - claude-opus-4-8
 ```
+
+The shipped list is the measured-evidence pool: the cheap base, the two escalation
+targets measured net-helpful, and the frontier tail. Models measured strictly
+dominated by `deepseek-v4-flash` (`qwen3.7-plus`, `gpt-5-mini`, `kimi-k2.5`) stay in
+the registry and in the benchmark, but are not live-routable by default — add them
+to `models:` explicitly if you want to route to them.
 
 Omit the key, or leave it empty, and every registry model is live-routable — the
 backward-compatible default. A name in the list that isn't in the registry fails
@@ -375,10 +382,7 @@ so restate every setting you care about:
 router:
   strategy: knn_cascade
   models:
-    - qwen3.7-plus
     - deepseek-v4-flash
-    - gpt-5-mini
-    - kimi-k2.5
     - zai-glm-5.2
     - claude-opus-4-8   # the one frontier model this deployment allows
 ```
@@ -391,7 +395,7 @@ Shunt config | strategy=knn_cascade
 Shunt config | knn: k=20 success_rate_threshold=0.60 min_samples=3
 Shunt config | exploration: enabled=True budget_frac=0.15 conservative_alpha=0.10 ...
 Shunt config | budget: max_spend_usd=unlimited
-Shunt config | models: 0:qwen3.7-plus, 1:gpt-5-mini, 2:kimi-k3
+Shunt config | models: 0:deepseek-v4-flash, 1:zai-glm-5.2, 2:kimi-k3
 Shunt config | session: inactivity_timeout=900s grace_period=120s retry_count=3
 ```
 
@@ -821,7 +825,7 @@ a file. Each is read once at startup.
 | `SHUNT_EMBEDDER_MODEL` | `jina-code` | Active embedding model — a key (or `repo`) from `embedding.yaml`; overrides the file. See [Choose the embedding model](#choose-the-embedding-model-and-stay-swap-safe) |
 | `SHUNT_EMBED_MAX_CHARS` | `4000` | Prompt characters fed to the embedder; overrides `embedding.yaml`'s `max_chars` |
 | `SHUNT_EMBED_CACHE_DIR` | `$SHUNT_DATA_DIR/models` | Where the ~600MB embedding model is cached. Shunt downloads it once at startup and reuses it; keep this on durable storage or every restart re-downloads it. Not downloaded at all under a fixed strategy (`always_cheap` / `always_frontier`), which never embeds |
-| `SHUNT_RESPONSE_MODEL_LABEL` | unset | Prefix added to the response `model` field (e.g. `shunt:` → `shunt:qwen3.7-plus`), so a client shows which model actually served the turn |
+| `SHUNT_RESPONSE_MODEL_LABEL` | unset | Prefix added to the response `model` field (e.g. `shunt:` → `shunt:deepseek-v4-flash`), so a client shows which model actually served the turn |
 | `SHUNT_LOG_LEVEL` | `info` | Log verbosity; `debug` traces the routing decision |
 
 `SHUNT_EMBED_MAX_CHARS` bounds only the text the router embeds to make its

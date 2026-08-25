@@ -117,7 +117,7 @@ def test_decision_routes_on_learned_outcome_after_refit(refit_client: Any) -> No
     for _ in range(3):
         resp = post_completion(client, chat_body())
         model, reason = parse_decision(resp.headers["X-Shunt-Decision"])
-        assert model == "qwen3.7-plus"
+        assert model == "deepseek-v4-flash"
         assert reason == "cold_start"
         close_session(client, resp.headers["X-Shunt-Session-Id"])
         wait_outcome(client, resp.headers["X-Shunt-Session-Id"], "success")
@@ -132,5 +132,5 @@ def test_decision_routes_on_learned_outcome_after_refit(refit_client: Any) -> No
     # The next request routes on the learned kNN neighbourhood, not cold-start.
     resp = post_completion(client, chat_body())
     model, reason = parse_decision(resp.headers["X-Shunt-Decision"])
-    assert model == "qwen3.7-plus"
+    assert model == "deepseek-v4-flash"
     assert reason == "cheapest_above_threshold"

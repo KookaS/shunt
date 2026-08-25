@@ -317,34 +317,44 @@ as well as money. On a task that keeps failing, those mid-tier models are paid f
 way to a frontier model the task was going to need anyway.
 
 So the rank rung walks only the **`rank_shortlist` cheapest ranks** individually (3 by
-default), and the rung that leaves them **jumps straight to the top rank**. With ten live
-models the ladder reaches the frontier in three rank rungs instead of nine, and never
-bills ranks 3–8. The shape mirrors the offline `Price-Cascade` strategy's shortlist
+default), and the rung that leaves them **jumps straight to the top rank**. With seven
+live models the ladder reaches the top rank in three rank rungs (deepseek → zai-glm-5.2 →
+a frontier slot → jump) and never bills ranks 3–5. The shape mirrors the offline
+`Price-Cascade` strategy's shortlist
 (`benchmark/routing/strategies/price_cascade.py`) — the cheap end of the ladder, then the
 escalation target of last resort — because that is the shape whose cost this repo has
 actually measured. Set `rank_shortlist: 0` to restore the every-rank walk.
 
-**The default of 3 is measured, and it buys a rung measured harmful.** Both halves of that
-matter, so both are stated. Sweeping `rank_shortlist` over {0,1,2,3,4,5} on the committed
-corpus moves **pass rate not at all** — 96.74% at every value, with an *identically zero*
-paired per-task difference, because the ladder reaches the same terminal rung either way
-and only spend changes. On cost, 0, 4 and 5 are strictly worse than 3 (intervals exclude
-zero, both cost models). The one candidate to beat it, `rank_shortlist: 2` — which drops
-`gpt-5-mini` from the ladder — is cheaper on naive cost (−$1.96, 95% CI [−3.49, −0.51])
-but **not** distinguishable on cache-aware cost (−$1.09, [−2.20, +0.10]), and cache-aware
-is the cost model that governs here. So the default stays 3 on the evidence, not on
-inertia. `rank_shortlist: 1` cannot be quoted at all: its replay fails its own positive
-control, because a ladder with no intermediate rung cannot track planted depth.
+**The default of 3 is measured, and on the benchmark replay it bought a rung measured
+harmful.** Both halves of that matter, so both are stated — and note the pool caveat:
+the sweep below runs the benchmark's replay ladder, which still prices gpt-5-mini
+(benchmark/benchmark.yaml keeps it for measurement). The SHIPPED live pool has since
+dropped the dominated models, so the live ladder no longer buys the harmful rung; the
+sweep still governs the knob's cost shape. Sweeping `rank_shortlist` over {0,1,2,3,4,5}
+on the committed corpus moves **pass rate not at all** — 96.74% at every value, with an
+*identically zero* paired per-task difference, because the ladder reaches the same
+terminal rung either way and only spend changes. On cost, 0, 4 and 5 are strictly worse
+than 3 (intervals exclude zero, both cost models). The one candidate to beat it,
+`rank_shortlist: 2` — which drops `gpt-5-mini` from the replay ladder — is cheaper on
+naive cost (−$1.96, 95% CI [−3.49, −0.51]) but **not** distinguishable on cache-aware
+cost (−$1.09, [−2.20, +0.10]), and cache-aware is the cost model that governs here. So
+the default stays 3 on the evidence, not on inertia. `rank_shortlist: 1` cannot be quoted
+at all: its replay fails its own positive control, because a ladder with no intermediate
+rung cannot track planted depth.
 
-That leaves a real defect unfixed rather than hidden. Measured one rung at a time against
-the cheap base model, `gpt-5-mini` — which the shipped shortlist buys — is **net-harmful**
-on this corpus (4 helps, 36 hurts, n=190, exact p < 1e-6), while `zai-glm-5.2`, the
-cheapest target measured net-helpful, is skipped at every shortlist from 1 to 4. No
-`rank_shortlist` value can express "drop `gpt-5-mini`, keep `qwen3.7-plus`, add
-`zai-glm-5.2`", because the knob selects a *prefix of the price order* and the measured
-capability order is a different order entirely. Fixing it needs a capability-ordered
-ladder, which is a feature and not a setting — `src/shunt/router/capability_rank.py`
-currently ships the price prior verbatim. Read this section with
+That leaves a real defect unfixed rather than hidden — though the pool change has
+narrowed it. The three dominated models (qwen3.7-plus, gpt-5-mini, kimi-k2.5) are no
+longer in the shipped router's live pool, so the ladder can no longer buy them; its
+first rank step now lands on `zai-glm-5.2`, the cheapest target measured net-helpful.
+What remains is that `kimi-k3` — the best-measured rung — is still skipped: its price
+slot (between `zai-glm-5.2` and the frontier tail) falls inside the `rank_shortlist`
+walk, so the jump to the top rank passes over it. That skip is an artefact of the
+price order, and it depends on the RESEARCH-ESTIMATED prices of the frontier tail. No
+`rank_shortlist` value can express "drop the frontier slot, keep `kimi-k3`", because
+the knob selects a *prefix of the price order* and the measured capability order is a
+different order entirely. Fixing it needs a capability-ordered ladder, which is a
+feature and not a setting — `src/shunt/router/capability_rank.py` currently ships the
+price prior verbatim. Read this section with
 [the ladder-rungs figure](routing.md#fig-ladder-rungs), which carries the per-rung numbers.
 
 The jump is bounded on both sides:
@@ -539,8 +549,8 @@ Be honest with yourself about where this does nothing:
   committed in the [session-value figure](#fig-session-value)) — against a *cheap retry*.
   Against the trivial arms in that figure's third panel the escalate arm does not win: it loses
   to always-frontier on quality and is indistinguishable from firing at random at the same rate,
-  and the arm it measures is the corpus's two most expensive models, which the shipped shortlist
-  reaches only after buying its cheaper rungs. Treat
+  and the arm it measures is the corpus's two most expensive models (zai-glm-5.2, kimi-k3) —
+  the shipped ladder's first rank step is now zai-glm-5.2, and it never reaches kimi-k3. Treat
   it as a mechanism with positive but not-yet-identified value; the ε-greedy + logged-propensity
   path is how it becomes measurable. The full-policy cost read over all 48 overlap tasks is
   computed and is sound on money, but its two arms differ in outcome on none of those tasks, so
@@ -1125,16 +1135,16 @@ generated from the data, so its counts and lift are re-derivable, not editorial.
 > **Caveat.** Observational, and the escalate arm does not beat always-frontier, random-escalate — read panel C.
 **Reading.** Read on EVERY trajectory in the corpus, not the per-step-stamped subset the other escalation figures score: a session outcome comes off the run header, so a run without per-step stamps still counts here. Measured on the overlap subset — tasks carrying BOTH a second cheap session and a frontier session, so every arm is read on the same tasks. Left: after a cheap session failed a task, the share of FRONTIER sessions on that task that resolved it (escalate) against the share of a SECOND cheap session that resolved it (retry). Both intervals resample whole INSTANCES, because several frontier sessions on one task are not independent draws. Middle: the PAIRED difference, escalate minus retry, on those same instance resamples, with its 95% interval and zero marked. Right: the same paired difference against the three trivial competitors — never being cheap (always frontier), never escalating (always cheap), and firing at random at the escalate arm's own rate.
 
-**What to look for.** The middle panel decides escalate-vs-retry; the right panel decides whether the ladder is worth having at all. A point left of zero there is a competitor the escalate arm does not beat. Neither panel is about the shipped ladder's rungs — the arm drawn here is the corpus's most expensive models, which the ladder reaches last, if at all.
+**What to look for.** The middle panel decides escalate-vs-retry; the right panel decides whether the ladder is worth having at all. A point left of zero there is a competitor the escalate arm does not beat. Neither panel is about the shipped ladder's rungs — the arm drawn here is the corpus's most expensive models, of which the ladder now reaches the cheaper (zai-glm-5.2) as its first rank step and never the pricier (kimi-k3).
 
 **Terms.** *cheap* — the cheapest model present — the base pick and the retry counterfactual *overlap subset* — tasks with >=2 cheap sessions AND a frontier session *always frontier* — the frontier session's outcome, whatever the cheap sessions did *always cheap* — the first cheap session's outcome, unconditionally *random escalate* — escalation fired on a seeded subset sized to the real fire rate *rung* — a model the ladder can step to; the shipped shortlist walks the cheapest ranks one at a time and then jumps to the top rank *frontier* — the 2 most expensive models present in the corpus: zai-glm-5.2, kimi-k3
 
 **Notes.** At session cadence the detector is trivially satisfied — the failed cheap session carries the task's target failing-check id — so this measures the LADDER's value, not the trigger's detection quality.
 The dashed line is the cheap model's UNCONDITIONAL base rate. The bars condition on a cheap failure on the same task, so the line is not a ceiling for them.
 instance-level bootstrap over 48 overlap tasks, not Wilson over sessions: several frontier sessions on one task are one draw, not several
-the shipped ladder (rank_shortlist=3) walks qwen3.7-plus -> gpt-5-mini -> kimi-k3 over this corpus's price order: of the escalate arm it reaches kimi-k3, and only after billing qwen3.7-plus, gpt-5-mini first
+the shipped ladder (rank_shortlist=3) walks zai-glm-5.2 -> gemini-3.1-pro -> claude-fable-5 over the shipped pool's price order: of the escalate arm it reaches zai-glm-5.2, and never reaches kimi-k3
 cost is the provider's billed real_cost joined per (task, model, reasoning); an arm pays for the sessions it had to run first, so the escalate arm carries its failed cheap session. 'naive' is CACHE-BLIND — it charges a repeated model as if its prefix were cold; 'cache-aware' applies the shared cache model, whose hit rate is assumed, not measured. USD per marginal resolve is against the always-cheap floor, on that arm's own tasks — and the escalate arm's tasks are the fired subset, not the whole overlap set.
 822 trajectories read at session cadence (per-step stamping not required), status=OK_OFFLINE_ONLY
-**Limits.** Observational: the arms ran in parallel and which tasks got frontier coverage was adaptive. Small n — read the interval, not the point estimate. THE ESCALATE ARM IS NOT THE SHIPPED LADDER. It is the most expensive models in the corpus, and the shipped ladder does not step straight to them: it buys the cheapest ranks first and only then jumps, and those intermediate rungs are measured separately on the routing corpus as null or net-harmful. Read this as the value of escalating TO THIS ARM, never as what the shipped default achieves. The escalate arm conditions on a cheap failure; the always-frontier and always-cheap arms do not, so they also cover tasks the cheap model already resolved. Scored on ALL 822 trajectories, not the 723-run per-step-stamped subset the other escalation figures use: a session outcome is read from the run header, so an unstamped run is still scorable here.
+**Limits.** Observational: the arms ran in parallel and which tasks got frontier coverage was adaptive. Small n — read the interval, not the point estimate. THE ESCALATE ARM IS NOT THE SHIPPED LADDER. It is the most expensive models in the corpus, and the shipped ladder does not step straight to them: since the pool change it reaches one arm member (zai-glm-5.2) as its first rank step and never reaches the other (kimi-k3, price-slotted inside the shortlist jump). Read this as the value of escalating TO THIS ARM, never as what the shipped default achieves. The escalate arm conditions on a cheap failure; the always-frontier and always-cheap arms do not, so they also cover tasks the cheap model already resolved. Scored on ALL 822 trajectories, not the 723-run per-step-stamped subset the other escalation figures use: a session outcome is read from the run header, so an unstamped run is still scorable here.
 
 <!-- n: escalate_sessions=45, overlap_instances=48, retry_sessions=34 -->

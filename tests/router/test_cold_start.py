@@ -25,7 +25,7 @@ class TestColdStartStrategyDefaults:
 
     def test_default_fallback_models(self):
         strategy = ColdStartStrategy()
-        assert strategy.fallback_models == ["deepseek-v4-flash", "zai-glm-5.2"]
+        assert strategy.fallback_models == ["zai-glm-5.2"]
 
     def test_env_override_thresholds(self, monkeypatch):
         monkeypatch.setenv("SHUNT_COLD_START_THRESHOLD_TIER2", "10")
@@ -82,20 +82,20 @@ class TestColdStartIsActive:
 
 
 class TestColdStartSelect:
-    def test_prefers_qwen3_5_plus_when_healthy(self):
+    def test_prefers_deepseek_when_healthy(self):
         pool = MagicMock()
         pool.is_healthy.return_value = True
         strategy = ColdStartStrategy()
         model = strategy.select(pool)
-        assert model == "qwen3.7-plus"
-        pool.is_healthy.assert_called_once_with("qwen3.7-plus")
+        assert model == "deepseek-v4-flash"
+        pool.is_healthy.assert_called_once_with("deepseek-v4-flash")
 
-    def test_falls_back_when_qwen_unhealthy(self):
+    def test_falls_back_when_deepseek_unhealthy(self):
         pool = MagicMock()
-        pool.is_healthy.side_effect = lambda m: m != "qwen3.7-plus"
+        pool.is_healthy.side_effect = lambda m: m != "deepseek-v4-flash"
         strategy = ColdStartStrategy()
         model = strategy.select(pool)
-        assert model == "deepseek-v4-flash"
+        assert model == "zai-glm-5.2"
 
     def test_falls_back_through_chain(self):
         pool = MagicMock()
@@ -106,9 +106,9 @@ class TestColdStartSelect:
 
     def test_escalates_when_all_fallback_exhausted(self):
         pool = MagicMock()
-        # Cold-start model AND both default fallbacks (deepseek-v4-flash, zai-glm-5.2)
-        # unhealthy, so select() falls through to the rank-sourced escalation loop; only a
-        # model reachable there (kimi-k3) is healthy.
+        # Cold-start model AND the default fallback (zai-glm-5.2) unhealthy, so
+        # select() falls through to the rank-sourced escalation loop; only a model
+        # reachable there (kimi-k3) is healthy.
         pool.is_healthy.side_effect = lambda m: m == "kimi-k3"
         pool.ranked_models.return_value = [
             FakeModel("deepseek-v4-flash"),
@@ -126,7 +126,7 @@ class TestColdStartSelect:
         pool.ranked_models.return_value = []
         strategy = ColdStartStrategy()
         model = strategy.select(pool)
-        assert model == "qwen3.7-plus"
+        assert model == "deepseek-v4-flash"
 
     def test_custom_fallback_models(self):
         pool = MagicMock()
@@ -136,3 +136,18 @@ class TestColdStartSelect:
         )
         model = strategy.select(pool)
         assert model == "custom-fallback"
+
+
+def test_shipped_restricted_fallback_chain_begins_with_zai_glm() -> None:
+    # The unrestricted-registry unit fixtures route a qwen3.7-plus cheap model; the SHIPPED
+    # restricted pool must NOT. Assert the packaged pool's cold-start chain is
+    # deepseek-v4-flash -> zai-glm-5.2, both members of the shipped live pool.
+    from benchmark.routing._live_pool import packaged_live_pool
+    from shunt.router.cold_start import _COLD_START_MODEL, _DEFAULT_FALLBACK_MODELS
+
+    pool = packaged_live_pool()
+    assert _COLD_START_MODEL == "deepseek-v4-flash"
+    assert _COLD_START_MODEL in pool
+    assert _DEFAULT_FALLBACK_MODELS == ["zai-glm-5.2"]
+    assert _DEFAULT_FALLBACK_MODELS[0] in pool
+    assert "qwen3.7-plus" not in pool

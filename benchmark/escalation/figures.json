@@ -271,7 +271,7 @@
         "At session cadence the detector is trivially satisfied \u2014 the failed cheap session carries the task's target failing-check id \u2014 so this measures the LADDER's value, not the trigger's detection quality.",
         "The dashed line is the cheap model's UNCONDITIONAL base rate. The bars condition on a cheap failure on the same task, so the line is not a ceiling for them.",
         "instance-level bootstrap over 48 overlap tasks, not Wilson over sessions: several frontier sessions on one task are one draw, not several",
-        "the shipped ladder (rank_shortlist=3) walks qwen3.7-plus -> gpt-5-mini -> kimi-k3 over this corpus's price order: of the escalate arm it reaches kimi-k3, and only after billing qwen3.7-plus, gpt-5-mini first",
+        "the shipped ladder (rank_shortlist=3) walks zai-glm-5.2 -> gemini-3.1-pro -> claude-fable-5 over the shipped pool's price order: of the escalate arm it reaches zai-glm-5.2, and never reaches kimi-k3",
         "cost is the provider's billed real_cost joined per (task, model, reasoning); an arm pays for the sessions it had to run first, so the escalate arm carries its failed cheap session. 'naive' is CACHE-BLIND \u2014 it charges a repeated model as if its prefix were cold; 'cache-aware' applies the shared cache model, whose hit rate is assumed, not measured. USD per marginal resolve is against the always-cheap floor, on that arm's own tasks \u2014 and the escalate arm's tasks are the fired subset, not the whole overlap set.",
         "822 trajectories read at session cadence (per-step stamping not required), status=OK_OFFLINE_ONLY"
       ],

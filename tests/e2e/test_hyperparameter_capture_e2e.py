@@ -159,14 +159,14 @@ def test_cold_start_tier2_threshold_gates_warm_versus_cold(
                 store,
                 session_id=f"cs-{i}",
                 text=TASK_A,
-                model="qwen3.7-plus",
+                model="deepseek-v4-flash",
                 cost=0.01,
                 outcome="success",
             )
         resp = post_completion(client, chat_body(content=TASK_A))
         model, reason = parse_decision(resp.headers["X-Shunt-Decision"])
         assert reason == expected_reason
-        assert model == "qwen3.7-plus"  # same cheap model either way; the REASON differs
+        assert model == "deepseek-v4-flash"  # same cheap model either way; the REASON differs
 
 
 # ── 14. refit.every_n_outcomes: the served app wires the configured cadence ───

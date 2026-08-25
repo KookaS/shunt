@@ -29,8 +29,10 @@ from tests.e2e.helpers import CHAT_PATH, chat_body, parse_decision
 from tests.fake_embedder import FakeEmbedder
 
 # Cheap model (cold-start default) and the mid model the hard task escalates to.
-_CHEAP = "qwen3.7-plus"
-_MID = "gpt-5-mini"
+# Both must be in the live pool (router.yaml models:) — the pool now spans
+# deepseek-v4-flash -> zai-glm-5.2 -> kimi-k3 after the dominated models were removed.
+_CHEAP = "deepseek-v4-flash"
+_MID = "zai-glm-5.2"
 
 # Two task texts, each a cluster of its own vector (FakeEmbedder is deterministic per
 # text, so every seed of one text lands on the same point and a query of the SAME text
@@ -166,7 +168,8 @@ def test_warm_knn_routes_through_the_assembled_router(warm_app: TestClient) -> N
     assert parse_decision(cold_header) == (_CHEAP, "cold_start")
 
     # Seed 28 verified outcomes across two task clusters. Task A is cheap-succeeds (16
-    # qwen successes); task B is the HARD task (8 qwen failures + 4 gpt-5-mini successes).
+    # deepseek successes); task B is the HARD task (8 deepseek failures + 4 zai-glm-5.2
+    # successes).
     # All seeds of one text share a vector, so a query of that exact text is distance-0 to
     # its own cluster and ~1 (cosine) to the other — the neighborhood split is exact.
     seed_ids: list[str] = []
@@ -189,10 +192,10 @@ def test_warm_knn_routes_through_the_assembled_router(warm_app: TestClient) -> N
         index.effective_labeled(), index.effective_tier2()
     )
 
-    # Near the cheap-succeeds cluster: qwen3.7-plus is eligible and cheapest -> kNN pick.
+    # Near the cheap-succeeds cluster: deepseek-v4-flash is eligible and cheapest -> kNN pick.
     _, warm_header_a, sid_a = _post(client, TASK_A, "warm-knn-a/0.1")
     assert parse_decision(warm_header_a) == (_CHEAP, "cheapest_above_threshold")
-    # Near the HARD cluster the cheap model is ineligible (0% success) and gpt-5-mini
+    # Near the HARD cluster the cheap model is ineligible (0% success) and zai-glm-5.2
     # wins -> the router learned a DIFFERENT model for a different task.
     _, warm_header_b, sid_b = _post(client, TASK_B, "warm-knn-b/0.1")
     assert parse_decision(warm_header_b) == (_MID, "cheapest_above_threshold")

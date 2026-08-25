@@ -19,8 +19,9 @@ from shunt.proxy.server import _cache_key_session_id, _get_external_session_id, 
 from shunt.session import SessionManager
 
 _ACOMPLETION_PATCH = "shunt.proxy.router._acompletion"
-# A real registry model distinct from the cold-start default, so a resume that reused it
-# proves the model was NOT re-decided (the engine-less default is qwen3.7-plus).
+# A real registry model with a "max" reasoning arm (the resume tests exercise escalated-arm
+# restore). It coincides with the cold-start default; the "not re-decided" proof rests on
+# `_no_decide`/`decide.assert_not_called()`, not on the model name differing from the default.
 _SESSION_RESUME_MODEL = "deepseek-v4-flash"
 
 _TOOL_IDENTITY: Final[str] = SessionManager.compute_tool_identity("testclient", "shunt-e2e/0.1")

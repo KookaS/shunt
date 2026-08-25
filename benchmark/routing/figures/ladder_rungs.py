@@ -10,10 +10,13 @@
 # `reports/ladder_evidence.json`: `reports/` is gitignored, and a figure whose input is not
 # committed cannot be regenerated from a fresh clone.
 #
-# The ladder walk in panel B is DERIVED — the shortlist is read from the packaged router.yaml and
-# stepped with the product's own `next_rung_rank` — so a config change moves the drawing instead of
-# silently invalidating it. The evidence in panel A reads no router module at all, which is what
-# keeps the measurement independent of the policy it is used to judge.
+# The ladder walk in panel B is DERIVED — the shortlist AND the live pool are read from the
+# packaged router.yaml (models list + rank_shortlist) and stepped with the product's own
+# `next_rung_rank` — so a config change moves the drawing instead of silently invalidating
+# it. A benchmark target absent from the live pool is drawn as NOT-LIVE rather than as a
+# skipped rung, because the shipped router can no longer route to it. The evidence in panel
+# A reads no router module at all, which is what keeps the measurement independent of the
+# policy it is used to judge.
 
 from __future__ import annotations
 
@@ -22,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from benchmark import plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
+from benchmark.routing._live_pool import packaged_live_pool, packaged_rank_shortlist
 from benchmark.routing.scripts import ladder_evidence
 
 if TYPE_CHECKING:
@@ -55,7 +59,7 @@ _X_STATUS: Final[float] = 0.34
 _X_VERDICT: Final[float] = 0.58
 
 SPEC = FigureSpec(
-    title="The ladder buys the rungs that do not help and jumps over the one that does",
+    title="The evidence-backed pool, and the rung the price-ranked ladder still skips",
     subtitle="paired on the overlap of scored default-arm runs · exact paired-exchangeability null",
     caveat=(
         "Observational overlap per pair, not a ladder replay: no logged session walked "
@@ -68,18 +72,22 @@ SPEC = FigureSpec(
         "percentile bootstrap over challenges, and the pale whisker behind it the exact paired-"
         "exchangeability null band, so a dot inside the pale band is indistinguishable from "
         "chance. Rows are ordered by list price, cheapest at the bottom, which is the same order "
-        "the ladder ranks by. Right: the same rows, showing which of them the shipped "
-        "rank_shortlist actually visits — a filled marker is a rung the ladder buys, a hollow one "
-        "is a rung the jump skips — with the visit sequence drawn as a stepped path and the "
-        "shortlist's jump drawn as a single long arrow."
+        "the ladder ranks by. Right: the same rows against the SHIPPED LIVE POOL (read from "
+        "src/shunt/config/router.yaml's models list) — a filled marker is a rung the ladder "
+        "actually visits, a hollow one a live rung the shortlist jump skips, and a hollow square "
+        "is a benchmark target the shipped router no longer routes to (it stays measured, never "
+        "served). The visit sequence is drawn as a stepped path and the shortlist's jump as a "
+        "single long arrow."
     ),
     goal=(
         "Read panel A first and ignore the ladder: only two targets' intervals clear zero on the "
-        "helpful side, and both sit far above the base price — while one visited rung's interval "
-        "clears zero on the HARMFUL side. Then read panel B on the same rows — every filled "
-        "marker below the jump is a rung the shipped default pays for, and the arrow passes over "
-        "the cheapest target that measurably helps. A row whose dark interval overlaps its own "
-        "pale null band is unmeasured at this n, not shown to be neutral."
+        "helpful side, and one of them is the most expensive rung measured. Then read panel B on "
+        "the same rows: the shipped pool no longer holds the flat-to-harmful rungs (they are "
+        "drawn NOT-LIVE), so the ladder's bought rungs are now the ones the evidence supports — "
+        "and the remaining defect is visible on the canvas: the price-ranked walk can still jump "
+        "over a net-helpful rung when a pricier frontier model's slot falls inside the shortlist. "
+        "A row whose dark interval overlaps its own pale null band is unmeasured at this n, not "
+        "shown to be neutral."
     ),
     definitions=(
         ("helps", "base failed the challenge, target resolved it"),
@@ -98,6 +106,11 @@ SPEC = FigureSpec(
             "a model the ladder can step to; the shortlist walks the cheapest ranks one at a "
             "time and then jumps to the top rank",
         ),
+        (
+            "not live",
+            "a benchmark target absent from router.yaml's models: list — measured for evidence, "
+            "never chosen for live inference",
+        ),
     ),
     limitations=(
         "Overlap only: each row is scored on the challenges both models were run on, and those "
@@ -111,6 +124,8 @@ SPEC = FigureSpec(
         "verified recurrence, so the cost of a harmful rung is not the whole of its price.",
         "One base, one corpus. A rung that is net-harmful here is net-harmful on this corpus's "
         "task mix, which is SWE-bench-derived and not your workload.",
+        "The live pool's price order — and therefore which rung the shortlist jump skips — "
+        "depends on frontier rows whose prices are research-estimated, not live Requesty listings.",
     ),
 )
 
@@ -130,6 +145,12 @@ class Rung:
     p_value: float
     verdict: str
     visited: bool
+    # Whether the shipped router still routes to this target (router.yaml models: list).
+    live: bool
+    # The target's rank in the price-ordered LIVE pool (0 = cheapest, the base). Step vs
+    # jump is decided on these ranks, NOT on the drawn-row index — the benchmark rows are a
+    # subset of the pool. None for a NOT-LIVE target, which holds no live rank.
+    live_rank: int | None
 
     @property
     def colour(self) -> str:
@@ -158,12 +179,20 @@ def shipped_walk(n_models: int) -> tuple[tuple[int, ...], int]:
     return (tuple(visits), shortlist)
 
 
-def rungs(payload: dict[str, Any]) -> list[Rung]:
-    """The evidence rows in ascending price order, tagged with the shipped ladder's visits."""
+def rungs(payload: dict[str, Any], live_pool: list[str] | None = None) -> list[Rung]:
+    """The evidence rows in price order, tagged with the shipped ladder's live-pool visits.
+
+    ``live_pool`` is the price-ordered routable set (default: the packaged router.yaml's);
+    a benchmark target outside it is tagged ``live=False`` — measured, never served.
+    """
     rows = payload["targets"]
-    # Rank 0 is the base; the targets follow it in the price order `build_evidence` sorted them
-    # into, so a row's index+1 IS its rank in the pool this corpus prices.
-    visited, _shortlist = shipped_walk(len(rows) + 1)
+    if live_pool is None:
+        live_pool = packaged_live_pool()
+    # A row's rank is its index in the price-ordered LIVE pool, not its index among the
+    # benchmark rows: the drawn rows are a SUBSET of the pool (zai is row 3 here but live
+    # rank 1), and a dominated target drawn below the live rungs holds no live rank at all.
+    visited_ranks, _shortlist = shipped_walk(len(live_pool))
+    rank_of = {name: rank for rank, name in enumerate(live_pool)}
     return [
         Rung(
             target=row["target"],
@@ -176,9 +205,11 @@ def rungs(payload: dict[str, Any]) -> list[Rung]:
             null_ci95=(row["null_ci95"][0], row["null_ci95"][1]),
             p_value=row["p_value"],
             verdict=row["verdict"],
-            visited=(index + 1) in visited,
+            visited=rank_of.get(row["target"]) in visited_ranks,
+            live=row["target"] in rank_of,
+            live_rank=rank_of.get(row["target"]),
         )
-        for index, row in enumerate(rows)
+        for row in rows
     ]
 
 
@@ -221,7 +252,7 @@ def _draw_evidence(ax: Axes, rows: list[Rung], base: str) -> None:
     plot_frame.panel_label(ax, "A · what each rung is measured to buy")
 
 
-def _draw_path(ax: Axes, rows: list[Rung], base: str) -> None:
+def _draw_path(ax: Axes, rows: list[Rung], base: str, top_rank: int) -> None:
     """Panel B: the shipped ladder's visit sequence over the same rows, jump drawn as an arrow."""
     ax.set_xlim(0.0, 1.0)
     ax.set_xticks([])
@@ -233,6 +264,21 @@ def _draw_path(ax: Axes, rows: list[Rung], base: str) -> None:
     ax.text(_X_STATUS, -1.0, "BASE", fontsize=8, va="center", color="#455A64")
     ax.text(_X_VERDICT, -1.0, base, fontsize=8, va="center", color="#666666")
     for y, rung in enumerate(rows):
+        if not rung.live:
+            # Not a skipped rung — a target the shipped router no longer routes to. Hollow
+            # SQUARE to distinguish from a live-but-skipped hollow circle below.
+            ax.plot(
+                [_X_MARK],
+                [y],
+                "s",
+                ms=7,
+                markerfacecolor="white",
+                markeredgecolor=_NEUTRAL,
+                markeredgewidth=1.2,
+            )
+            ax.text(_X_STATUS, y, "not live", fontsize=8, va="center", color=_NEUTRAL)
+            ax.text(_X_VERDICT, y, rung.verdict, fontsize=8, va="center", color=_NEUTRAL)
+            continue
         ax.plot(
             [_X_MARK],
             [y],
@@ -252,73 +298,95 @@ def _draw_path(ax: Axes, rows: list[Rung], base: str) -> None:
             color="#1a1a1a" if rung.visited else _NEUTRAL,
         )
         ax.text(_X_VERDICT, y, rung.verdict, fontsize=8, va="center", color=rung.colour)
-    _draw_steps(ax, rows)
+    _draw_steps(ax, rows, top_rank)
     plot_frame.panel_label(ax, "B · what the shipped ladder does with them")
 
 
-def _draw_steps(ax: Axes, rows: list[Rung]) -> None:
-    """The visit sequence: adjacent rungs as a stepped line, the shortlist's jump as an arrow."""
-    path = [-1] + [y for y, rung in enumerate(rows) if rung.visited]
-    for start, end in zip(path, path[1:], strict=False):
-        if end == start + 1:
-            ax.plot([_X_MARK, _X_MARK], [start, end], color="#455A64", lw=1.4, zorder=1)
+def _draw_steps(ax: Axes, rows: list[Rung], top_rank: int) -> None:
+    """The walk over LIVE-POOL ranks: a step between adjacent ranks, one jump to the top."""
+    # The drawn rows are a SUBSET of the live pool, so a row's index is NOT its rank: zai is
+    # row 3 but rank 1, adjacent to the base at rank 0, so the base -> zai segment is a STEP
+    # even though the NOT-LIVE rows the benchmark still draws below zai sit between them on
+    # the canvas. The walk's single jump (shortlist -> top rank) is the only arrow: it arcs
+    # UP over the rows above the last visited rung, never over the NOT-LIVE rows below.
+    path = [(-1, 0)] + [
+        (y, rung.live_rank)
+        for y, rung in enumerate(rows)
+        if rung.visited and rung.live_rank is not None
+    ]
+    for (start_y, start_rank), (end_y, end_rank) in zip(path, path[1:], strict=False):
+        if end_rank == start_rank + 1:
+            ax.plot([_X_MARK, _X_MARK], [start_y, end_y], color="#455A64", lw=1.4, zorder=1)
             continue
-        # The jump is POLICY, not measurement, so it is the only mark of its kind on the canvas:
-        # a bowed arrow, drawn wide enough of the marker column to pass visibly OVER the rows it
-        # skips rather than through their markers.
-        ax.annotate(
-            "",
-            xy=(_X_MARK, end),
-            xytext=(_X_MARK, start),
-            arrowprops={
-                "arrowstyle": "-|>",
-                "color": _JUMP,
-                "lw": 1.8,
-                "shrinkA": 6,
-                "shrinkB": 6,
-                "connectionstyle": "arc3,rad=-0.45",
-            },
-        )
-        ax.text(
-            _X_MARK + 0.10,
-            (start + end) / 2.0,
-            f"shortlist jump\nover {end - start - 1} rungs"
-            if end - start - 1 != 1
-            else "shortlist jump\nover 1 rung",
-            fontsize=7.5,
-            color=_JUMP,
-            va="center",
-            ha="left",
-        )
+        _draw_jump(ax, start_y, end_y)
+    if path and path[-1][1] != top_rank:
+        # The top-rank model is not a benchmark row, so it is not drawn: the jump from the
+        # last visited rung lands just past the top row, passing over the skipped live rungs
+        # above it (kimi-k3) rather than ending at an invisible rung.
+        _draw_jump(ax, path[-1][0], len(rows) - 0.5)
+
+
+def _draw_jump(ax: Axes, start_y: float, end_y: float) -> None:
+    """The walk's jump as a bowed arrow passing over the rows between *start_y* and *end_y*."""
+    # The jump is POLICY, not measurement, so it is the only mark of its kind on the canvas:
+    # a bowed arrow, drawn wide enough of the marker column to pass visibly OVER the rows it
+    # skips rather than through their markers.
+    ax.annotate(
+        "",
+        xy=(_X_MARK, end_y),
+        xytext=(_X_MARK, start_y),
+        arrowprops={
+            "arrowstyle": "-|>",
+            "color": _JUMP,
+            "lw": 1.8,
+            "shrinkA": 6,
+            "shrinkB": 6,
+            "connectionstyle": "arc3,rad=-0.45",
+        },
+    )
+    ax.text(
+        _X_MARK + 0.10,
+        (start_y + end_y) / 2.0,
+        "jump to top rank",
+        fontsize=7.5,
+        color=_JUMP,
+        va="center",
+        ha="left",
+    )
 
 
 def _annotations(rows: list[Rung], payload: dict[str, Any], shortlist: int) -> Annotations:
     """Every fact on this figure derived from the rows — no target, price or verdict retyped."""
     visited = [r.target for r in rows if r.visited]
-    skipped = [r for r in rows if not r.visited]
-    helpful_skipped = [r.target for r in skipped if r.verdict == "NET-HELPFUL"]
-    return Annotations(
-        subtitle_facts=(
-            f"base {payload['base_model']} · rank_shortlist={shortlist} visits "
-            f"{len(visited)} of {len(rows)} targets",
-            "visited: " + ", ".join(f"{r.target} ({r.delta:+.3f})" for r in rows if r.visited),
-            "skipped: " + ", ".join(f"{r.target} ({r.delta:+.3f})" for r in skipped),
-        ),
-        notes=tuple(
-            f"{r.target} at {r.price_multiple:.1f}x base: n={r.n}, helps {r.helps}, hurts "
-            f"{r.hurts}, delta {r.delta:+.4f} [{r.ci95[0]:+.4f}, {r.ci95[1]:+.4f}], exact null "
-            f"[{r.null_ci95[0]:+.4f}, {r.null_ci95[1]:+.4f}], p {p_text(r.p_value)}, {r.verdict}"
-            for r in rows
+    skipped = [r.target for r in rows if r.live and not r.visited]
+    not_live = [r.target for r in rows if not r.live]
+    helpful_skipped = [
+        r.target for r in rows if r.live and not r.visited and r.verdict == "NET-HELPFUL"
+    ]
+    facts = [
+        f"base {payload['base_model']} · rank_shortlist={shortlist} visits "
+        f"{len(visited)} of {len(skipped) + len(visited)} live targets",
+        "visited: " + ", ".join(f"{r.target} ({r.delta:+.3f})" for r in rows if r.visited),
+        "skipped: "
+        + ", ".join(f"{r.target} ({r.delta:+.3f})" for r in rows if r.live and not r.visited),
+    ]
+    if not_live:
+        facts.append("not live (registry only): " + ", ".join(not_live))
+    notes = tuple(
+        f"{r.target} at {r.price_multiple:.1f}x base: n={r.n}, helps {r.helps}, hurts "
+        f"{r.hurts}, delta {r.delta:+.4f} [{r.ci95[0]:+.4f}, {r.ci95[1]:+.4f}], exact null "
+        f"[{r.null_ci95[0]:+.4f}, {r.null_ci95[1]:+.4f}], p {p_text(r.p_value)}, {r.verdict}"
+        for r in rows
+    )
+    if helpful_skipped:
+        notes += (
+            "the shortlist jumps over "
+            + ", ".join(helpful_skipped)
+            + ", a target whose interval clears zero on this corpus",
         )
-        + (
-            (
-                "the shortlist jumps over "
-                + ", ".join(helpful_skipped)
-                + ", the cheapest target whose interval clears zero on this corpus",
-            )
-            if helpful_skipped
-            else ()
-        ),
+    return Annotations(
+        subtitle_facts=tuple(facts),
+        notes=notes,
         counts=(
             ("targets", len(rows)),
             ("visited_rungs", len(visited)),
@@ -332,12 +400,13 @@ def render(ctx: ctxmod.RoutingContext) -> Path | None:
     payload = ladder_evidence.build_evidence()
     if payload is None or not payload["targets"]:
         return None
-    rows = rungs(payload)
-    _visited, shortlist = shipped_walk(len(rows) + 1)
+    live_pool = packaged_live_pool()
+    shortlist = packaged_rank_shortlist()
+    rows = rungs(payload, live_pool)
     size = plot_frame.WIDE
     fig, axes = plot_frame.subplots(size, 1, 2, width_ratios=(1.75, 1.0), sharey=True)
     _draw_evidence(axes[0], rows, payload["base_model"])
-    _draw_path(axes[1], rows, payload["base_model"])
+    _draw_path(axes[1], rows, payload["base_model"], len(live_pool) - 1)
     for ax in axes:
         ax.set_ylim(-1.6, len(rows) - 0.4)
     return plot_frame.save(

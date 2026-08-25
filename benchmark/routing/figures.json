@@ -494,18 +494,19 @@
         6.0
       ],
       "generator": "benchmark.routing.figures.ladder_rungs",
-      "goal": "Read panel A first and ignore the ladder: only two targets' intervals clear zero on the helpful side, and both sit far above the base price \u2014 while one visited rung's interval clears zero on the HARMFUL side. Then read panel B on the same rows \u2014 every filled marker below the jump is a rung the shipped default pays for, and the arrow passes over the cheapest target that measurably helps. A row whose dark interval overlaps its own pale null band is unmeasured at this n, not shown to be neutral.",
+      "goal": "Read panel A first and ignore the ladder: only two targets' intervals clear zero on the helpful side, and one of them is the most expensive rung measured. Then read panel B on the same rows: the shipped pool no longer holds the flat-to-harmful rungs (they are drawn NOT-LIVE), so the ladder's bought rungs are now the ones the evidence supports \u2014 and the remaining defect is visible on the canvas: the price-ranked walk can still jump over a net-helpful rung when a pricier frontier model's slot falls inside the shortlist. A row whose dark interval overlaps its own pale null band is unmeasured at this n, not shown to be neutral.",
       "limitations": [
         "Overlap only: each row is scored on the challenges both models were run on, and those sets differ by row, so the rows are not scored on one common set and their deltas are not directly comparable to each other.",
         "Coverage is opportunistic, not assigned: which challenges each model was run on was not randomized, so a target measured on an easier overlap looks better for free.",
         "Default reasoning arm only. A rung the ladder reaches at a raised effort arm is not this row.",
         "This measures TARGETS, not the ladder: a real ladder pays for a rung only after a verified recurrence, so the cost of a harmful rung is not the whole of its price.",
-        "One base, one corpus. A rung that is net-harmful here is net-harmful on this corpus's task mix, which is SWE-bench-derived and not your workload."
+        "One base, one corpus. A rung that is net-harmful here is net-harmful on this corpus's task mix, which is SWE-bench-derived and not your workload.",
+        "The live pool's price order \u2014 and therefore which rung the shortlist jump skips \u2014 depends on frontier rows whose prices are research-estimated, not live Requesty listings."
       ],
       "n": {
         "paired_challenges": 592,
         "targets": 5,
-        "visited_rungs": 3
+        "visited_rungs": 1
       },
       "notes": [
         "qwen3.7-plus at 3.8x base: n=87, helps 6, hurts 3, delta +0.0345 [-0.0345, +0.1034], exact null [-0.0575, +0.0575], p 0.51, INDISTINGUISHABLE",
@@ -513,11 +514,11 @@
         "kimi-k2.5 at 8.6x base: n=121, helps 8, hurts 10, delta -0.0165 [-0.0826, +0.0496], exact null [-0.0661, +0.0661], p 0.81, INDISTINGUISHABLE",
         "zai-glm-5.2 at 13.8x base: n=84, helps 14, hurts 1, delta +0.1548 [+0.0714, +0.2381], exact null [-0.0833, +0.0833], p 0.00098, NET-HELPFUL",
         "kimi-k3 at 42.9x base: n=110, helps 29, hurts 3, delta +0.2364 [+0.1455, +0.3273], exact null [-0.1091, +0.1091], p 2.6e-06, NET-HELPFUL",
-        "the shortlist jumps over zai-glm-5.2, the cheapest target whose interval clears zero on this corpus"
+        "the shortlist jumps over kimi-k3, a target whose interval clears zero on this corpus"
       ],
-      "reading": "Left: for each candidate escalation target, the paired difference in resolve rate against the cheap base model, computed only on challenges where BOTH models have a scored default-arm outcome. The dot is the point estimate, the dark whisker the paired percentile bootstrap over challenges, and the pale whisker behind it the exact paired-exchangeability null band, so a dot inside the pale band is indistinguishable from chance. Rows are ordered by list price, cheapest at the bottom, which is the same order the ladder ranks by. Right: the same rows, showing which of them the shipped rank_shortlist actually visits \u2014 a filled marker is a rung the ladder buys, a hollow one is a rung the jump skips \u2014 with the visit sequence drawn as a stepped path and the shortlist's jump drawn as a single long arrow.",
+      "reading": "Left: for each candidate escalation target, the paired difference in resolve rate against the cheap base model, computed only on challenges where BOTH models have a scored default-arm outcome. The dot is the point estimate, the dark whisker the paired percentile bootstrap over challenges, and the pale whisker behind it the exact paired-exchangeability null band, so a dot inside the pale band is indistinguishable from chance. Rows are ordered by list price, cheapest at the bottom, which is the same order the ladder ranks by. Right: the same rows against the SHIPPED LIVE POOL (read from src/shunt/config/router.yaml's models list) \u2014 a filled marker is a rung the ladder actually visits, a hollow one a live rung the shortlist jump skips, and a hollow square is a benchmark target the shipped router no longer routes to (it stays measured, never served). The visit sequence is drawn as a stepped path and the shortlist's jump as a single long arrow.",
       "size": "wide",
-      "subtitle": "paired on the overlap of scored default-arm runs \u00b7 exact paired-exchangeability null \u00b7 base deepseek-v4-flash \u00b7 rank_shortlist=3 visits 3 of 5 targets \u00b7 visited: qwen3.7-plus (+0.035), gpt-5-mini (-0.168), kimi-k3 (+0.236) \u00b7 skipped: kimi-k2.5 (-0.017), zai-glm-5.2 (+0.155)",
+      "subtitle": "paired on the overlap of scored default-arm runs \u00b7 exact paired-exchangeability null \u00b7 base deepseek-v4-flash \u00b7 rank_shortlist=3 visits 1 of 2 live targets \u00b7 visited: zai-glm-5.2 (+0.155) \u00b7 skipped: kimi-k3 (+0.236) \u00b7 not live (registry only): qwen3.7-plus, gpt-5-mini, kimi-k2.5",
       "terms": [
         [
           "helps",
@@ -538,9 +539,13 @@
         [
           "rung",
           "a model the ladder can step to; the shortlist walks the cheapest ranks one at a time and then jumps to the top rank"
+        ],
+        [
+          "not live",
+          "a benchmark target absent from router.yaml's models: list \u2014 measured for evidence, never chosen for live inference"
         ]
       ],
-      "title": "The ladder buys the rungs that do not help and jumps over the one that does"
+      "title": "The evidence-backed pool, and the rung the price-ranked ladder still skips"
     },
     "live_gap.png": {
       "caveat": "42% of the headroom sits behind a blocker, so it is a to-do, not a measured saving.",

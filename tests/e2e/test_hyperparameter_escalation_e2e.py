@@ -116,7 +116,7 @@ def test_stale_window_retires_failures_outside_it(
             # Only the boundary AFTER the second verified red steps (effort rung: same
             # model, higher reasoning arm — cache-safe).
             assert decisions[2][1] == "auto_escalation"
-            assert decisions[2][0] == ranked_model(client, 1)  # qwen3.7-plus
+            assert decisions[2][0] == ranked_model(client, 0)  # deepseek-v4-flash (cheapest)
 
 
 # ── 10. rank_shortlist: the shortlist shape sets the rank-step target ─────────
@@ -127,8 +127,9 @@ def test_stale_window_retires_failures_outside_it(
     [
         # 1 = jump straight past the mid-tier to the top rank (the whole point of the knob).
         pytest.param(1, -1, id="rank_shortlist=1"),
-        # 3 (shipped) = walk the 3 cheapest ranks one at a time: qwen(1) → gpt-5-mini(2).
-        pytest.param(3, 2, id="rank_shortlist=3"),
+        # 3 (shipped) = walk the 3 cheapest ranks one at a time: from deepseek(0) the
+        # rank step's first target is zai-glm-5.2(1).
+        pytest.param(3, 1, id="rank_shortlist=3"),
     ],
 )
 def test_rank_shortlist_sets_the_rank_step_target(
@@ -145,9 +146,9 @@ def test_rank_shortlist_sets_the_rank_step_target(
         # (same model, cache-safe); sessions 4-5 accrue the two more that step RANK at
         # session 5. The rank target is what the shortlist determines.
         decisions = [_drive_session(client, work_dir, count) for count in (1, 2, 1, 2, 1)]
-        # The effort rung fired first (same model, still qwen).
+        # The effort rung fired first (same model, still deepseek).
         assert decisions[2][1] == "auto_escalation"
-        assert decisions[2][0] == ranked_model(client, 1)
+        assert decisions[2][0] == ranked_model(client, 0)
         # The rank rung lands on the shortlist-defined target — never the intermediate ranks.
         assert decisions[4][1] == "auto_escalation"
         assert decisions[4][0] == ranked_model(client, expected_rank_index)

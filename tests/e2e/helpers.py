@@ -88,7 +88,9 @@ def _chat_payload(content: str, model: str) -> dict[str, Any]:
     }
 
 
-def canned_chat_response(content: str = "Hello back", model: str = "qwen3.7-plus") -> MagicMock:
+def canned_chat_response(
+    content: str = "Hello back", model: str = "deepseek-v4-flash"
+) -> MagicMock:
     """A canned non-streaming ChatCompletion the mocked upstream returns verbatim."""
     resp = MagicMock()
     resp.id = "cmpl-e2e"
@@ -116,7 +118,7 @@ async def _canned_stream(content: str) -> AsyncGenerator[MagicMock, None]:
     first.usage = None
     first.model_dump.return_value = {
         "id": "c1",
-        "model": "qwen3.7-plus",
+        "model": "deepseek-v4-flash",
         "choices": [
             {
                 "index": 0,
@@ -130,14 +132,14 @@ async def _canned_stream(content: str) -> AsyncGenerator[MagicMock, None]:
     last.usage = None
     last.model_dump.return_value = {
         "id": "c2",
-        "model": "qwen3.7-plus",
+        "model": "deepseek-v4-flash",
         "choices": [{"index": 0, "finish_reason": "stop", "delta": {}}],
     }
     yield last
 
 
 def make_fake_acompletion(
-    *, content: str = "Hello back", model: str = "qwen3.7-plus"
+    *, content: str = "Hello back", model: str = "deepseek-v4-flash"
 ) -> Callable[..., Any]:
     """A ``shunt.proxy.router._acompletion`` stand-in: predefined text, no API call."""
 

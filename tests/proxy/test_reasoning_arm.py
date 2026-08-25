@@ -29,8 +29,9 @@ def _response() -> MagicMock:
 
 @pytest.fixture
 def router() -> ProxyRouter:
-    # No engine → the default cold-start model is qwen3.7-plus, whose registry ladder is
-    # nothink(rank0) / think(rank1). The router routes to it; we inject the escalated arm.
+    # No engine → the default cold-start model is deepseek-v4-flash, whose registry
+    # ladder is nothink(rank0) / high(rank1) / max(rank2). The router routes to it; we
+    # inject the escalated arm.
     return ProxyRouter(model_pool=ModelPool(), session_manager=SessionManager())
 
 
@@ -41,7 +42,7 @@ def _session(sm: SessionManager) -> Session:
 @pytest.mark.asyncio
 async def test_escalated_arm_reaches_upstream_and_overrides_client(router: ProxyRouter) -> None:
     session = router._sessions.create_session("test-tool")
-    session.metadata["reasoning_arm"] = "think"  # as set by an effort escalation on the decision
+    session.metadata["reasoning_arm"] = "max"  # as set by an effort escalation on the decision
     body: dict[str, Any] = {
         "messages": [{"role": "user", "content": "do it"}],
         "reasoning_effort": "low",  # client-supplied reasoning the arm must override
@@ -51,12 +52,14 @@ async def test_escalated_arm_reaches_upstream_and_overrides_client(router: Proxy
         _payload, model_name, _reason = await router.route_chat_completion(body, session)
 
     kwargs = mock_ac.call_args.kwargs
-    # `enable_thinking` is NOT an OpenAI SDK kwarg — it rides in extra_body, which the SDK
-    # forwards into the JSON body verbatim. Spliced in as a kwarg it raised TypeError instead.
-    assert kwargs["extra_body"] == {"enable_thinking": True}
-    assert "enable_thinking" not in kwargs
-    assert "reasoning_effort" not in kwargs  # client-supplied reasoning was overridden/removed
-    assert model_name == "qwen3.7-plus"  # cache-safe: served model unchanged by the effort step
+    # `thinking` is NOT an OpenAI SDK kwarg — it rides in extra_body, which the SDK
+    # forwards into the JSON body verbatim. Spliced in as a kwarg it raised TypeError
+    # instead. `reasoning_effort` IS SDK-native and overrides the client's "low".
+    assert kwargs["reasoning_effort"] == "max"
+    assert kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert "thinking" not in kwargs
+    # cache-safe: served model unchanged by the effort step
+    assert model_name == "deepseek-v4-flash"
 
 
 @pytest.mark.asyncio

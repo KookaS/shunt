@@ -1,0 +1,4 @@
+# Named exceptions to the triage frontier (SH015). A live-pool model listed
+# here is reported as verdict EXCEPTION with its reason, and does not fail the
+# gate. The reason is surfaced in the report and by the gate, never silent.
+exceptions: {}

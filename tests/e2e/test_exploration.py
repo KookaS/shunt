@@ -18,7 +18,7 @@ upstream, zero spend)."""
 # np.random.default_rng() (engine.py L311-318), so the draw cannot be pinned by config.
 # The test pins it by replacing numpy.random.default_rng BEFORE boot with a stand-in
 # that seeds unseeded draws to _RNG_SEED while preserving explicit seeds (the
-# FakeEmbedder relies on those for per-text vectors). Seed 12 makes the FIRST decision
+# FakeEmbedder relies on those for per-text vectors). Seed 15 makes the FIRST decision
 # on the fixed corpus below explore (found by sweeping seeds against the deterministic
 # neighbourhood); the whole path then runs bit-for-bit the same every time.
 #
@@ -46,10 +46,10 @@ from tests.e2e.helpers import (
 )
 from tests.fake_embedder import FakeEmbedder
 
-_QWEN: Final[str] = "qwen3.7-plus"
-_DS: Final[str] = "deepseek-v4-flash"
+_CHEAP: Final[str] = "deepseek-v4-flash"
+_MID: Final[str] = "zai-glm-5.2"
 _PROMPT: Final[str] = "Fix the build"
-_RNG_SEED: Final[int] = 12
+_RNG_SEED: Final[int] = 15
 # The REAL numpy factory, captured before the test pins the module attribute — the pin
 # must delegate to it or it would recurse into itself.
 _REAL_DEFAULT_RNG: Final = np.random.default_rng
@@ -66,7 +66,7 @@ def _pinned_default_rng(*args: int) -> np.random.Generator:
 def _seed_corpus(store: OutcomeStore, embedder: FakeEmbedder) -> None:
     """Write the deterministic verified corpus the kNN neighbourhood reads back."""
     # 24 Tier-2 sessions split between the two models, both near the 0.6 success
-    # threshold (qwen 8/12 passes, deepseek 6/12), the pricier at cost 5.0 vs 1.0.
+    # threshold (deepseek 9/12 passes, zai-glm-5.2 5/12), the pricier at cost 5.0 vs 1.0.
     # This is what lets the Thompson layer sometimes diverge from the greedy pick —
     # and it is the precondition exploration needs: cold-start ends at >= 20 effective
     # Tier-2 outcomes, so the engine reaches the exploration branch at all.
@@ -98,9 +98,9 @@ def _seed_corpus(store: OutcomeStore, embedder: FakeEmbedder) -> None:
         counter += 1
 
     for i in range(12):
-        add(f"seed-{_QWEN}-{i}", _QWEN, 1.0, "success" if i < 8 else "failure")
+        add(f"seed-{_CHEAP}-{i}", _CHEAP, 1.0, "success" if i < 9 else "failure")
     for i in range(12):
-        add(f"seed-{_DS}-{i}", _DS, 5.0, "success" if i < 6 else "failure")
+        add(f"seed-{_MID}-{i}", _MID, 5.0, "success" if i < 5 else "failure")
 
 
 def _boot(
@@ -136,7 +136,7 @@ def test_exploratory_decision_is_observable_and_recorded(
         # upshift to the pricier model — the `exploration` reason token (engine.py
         # L577-588, docs/routing.md reason table).
         assert reason == "exploration"
-        assert model == _DS
+        assert model == _MID
 
         # Recorded with provenance: the session row carries the rule, the realised TS
         # propensity (logged for off-policy evaluation) and the downshift flag.
@@ -144,7 +144,7 @@ def test_exploratory_decision_is_observable_and_recorded(
         assert row is not None
         prov = json.loads(row["decision_provenance"] or "{}")
         assert prov["selection_rule_used"] == "exploration"
-        assert prov["model_chosen"] == _DS
+        assert prov["model_chosen"] == _MID
         assert 0.0 < prov["router_propensity"] < 1.0
         assert row["selection_propensity"] == prov["router_propensity"]
         assert prov["downshift"] is False  # an upshift is not gate evidence
