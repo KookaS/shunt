@@ -17,6 +17,7 @@ from shunt.db.store import OutcomeStore
 from shunt.models import ModelPool
 from shunt.router.engine import RouterEngine
 from shunt.router.escalation import EscalationConfig
+from shunt.router.policy import load_router_policy
 from tests.router.escalation_fakes import EchoSessionManager, Embedder, Index
 
 _REPO = "/repo-under-test"
@@ -131,8 +132,15 @@ def test_reports_the_climbed_rank_floor_and_its_model(
 
     out = capsys.readouterr().out
     floor = pool.rank_of(model)
+    assert floor is not None
     assert f"Rank floor:     {floor}" in out
-    assert f"Model:          {model}" in out
+    # The engine escalates over the FULL registry, but the CLI resolves the persisted floor
+    # against the LIVE pool (router.yaml `models:`) — so the reported model is the live
+    # pool's model at that rank, which is NOT the model the engine returned.
+    live = ModelPool()
+    live.restrict_to_live(load_router_policy().models)
+    expected = live.models_from_rank(floor)[0].name
+    assert f"Model:          {expected}" in out
     assert "escalation rank floor" in out
 
 

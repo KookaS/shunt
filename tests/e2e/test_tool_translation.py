@@ -30,7 +30,7 @@ from tests.integrations.fake_upstream import FakeUpstream
 
 _REGISTRY = Path(__file__).parent.parent / "integrations" / "fake_registry.yaml"
 _DOCKER_BASE_URL = "http://fake-upstream:9099/v1"
-_CHEAP = "qwen3.7-plus"
+_CHEAP = "deepseek-v4-flash"
 _ANTHROPIC_KEY: Final[dict[str, str]] = {"x-api-key": "dummy"}
 
 # Router env vars the e2e suite controls; a dev-machine leftover would break hermeticity.

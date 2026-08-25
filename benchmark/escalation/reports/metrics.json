@@ -1436,9 +1436,9 @@
       "n_frontier_after_fail_resolved": 34,
       "random_escalate_fire_rate": 0.625,
       "shipped_ladder_visits": [
-        "qwen3.7-plus",
-        "gpt-5-mini",
-        "kimi-k3"
+        "zai-glm-5.2",
+        "gemini-3.1-pro",
+        "claude-fable-5"
       ],
       "shipped_rank_shortlist": 3
     },

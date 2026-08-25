@@ -62,7 +62,7 @@ def test_green_repo_routes_and_never_escalates(
 
     r1, sid1 = _drive_session(client)
     model1, reason1 = parse_decision(r1.headers["X-Shunt-Decision"])
-    assert model1 == "qwen3.7-plus"
+    assert model1 == "deepseek-v4-flash"
     assert reason1 == "cold_start"
     assert r1.json()["choices"][0]["message"]["content"] == "Hello back"
     close_session(client, sid1)
@@ -91,7 +91,7 @@ def test_same_failure_twice_escalates_next_session(
     model1, reason1 = parse_decision(r1.headers["X-Shunt-Decision"])
     # Precondition, not an assertion of taste: reason=cold_start proves the corpus is
     # fresh and trusted, so the escalate path (not _decide_stale_space) is what runs.
-    assert model1 == "qwen3.7-plus"
+    assert model1 == "deepseek-v4-flash"
     assert reason1 == "cold_start"
     close_session(client, sid1)
     wait_failure_count(client, work_dir, 1)
@@ -105,10 +105,13 @@ def test_same_failure_twice_escalates_next_session(
     r3, _sid3 = _drive_session(client)
     model3, reason3 = parse_decision(r3.headers["X-Shunt-Decision"])
     assert reason3 == "auto_escalation"
-    assert model3 == "qwen3.7-plus"  # effort rung: same model, higher reasoning arm
-    # The escalated arm reaches the WIRE. `enable_thinking` is not an OpenAI SDK kwarg, so it
-    # travels in extra_body — spliced in as a kwarg the SDK rejected it with a TypeError.
-    assert mock_acompletion.call_args_list[2].kwargs.get("extra_body") == {"enable_thinking": True}
+    assert model3 == "deepseek-v4-flash"  # effort rung: same model, higher reasoning arm
+    # The escalated arm reaches the WIRE. `thinking` is not an OpenAI SDK kwarg, so it
+    # travels in extra_body; `reasoning_effort` is SDK-native and travels as a kwarg.
+    assert mock_acompletion.call_args_list[2].kwargs.get("reasoning_effort") == "max"
+    assert mock_acompletion.call_args_list[2].kwargs.get("extra_body") == {
+        "thinking": {"type": "enabled"}
+    }
 
 
 # ── Escalation semantics ──────────────────────────────────────────────────────
@@ -183,8 +186,8 @@ def test_second_recurrence_reaches_the_rank_rung(
     r3, sid3 = _drive_session(client)  # 1st escalation: effort arm on the SAME model
     model3, reason3 = parse_decision(r3.headers["X-Shunt-Decision"])
     assert reason3 == "auto_escalation"
-    assert model3 == "qwen3.7-plus"
-    assert mock_acompletion.call_args_list[2].kwargs.get("extra_body") == {"enable_thinking": True}
+    assert model3 == "deepseek-v4-flash"
+    assert mock_acompletion.call_args_list[2].kwargs.get("reasoning_effort") == "max"
     close_session(client, sid3)
     # The escalation RETIRED the window at decide-time, so s3's own red restarts the
     # count at 1 — two MORE same-key failures are needed for the next rung.
@@ -199,7 +202,7 @@ def test_second_recurrence_reaches_the_rank_rung(
     r5, sid5 = _drive_session(client)  # 2nd recurrence -> RANK step
     model5, reason5 = parse_decision(r5.headers["X-Shunt-Decision"])
     assert reason5 == "auto_escalation"
-    assert model5 != "qwen3.7-plus"
+    assert model5 != "deepseek-v4-flash"
 
     r6 = post_completion(client, chat_body())  # 2nd turn on the rank-escalated session
     assert r6.headers["X-Shunt-Session-Id"] == sid5
@@ -311,14 +314,14 @@ def test_escalated_arm_persists_across_turns_same_session(
     r3, sid3 = _drive_session(client)  # escalated, left OPEN
     model3, reason3 = parse_decision(r3.headers["X-Shunt-Decision"])
     assert reason3 == "auto_escalation"
-    assert mock_acompletion.call_args_list[2].kwargs.get("extra_body") == {"enable_thinking": True}
+    assert mock_acompletion.call_args_list[2].kwargs.get("reasoning_effort") == "max"
 
     r4 = post_completion(client, chat_body())  # 2nd turn, same session, no close
     assert r4.headers["X-Shunt-Session-Id"] == sid3
     model4, reason4 = parse_decision(r4.headers["X-Shunt-Decision"])
     assert model4 == model3
     assert reason4 == "auto_escalation"
-    assert mock_acompletion.call_args_list[3].kwargs.get("extra_body") == {"enable_thinking": True}
+    assert mock_acompletion.call_args_list[3].kwargs.get("reasoning_effort") == "max"
     close_session(client, sid3)
     wait_capture_idle(client)
 
@@ -340,12 +343,12 @@ def test_streaming_escalation(routed_app: tuple[TestClient, Path], mock_acomplet
     r3 = post_completion(client, chat_body(stream=True))
     model3, reason3 = parse_decision(r3.headers["X-Shunt-Decision"])
     assert reason3 == "auto_escalation"
-    assert model3 == "qwen3.7-plus"
+    assert model3 == "deepseek-v4-flash"
     assert "Hello" in r3.text
     assert "data: [DONE]" in r3.text
     kwargs3 = mock_acompletion.call_args_list[2].kwargs
     assert kwargs3.get("stream") is True
-    assert kwargs3.get("extra_body") == {"enable_thinking": True}
+    assert kwargs3.get("reasoning_effort") == "max"
     close_session(client, r3.headers["X-Shunt-Session-Id"])
     wait_capture_idle(client)
 
@@ -371,8 +374,8 @@ def test_anthropic_messages_escalation(
     r3 = post_completion(client, _ANTHROPIC_BODY, path=MESSAGES_PATH)
     model3, reason3 = parse_decision(r3.headers["X-Shunt-Decision"])
     assert reason3 == "auto_escalation"
-    assert model3 == "qwen3.7-plus"
-    assert mock_acompletion.call_args_list[2].kwargs.get("extra_body") == {"enable_thinking": True}
+    assert model3 == "deepseek-v4-flash"
+    assert mock_acompletion.call_args_list[2].kwargs.get("reasoning_effort") == "max"
     assert r3.json()["content"][0]["text"] == "Hello back"
 
 

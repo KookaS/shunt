@@ -27,9 +27,9 @@ def _neighbor(
 class TestColdStart:
     def test_cold_start_returns_cold_start_model(self):
         rule = SelectionRule(cold_start_threshold=20)
-        pool = FakeModelPool("qwen3.7-plus", "gpt4")
+        pool = FakeModelPool("deepseek-v4-flash", "gpt4")
         model, reason = rule.select([], pool, cold_start_active=True)
-        assert model == "qwen3.7-plus"
+        assert model == "deepseek-v4-flash"
         assert reason == "cold_start"
 
     def test_cold_start_custom_model(self):

@@ -46,7 +46,7 @@ _BUDGET_USD: Final[float] = 0.01
 _CLUSTER_A_PROMPT: Final[str] = "deploy the api gateway to production"
 _CLUSTER_B_PROMPT: Final[str] = "fix the flaky database migration test"
 _CLUSTER_A_MODEL: Final[str] = "deepseek-v4-flash"
-_CLUSTER_B_MODEL: Final[str] = "gpt-5-mini"
+_CLUSTER_B_MODEL: Final[str] = "zai-glm-5.2"
 
 _CLUSTERS: Final[tuple[tuple[str, str], ...]] = (
     (_CLUSTER_A_PROMPT, _CLUSTER_A_MODEL),

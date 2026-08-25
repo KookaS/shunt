@@ -94,10 +94,10 @@ class _ColdIndex(_Index):
 
 
 class _ColdStartPool(_RankedPool):
-    """Models named so the cold-start default (qwen3.7-plus) is a rankable member."""
+    """Models named so the cold-start default (deepseek-v4-flash) is a rankable member."""
 
     def __init__(self) -> None:
-        self._ranked = [_M("qwen3.7-plus"), _M("glm"), _M("opus")]
+        self._ranked = [_M("deepseek-v4-flash"), _M("glm"), _M("opus")]
 
 
 def _engine(*, enabled: bool, epsilon: float = 0.0) -> RouterEngine:
@@ -152,7 +152,7 @@ def test_cold_start_is_not_suppressed_by_the_collapse_alarm() -> None:
     # accumulate. The collapse guard is a policy-ossification detector; it must abstain while
     # the router is not choosing at all (found by the live cold-start smoke).
     eng = RouterEngine(
-        model_pool=_ColdStartPool(),  # qwen3.7-plus is the cold-start default AND rankable
+        model_pool=_ColdStartPool(),  # deepseek-v4-flash is the cold-start default AND rankable
         session_manager=_SessionManager(),
         outcome_index=_ColdIndex(),  # cold-start ACTIVE
         embedder=_Embedder(),
@@ -165,7 +165,7 @@ def test_cold_start_is_not_suppressed_by_the_collapse_alarm() -> None:
     _fail(eng)
     m3, r3, prov = eng.decide("s3", "same task")
     assert r3 == "auto_escalation"  # cold-start degenerate choices must NOT suppress escalation
-    assert m3 != "qwen3.7-plus"
+    assert m3 != "deepseek-v4-flash"
     assert prov["rank_escalation_reason"] == f"same_verified_failure_x{_AFTER_N}"
 
 

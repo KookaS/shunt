@@ -966,15 +966,15 @@ def test_missing_key_for_the_cold_start_model_is_a_failure_under_knn(
     cli_env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A neighbour-consulting strategy has no verified outcomes on a fresh install, so the engine
-    # cold-starts — and the cold-start model is a Requesty one. Checking only "some key is set"
-    # would call this serviceable while every first request fails.
+    # cold-starts — and the cold-start model is deepseek-v4-flash (reads DEEPSEEK_API_KEY).
+    # Checking only "some key is set" would call this serviceable while every first request fails.
     monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn")
-    monkeypatch.setenv("DEEPSEEK_API_KEY", _FAKE_KEY)
-    monkeypatch.delenv("REQUESTY_API_KEY", raising=False)
+    monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     report = doctor_report(work_dir=None, launch_dir=str(cli_env))
     creds = _check(report, "credentials")
     assert creds.ok is False
-    assert "REQUESTY_API_KEY" in creds.detail
+    assert "DEEPSEEK_API_KEY" in creds.detail
     assert report.serviceable is False
 
 

@@ -687,6 +687,10 @@ def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
         # any results.csv edit. Fingerprinted here so the committed figures can never outlive
         # the registry they were drawn from again.
         _REPO_ROOT / "src" / "shunt" / "config" / "models.yaml",
+        # ladder_rungs.png derives its panel B from router.yaml's `models:` list (the live
+        # pool), so a knob change silently invalidates every routing figure that draws the
+        # shipped ladder — mirroring the escalation half's fingerprint of the same file.
+        _REPO_ROOT / "src" / "shunt" / "config" / "router.yaml",
     )
 
 

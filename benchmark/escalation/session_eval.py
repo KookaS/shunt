@@ -413,15 +413,24 @@ def _price_ranks(trajectories: Sequence[Trajectory]) -> dict[str, int]:
 
 
 def _shipped_ladder(ranks: dict[str, int]) -> tuple[tuple[str, ...], int]:
-    """The models the SHIPPED ladder steps to over this corpus's price order, and its shortlist."""
+    """The models the SHIPPED ladder steps to over the SHIPPED live pool's price order."""
     # Read from the packaged router config and stepped with the product's OWN rank arithmetic, so
     # a shortlist change moves this line instead of silently invalidating it. The walk is over the
-    # models PRESENT here, which is the same shape the router walks over its enabled pool.
+    # SHIPPED live pool (the packaged registry restricted to the packaged router.yaml `models:`
+    # list), NOT the models present in this corpus: the escalation figure must say what the router
+    # would ACTUALLY climb, and a corpus that drops a shipped model must not change that sentence.
+    # ``ranks`` stays in the signature because callers pass it, but it no longer builds the walk.
+    from shunt.models.config import ModelPool, default_registry_path  # noqa: PLC0415
     from shunt.router.escalation import next_rung_rank  # noqa: PLC0415
     from shunt.router.policy import load_router_policy, packaged_policy_path  # noqa: PLC0415
 
-    shortlist = load_router_policy(packaged_policy_path()).escalation.rank_shortlist
-    by_rank = sorted(ranks, key=lambda m: ranks[m])
+    policy = load_router_policy(packaged_policy_path())
+    # The PACKAGED registry, never SHUNT_CONFIG_DIR / ~/.config: a host override would draw the
+    # ladder from a pool the shipped router does not build.
+    pool = ModelPool(str(default_registry_path()))
+    pool.restrict_to_live(policy.models)
+    by_rank = [m.name for m in pool.ranked_models()]
+    shortlist = policy.escalation.rank_shortlist
     top = len(by_rank) - 1
     visits: list[str] = []
     current = 0

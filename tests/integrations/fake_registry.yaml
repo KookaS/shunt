@@ -2,7 +2,7 @@
 # real provider. No key, no cost, no network beyond the stub.
 #
 # Three models spanning the capability rank (cheapest -> priciest). The cheap row is
-# keyed `qwen3.7-plus` on purpose: the router's cold-start default (`_DEFAULT_MODEL`
+# keyed `deepseek-v4-flash` on purpose: the router's cold-start default (`_DEFAULT_MODEL`
 # in src/shunt/proxy/router.py) locks a fresh session to that name, so a handshake
 # always exercises it. The mid and top rows exist so the pool spans the rank
 # (fallback-chain coverage). Prices are placeholder routing metadata (hermetic), not
@@ -18,7 +18,7 @@ providers:
     litellm_prefix: openai
 
 models:
-  qwen3.7-plus:
+  deepseek-v4-flash:
     model_id: fake/cheap
     provider: fake
     version: fake-cheap

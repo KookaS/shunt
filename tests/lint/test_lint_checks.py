@@ -171,6 +171,15 @@ def test_sh004_catches_the_missing_vocab_families(tmp_path: Path) -> None:
         assert _run("check_internal_refs.py", str(f)) == 1, line
 
 
+def test_sh004_catches_the_underscore_decision_identifier_form(tmp_path: Path) -> None:
+    # The two-tree leak that shipped: a snake_case decision id in a test name. No word
+    # boundary sits before "decision" (the preceding "_" is a word char) or after the year,
+    # so the \b-anchored prose pattern misses it. The separator-form pattern must catch it.
+    f = tmp_path / "leak_under.py"
+    f.write_text("def test_real_triage_reproduces_decision_0013_pool():\n    pass\n")  # noqa: SHUNT-ISO
+    assert _run("check_internal_refs.py", str(f)) == 1
+
+
 def test_sh004_does_not_flag_public_english_uses(tmp_path: Path) -> None:
     # Tight \b-anchored patterns must not flag ordinary English: a lowercase "story",
     # "AC-" buried in "MAC-10" (no word boundary before it), "decision process"

@@ -193,7 +193,7 @@ Two guards sit in front of every number this figure draws:
 
 ![Two strata share one corpus, and the router cannot tell them apart](assets/figures/inference/inference_strata.png)
 
-*lifecycle stage counts, arrival times and per-model labels, split seeded vs live · seeded n=792 · live n=0 · ambiguous n=0*
+*lifecycle stage counts, arrival times and per-model labels, split seeded vs live · seeded n=384 · live n=0 · ambiguous n=0*
 **Reading.** Panel A counts sessions at five lifecycle stages per stratum: stored, embedded, labeled, Tier-2 and indexed. They are not a funnel and do not nest: `embedded` and `indexed` are the only two contained in `stored`, while `labeled` is counted off the append-only `outcome_events` log and `tier2` off the materialized `outcomes` view, so a later stage can exceed an earlier one. Read each bar as its own count, and read the red line for any adjacent pair that actually inverts. Panel B places every session on its `timestamp`; the seeded stratum is imported in one burst and so collapses to a single column, which is exactly why any recency-window read over the whole store reports the benchmark matrix rather than router behaviour. Panel C counts labeled sessions per model in each stratum.
 
 **What to look for.** Make the two populations sharing one outcome store visible before any figure quotes a number over them, so that a mixed aggregate is recognisable as mixed.
@@ -206,13 +206,13 @@ There is no Tier-1 bar, and its absence is the point: a Tier-1-only session is k
 
 **Limits.** Panel A counts sessions, not requests: a session serving many turns appears once. A session with no outcome event at all is stored and possibly embedded but never labeled. That gap is the store's, not this figure's.
 
-<!-- n: ambiguous=0, live=0, seeded=792, sessions=792 --><!-- generated-by: shunt.inspect.inference:render -->
+<!-- n: ambiguous=0, live=0, seeded=384, sessions=384 --><!-- generated-by: shunt.inspect.inference:render -->
 
 ### Live inference cost by model and window, seeded rows excluded {#fig-inference-cost}
 
 ![Live inference cost by model and window, seeded rows excluded](assets/figures/inference/inference_cost.png)
 
-*live inference cost (USD); replayed benchmark spend is excluded by construction · seeded rows excluded (n=792) · live sessions n=0*
+*live inference cost (USD); replayed benchmark spend is excluded by construction · seeded rows excluded (n=384) · live sessions n=0*
 > **Caveat.** no live sessions in this corpus — every panel is empty, not zero
 **Reading.** Panel A is live spend per model over 7 days, 30 days and the whole store; a model absent from a window served nothing in it. Panel B is cost coverage: how many live sessions the provider actually reported a cost for, against how many it did not. Panel C accumulates live spend over time. An entirely empty figure means the corpus holds no live sessions, which is the honest answer for a seed-only render.
 
@@ -225,13 +225,13 @@ Cost is summed over `cost_known = 1` alone; the unknown count is reported beside
 
 **Limits.** A window with no live sessions is empty, not zero-cost. The figure states which. Cost is the provider's reported figure, so a provider that under-reports cache reads under-reports here too.
 
-<!-- n: cost_unknown=0, live_sessions=0, seeded_excluded=792 --><!-- generated-by: shunt.inspect.inference:render -->
+<!-- n: cost_unknown=0, live_sessions=0, seeded_excluded=384 --><!-- generated-by: shunt.inspect.inference:render -->
 
 ### Cost per verified success, live traffic against the seeded reference band {#fig-inference-unit-economics}
 
 ![Cost per verified success, live traffic against the seeded reference band](assets/figures/inference/inference_unit_economics.png)
 
-*Wilson 95% intervals; hatching marks replayed seeded rows; * marks n<10 · seeded models n=6 · live labeled sessions n=0*
+*Wilson 95% intervals; hatching marks replayed seeded rows; * marks n<10 · seeded models n=3 · live labeled sessions n=0*
 > **Caveat.** the grey band is REPLAYED BENCHMARK outcomes, not live inference
 **Reading.** Panel A is the verified-success rate per model with a Wilson 95% interval; a bar marked * is provisional (fewer than 10 labeled sessions) and its point estimate should not be ranked against another. Panel B divides spend by verified successes. Grey bars are the seeded reference band — replayed benchmark outcomes, a reference point and not a measurement of live routing. Coloured bars are live traffic; where there are none, the live claim is empty and says so.
 
@@ -244,13 +244,13 @@ Cost per verified success is undefined where a model has zero verified successes
 
 **Limits.** The seeded band inherits the benchmark matrix's model mix, so its per-model n is a property of the sweep design and not of demand. Success is Tier-2 only. A model whose work is never verified contributes no successes however well it performed.
 
-<!-- n: live_labeled=0, seeded_labeled=792 --><!-- generated-by: shunt.inspect.inference:render -->
+<!-- n: live_labeled=0, seeded_labeled=384 --><!-- generated-by: shunt.inspect.inference:render -->
 
 ### Do near neighbours agree? Reliability, distance and neighbour origin {#fig-inference-neighbourhood}
 
 ![Do near neighbours agree? Reliability, distance and neighbour origin](assets/figures/inference/inference_neighbourhood.png)
 
-*leave-one-out over every indexed session; k nearest, self excluded · k=10 · probed n=792 · live decisions n=0*
+*leave-one-out over every indexed session; k nearest, self excluded · k=10 · probed n=384 · live decisions n=0*
 > **Caveat.** no live decisions in this corpus — panel C is empty, not zero
 **Reading.** Panel A bins each session by the success rate of its k nearest neighbours and plots the realised success rate of the sessions in that bin against the diagonal; points on the diagonal mean the neighbourhood is calibrated, points below mean it is optimistic. Panel B is the distribution of neighbour distances — a corpus whose neighbours are all far away has no neighbourhood to speak of. Panel C asks, for each live decision, what fraction of its top-k neighbours were seeded rows; on a seed-only corpus there are no live decisions and the panel is empty.
 
@@ -263,13 +263,13 @@ Distance is the index's own metric, reported unchanged.
 
 **Limits.** Leave-one-out over a corpus imported in one burst measures the corpus, not the router's behaviour over time. A bin holding few sessions has a noisy realised rate; bin counts are printed so a bin resting on a handful of sessions is not read as a trend.
 
-<!-- n: live_decisions=0, probed=792 --><!-- generated-by: shunt.inspect.inference:render -->
+<!-- n: live_decisions=0, probed=384 --><!-- generated-by: shunt.inspect.inference:render -->
 
 ### Model share over time, and whether the choice distribution has collapsed {#fig-inference-policy}
 
 ![Model share over time, and whether the choice distribution has collapsed](assets/figures/inference/inference_policy.png)
 
-*live share, rolling entropy and frontier share against the loop-health alarms · live sessions n=0 · window=100 · seeded models n=6*
+*live share, rolling entropy and frontier share against the loop-health alarms · live sessions n=0 · window=100 · seeded models n=3*
 > **Caveat.** the seed band is corpus composition, not a routing decision
 **Reading.** Panel A is live model share within a trailing window — not cumulative share, which would dilute a recent collapse with history that has stopped being true. Where the corpus is seed-only it instead shows one hatched band: the seeded model distribution, which is the benchmark matrix's sweep design and not a choice the router made. Panel B tracks rolling choice entropy and frontier share against the loop-health alarm lines; entropy at or below the alarm means the distribution has concentrated onto a few arms. Panel C is each model's mean selection propensity against the exploration floor: a model below the floor has effectively stopped being tried. Panels B and C are empty where there is no live traffic to read, and say so on the canvas. Panel B is also empty when no model registry was supplied, because normalized entropy is undefined without the number of arms the router could have picked.
 
@@ -282,7 +282,7 @@ Alarm lines come from the shipped `LoopHealthThresholds` defaults, and both the 
 
 **Limits.** Entropy over a window holding fewer sessions than there are arms cannot reach 1.0 and so reads as collapse; the window size and the arm count are both printed. Propensity is missing for every non-policy decision — an escalated turn is imposed, not sampled — so panel C covers policy decisions only.
 
-<!-- n: live_sessions=0, seeded_models=6 --><!-- generated-by: shunt.inspect.inference:render -->
+<!-- n: live_sessions=0, seeded_models=3 --><!-- generated-by: shunt.inspect.inference:render -->
 
 ### Escalation: how often it fires, which rung, why it held, what followed {#fig-inference-escalation}
 

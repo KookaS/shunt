@@ -236,29 +236,30 @@ mechanically rather than editorially (`run.canonical_deployability.reason`):
 
 **The escalate arm is not the shipped ladder.** The arm measured above is the two
 most expensive models in the corpus (`session_value.png.context.frontier_models`).
-The shipped ladder walks `qwen3.7-plus → gpt-5-mini → kimi-k3`
-(`session_value.png.context.shipped_ladder_visits`, at
-`escalation.rank_shortlist: 3`). So production bills two rungs before it reaches
-the escalate arm at all, and it never reaches `zai-glm-5.2`. Read the claim as the
-value of escalating *to that arm*, never as what a default install achieves.
+The shipped ladder walks the reduced live pool — `zai-glm-5.2 →` (a frontier slot)
+`→ jump over kimi-k3` (`ladder_rungs.png` panel B, at `escalation.rank_shortlist: 3`).
+So production reaches one arm member (zai-glm-5.2) and never the other (kimi-k3).
+Read the claim as the value of escalating *to that arm*, never as what a default
+install achieves.
 
-That ordering is measured, and it is measured wrong. Against the cheap base
-`deepseek-v4-flash`, on paired overlaps
-(`benchmark/routing/reports/ladder_evidence.json`, `targets[]`):
+That ordering is measured, and it was measured wrong — and the pool change has
+removed the worst of it. Against the cheap base `deepseek-v4-flash`, on paired
+overlaps (`benchmark/routing/reports/ladder_evidence.json`, `targets[]`):
 
 | Rung | Price multiple | n | Δ resolve | p | Verdict | Ladder visits it? |
 |---|---:|---:|---:|---:|---|---|
-| `qwen3.7-plus` | 3.81× | 87 | +0.0345 | 0.51 | INDISTINGUISHABLE | yes |
-| `gpt-5-mini` | 5.36× | 190 | −0.1684 | 0.0 | **NET-HARMFUL** | yes |
-| `kimi-k2.5` | 8.57× | 121 | −0.0165 | 0.81 | INDISTINGUISHABLE | no |
-| `zai-glm-5.2` | 13.81× | 84 | +0.1548 | 0.00098 | **NET-HELPFUL** | no |
-| `kimi-k3` | 42.86× | 110 | +0.2364 | 3e-06 | **NET-HELPFUL** | yes |
+| `qwen3.7-plus` | 3.81× | 87 | +0.0345 | 0.51 | INDISTINGUISHABLE | no — not live |
+| `gpt-5-mini` | 5.36× | 190 | −0.1684 | 0.0 | **NET-HARMFUL** | no — not live |
+| `kimi-k2.5` | 8.57× | 121 | −0.0165 | 0.81 | INDISTINGUISHABLE | no — not live |
+| `zai-glm-5.2` | 13.81× | 84 | +0.1548 | 0.00098 | **NET-HELPFUL** | yes |
+| `kimi-k3` | 42.86× | 110 | +0.2364 | 3e-06 | **NET-HELPFUL** | no |
 
 `p` is `targets[].p_value` as the file reports it; `gpt-5-mini`'s is a rounded
 zero from an exact paired-exchangeability test, not a claim of impossibility. The
-price-ordered ladder pays for the one rung measured harmful and jumps over the
-cheapest rung measured helpful. Reading and every caveat:
-[the ladder-rungs figure](routing.md#fig-ladder-rungs).
+three dominated models are no longer in the shipped pool (they stay in the registry
+and the benchmark), so the ladder no longer pays for the harmful rung; what remains
+is the price-order skip of `kimi-k3`, the best-measured rung. Reading and every
+caveat: [the ladder-rungs figure](routing.md#fig-ladder-rungs).
 
 **Every arm contrast on this page is coverage-mismatched.** The arms do not act
 on the same instances: always-frontier acts on all 48, the escalate arm on 30, the
@@ -464,9 +465,14 @@ larger effect: `gpt-5-mini` at n=190, 4 helps against 36 hurts, −0.1684
 [−0.2263, −0.1105], `p_value` 0.0, verdict `NET-HARMFUL`
 (`ladder_evidence.json` `targets[]`). The pre-registered consequence is applied:
 every statement on this page is scoped to escalate-to-frontier, the harmful rung
-is stated plainly, and the ladder composition is
+is stated plainly, and the ladder composition was
 [left as future work](#what-would-take-this-past-pre-alpha) rather than patched
-here.
+inside the release. That follow-up has now landed as a pool change: the three
+dominated models (`qwen3.7-plus`, `gpt-5-mini`, `kimi-k2.5`) are removed from the
+shipped `router.yaml` `models:` list, so the ladder can no longer buy the harmful
+rung; the remaining skip (`kimi-k3`, net-helpful, price-slotted inside the
+shortlist jump) is still future work, and still needs the capability-ordered
+ladder rather than a knob.
 
 ### E4, E6, E7 — why "not tripped" is not the same as "confirmed"
 
@@ -592,11 +598,14 @@ disagree — which is item 1 on this list. A paired difference between the two a
 USD-per-marginal-resolve is still not estimated.
 
 **7. Ladder composition — the rung set is measured wrong.** The ladder ranks by
-price, and the price order is not the capability order: it buys `gpt-5-mini`
-(NET-HARMFUL) and skips `zai-glm-5.2` (NET-HELPFUL, and 3× cheaper than the rung
-it jumps to). A capability-ordered ladder is the obvious next step. The resolver
-that would order rungs by measured outcome rather than by list price exists but
-is not wired to the escalation path.
+price, and the price order is not the capability order: it used to buy `gpt-5-mini`
+(NET-HARMFUL) and skip `zai-glm-5.2` (NET-HELPFUL, and 3× cheaper than the rung
+it jumped to). The pool change removed the dominated rungs, so the ladder now buys
+`zai-glm-5.2`; what remains is that the price order still skips `kimi-k3`
+(NET-HELPFUL, the best-measured rung) because a research-estimated frontier slot
+falls inside the shortlist. A capability-ordered ladder is the obvious next step.
+The resolver that would order rungs by measured outcome rather than by list price
+exists but is not wired to the escalation path.
 
 ## Related
 

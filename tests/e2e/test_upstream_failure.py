@@ -23,9 +23,9 @@ OpenAI client over real HTTP to a live, scripted fake upstream.
 #
 # Non-streaming responses persist the session row synchronously inside the request, so
 # no capture polling is needed. The fake embedder routes the empty store via cold-start
-# to `qwen3.7-plus` (src/shunt/router/engine.py L382-391), so the fallback chain is
-# qwen3.7-plus -> fake-mid -> fake-frontier (ModelPool.fallback_chain, config.py
-# L416-434: self, then rank neighbours outward).
+# to `deepseek-v4-flash` (src/shunt/proxy/router.py `_DEFAULT_MODEL`), so the fallback
+# chain is deepseek-v4-flash -> fake-mid -> fake-frontier (ModelPool.fallback_chain,
+# config.py L416-434: self, then rank neighbours outward).
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ _MID_ID = "fake/mid"
 _FRONTIER_ID = "fake/frontier"
 
 # Registry model names, as the router knows them (cold-start locks the cheapest).
-_CHEAP = "qwen3.7-plus"
+_CHEAP = "deepseek-v4-flash"
 _MID = "fake-mid"
 _FRONTIER = "fake-frontier"
 
@@ -290,7 +290,7 @@ def test_persistent_failure_falls_back_to_next_pool_model(
     assert resp.status_code == 200
     assert resp.json()["choices"][0]["message"]["content"] == "ok"
     served_model, _ = _decision(resp)
-    # Fallback order: qwen3.7-plus retries RETRY_COUNT times, then fake-mid serves.
+    # Fallback order: deepseek-v4-flash retries RETRY_COUNT times, then fake-mid serves.
     assert served_model == _MID
     models_seen = [r.get("model") for r in upstream.requests]
     assert models_seen == [_CHEAP_ID] * RETRY_COUNT + [_MID_ID], models_seen

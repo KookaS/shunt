@@ -133,10 +133,12 @@ async def test_fallback_records_served_model_and_serving_log(
         mock_acompletion.side_effect = [failure, _response(0, 5)]
         _, model_name = await router._route_with_fallback(kwargs, session)
 
-    assert model_name == "deepseek-v4-flash"
-    assert session.metadata["last_turn_served_model"] == "deepseek-v4-flash"
+    # The locked default (deepseek-v4-flash) fails, the next pool model (qwen3.7-plus)
+    # serves — the log names the real served model, not the locked one.
+    assert model_name == "qwen3.7-plus"
+    assert session.metadata["last_turn_served_model"] == "qwen3.7-plus"
     assert (
-        f"serving: session={session.session_id} locked=qwen3.7-plus served=deepseek-v4-flash"
+        f"serving: session={session.session_id} locked=deepseek-v4-flash served=qwen3.7-plus"
         in caplog.text
     )
 
@@ -155,6 +157,6 @@ async def test_locked_model_direct_serve_emits_no_serving_log(
         mock_acompletion.return_value = _response(0, 5)
         _, model_name = await router._route_with_fallback(kwargs, session)
 
-    assert model_name == "qwen3.7-plus"
-    assert session.metadata["last_turn_served_model"] == "qwen3.7-plus"
+    assert model_name == "deepseek-v4-flash"
+    assert session.metadata["last_turn_served_model"] == "deepseek-v4-flash"
     assert "serving:" not in caplog.text

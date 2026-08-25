@@ -298,8 +298,8 @@ one task, and no configuration will ever do that here.
 the ladder; it does not score the models the ladder steps to. Those are measured
 one rung at a time, against the cheap base model, in
 [the ladder-rungs figure](routing.md#fig-ladder-rungs) — and on this corpus the
-shipped shortlist buys a rung measured *worse* than the base model and steps over
-the cheapest rung measured better than it. Read the two together.
+shipped ladder now steps the rung the measurement supports (zai-glm-5.2) and still
+skips the best-measured rung (kimi-k3) on a price slot. Read the two together.
 
 ### The shipped default, and the routing model priced against it
 

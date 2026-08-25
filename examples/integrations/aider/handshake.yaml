@@ -6,7 +6,7 @@
 tool: aider
 wire: openai
 service: aider
-expected_model: qwen3.7-plus
+expected_model: deepseek-v4-flash
 best_effort: true    # continue-on-error in CI (real CLI/service onboarding is brittle)
 
 # Scenarios this tool runs (workflow matrix = tool x scenario):

@@ -19,7 +19,7 @@ import pytest
 from tests.integrations import assert_escalation as ae
 
 MARKER = "SHUNT-ESC-curl"
-BASE_MODEL = "qwen3.7-plus"  # the router's cold-start pick (src/shunt/proxy/router.py)
+BASE_MODEL = "deepseek-v4-flash"  # the router's cold-start pick (src/shunt/proxy/router.py)
 # The rung the CONFIGURED ladder aims at from the cold-start model, not merely "something
 # pricier": rank_shortlist=3 over the 3-model fake registry makes the first step rank 0 -> 1.
 HIGHER_MODEL = "fake-mid"

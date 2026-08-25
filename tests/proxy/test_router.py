@@ -232,7 +232,7 @@ class TestOpenAIResponseToAnthropic:
     def test_basic_conversion(self) -> None:
         mock_response = MagicMock()
         mock_response.id = "chatcmpl-123"
-        mock_response.model = "qwen3.7-plus"
+        mock_response.model = "deepseek-v4-flash"
         mock_response.usage.prompt_tokens = 10
         mock_response.usage.completion_tokens = 20
 
@@ -254,7 +254,7 @@ class TestOpenAIResponseToAnthropic:
     def test_length_finish_reason(self) -> None:
         mock_response = MagicMock()
         mock_response.id = "chatcmpl-123"
-        mock_response.model = "qwen3.7-plus"
+        mock_response.model = "deepseek-v4-flash"
         mock_response.usage = None
 
         choice = MagicMock()
@@ -269,7 +269,7 @@ class TestOpenAIResponseToAnthropic:
     def test_empty_content(self) -> None:
         mock_response = MagicMock()
         mock_response.id = "chatcmpl-123"
-        mock_response.model = "qwen3.7-plus"
+        mock_response.model = "deepseek-v4-flash"
         mock_response.usage = None
 
         choice = MagicMock()
@@ -289,7 +289,7 @@ class TestOpenAIChunkToAnthropicSSE:
     def test_role_chunk_emits_start_events(self) -> None:
         mock_chunk = MagicMock()
         mock_chunk.id = "chunk-1"
-        mock_chunk.model = "qwen3.7-plus"
+        mock_chunk.model = "deepseek-v4-flash"
         mock_chunk.usage = None
 
         choice = MagicMock()
@@ -311,7 +311,7 @@ class TestOpenAIChunkToAnthropicSSE:
     def test_content_chunk_emits_delta(self) -> None:
         mock_chunk = MagicMock()
         mock_chunk.id = "chunk-2"
-        mock_chunk.model = "qwen3.7-plus"
+        mock_chunk.model = "deepseek-v4-flash"
         mock_chunk.usage = None
 
         choice = MagicMock()
@@ -333,7 +333,7 @@ class TestOpenAIChunkToAnthropicSSE:
     def test_finish_chunk_emits_stop_events(self) -> None:
         mock_chunk = MagicMock()
         mock_chunk.id = "chunk-3"
-        mock_chunk.model = "qwen3.7-plus"
+        mock_chunk.model = "deepseek-v4-flash"
         mock_chunk.usage = MagicMock()
         mock_chunk.usage.prompt_tokens = 10
         mock_chunk.usage.completion_tokens = 20
@@ -367,9 +367,9 @@ class TestOpenAIChunkToAnthropicSSE:
 
 def test_get_or_lock_model_first_call(router: ProxyRouter, session: Session) -> None:
     model = router._get_or_lock_model(session)
-    assert model == "qwen3.7-plus"
-    assert session.model_chosen == "qwen3.7-plus"
-    assert session.metadata["model"] == "qwen3.7-plus"
+    assert model == "deepseek-v4-flash"
+    assert session.model_chosen == "deepseek-v4-flash"
+    assert session.metadata["model"] == "deepseek-v4-flash"
     assert session.metadata["model_source"] == "cold-start-always-cheap"
 
 
@@ -418,7 +418,7 @@ async def test_route_chat_non_streaming(router: ProxyRouter, session: Session) -
         mock_acompletion.return_value = mock_response
         result, model_name, reason = await router.route_chat_completion(body, session)
 
-    assert model_name == "qwen3.7-plus"
+    assert model_name == "deepseek-v4-flash"
     assert result["choices"][0]["message"]["content"] == "Hello back"
 
 
@@ -430,7 +430,7 @@ async def test_route_chat_streaming(router: ProxyRouter, session: Session) -> No
         for i in range(2):
             chunk = MagicMock()
             chunk.id = f"chunk-{i}"
-            chunk.model = "qwen3.7-plus"
+            chunk.model = "deepseek-v4-flash"
             chunk.usage = None
             choice = MagicMock()
             choice.index = 0
@@ -447,7 +447,7 @@ async def test_route_chat_streaming(router: ProxyRouter, session: Session) -> No
         # Final chunk with finish
         final = MagicMock()
         final.id = "chunk-final"
-        final.model = "qwen3.7-plus"
+        final.model = "deepseek-v4-flash"
         final.usage = MagicMock()
         final.usage.prompt_tokens = 5
         final.usage.completion_tokens = 10
@@ -466,8 +466,8 @@ async def test_route_chat_streaming(router: ProxyRouter, session: Session) -> No
         mock_acompletion.return_value = mock_stream()
         result, model_name, reason = await router.route_chat_completion(body, session)
 
-    assert model_name == "qwen3.7-plus"
-    assert reason == "stream:qwen3.7-plus"
+    assert model_name == "deepseek-v4-flash"
+    assert reason == "stream:deepseek-v4-flash"
     # result should be an async generator
     chunks = [c async for c in result]
     assert len(chunks) > 0
@@ -482,7 +482,7 @@ async def test_route_messages_non_streaming(router: ProxyRouter, session: Sessio
 
     mock_response = MagicMock()
     mock_response.id = "cmpl-1"
-    mock_response.model = "qwen3.7-plus"
+    mock_response.model = "deepseek-v4-flash"
     mock_response.usage = MagicMock()
     mock_response.usage.prompt_tokens = 5
     mock_response.usage.completion_tokens = 10
@@ -496,7 +496,7 @@ async def test_route_messages_non_streaming(router: ProxyRouter, session: Sessio
         mock_acompletion.return_value = mock_response
         result, model_name, reason = await router.route_messages(body, session)
 
-    assert model_name == "qwen3.7-plus"
+    assert model_name == "deepseek-v4-flash"
     assert isinstance(result, dict)
     assert result["type"] == "message"
     assert result["content"][0]["text"] == "Hello back"
@@ -509,7 +509,7 @@ async def test_route_messages_streaming(router: ProxyRouter, session: Session) -
     async def mock_stream() -> AsyncGenerator[MagicMock, None]:
         chunk = MagicMock()
         chunk.id = "chunk-1"
-        chunk.model = "qwen3.7-plus"
+        chunk.model = "deepseek-v4-flash"
         chunk.usage = None
         choice = MagicMock()
         choice.index = 0
@@ -526,7 +526,7 @@ async def test_route_messages_streaming(router: ProxyRouter, session: Session) -
         mock_acompletion.return_value = mock_stream()
         result, model_name, reason = await router.route_messages(body, session)
 
-    assert reason == "stream:qwen3.7-plus"
+    assert reason == "stream:deepseek-v4-flash"
     chunks = [c async for c in result]
     assert len(chunks) > 0
     decoded = b"".join(chunks).decode("utf-8")
@@ -564,7 +564,7 @@ async def test_streaming_cache_tax_from_trailing_usage_chunk(
     async def mock_stream() -> AsyncGenerator[MagicMock, None]:
         content = MagicMock()
         content.usage = None
-        content.model = "qwen3.7-plus"
+        content.model = "deepseek-v4-flash"
         choice = MagicMock()
         choice.finish_reason = None
         delta = MagicMock()
@@ -668,13 +668,14 @@ async def test_retry_then_fallback(router: ProxyRouter, session: Session) -> Non
     with patch(_ACOMPLETION_PATCH, new_callable=AsyncMock) as mock_acompletion:
         rate_err = Exception("Rate limit")
         rate_err.status_code = 429  # type: ignore[attr-defined]
-        # First call fails (qwen3.7-plus), second succeeds (deepseek-v4-flash)
+        # First call fails (deepseek-v4-flash), a fallback model succeeds
         mock_acompletion.side_effect = [rate_err, rate_err, rate_err, mock_response]
 
-        # qwen3.7-plus will be retried 2x, then fallback to deepseek-v4-flash
+        # deepseek-v4-flash is retried 2x, then the next pool model in the unrestricted
+        # registry (qwen3.7-plus) serves the fallback response.
         result, model_name, reason = await router.route_chat_completion(body, session)
 
-    assert model_name == "deepseek-v4-flash"
+    assert model_name == "qwen3.7-plus"
     assert result["choices"][0]["message"]["content"] == "from fallback"
 
 
@@ -753,7 +754,7 @@ def _make_mock_chat_response() -> MagicMock:
     """Build a mock OpenAI ChatCompletion for non-streaming chat."""
     mock_response = MagicMock()
     mock_response.id = "cmpl-1"
-    mock_response.model = "qwen3.7-plus"
+    mock_response.model = "deepseek-v4-flash"
     mock_response.usage.prompt_tokens = 5
     mock_response.usage.completion_tokens = 10
     choice = MagicMock()
@@ -774,7 +775,7 @@ def _make_mock_chat_response() -> MagicMock:
             }
         ],
         "usage": {"prompt_tokens": 5, "completion_tokens": 10},
-        "model": "qwen3.7-plus",
+        "model": "deepseek-v4-flash",
     }
     return mock_response
 
@@ -824,7 +825,7 @@ def test_streaming_returns_event_stream() -> None:
     async def _mock_stream() -> AsyncGenerator[MagicMock, None]:
         chunk = MagicMock()
         chunk.id = "chunk-1"
-        chunk.model = "qwen3.7-plus"
+        chunk.model = "deepseek-v4-flash"
         chunk.usage = None
         choice = MagicMock()
         choice.index = 0
@@ -851,7 +852,7 @@ def test_messages_streaming_returns_event_stream() -> None:
     async def _mock_stream() -> AsyncGenerator[MagicMock, None]:
         chunk = MagicMock()
         chunk.id = "chunk-1"
-        chunk.model = "qwen3.7-plus"
+        chunk.model = "deepseek-v4-flash"
         chunk.usage = None
         choice = MagicMock()
         choice.index = 0

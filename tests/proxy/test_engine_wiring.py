@@ -26,7 +26,7 @@ from shunt.router.selection import NeighborResult
 from shunt.session import Session, SessionManager
 
 _ACOMPLETION_PATCH = "shunt.proxy.router._acompletion"
-_COLD_START_MODEL = "qwen3.7-plus"
+_COLD_START_MODEL = "deepseek-v4-flash"
 _KNN_MODEL = "deepseek-v4-flash"
 
 
