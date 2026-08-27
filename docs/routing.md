@@ -15,7 +15,7 @@ outcome exists; this one acts *before* there is any evidence about the task at h
 > `router.strategy: session_cascade`, which starts every session on the cheapest healthy
 > model and lets [verified failure](escalation.md) climb it. It **never runs this page's
 > rule**: no embedding, no neighbour lookup, no candidate scoring, no per-task model
-> choice. To get the routing model you set `router.strategy: knn_cascade`, and a default
+> choice. To get the routing model you set `router.strategy: knn_semantic_cascade`, and a default
 > install does not. Two things follow that are easy to miss: **exploration is inert** under
 > the default (it perturbs a kNN pick that is never made), and `shunt doctor` treats a
 > missing embedding-weights cache as a **warning rather than a failure**, because nothing
@@ -179,7 +179,10 @@ consequential branch: on a thin or empty neighbourhood it returns the *cheapest*
 model, so an under-informed router behaves like `always_cheap` while reporting a
 reason that sounds like a considered choice. Only the debug log distinguishes the
 two. If every model in the pool has already been tried and none qualified, the
-strongest is returned as `safe_fallback`.
+cheapest is returned as `safe_fallback` — cost-minimal, not a quality bet: the
+strongest was in the tried set and failed the same bar, so escalating to it was a
+heuristic, and deliberate escalation on verified failure is the auto-escalation
+ladder's job (see [escalation](escalation.md)).
 
 ### Exploration
 
@@ -269,7 +272,7 @@ in `shunt explain`:
 | `stale_embedding_space` | The corpus was embedded by a different embedder; neighbours refused until `shunt reindex` |
 | `cheapest_above_threshold` | A model cleared the success bar with enough samples, and was cheapest |
 | `exploration_untested` | Nothing cleared the bar; the cheapest model with no local history was picked |
-| `safe_fallback` | Nothing cleared the bar and every model had been tried — strongest model |
+| `safe_fallback` | Nothing cleared the bar and every model had been tried — cheapest model |
 | `exploration` | Thompson sampling diverged from the greedy pick |
 | `exploration_exploit` | Thompson sampling agreed with the greedy pick |
 | `conservative_fallback` | An exploratory downshift was blocked for lack of banked slack |
@@ -282,7 +285,7 @@ in `shunt explain`:
 | `always_cheap` / `always_frontier` | A fixed strategy is configured; no embedding, no query. Both are pinned controls: a verified failure never moves them |
 | `session_cascade` | The cheap-first cascade preset picked its base model; unlike the two above, a verified failure can raise it a rung later (see the escalation reasons) |
 
-Under `knn_cascade` — the opt-in routing strategy, not the default — the base pick
+Under `knn_semantic_cascade` — the opt-in routing strategy, not the default — the base pick
 reports one of the kNN tokens above
 (`cheapest_above_threshold`, `exploration_untested`, `safe_fallback`, `cold_start`) —
 the ladder is a *later* decision, and it shows up as `auto_escalation` and
@@ -336,9 +339,9 @@ Read these before trusting a routing decision.
   a test suite. Nothing stops you routing other work through Shunt, but the decision
   has no evidence behind it and no verifier to grade it afterwards.
 - **This rule is off unless you turn it on, and on this corpus turning it on cost
-  money.** The default `session_cascade` never embeds. Selecting `knn_cascade` opens
+  money.** The default `session_cascade` never embeds. Selecting `knn_semantic_cascade` opens
   the same ladder on the kNN pick and, on the offline corpus, reached the *same* pass
-  rate for **$9.55 more** cache-aware — see
+  rate for **$9.78 more** cache-aware — see
   [the shipped default, measured](results.md#the-shipped-default-and-the-routing-model-priced-against-it)
   for the number and for the reason it may understate the routing model in live use.
 - **The cascade numbers are an offline replay from a fresh tree.** Live, an escalated
@@ -364,7 +367,7 @@ prediction. The [rationale](#why-it-is-built-this-way) is above and the
 | CPU-only embeddings; runs on any laptop | Cannot react to a task that changes mid-session |
 | Batch, global, inspectable learning | Exploration costs money and quality while it runs |
 | | SWE tasks only today |
-| | Off by default — `knn_cascade` is opt-in, and it cost more than the cheap start here |
+| | Off by default — `knn_semantic_cascade` is opt-in, and it cost more than the cheap start here |
 
 ## Configure it
 
@@ -376,12 +379,81 @@ already there: `session_cascade` is the **default**, and it skips the prediction
 the cheapest model, and lets [verified failure](escalation.md) walk the ladder. It costs no
 embedding at all.
 
-To turn this page's rule on, set `router.strategy: knn_cascade`: the same ladder, opened on
-the kNN pick instead of on the cheapest model. It was spelled `knn` before the rename, and
-that value still works with a warning — it still means **kNN routing**, so it resolves to
-`knn_cascade` and never to the new default. Note what is *not* on offer: the kNN rule
+To turn this page's rule on, set `router.strategy: knn_semantic_cascade`: the same ladder, opened on
+the kNN pick instead of on the cheapest model. It was spelled `knn`, then `knn_cascade`,
+before the second rename, and those values still work with a warning — they still mean **kNN
+routing**, so they resolve to `knn_semantic_cascade` and never to the new default. Note what
+is *not* on offer: the kNN rule
 **without** the ladder. The shipped values are in `src/shunt/config/router.yaml` and
 `src/shunt/config/embedding.yaml`.
+
+## Difficulty routing (judge-labelled kNN)
+
+The embedding-based kNN above is the **semantic** family: it embeds the task text and finds
+semantically similar tasks. This page's own evidence ([`embedding_signal.png`](#fig-embedding-signal))
+shows that embedding carries almost no difficulty signal (LOO R² −0.04, inside its null), so a
+second family routes on the thing the embedding is missing: a **difficulty label**, produced by an
+LLM judge (`gpt-5.6-terra`, $1/$6 list — probed at the same label quality as the claude-sonnet-5
+anchor, LOO R² +0.027 vs +0.029). The committed per-task labels live in
+`benchmark/routing/data/judge_difficulty.json` (derived by `derive_judge_difficulty.py` from the
+gitignored probe artifacts). The three benchmark rows are `knn_difficulty` (single-shot control),
+`knn_difficulty_cascade` (difficulty pick + the session ladder) and `difficulty_band_cascade` (the
+"just the label + escalation" rule: same-difficulty-band members vote, cheapest in-band model whose
+pass rate clears the bar opens the ladder). Each row's cost includes the MEASURED per-task judge
+bill (`judge_label_cost` in `strategy_summary.csv`), because a judge call is a real cost of running
+that strategy. The measured bill is the provider-reported usage cost recorded by the probe at
+2026-08-26 (~$0.0016/task, ~1.6× the $1/$6 list estimate) — it is the honest number the figures
+plot, and it is the reason the "cheaper than the anchor" framing rests on the list price, not on a
+measured cross-model comparison.
+
+**Measured verdict — none cleared the inference bar, so none is wired into the product.** The
+pre-registered gate was: match `session_cascade`'s pass rate within 5pp at *lower* model+judge cost.
+On the 184-task corpus:
+
+| row | pass rate | cache-aware cost | verdict |
+|---|---|---|---|
+| `session_cascade` (shipped) | 96.74% | $28.71 | baseline |
+| `knn_difficulty_cascade` | 96.74% | $29.01 | equal quality, **more** expensive |
+| `difficulty_band_cascade` | 96.74% | $29.92 | equal quality, more expensive |
+| `knn_difficulty` (control) | 75.54% | $1.80 | == always-cheap; never escalates |
+
+The difficulty cascades' model cost is `session_cascade`'s plus the judge bill:
+`knn_difficulty_cascade`'s is exactly that ($28.71 + $0.30) — its difficulty pick opened
+on the cheapest rung on all 184 tasks, so it replays `session_cascade`'s ladder verbatim —
+while `difficulty_band_cascade`'s band pick opens above rung 0 on 12 tasks (picking
+qwen3.7-plus), which is the ~$0.90 more of model cost. The difficulty pick bought nothing
+on this corpus either way — the judge bill is pure addition. On the completed scoring
+basis — the house basis every frontier row uses, disclosed in this section's figure limits —
+the single-shot row collapses to always-cheap: deepseek-v4-flash's neighbour pass rate
+clears the 0.6 eligibility bar in every completed-matrix difficulty neighbourhood, so the
+rule's cheapest-eligible pick is deepseek on all 184 scored tasks. That collapse is a
+property of the completed scoring basis, not a corpus invariant: on the raw 200-task
+matrix the same pick routes 28 tasks to kimi-k3, and an oracle label (the task's own
+outcome) would move 45 of the 184 picks off deepseek — the oracle pick still lands on
+deepseek for 139 of 184
+tasks — so a strong-enough label WOULD shift the routing, and the measured +0.027 LOO
+label is simply not strong enough. The falsification stands on both
+bases: on the raw 200-task matrix the difficulty cascade run loses quality against
+`session_cascade` (164 passes vs 170) at similar cost, so neither basis changes the verdict.
+This is the predict-then-cascade finding restated on a second axis: on this corpus
+the **verification ladder dominates prediction** — whatever the pick, the ladder reaches
+the frontier on verified failure, so a better pick cannot lower the bill at equal quality.
+For the same reason there is no step-count win for the kNN-difficulty cascade (its path is
+byte-identical to `session_cascade`'s); the band cascade opens higher on its 12 tasks, so
+it escalates marginally *more*, not less.
+
+**What moving a difficulty row to inference would require** (nothing blocks it mechanically; the
+value does). A judge provider and key; one judge call per task *at the task boundary* (label the
+first turn before the first routing decision — a cache-safe single decision per session, ~$0.0016 and
+the latency of one small completion); a difficulty index over the labelled outcome history (rebuild
+like the semantic index, from verified outcomes, so a label never votes without a measurement); and a
+cold-start fallback to `session_cascade` when no judge is configured or the index is empty. None of
+it is worth building while the measured result says the pick changes nothing. The revisit
+condition is genuinely *per family*: for the single-shot and band rules — the only ones whose pick
+can move — the judge label would need to approach the human tag's same-pipeline LOO R² (≈0.09,
+roughly the "~0.1" ceiling; current terra is +0.027); for the session-cascade rows no label quality
+helps, because the ladder reaches the frontier on verified failure regardless of where the pick
+opens.
 
 ## Figures
 
@@ -462,35 +534,66 @@ the 14 solved-by-none tasks are under-sampled too (3 to 8 columns), but could jo
 
 ![The live frontier at cache-aware cost — cost is the uncertain axis](assets/figures/routing/cost_quality_frontier.png)
 
-*9 strategies over 184 scored tasks · Session-Cascade \$28.71 at 96.7% vs baseline \$96.02 at 95.1% (30% of the bill, cache-aware) · cost is the wide axis: Session-Cascade's naive total spans \$22.53–\$46.14 (95% bootstrap) · area under the live frontier 0.929*
-> **Caveat.** scored on 184 coverage-selected tasks (dropped are harder); 5 of 9 are not selectable as router.strategy.
-**Reading.** x is total dollars spent over the scored task set, on a log axis because the strategies span two decades. The marker sits at CACHE-AWARE cost — what a deployment is billed once a repeat of the same model banks its cached prefix — and the thin line running from it ends at an open tick at the NAIVE per-call sum, so the gap between the two cost models is a drawn distance. The capped bar at that tick is the 95% bootstrap interval on the naive total; it is drawn on the naive statistic because that is the one it was computed for. Both cost marks appear on LIVE strategies only. y is pass rate in percent with a 95% Wilson interval. Marker SHAPE carries what a strategy is: circles and the orange diamond can run in production today, blue squares are blocked — no router.strategy value names them — an X is a control that must never ship, and a star is a bound that is unreachable by design. Marker FILL splits the blue squares: a SOLID square is blocked and nothing equivalent runs today, while a HOLLOW one would mark a mechanism that ships under another config surface with only its NAME blocked. NO ROW IS HOLLOW TODAY — the one that was, Session-Cascade, is now live as router.strategy: session_cascade, and every remaining blue square is solid, i.e. genuinely unrunnable. Only the live points enter the Pareto test and the shaded mixture region — a frontier anchored on a strategy the router rejects at boot describes an operating point nobody can buy. WHERE SEVERAL STRATEGIES COLLAPSE INTO A FEW PIXELS a MAGNIFIED PANEL redraws that region at larger scale; the outlined rectangle on the plane and the two lines running to the panel say which region it is. The panel is a MAGNIFICATION, not extra data: every mark in it is one of the points already on the plane, at the same cost and the same pass rate, and it is drawn only when the names in a region genuinely cannot be placed there — when the strategies spread out, no panel appears. It leaves the intervals behind, because at that scale they run off the panel; they stay on the plane. Inside the panel the two DEPLOYABLE escalating strategies each carry a context-transfer cost model, drawn as a dashed rule hanging just under the marker it belongs to and joined to it by a thin line: the MARKER is what the benchmark measures, a fresh context on every rung, which is not a setting anyone can select; the shaded segment is `context_transfer: summary`, a band rather than a tick because how far a summariser compresses is not a constant; and the tick at the right end is `context_transfer: full`, which is what ships today. That rule asserts NO pass rate — it is horizontal, and its height carries no meaning at all.
+*12 strategies over 184 scored tasks · Session-Cascade \$28.71 at 96.7% vs baseline \$96.02 at 95.1% (30% of the bill, cache-aware) · cost is the wide axis: Session-Cascade's naive total spans \$22.53–\$46.14 (95% bootstrap) · area under the live frontier 0.929*
+> **Caveat.** scored on 184 coverage-selected tasks (dropped are harder); 8 of 12 are not selectable as router.strategy.
+**Reading.** THREE PANELS, THREE MAGNIFICATIONS, ONE PLANE. Panel A is the whole set — every strategy that carries a cost, over the full cost range, at full label, interval and hull treatment. Panel B redraws the outlined box on A at the same full width; panel C redraws the outlined box on B. Each box is joined to the panel that magnifies it by two dashed lines running from its lower corners to that panel's upper corners, so the A-to-B-to-C descent is drawn rather than asserted. The three x axes are three DIFFERENT scales, each ticked in round dollars across its own window, and only the bottom panel carries the axis label. In all three, x is total dollars spent over the scored task set on a log axis, because the strategies span two decades, and y is pass rate in percent. NEITHER BOX IS WRITTEN DOWN. B's is the DETAIL WINDOW, derived from the rows every time the figure is drawn: every strategy whose pass rate clears the best measured row's own Wilson lower bound, plus the fixed-frontier baseline and the oracle bound, widened by the room the names need. C's is the group whose MARKERS overlap inside B — measured on the rendered canvas, not chosen — widened to contain the full length of every context bracket it draws. EVERY PANEL NAMES EVERY STRATEGY ITS OWN WINDOW HOLDS, so a name repeats down the stack at each scale — that is what a magnification is, one point named twice, not two measurements. A strategy outside the detail window is therefore named on A, on the plane, at its own cost and pass rate: it is not part of the comparison B is for, and it is not a footnote either. The ONE exception is the group panel C magnifies. Above C its markers are a single blob, so a name printed there would land on a mark nobody can resolve, and those names appear only on C. Any name that could be placed on no panel at all would be listed in the notes; today there is none. THE FIGURE DEGRADES ON BOTH AXES, and says which case it is in. With nothing outside the detail window there is nothing for B to add, and the figure is A plus the magnified panel. With no overlapping markers there is nothing to magnify, and the figure is A plus the detail panel. With neither, it is the single plane it has always been. The layout note states how many levels the figure has. WHERE THE INTERVALS LIVE. Panels A and B carry them; panel C carries none. The vertical rule through each marker is its 95% Wilson interval on the pass rate, drawn BEHIND the markers and faintly: several strategies share one pass rate here, so their intervals are literally the same rule drawn several times, and at full weight they read as a picket fence of separate measurements. The thin horizontal line running from a marker ends at an open tick at the NAIVE per-call sum, so the gap between the two cost models is a drawn distance; the capped bar at that tick is the 95% bootstrap interval on the naive total, drawn on the naive statistic because that is the one it was computed for. Both cost marks appear on LIVE strategies only. At C's scale every one of these runs off the panel, so C leaves them behind and the panel caption says so. IN EVERY PANEL the marker sits at CACHE-AWARE cost — what a deployment is billed once a repeat of the same model banks its cached prefix. Marker SHAPE carries what a strategy is: circles and the orange diamond can run in production today, blue squares are blocked — no router.strategy value names them — an X is a control that must never ship, and a star is a bound that is unreachable by design. Marker FILL splits the blue squares: a SOLID square is blocked and nothing equivalent runs today, while a HOLLOW one would mark a mechanism that ships under another config surface with only its NAME blocked. NO ROW IS HOLLOW TODAY — the one that was, Session-Cascade, is now live as router.strategy: session_cascade, and every remaining blue square is solid, i.e. genuinely unrunnable. Only the live points enter the Pareto test and the shaded mixture region — a frontier anchored on a strategy the router rejects at boot describes an operating point nobody can buy. HOW A NAME IS PLACED SAYS WHAT WAS CROWDED. A name printed beside its marker had room there. A name lifted onto a level above or below the plane, on a vertical leader down to its own marker, belongs to a group whose NAMES could not all be printed where they sit — the leader is vertical and lands on the marker it names, so it cannot be misread onto a neighbour. Panel C labels its whole crowd that way, because at that scale nothing else can. Inside panel C, a DEPLOYABLE escalating strategy carries a context-transfer cost model, drawn as a dashed rule hanging under the marker it belongs to and joined to it by a thin line: the MARKER is what the benchmark measures, a fresh context on every rung, which is not a setting anyone can select; the shaded segment is `context_transfer: summary`, a band rather than a tick because how far a summariser compresses is not a constant; and the tick at the right end is `context_transfer: full`, which is what ships today. That rule asserts NO pass rate — it is horizontal, and its height carries no meaning at all. A deployable escalating row panel C does not contain carries no bracket on the canvas, and the notes name it and publish its numbers. The key is drawn ONCE for the whole figure, below the bottom panel, from every class the figure actually carries.
 
 **What to look for.** A router earns its existence only by sitting ABOVE the shaded mixture region — below or on it, the same cost-quality point is reachable by flipping a weighted coin between two fixed policies.
 
-**Terms.** *live* — the router may be configured with this strategy today — the set is derived from the product's own LIVE_STRATEGIES, not restated here. *live Pareto* — no other LIVE strategy is both cheaper and at least as good, on CACHE-AWARE cost. Bounds, controls and blocked strategies are excluded — none of them is a setting an operator can choose. This is the same cost model strategy_summary.csv's Pareto column uses, so the plane and the table cannot disagree. *cache-aware cost* — a repeat of the same model on a consecutive attempt is billed at the provider's cache-read rate rather than at full input price. Cascades re-serve one model by construction, so this is exactly where the two cost models part company. *context transfer* — what a deployment is billed once the model an escalation moves to is resent the conversation. The router config names the two settings the panel labels: `summary` resends a summarised prefix, `full` resends all of it, and `full` is the shipped default. The resent prefix is a cache MISS by construction — a new model receiving a prefix it has never seen — so it is charged at the full input rate, never at the cache-read rate. Context size is estimated as t = 2 x in_tok / calls. It is a cost model, it asserts no pass rate, and it rests on the token-complete subset named in the notes. *magnified panel* — an inset that redraws one crowded region of the plane at larger scale. Same points, same numbers, no extra data — and no intervals, which stay on the plane. Which region it covers is decided from the rendered figure, not written down: the labels are measured against each other, and a panel is drawn only where they cannot all be placed. Its bounds are the crowd's own bounding box widened to contain everything the panel draws, including the full length of a context bracket. *mixture region* — the upper convex hull of the LIVE points. Any point under it is reachable by probabilistically mixing two fixed policies. *blocked* — no router.strategy value names it, and on this corpus that now means genuinely unrunnable: the two remaining blocked cascades verify INSIDE one task, which breaks the one-decision-per-session cache-safety spine and is excluded by design rather than pending. They are excluded from the frontier, because the frontier ranks settings an operator can choose, and they are kept because they price what session cadence costs. Each row's blocker and path to live are in benchmark/routing/strategy_class.py.
+**Terms.** *live* — the router may be configured with this strategy today — the set is derived from the product's own LIVE_STRATEGIES, not restated here. *live Pareto* — no other LIVE strategy is both cheaper and at least as good, on CACHE-AWARE cost. Bounds, controls and blocked strategies are excluded — none of them is a setting an operator can choose. This is the same cost model strategy_summary.csv's Pareto column uses, so the plane and the table cannot disagree. *cache-aware cost* — a repeat of the same model on a consecutive attempt is billed at the provider's cache-read rate rather than at full input price. Cascades re-serve one model by construction, so this is exactly where the two cost models part company. *context transfer* — what a deployment is billed once the model an escalation moves to is resent the conversation. The router config names the two settings the panel labels: `summary` resends a summarised prefix, `full` resends all of it, and `full` is the shipped default. The resent prefix is a cache MISS by construction — a new model receiving a prefix it has never seen — so it is charged at the full input rate, never at the cache-read rate. Context size is estimated as t = 2 x in_tok / calls. It is a cost model, it asserts no pass rate, and it rests on the token-complete subset named in the notes. *detail window* — the region of the plane panel B redraws at full width, and the box drawn on panel A. DERIVED from the rows every time the figure is drawn — the strategies whose pass rate clears the best measured row's own Wilson lower bound, unioned with the fixed-frontier baseline and the oracle bound so the two reference points can never fall out of the picture, then widened by measured label extents. Never a written-down box: costs move on every re-run, and a fixed one would end up pointing at empty canvas or cropping the comparison it exists for, with nothing failing to say so. *magnified window* — the region panel C redraws at full width, and the box drawn on panel B. Same points, same numbers, no extra data — and no intervals, which stay in the panel above. Which region it covers is decided from the RENDERED figure, not written down: it is the group whose MARKERS overlap on the parent panel, which is the one crowd no label placement can fix. A group whose names merely collide over separable markers is stacked on levels where it sits and earns no panel. The window is the overlapping group's own bounding box widened to contain everything panel C draws, including the full length of a context bracket. *level* — one full-width panel, and one step of magnification. The figure has three when something falls outside the detail window AND a group of markers overlaps inside it, two when only one of those holds, and one when neither does. The count is derived from the rows and the rendered geometry, and the layout note states it. *mixture region* — the upper convex hull of the LIVE points. Any point under it is reachable by probabilistically mixing two fixed policies. *blocked* — no router.strategy value names it, and on this corpus that now means genuinely unrunnable: the two remaining blocked cascades verify INSIDE one task, which breaks the one-decision-per-session cache-safety spine and is excluded by design rather than pending. They are excluded from the frontier, because the frontier ranks settings an operator can choose, and they are kept because they price what session cadence costs. Each row's blocker and path to live are in benchmark/routing/strategy_class.py.
 
-**Notes.** The y axis is clipped to the data range, not to 0-100. The axis label says so; the alternative was a figure on which every strategy is the same flat line.
+**Notes.** The y axis is clipped to the data range, not to 0-100, and each panel is clipped to its own window. Every axis label carries the range it shows; the alternative was a figure on which every strategy is the same flat line.
+Each panel below the first shows one REGION of the panel above it, and the region is derived rather than chosen: the layout note records the windows it landed on, and the panel above always carries every strategy the window leaves out — named there, on the plane. A strategy is never dropped; the worst that happens is that it is compared at a coarser scale than the crowd below it.
 The marker and the hull use the same cache-aware cost column strategy_summary.csv decides Pareto on, so the plane and the table cannot rank strategies differently.
 Oracle: \$18.33 cache-aware / \$18.33 naive, 96.74% (n=184, bound — unreachable by design)
 Price-Cascade: \$27.11 cache-aware / \$27.11 naive, 96.74% (n=184, blocked — no router.strategy names it)
-kNN-cascade (within-task): \$30.44 cache-aware / \$30.44 naive, 96.74% (n=184, blocked — no router.strategy names it)
+kNN-semantic-cascade (within-task): \$30.44 cache-aware / \$30.44 naive, 96.74% (n=184, blocked — no router.strategy names it)
 Session-Cascade: \$28.71 cache-aware / \$33.56 naive, 96.74% (n=184, live, on the frontier)
-kNN-cascade: \$38.26 cache-aware / \$43.01 naive, 96.74% (n=184, live, but dominated)
+kNN-difficulty-cascade: \$29.01 cache-aware / \$33.86 naive, 96.74% (n=184, blocked — no router.strategy names it)
+Difficulty-Band-cascade: \$29.92 cache-aware / \$34.77 naive, 96.74% (n=184, blocked — no router.strategy names it)
+kNN-semantic-cascade: \$38.49 cache-aware / \$43.28 naive, 96.74% (n=184, live, but dominated)
 Always-Frontier: \$96.02 cache-aware / \$96.02 naive, 95.11% (n=184, live, but dominated)
-kNN: \$13.21 cache-aware / \$13.21 naive, 78.26% (n=184, control — never shippable)
+kNN-semantic: \$11.79 cache-aware / \$11.79 naive, 77.72% (n=184, control — never shippable)
 Always-Cheap: \$1.50 cache-aware / \$1.50 naive, 75.54% (n=184, live, on the frontier)
-Tier-Classifier: \$11.53 cache-aware / \$11.53 naive, 65.76% (n=184, blocked — no router.strategy names it)
+kNN-difficulty: \$1.80 cache-aware / \$1.80 naive, 75.54% (n=184, control — never shippable)
+kNN-semantic-tier: \$11.53 cache-aware / \$11.53 naive, 65.76% (n=184, blocked — no router.strategy names it)
 context transfer on Session-Cascade: \$28.71 as the benchmark measures it (a fresh context per rung — not a config value), \$29.12–\$29.94 at context_transfer: summary, \$32.81 at context_transfer: full (the shipped default) — a cost model over measured tokens and registry input prices, computed on the token-complete subset (n=159), asserting no pass rate
-context transfer on kNN-cascade: \$38.26 as the benchmark measures it (a fresh context per rung — not a config value), \$38.69–\$39.53 at context_transfer: summary, \$42.49 at context_transfer: full (the shipped default) — a cost model over measured tokens and registry input prices, computed on the token-complete subset (n=141), asserting no pass rate
+context transfer on kNN-semantic-cascade: \$38.49 as the benchmark measures it (a fresh context per rung — not a config value), \$38.93–\$39.82 at context_transfer: summary, \$42.90 at context_transfer: full (the shipped default) — a cost model over measured tokens and registry input prices, computed on the token-complete subset (n=145), asserting no pass rate
 frontier vs strategy_summary.csv Pareto: drawn-only Session-Cascade (both on cache-aware cost; a difference here is the live-only filter)
 selection: scored on 184/200 tasks selected by coverage; deepseek-v4-flash passes 74.1% here vs 12.5% on the 16 dropped (+61.6pp) — difficulty-biased, not a random sample
 equal-coverage via monotone imputation — 47% of frontier cells imputed (every strategy scored on n=184). Monotonicity holds on 92% of 190 multi-observed task(s) (measured, not assumed). NEARLY every imputed cell is filled pass=True at a median measured price (the monotone ladder has a fail branch, and 1 of 398 filled cells took it), for the router as well as for the baseline — see evidence_basis.png for how much of each strategy's number that is, and kill_gate.png's measured-only row for what survives when the projection is removed.
-layout: 4 strategies within \$22.72–\$50.69 at 96.0–97.5% are magnified in an inset panel — the SAME points at larger scale, not extra data, and without their intervals, which stay on the plane
-**Limits.** A non-live point's number is still a real measurement — it is the CONCLUSION that is limited: no router.strategy setting reproduces it, so it may not anchor the frontier or a headline. It does NOT follow that the underlying capability is unavailable — a blocked row may measure a mechanism that ships in a different layer — and the per-strategy blocker in benchmark/routing/strategy_class.py says which case it is. A cascade point prices the LADDER's cost, not its per-rung quality. The shipped ladder's cheap intermediate rungs are measured separately against the base model on this same corpus, and are null or net-harmful there — see ladder_rungs.png. The cache-aware x position rests on an ASSUMED cache hit rate; only the per-model discount and input share are measured — see cache_economics.png for the range that assumption spans. The horizontal interval belongs to the NAIVE total and is not transplanted onto the cache-aware marker. The cache-aware ratio's own 90% bootstrap CI is published by the kill gate (cache cost is scoped per task, so a whole-task resample preserves it) — not transplanted onto this plot. Pass rates are scored on the coverage-completed matrix, whose imputed cells are all pass=True — see evidence_basis.png for how much of each strategy's number that is. The scored set is chosen by coverage, not at random: the collector runs the expensive tier only on the discriminating slice, so both axes describe a difficulty-biased sample. The subtitle carries the measured gap. The dashed context bracket is a COST MODEL, not a measurement. It re-prices the marker when the context an attempt ends holding is resent to the model escalation moves to — a cache MISS by construction, so it is charged at full input rate. It asserts NO pass rate: the bracket is horizontal because nothing here measures what carrying context does to quality. The canvas labels the bracket in CONFIG vocabulary; the cost model underneath is parameterised by alpha, the share of the context an attempt ends holding that is resent. The mapping is exact: `context_transfer: summary` is the alpha 0.1-0.3 band (a band, because a summariser's compression ratio is not a constant and one tick would assert a precision this model does not have), `context_transfer: full` is alpha = 1.0, and the marker itself is alpha = 0 — a fresh context on every rung, which is what the OFFLINE benchmark replays and what live inference never does. alpha = 0 is deliberately not offered as a config value: `none` is not a context_transfer setting, so the marker is the offline/live divergence made visible rather than a third option. A bracket is drawn on the DEPLOYABLE escalating strategies only. The summary table also carries alpha columns for the two within-task cascades, and they are deliberately not drawn: the model prices a SESSION-BOUNDARY handoff, and those two rows are blocked precisely because they retry inside one task, so they have no boundary to hand off at. A strategy that never escalates carries nothing and correctly shows no bracket at all. The bracket's context size is estimated as t = 2 x in_tok / calls, which assumes the prefix grows LINEARLY across a task's calls. Tool output and file reads do not arrive at a constant rate, so the error is one-sided in an unknown direction, and the bracket is an ordering of magnitudes rather than a quotable dollar amount. The bracket is computed on the token-complete subset — the tasks where every attempt on the realized path landed on a measured, token-bearing cell — which is strictly smaller than the scored set, because an imputed cell carries no token columns at all. What transfers to the plotted marker is the dimensionless surcharge FACTOR, not the subset's own dollars, and that transfer ASSUMES the subset carries context per dollar the way the scored set does. The subset is not a random sample of it — it is the tasks the collector happened to measure on every rung this strategy walked — so if those tasks escalate differently from the rest, the bracket is biased in the direction of that difference and nothing here corrects it. The subset size is published as the n in the bracket note row.
+layout: THREE levels of magnification, stacked full width — panel A carries every strategy over the full cost range. panel B redraws panel A's box at full width (\$8.69–\$132.56 at 89.5–100.0%), which is the detail window — every strategy whose pass rate clears the best measured row's own Wilson lower bound, plus the fixed-frontier baseline and the oracle bound, never written down. panel C redraws panel B's box at full width (\$27.90–\$33.76 at 96.5–96.9%), which is the group whose markers overlap in the panel above, measured on the rendered canvas, never written down. the pass-rate Wilson interval and the two cost marks are drawn in panel(s) A, B, and panel C carries neither — at that scale they run off the panel — carrying the context-transfer brackets instead. every panel names every strategy its own window holds, so a name repeats down the stack at each scale; the exception is the group panel C magnifies, whose markers are one blob above it and which is therefore named only there.
+layout: 2 strategies within \$27.11–\$38.49 at 96.7–96.7% have separable markers but names too wide to print beside them, so the names are stacked on levels, each on a vertical leader to its own marker — no second copy of the points is drawn
+layout: 2 strategies within \$1.50–\$1.80 at 75.5–75.5% have separable markers but names too wide to print beside them, so the names are stacked on levels, each on a vertical leader to its own marker — no second copy of the points is drawn
+layout: the context-transfer bracket is drawn only where the markers are magnified, so kNN-semantic-cascade carries none on the canvas; its numbers are in the context-transfer note rows above
 
-<!-- n: strategies=9, tasks=184 -->
+**Limits.** A non-live point's number is still a real measurement — it is the CONCLUSION that is limited: no router.strategy setting reproduces it, so it may not anchor the frontier or a headline. It does NOT follow that the underlying capability is unavailable — a blocked row may measure a mechanism that ships in a different layer — and the per-strategy blocker in benchmark/routing/strategy_class.py says which case it is. A cascade point prices the LADDER's cost, not its per-rung quality. The shipped ladder's cheap intermediate rungs are measured separately against the base model on this same corpus, and are null or net-harmful there — see ladder_rungs.png. The cache-aware x position rests on an ASSUMED cache hit rate; only the per-model discount and input share are measured — see cache_economics.png for the range that assumption spans. The difficulty rows' x position includes the MEASURED per-task judge label cost (gpt-5.6-terra, ~$0.0016/task measured — folded into both cost columns and published as judge_label_cost in strategy_summary.csv). A judge call is one per task and never cached, so it is identical under both cost models; every other row carries no judge bill at all. The horizontal interval belongs to the NAIVE total and is not transplanted onto the cache-aware marker. The cache-aware ratio's own 90% bootstrap CI is published by the kill gate (cache cost is scoped per task, so a whole-task resample preserves it) — not transplanted onto this plot. Pass rates are scored on the coverage-completed matrix, whose imputed cells are all pass=True — see evidence_basis.png for how much of each strategy's number that is. The scored set is chosen by coverage, not at random: the collector runs the expensive tier only on the discriminating slice, so both axes describe a difficulty-biased sample. The subtitle carries the measured gap. The dashed context bracket is a COST MODEL, not a measurement. It re-prices the marker when the context an attempt ends holding is resent to the model escalation moves to — a cache MISS by construction, so it is charged at full input rate. It asserts NO pass rate: the bracket is horizontal because nothing here measures what carrying context does to quality. The canvas labels the bracket in CONFIG vocabulary; the cost model underneath is parameterised by alpha, the share of the context an attempt ends holding that is resent. The mapping is exact: `context_transfer: summary` is the alpha 0.1-0.3 band (a band, because a summariser's compression ratio is not a constant and one tick would assert a precision this model does not have), `context_transfer: full` is alpha = 1.0, and the marker itself is alpha = 0 — a fresh context on every rung, which is what the OFFLINE benchmark replays and what live inference never does. alpha = 0 is deliberately not offered as a config value: `none` is not a context_transfer setting, so the marker is the offline/live divergence made visible rather than a third option. A bracket is drawn on the DEPLOYABLE escalating strategies only. The summary table also carries alpha columns for the two within-task cascades, and they are deliberately not drawn: the model prices a SESSION-BOUNDARY handoff, and those two rows are blocked precisely because they retry inside one task, so they have no boundary to hand off at. A strategy that never escalates carries nothing and correctly shows no bracket at all. The bracket's context size is estimated as t = 2 x in_tok / calls, which assumes the prefix grows LINEARLY across a task's calls. Tool output and file reads do not arrive at a constant rate, so the error is one-sided in an unknown direction, and the bracket is an ordering of magnitudes rather than a quotable dollar amount. The bracket is computed on the token-complete subset — the tasks where every attempt on the realized path landed on a measured, token-bearing cell — which is strictly smaller than the scored set, because an imputed cell carries no token columns at all. What transfers to the plotted marker is the dimensionless surcharge FACTOR, not the subset's own dollars, and that transfer ASSUMES the subset carries context per dollar the way the scored set does. The subset is not a random sample of it — it is the tasks the collector happened to measure on every rung this strategy walked — so if those tasks escalate differently from the rest, the bracket is biased in the direction of that difference and nothing here corrects it. The subset size is published as the n in the bracket note row.
 
+<!-- n: strategies=12, tasks=184 -->
+
+### Shunt's default matches the frontier baseline's quality at a third of the bill {#fig-cost-quality-headline}
+
+![Shunt's default matches the frontier baseline's quality at a third of the bill](assets/figures/routing/cost_quality_headline.png)
+
+*4 of 12 scored strategies, 184 scored tasks · Session-Cascade \$28.71 at 96.7% vs Always-Frontier \$96.02 at 95.1% — 30% of the bill · cache-aware cost on a LINEAR axis; the full twelve-strategy plane is cost_quality_frontier.png*
+> **Caveat.** Oracle is a hindsight bound, not a setting anyone can buy — and the scored tasks are coverage-selected, not random.
+
+**Reading.** One plane, four points, no legend — each point is named where it sits. Left to right is the total dollars a strategy spent over the whole scored task set, on a LINEAR axis; bottom to top is the share of tasks it passed. Cheap is left, good is up, so the best place to be is the top-left corner. The blue point is what Shunt routes with by default. The orange point is the baseline it has to beat: send everything to the strongest enabled frontier model. The grey circle at the far left is the opposite extreme — send everything to the cheapest model. The grey STAR is a bound, not a product: it is what a router that already knew each task's outcome would have paid, and no configuration reproduces it. The measuring bar across the bottom is the figure's whole point: it spans the horizontal distance between the blue point and the orange one, which is the money the router does not spend.
+
+**What to look for.** Read the measuring bar, then check the two heights it connects. The blue point sits far to the LEFT of the orange one, at the same height or above it — cheaper for the same work is the claim, and a router that landed below and to the right of the baseline would have failed.
+
+**Terms.** *pass rate* — share of the scored tasks a strategy solved. *cache-aware cost* — what a deployment is billed once a repeat of the same model on a consecutive attempt is charged at the provider's cache-read rate rather than full input price. *hindsight bound* — the price of choosing correctly with the answers already known — a floor on what any router could cost, never a setting an operator can select.
+
+**Notes.** Oracle: \$18.33 cache-aware, 96.74% passed, n=184 (hindsight bound — no router.strategy value reproduces it)
+Session-Cascade: \$28.71 cache-aware, 96.74% passed, n=184 (the shipped router.strategy default)
+Always-Frontier: \$96.02 cache-aware, 95.11% passed, n=184 (the baseline the kill gate is measured against)
+Always-Cheap: \$1.50 cache-aware, 75.54% passed, n=184 (the cheap floor)
+The four rows are read from the derived strategy summary at render time, so this figure and cost_quality_frontier.png cannot quote different numbers for one strategy.
+No interval is drawn. This figure states an ordering, not a precision — the intervals, the mixture region and the eight strategies left out are in cost_quality_frontier.png.
+
+**Limits.** This is FOUR of the strategies the benchmark scores. The full plane — every strategy, its interval, the mixture region a router has to clear, and which rows are not selectable at all — is cost_quality_frontier.png, and this figure asserts nothing the parent does not. The y axis starts above zero and is labelled with the range it shows: the four points span about twenty points of pass rate, which on a 0-100 axis is a flat line. The cache-aware x position rests on an ASSUMED cache hit rate; only the per-model discount and input share are measured — see cache_economics.png for the range that assumption spans. Pass rates are scored on the coverage-completed matrix, whose imputed cells are all pass=True — see evidence_basis.png for how much of each strategy's number that is. The scored set is chosen by coverage, not at random: the collector runs the expensive tier only on the discriminating slice, so both axes describe a difficulty-biased sample.
+
+<!-- n: strategies_drawn=4, tasks=184 -->
 ### Real problem text carries no routable signal; a three-level human tag does {#fig-embedding-signal}
 
 ![Real problem text carries no routable signal; a three-level human tag does](assets/figures/routing/embedding_signal.png)
@@ -531,13 +634,16 @@ NULL RESULT: the diagonal advantage over 8 repos with ≥16 tasks is 0.0000, INS
 **Notes.** The dollar split is PATH-AWARE: a cascade that probed a projected cell on its way to a measured pick counts as projected, so the measured bar is measured end to end.
 Always-Cheap: \$1.45 measured + \$0.05 projected; 129 measured passes + 10 projected
 Always-Frontier: \$52.87 measured + \$43.15 projected; 86 measured passes + 89 projected
+Difficulty-Band-cascade: \$25.46 measured + \$9.30 projected; 145 measured passes + 33 projected
 Oracle: \$17.61 measured + \$0.71 projected; 164 measured passes + 14 projected
 Price-Cascade: \$19.60 measured + \$7.51 projected; 153 measured passes + 25 projected
 Session-Cascade: \$24.79 measured + \$8.78 projected; 153 measured passes + 25 projected
-Tier-Classifier: \$8.69 measured + \$2.84 projected; 85 measured passes + 36 projected
-kNN: \$8.44 measured + \$4.77 projected; 114 measured passes + 30 projected
-kNN-cascade: \$28.77 measured + \$14.24 projected; 135 measured passes + 43 projected
-kNN-cascade (within-task): \$21.89 measured + \$8.55 projected; 147 measured passes + 31 projected
+kNN-difficulty: \$1.45 measured + \$0.05 projected; 129 measured passes + 10 projected
+kNN-difficulty-cascade: \$25.04 measured + \$8.82 projected; 153 measured passes + 25 projected
+kNN-semantic: \$7.58 measured + \$4.21 projected; 118 measured passes + 25 projected
+kNN-semantic-cascade: \$29.17 measured + \$14.11 projected; 139 measured passes + 39 projected
+kNN-semantic-cascade (within-task): \$21.89 measured + \$8.55 projected; 147 measured passes + 31 projected
+kNN-semantic-tier: \$8.69 measured + \$2.84 projected; 85 measured passes + 36 projected
 band 1: 317 real / 81 imputed / 2 unknown
 band 2: 190 real / 10 imputed / 0 unknown
 band 3: 156 real / 230 imputed / 14 unknown
@@ -573,7 +679,7 @@ Realized explore/exploit SPEND 0.690 (worst seed 0.992); the router's own counte
 
 ![The pre-registered arm misses the 5pp bar on every basis; the shipped default clears it](assets/figures/routing/kill_gate.png)
 
-*paired Tango score at the pre-registered δ=5pp · n=184/93/20/184 · arms disagree on 37 of 184: MDE ±8.2pp there, ±5.8pp at 10% discordance*
+*paired Tango score at the pre-registered δ=5pp · n=184/94/20/184 · arms disagree on 38 of 184: MDE ±8.3pp there, ±5.8pp at 10% discordance*
 > **Caveat.** 3 of 4 rows: WORSE by more than the margin. Those rows' savings are not at equal quality.
 **Reading.** Left: one row per evidence basis. The dot is the paired pass-rate difference (the kNN selection rule minus fixed-frontier) in percentage points, the whisker its 95% paired interval, and the dashed red line the pre-registered non-inferiority margin of -5pp. A row is green only when the Tango score test rejects H0 at that margin, red when the router is proven WORSE by more than the margin, grey when the data cannot tell. Right: the same tasks' total spend, baseline dot to router dot; a leftward arrow is a saving.
 
@@ -583,14 +689,14 @@ Realized explore/exploit SPEND 0.690 (worst seed 0.992); the router's own counte
 
 **Notes.** The margin is read from benchmark.yaml:collect.noninferiority_margin, so the bar on the canvas is the one that was pre-registered rather than one chosen after seeing the result.
 The pre-registration named the kNN selection rule as the verdict arm, and it is kept there: repointing it after seeing the data would rewrite the registered test. But router.strategy defaults to session_cascade, so the shipped default is drawn beside it on its own row, labelled NOT pre-registered. The gap is a pre-existing defect the rename exposed, not one it created — the pre-registered arm adjudicates a configuration no operator can select.
-completed (imputed): Δ=-16.8pp [-22.9, -10.8], inferior, b=3 c=34, router \$13.21 vs baseline \$96.02, MDE ±8.2pp (±5.8pp at 10% discordance)
-measured only: Δ=-18.3pp [-27.7, -8.9], inferior, b=3 c=20, router \$7.80 vs baseline \$50.93, MDE ±12.8pp (±8.2pp at 10% discordance)
-gate sample (N=20): Δ=-20.0pp [-37.5, -2.5], inferior, b=0 c=4, router \$1.39 vs baseline \$9.13, MDE ±24.9pp (±17.6pp at 10% discordance)
+completed (imputed): Δ=-17.4pp [-23.5, -11.3], inferior, b=3 c=35, router \$11.79 vs baseline \$96.02, MDE ±8.3pp (±5.8pp at 10% discordance)
+measured only: Δ=-19.1pp [-28.6, -9.7], inferior, b=3 c=21, router \$6.80 vs baseline \$51.71, MDE ±13.0pp (±8.1pp at 10% discordance)
+gate sample (N=20): Δ=-20.0pp [-37.5, -2.5], inferior, b=0 c=4, router \$1.48 vs baseline \$9.13, MDE ±24.9pp (±17.6pp at 10% discordance)
 Session-Cascade — shipped default, NOT pre-registered: Δ=+1.6pp [-0.2, +3.5], non_inferior, b=3 c=0, router \$33.56 vs baseline \$96.02, MDE ±2.3pp (±5.8pp at 10% discordance)
 equal-coverage via monotone imputation — 47% of frontier cells imputed (every strategy scored on n=184). Monotonicity holds on 92% of 190 multi-observed task(s) (measured, not assumed). NEARLY every imputed cell is filled pass=True at a median measured price (the monotone ladder has a fail branch, and 1 of 398 filled cells took it), for the router as well as for the baseline — see evidence_basis.png for how much of each strategy's number that is, and kill_gate.png's measured-only row for what survives when the projection is removed.
 **Limits.** The cost panel is naive per-task cost. The gate's real criterion is cache-aware cost, which the gate bootstraps per task — cache cost is scoped per task (one task is one session), so a whole-task resample preserves within-task adjacency — and publishes as a 90% CI in the tracked verdict artifact. See cache_economics.png for how far the assumed hit rate moves that ratio.
 
-<!-- n: Session-Cascade — shipped default, NOT pre-registered=184, completed (imputed)=184, gate sample (N=20)=20, measured only=93 -->
+<!-- n: Session-Cascade — shipped default, NOT pre-registered=184, completed (imputed)=184, gate sample (N=20)=20, measured only=94 -->
 
 ### The router's one input does not predict outcomes; a 3-level human tag does {#fig-knn-calibration}
 
@@ -640,30 +746,32 @@ the shortlist jumps over kimi-k3, a target whose interval clears zero on this co
 
 ![What the bound's quality costs, and which of those prices you may actually pay](assets/figures/routing/live_gap.png)
 
-*5 of 9 strategies reach 96.74% ± 1pp · cheapest live \$33.56 · cheapest blocked \$27.11 · bound \$18.33 · blocked strategies hold 42% of the live-to-bound headroom*
+*7 of 12 strategies reach 96.74% ± 1pp · cheapest live \$33.56 · cheapest blocked \$27.11 · bound \$18.33 · blocked strategies hold 42% of the live-to-bound headroom*
 > **Caveat.** 42% of the headroom sits behind a blocker, so it is a to-do, not a measured saving.
-**Reading.** Left: every strategy that reaches the bound's pass rate within one percentage point, as total spend on a log axis, cheapest at the bottom, coloured by class. A GREEN bar is a price you can pay today — `router.strategy` names it. The blue bracket is the span between the cheapest LIVE way to buy that quality and the cheapest BLOCKED one — engineering work, not physics. The red bracket is the span from there down to the bound, which no strategy of any class can cross. The subtitle carries how the two divide, because that split moves with the data and this title deliberately does not claim it. Right: how many strategies each class contributes and the best pass rate it reaches, with the reason that class is kept in the corpus.
+**Reading.** Left: every strategy that reaches the bound's pass rate within one percentage point, as a DOT at its total spend on a log axis, cheapest at the bottom, coloured by class. The axis is logarithmic, so only the dot's POSITION carries the price; the grey rule behind it is a reading guide and its length means nothing. A GREEN dot is a price you can pay today — `router.strategy` names it. The blue bracket is the span between the cheapest LIVE way to buy that quality and the cheapest BLOCKED one — engineering work, not physics. The red bracket is the span from there down to the bound, which no strategy of any class can cross. The subtitle carries how the two divide, because that split moves with the data and this title deliberately does not claim it. Right: how many strategies each class contributes and the best pass rate it reaches, with the reason that class is kept in the corpus.
 
-**What to look for.** Read the CHEAPEST GREEN bar first — that is what this quality actually costs a deployment, and if there is no green bar in the band the subtitle says so instead of pricing an empty set. Then read the two brackets against each other. A large blue span and a small red one means the shipped router's deficit is a backlog item; the reverse means the corpus has been squeezed and the remaining distance is a property of the models, not of the routing. Neither bracket is a result you can deploy — the whole point of separating the classes is that only the green bars are purchasable.
+**What to look for.** Read the CHEAPEST GREEN dot first — that is what this quality actually costs a deployment, and if there is no green dot in the band the subtitle says so instead of pricing an empty set. Then read the two brackets against each other. A large blue span and a small red one means the shipped router's deficit is a backlog item; the reverse means the corpus has been squeezed and the remaining distance is a property of the models, not of the routing. Neither bracket is a result you can deploy — the whole point of separating the classes is that only the green dots are purchasable.
 
 **Terms.** *bound* — a strategy that reads the query task's own realised outcome. Unreachable BY DESIGN; it exists to say how much is left, never to be shipped. *blocked* — no router.strategy value names it, with the reason and a path to live recorded in benchmark/routing/strategy_class.py. A costed to-do, not a result — but the to-do is sometimes only the NAME, not the mechanism. *control* — exists so the other numbers mean something — a strategy the measurement is compared against, which must never ship. *at the bound's quality* — pass rate within 1.0pp of the best bound's. A cost comparison across the band is therefore an equal-quality comparison to within that tolerance.
 
 **Notes.** Costs are the same naive per-task totals every other routing figure uses, so the brackets are comparable with cost_quality_frontier.png.
 Oracle: \$18.33, 96.74% (bound)
 Price-Cascade: \$27.11, 96.74% (blocked)
-kNN-cascade (within-task): \$30.44, 96.74% (blocked)
+kNN-semantic-cascade (within-task): \$30.44, 96.74% (blocked)
 Session-Cascade: \$33.56, 96.74% (live)
-kNN-cascade: \$43.01, 96.74% (live)
+kNN-difficulty-cascade: \$33.86, 96.74% (blocked)
+Difficulty-Band-cascade: \$34.77, 96.74% (blocked)
+kNN-semantic-cascade: \$43.28, 96.74% (live)
 **Limits.** The blue bracket is what the BLOCKED strategies measured here would buy IF their blockers were removed, and the blockers are not one kind of thing: some are structural (cache-safety, an offline-fit input) and the live mechanism replacing them may land nowhere near this span, while another is only that no router.strategy value names a mechanism that already ships in a different layer. Read each blocker in benchmark/routing/strategy_class.py before treating this span as unbuilt work. Only strategies inside the quality band appear on the left panel. A cheap strategy that gives up quality is not a smaller version of this gap — read the frontier figure for that trade. The bound reads realised outcomes on the SAME corpus it is measured on, so it is a ceiling for this task set, not a general one.
 
-<!-- n: in_band=5, strategies=9 -->
+<!-- n: in_band=7, strategies=12 -->
 
 ### The saving is a cheaper tariff, not a better prediction {#fig-oracle-gap}
 
 ![The saving is a cheaper tariff, not a better prediction](assets/figures/routing/oracle_gap.png)
 
-*price 143.3% + interaction -39.0% = 104.3% mechanism, volume -4.3% (64 both-pass tasks) · regret quoted at gamma=0.1; ordering IDENTICAL across gamma 0.001-0.33*
-> **Caveat.** Arm-bandit, Tier-Classifier carry MORE regret than always-cheapest.
+*price 138.0% + interaction -36.1% = 101.9% mechanism, volume -1.9% (64 both-pass tasks) · regret quoted at gamma=0.1; ordering IDENTICAL across gamma 0.001-0.33*
+> **Caveat.** Arm-bandit, kNN-difficulty, kNN-semantic-tier carry MORE regret than always-cheapest.
 **Reading.** Left: the cost saving of the router against fixed-frontier, split by Oaxaca-Blinder into a price effect (cheaper tokens), a volume effect (fewer tokens) and their interaction, over the tasks where BOTH arms landed on a measured cell and passed. Middle: cumulative regret against the hindsight oracle, lower is better, with 95% bootstrap intervals where the summary carries them; bar colour is the strategy's class — green runs live today, blue is blocked, orange is a control that must never ship, grey is a bound no router can reach — and a red outline marks a bar a fixed always-cheapest policy already beats. Right: the same ranking recomputed across three orders of magnitude of the cost/quality exchange rate, coloured the same way.
 
 **What to look for.** Read the left panel for what routing is actually doing — if price dominates, the value is in the price list, and a fixed cheap policy captures most of it without any prediction. Then read the right panel: a flat set of lines means the middle panel's ordering does not depend on the exchange rate nobody can defend.
@@ -675,23 +783,26 @@ Always-Cheap: regret 37.3172
 Always-Frontier: regret 10.7692
 Arm-bandit: regret 48.9889
 Arm-oracle: regret -0.3685
+Difficulty-Band-cascade: regret 1.6441
 Oracle: regret 0.0000
 Price-Cascade: regret 0.8783
 Session-Cascade: regret 1.5236
-Tier-Classifier: regret 56.3201
-kNN: regret 33.4884
-kNN-cascade: regret 2.4681
-kNN-cascade (within-task): regret 1.2116
+kNN-difficulty: regret 37.3472
+kNN-difficulty-cascade: regret 1.5536
+kNN-semantic: regret 34.3461
+kNN-semantic-cascade: regret 2.4954
+kNN-semantic-cascade (within-task): regret 1.2116
+kNN-semantic-tier: regret 56.3201
 Every strategy holds the same rank at every gamma on the grid, so the ladder's ordering is a statement about quality-at-cost and not about the exchange rate.
 **Limits.** The price decomposition treats a cheaper model as a cheaper way to get the SAME outcome. Measured per-rung, the cheap intermediate targets do not deliver the base model's outcome on this corpus, so the price term is an upper bound on what cheapness buys — see ladder_rungs.png. The bandit is an illustrative inline learner drawn for this figure only, not a shipped routing strategy. It shows that a naive learner loses here; it does not show that every learner would. The arm series exist only where more than one arm per model was sampled; the coverage is sparse by design.
 
-<!-- n: both_pass_tasks=64, series=11 -->
+<!-- n: both_pass_tasks=64, series=14 -->
 
 ### The kNN selection rule's errors go both ways — it loses tasks, not just money {#fig-routing-decision-audit}
 
 ![The kNN selection rule's errors go both ways — it loses tasks, not just money](assets/figures/routing/routing_decision_audit.png)
 
-*178 decidable decisions, 6 tasks no model solved · 105 exact / 41 over-provisioned / 32 under-provisioned*
+*178 decidable decisions, 6 tasks no model solved · 107 exact / 39 over-provisioned / 32 under-provisioned*
 > **Caveat.** 32 task(s) were lost to under-provisioning — those are quality, not cost.
 **Reading.** Left: rows are the model the router chose, columns the cheapest model that actually solved the task. The diagonal is an exact hit. BELOW it the router paid for a model it did not need; above it the router under-provisioned and the task was lost. Right: the same decisions as an error budget — exact, over-provisioned, under-provisioned, and the tasks no model solved, which no decision could have won.
 
@@ -700,10 +811,10 @@ Every strategy holds the same rank at every gamma on the grid, so the ladder's o
 **Terms.** *cheapest sufficient* — the cheapest measured model that passed this task — the router's correct answer. Undefined when no model passed. *over-provisioned* — the chosen model was dearer than the cheapest that would have passed. *under-provisioned* — the chosen model failed a task some dearer model solved.
 
 **Notes.** Both axes are in price order and rows are the CHOSEN model, so a cell below the diagonal is over-provisioning by construction rather than by convention.
-exact-hit rate 59.0% over the decidable set; over-provisioning is 23.0%
+exact-hit rate 60.1% over the decidable set; over-provisioning is 21.9%
 **Limits.** Cheapest-sufficient is read off the coverage-completed matrix, so a task whose cheap cell was imputed pass=True yields a cheaper 'correct answer' than measurement alone supports — the over-provisioning count is an upper bound.
 
-<!-- n: decisions=184, exact=105, over=41, under=32 -->
+<!-- n: decisions=184, exact=107, over=39, under=32 -->
 
 ### A narrow mid-k band beats the two-policy mixture; the shipped setting does not {#fig-sweep-regimes}
 
@@ -731,7 +842,7 @@ Reward is driven by success_rate_thresh (η²=0.68); k also matters (η²=0.07) 
 *184 scored tasks (16 incomplete challenges excluded); 6 solved by no enabled model · 4 capability bands populated · hardest bucket (0 solvers) mostly deepseek-v4-flash, easiest (6 solvers) mostly deepseek-v4-flash*
 **Reading.** Left: how many tasks each capability band is the cheapest sufficient answer for, weakest band on the left, plus the tasks no enabled model solved. Right: for each count of solving models — the corpus's own difficulty measure — the share of tasks the kNN selection rule sent to each model, as stacked bars with the task count above.
 
-**What to look for.** Compare the stacks across the right panel's buckets. The rule plotted here is kNN: it predicts ONCE from the neighbourhood and does not escalate, so a stack that barely moves from the hardest bucket to the easiest means the prediction is barely conditioning on difficulty at all. Read embedding_signal.png for why — the input it predicts from carries almost no routable signal.
+**What to look for.** Compare the stacks across the right panel's buckets. The rule plotted here is kNN-semantic: it predicts ONCE from the neighbourhood and does not escalate, so a stack that barely moves from the hardest bucket to the easiest means the prediction is barely conditioning on difficulty at all. Read embedding_signal.png for why — the input it predicts from carries almost no routable signal.
 
 **Terms.** *capability band* — models grouped by derived capability rank; a task's band is the weakest band containing a model that solved it. *solving models* — how many enabled models solved the task. Zero means unwinnable, all means free.
 
@@ -740,13 +851,13 @@ band 1: 3 tasks
 band 2: 139 tasks
 band 3: 22 tasks
 band 4: 14 tasks
-0 solvers: {'deepseek-v4-flash': 5, 'qwen3.7-plus': 1}
-1 solvers: {'deepseek-v4-flash': 11, 'kimi-k3': 1, 'qwen3.7-plus': 2}
-2 solvers: {'deepseek-v4-flash': 9, 'qwen3.7-plus': 2, 'zai-glm-5.2': 1}
-3 solvers: {'deepseek-v4-flash': 7, 'kimi-k2.5': 1, 'kimi-k3': 1}
-4 solvers: {'deepseek-v4-flash': 8, 'gpt-5-mini': 1, 'kimi-k3': 1, 'qwen3.7-plus': 2, 'zai-glm-5.2': 1}
-5 solvers: {'deepseek-v4-flash': 18, 'kimi-k2.5': 3, 'kimi-k3': 1, 'qwen3.7-plus': 1, 'zai-glm-5.2': 3}
-6 solvers: {'deepseek-v4-flash': 78, 'gpt-5-mini': 1, 'kimi-k2.5': 4, 'kimi-k3': 9, 'qwen3.7-plus': 7, 'zai-glm-5.2': 5}
+0 solvers: {'deepseek-v4-flash': 6}
+1 solvers: {'deepseek-v4-flash': 11, 'gpt-5-mini': 1, 'kimi-k3': 1, 'qwen3.7-plus': 1}
+2 solvers: {'deepseek-v4-flash': 10, 'gpt-5-mini': 1, 'kimi-k2.5': 1}
+3 solvers: {'deepseek-v4-flash': 6, 'gpt-5-mini': 1, 'kimi-k2.5': 1, 'kimi-k3': 1}
+4 solvers: {'deepseek-v4-flash': 9, 'gpt-5-mini': 1, 'kimi-k2.5': 1, 'kimi-k3': 1, 'zai-glm-5.2': 1}
+5 solvers: {'deepseek-v4-flash': 18, 'kimi-k2.5': 4, 'kimi-k3': 3, 'zai-glm-5.2': 1}
+6 solvers: {'deepseek-v4-flash': 80, 'gpt-5-mini': 4, 'kimi-k2.5': 9, 'kimi-k3': 9, 'qwen3.7-plus': 1, 'zai-glm-5.2': 1}
 **Limits.** An imputed cell is always a pass, so a task's band is a LOWER bound on the capability it truly needs and the solving-model count is an upper bound. The right panel is NOT circular for the rule plotted — kNN decides before any outcome for this task exists — but it is not independent either: the neighbours it reads and the solving-model count it is plotted against come from one matrix. 'No enabled model solved it' counts the six models at their DEFAULT arms. complementarity.png counts every sampled (model, arm) column instead, so its solved-by-none figure is smaller — a different denominator, not a disagreement.
 
 <!-- n: excluded=16, tasks=184, unsolved=6 -->

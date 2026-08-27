@@ -1,6 +1,6 @@
 """Single-shot rank classifier: predict the crossover model from kNN, route there once.
 
-Unlike kNN-cascade it never probes cheaper models first — one embedding lookup picks the
+Unlike kNN-semantic-cascade it never probes cheaper models first — one embedding lookup picks the
 capability-rank position and routes straight to that model.
 """
 
@@ -61,7 +61,7 @@ class TierClassifier(Strategy):
 
     @property
     def name(self) -> str:
-        return "Tier-Classifier"
+        return "kNN-semantic-tier"
 
     def select(self, task_id: str, task_meta: dict, matrix: dict) -> str:
         if not matrix.get("results"):

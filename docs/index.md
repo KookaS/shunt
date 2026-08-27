@@ -18,7 +18,7 @@ with a `work_dir`), or manually via `shunt flag`.
 `session_cascade`: start every session on the cheapest healthy model, and let a repeated
 verified failure raise a rung at the next session boundary. That path does **no per-task
 routing** — it never embeds a turn, never queries the neighbourhood, never scores
-candidates. The kNN routing model below is what `router.strategy: knn_cascade` turns on,
+candidates. The kNN routing model below is what `router.strategy: knn_semantic_cascade` turns on,
 and it is opt-in. (The `exploration:` block ships `enabled: true` but only perturbs a kNN
 base pick, so it too is inert under the default — see
 [configuration](configuration.md#tune-the-router).)
@@ -36,7 +36,7 @@ The solid path is what runs: the router chooses a model on the first turn, verif
 outcomes at session close (via off-wire test execution when configured), and the router
 learns from those outcomes for future sessions. Under the default strategy the learning
 loop feeds the **escalation** ladder rather than a per-task pick; switching to
-`knn_cascade` is what makes those outcomes decide the first turn too.
+`knn_semantic_cascade` is what makes those outcomes decide the first turn too.
 
 ## An honest result
 
@@ -47,14 +47,15 @@ there is routing headroom. On the agentic-coding workload we actually target it
 did **not** clear our viability bar: ranking hard tasks from easy ones off the
 prompt embedding came out near chance.
 
-That number is weaker evidence than it looks, and we would rather say so than
-bank it. The embedder was handed a 106-character identifier instead of the task's
-problem statement — still true of every committed task — and the suite's smallest
-detectable effect sits far above any published difficulty detector. So on coding
-work the question is open, not settled ([Results](results.md#routing-results)).
-Either way we do not claim live coding-task routing we cannot back with evidence,
-and neither the cache-safe proxy nor the verify-and-escalate path depends on that
-signal.
+That result used to rest on weaker evidence than it looked: the embedder was
+handed a 106-character identifier rather than the task's problem statement. The
+corpus has since been rebuilt on the real problem statement, and the signal still
+sits inside a shuffled-data null while a crude human difficulty tag clears the
+same null on the same pipeline — a working control beside a negative result
+([Results](results.md#routing-results)). It is a falsification on this corpus at
+this sample size, not a claim that no encoder could do better. Either way we do
+not claim live coding-task routing we cannot back with evidence, and neither the
+cache-safe proxy nor the verify-and-escalate path depends on that signal.
 
 ## What runs today
 

@@ -23,7 +23,7 @@ class TestStrategyFactoriesMatchEnabledSet:
         # algorithm, and the headline strategy that must appear on the regret plot.
         config.load("benchmark/benchmark.yaml")
         factories = report._build_strategy_factories(config.gamma())
-        assert "kNN" in factories
+        assert "kNN-semantic" in factories
 
     def test_oracle_reward_always_present_as_internal_reference(self):
         # Oracle-reward is the regret plot's baseline every strategy is scored

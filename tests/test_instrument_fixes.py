@@ -202,7 +202,7 @@ class TestBilledAttempts:
 
     def test_a_cascade_publishes_every_attempt_not_just_the_total(self):
         m = _matrix()
-        _dec, _uns, attempts = evaluate_billed(PriceCascade(max_tries=1), m, ["t1"])
+        _dec, _uns, attempts, _judge = evaluate_billed(PriceCascade(max_tries=1), m, ["t1"])
         assert [(a.model, a.cost) for a in attempts["t1"]] == [("cheap", 1.0), ("frontier", 10.0)]
 
     def test_attempts_reconcile_with_the_collapsed_total(self):
@@ -217,7 +217,7 @@ class TestBilledAttempts:
     def test_a_single_shot_decision_is_one_attempt(self):
         from benchmark.routing.strategies.fixed import AlwaysFrontier
 
-        _dec, _uns, attempts = evaluate_billed(AlwaysFrontier(), m := _matrix(), ["t1"])
+        _dec, _uns, attempts, _judge = evaluate_billed(AlwaysFrontier(), m := _matrix(), ["t1"])
         assert m and [(a.model, a.cost) for a in attempts["t1"]] == [("frontier", 10.0)]
 
 

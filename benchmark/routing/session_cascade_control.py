@@ -467,7 +467,8 @@ def main() -> int:
         "rank_shortlist": None if shortlist is None else int(shortlist),
     }
     # BOTH session-cadence rows are gated here, because they are one instrument opened at two
-    # rungs: `Session-Cascade` starts at the cheapest model, `kNN-cascade` at the kNN pick. A
+    # rungs: `Session-Cascade` starts at the cheapest model, `kNN-semantic-cascade` at the
+    # kNN pick. A
     # verdict may be quoted for a row only if ITS leg is admissible — and note what "its leg"
     # buys: the two legs' correlation statistic is shift-invariant and therefore IDENTICAL by
     # construction, so the seeded leg's independent content is its floor-billing check alone

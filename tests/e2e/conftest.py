@@ -36,7 +36,7 @@ def app_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[...
     # default does not produce — it never consults the neighbourhood. The default is not left
     # untested by this: `test_routing_escalation.py` boots `session_cascade` explicitly, and
     # every test that cares about another strategy names it here.
-    default_strategy = "knn_cascade"
+    default_strategy = "knn_semantic_cascade"
 
     def _boot(*, repo: Path | None = None, strategy: str | None = default_strategy) -> TestClient:
         for name in _CONTROLLED_ENV:

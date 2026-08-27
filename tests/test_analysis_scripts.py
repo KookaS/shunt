@@ -63,10 +63,10 @@ class TestReportRegretFactories:
 
         factories = _build_strategy_factories(gamma=0.1)
         # Keys must equal the strategies' .name so they match results.csv rows.
-        assert "kNN" in factories
-        assert "kNN-cascade" in factories
-        assert factories["kNN"]().name == "kNN"
-        assert factories["kNN-cascade"]().name == "kNN-cascade"
+        assert "kNN-semantic" in factories
+        assert "kNN-semantic-cascade" in factories
+        assert factories["kNN-semantic"]().name == "kNN-semantic"
+        assert factories["kNN-semantic-cascade"]().name == "kNN-semantic-cascade"
 
 
 class TestRegretExcludesUnscorable:
@@ -180,16 +180,18 @@ class TestZeroEvidenceRows:
     def test_thin_rows_are_rejected_with_a_reason(self):
         from benchmark.routing.report import _validate_rows
 
-        missing = _validate_rows([{"strategy": "kNN", "n_tasks": 3}])
+        missing = _validate_rows([{"strategy": "kNN-semantic", "n_tasks": 3}])
         assert missing is not None and "TotalCost" in missing
 
         no_evidence = _validate_rows(
-            [{"strategy": "kNN", "n_tasks": 0, "TotalCost": 0.0, "AvgPerf%": 0.0}]
+            [{"strategy": "kNN-semantic", "n_tasks": 0, "TotalCost": 0.0, "AvgPerf%": 0.0}]
         )
         assert no_evidence is not None and "scorable" in no_evidence
 
         assert (
-            _validate_rows([{"strategy": "kNN", "n_tasks": 2, "TotalCost": 1.0, "AvgPerf%": 50.0}])
+            _validate_rows(
+                [{"strategy": "kNN-semantic", "n_tasks": 2, "TotalCost": 1.0, "AvgPerf%": 50.0}]
+            )
             is None
         )
 

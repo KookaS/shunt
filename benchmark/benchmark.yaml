@@ -18,26 +18,39 @@ strategies:
     - oracle              # upper bound (perfect knowledge, best quality)
     - always_frontier     # baseline: always the most expensive model
     - always_cheap        # baseline: always the cheapest model
-    - knn                 # CONTROL: the selection rule with the ladder removed
-    - knn_cascade         # the kNN pick, then the ladder at session cadence (opt-in routing)
-    - knn_cascade_withintask  # blocked: kNN-informed try-verify-escalate INSIDE one task
+    - knn_semantic        # CONTROL: the semantic-embedding selection rule with the ladder removed
+    - knn_semantic_cascade  # the semantic-kNN pick, then the ladder at session cadence (opt-in routing)
+    - knn_semantic_cascade_withintask  # blocked: semantic-kNN try-verify-escalate INSIDE one task
+    - knn_difficulty   # CONTROL: judge-difficulty selection rule with the ladder removed
+    - knn_difficulty_cascade  # judge-difficulty pick, then the ladder at session cadence
+    - difficulty_band_cascade # "just judge label + escalation": same-difficulty-band pick, then the ladder
     - price_cascade       # zero-ML floor: cheapest-first try-verify-escalate, no embeddings
     - session_cascade     # THE SHIPPED DEFAULT: the escalation ladder at session cadence (cache-safe)
-    - tier_classifier     # single-shot: predict crossover tier, route there directly
+    - knn_semantic_tier   # single-shot: predict crossover tier from semantic neighbours, route there
     # - oracle_reward      # same as oracle with different cost weight
     # - random             # not useful for comparison
-  knn:
+  knn_semantic:
     k: 20
     success_rate_threshold: 0.6   # lower = more cost savings, higher = more reliability
     min_samples: 3
-  # NOTE: `knn_cascade` (opt-in routing) has NO block of its own. It takes the kNN knobs
-  # above and the `session_cascade` ladder knobs below verbatim, so the two session-cadence rows
-  # can never be scored at two different ladders. The block below configures the BLOCKED
-  # within-task row only.
-  knn_cascade_withintask:
+  # The difficulty family has its OWN knobs: the semantic kNN's thresholds describe an embedding
+  # neighbourhood, and borrowing them would couple the two families' tuning. Its judge cost is
+  # not a knob — it is the MEASURED per-task cost from judge_difficulty.json.
+  knn_difficulty:
+    k: 20
+    success_rate_threshold: 0.6
+    min_samples: 3
+  difficulty_band:
+    success_rate_threshold: 0.6
+    min_samples: 3
+  # NOTE: `knn_semantic_cascade` (opt-in routing) has NO block of its own. It takes the
+  # `knn_semantic` selection knobs above and the `session_cascade` ladder knobs below verbatim,
+  # so the two session-cadence rows can never be scored at two different ladders. The block
+  # below configures the BLOCKED within-task row only.
+  knn_semantic_cascade_withintask:
     max_tries: 3
     success_rate_threshold: 0.6
-  tier_classifier:
+  knn_semantic_tier:
     success_rate_threshold: 0.6   # neighbour pass-rate at a tier's rung to route there
   session_cascade:
     # The PRODUCT's escalation defaults (src/shunt/router/escalation.py EscalationConfig), so

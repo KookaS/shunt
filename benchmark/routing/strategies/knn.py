@@ -47,6 +47,13 @@ def _get_embedder() -> Embedder:
 # call that used to fit.
 _EMBED_BUDGET: int = 32_000_000
 
+# Confidence granted to an IMPUTED neighbour cell (monotone-ladder fill, not measured).
+# 0.0 zeroes the cell's selection weight (impute.py flags imputed=True, near-exclusively
+# pass-filling), so a synthetic pass never votes as if it were verified. A small nonzero
+# value would down-weight rather than exclude; 0.0 is the honest reading of "no
+# measurement". Measured cells keep confidence 1.0.
+_IMPUTED_VERIFICATION_CONFIDENCE: float = 0.0
+
 
 def _length_batches(texts: list[str]) -> list[list[int]]:
     """Indices grouped so `len(batch) * max_chars^2` stays under the budget."""
@@ -159,11 +166,13 @@ class MatrixOutcomeIndex:
         embeddings: np.ndarray,
         index: hnswlib.Index,
         matrix: dict,
+        imputed_confidence: float = _IMPUTED_VERIFICATION_CONFIDENCE,
     ) -> None:
         self._task_ids = task_ids
         self._embeddings = embeddings
         self._index = index
         self._matrix = matrix
+        self._imputed_confidence = imputed_confidence
 
     def count_labeled(self) -> int:
         return len(self._task_ids)
@@ -200,12 +209,19 @@ class MatrixOutcomeIndex:
                 continue
             neighbor_results = self._matrix["results"].get(nid, {})
             for model, outcome in neighbor_results.items():
+                # A cell's `imputed` flag separates MEASURED outcomes from monotone-ladder
+                # fills (impute.py to_cell). An imputed neighbour — near-exclusively
+                # pass=True — must not vote as if it were verified: at the default
+                # confidence 0.0 it contributes no weight to the selection rule's
+                # weighted success or to its measured min_samples floor, so eligibility
+                # reflects measurement, not the completion axiom.
+                imputed = bool(outcome.get("imputed", False))
                 results.append(
                     NeighborResult(
                         model=model,
                         outcome=bool(outcome.get("pass", False)),
                         cost=float(outcome.get("cost", 0.0)),
-                        verification_confidence=1.0,
+                        verification_confidence=(self._imputed_confidence if imputed else 1.0),
                         distance=distance,
                         session_id=nid,
                         truncation_rate=0.0,
@@ -253,7 +269,7 @@ class _LookupEmbedder:
 class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm name)
     """kNN routing via HNSW with distance-weighted cheapest-above-threshold,
     using the live ``RouterEngine.decide()`` for selection. Params: ``k`` (20),
-    ``success_rate_threshold`` (0.7), ``min_samples`` (3).
+    ``success_rate_threshold`` (0.6 shipped), ``min_samples`` (3).
     """
 
     def __init__(
@@ -266,6 +282,16 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
         self._k = k
         self._success_rate_threshold = success_rate_threshold
         self._min_samples = min_samples
+        # `success_rate_threshold` semantics — a RAW global bar on the confidence- and
+        # distance-weighted neighbour pass rate, not a calibrated quality target. The
+        # shipped 0.6 sits near deepseek-v4-flash's global pass rate, so crossing it on
+        # this corpus is noise-dominated: a model's measured rate wobbles across the bar
+        # with neighbourhood draw, and eligibility flips between "cheap is fine" and
+        # "escalate" without a clean signal split. A RouteLLM-style calibration of the
+        # threshold against a TARGET CHEAP-MODEL SHARE is the alternative; it is not
+        # implemented here (the knob sweep is benchmark/routing/scripts/threshold_sweep.py).
+        # The default above is the constructor default; the SHIPPED value is benchmark.yaml
+        # strategies.knn.success_rate_threshold (0.6), passed in by config.
         # None means the shipped embedder, resolved at CALL time so a monkeypatched module-level
         # `_embed_texts` still wins. The seam exists for `instrument_control`, which builds one
         # strategy per permutation draw over a corpus whose TEXT never changes — without it the
@@ -286,7 +312,7 @@ class kNNStrategy(Strategy):  # noqa: N801 (kNN is the established algorithm nam
     # ------------------------------------------------------------------
     @property
     def name(self) -> str:
-        return "kNN"
+        return "kNN-semantic"
 
     def select(self, task_id: str, task_meta: dict, matrix: dict) -> str:
         if not matrix.get("results"):

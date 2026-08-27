@@ -43,7 +43,7 @@ def _clean_env(tmp_path: Path) -> Iterator[None]:
 
 
 def test_strategy_flag_beats_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn")
+    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn_semantic_cascade")
     _apply_router_flag_overrides(_parse(["--strategy", "always_cheap"]))
     assert apply_env_overrides(load_router_policy()).strategy == "always_cheap"
 
@@ -123,9 +123,9 @@ def test_flag_beats_env_which_beats_file(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setenv("SHUNT_EXPLORE_BUDGET_FRAC", "0.5")
     monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "always_frontier")
 
-    # File alone: 0.1 / knn_cascade (the file's `knn` is the pre-rename alias).
+    # File alone: 0.1 / knn_semantic_cascade (the file's `knn` is a pre-rename alias).
     assert load_router_policy().exploration.explore_budget_frac == pytest.approx(0.1)
-    assert load_router_policy().strategy == "knn_cascade"
+    assert load_router_policy().strategy == "knn_semantic_cascade"
 
     _apply_router_flag_overrides(_parse(["--strategy", "always_cheap"]))
     policy = apply_env_overrides(load_router_policy())

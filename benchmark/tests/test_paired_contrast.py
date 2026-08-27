@@ -36,7 +36,7 @@ def _matrix() -> dict:
 
 
 def test_paired_delta_uses_intersection_not_raw_subtraction() -> None:
-    router, frontier = _Fake("kNN", "R"), _Fake("Always-Frontier", "F")
+    router, frontier = _Fake("kNN-semantic", "R"), _Fake("Always-Frontier", "F")
     res = run_eval._paired_delta(_matrix(), ["t1", "t2", "t3", "t4"], router, frontier, seed=1)
     assert res is not None
     # Shared scorable set is {t2, t3} only (t1 lacks F, t4 lacks R).
@@ -48,7 +48,7 @@ def test_paired_delta_uses_intersection_not_raw_subtraction() -> None:
 
 
 def test_paired_delta_none_when_no_shared_task() -> None:
-    router, frontier = _Fake("kNN", "R"), _Fake("Always-Frontier", "F")
+    router, frontier = _Fake("kNN-semantic", "R"), _Fake("Always-Frontier", "F")
     disjoint = {
         "tasks": {},
         "results": {
@@ -72,12 +72,12 @@ def test_pick_router_picks_the_best_live_router_not_the_best_row() -> None:
     rows = [
         {"strategy": "Oracle", "Reward": 9.0, "n_tasks": 5},
         {"strategy": "Always-Frontier", "Reward": 8.0, "n_tasks": 5},
-        {"strategy": "kNN-cascade (within-task)", "Reward": 7.0, "n_tasks": 5},
-        {"strategy": "kNN", "Reward": 6.5, "n_tasks": 5},
-        {"strategy": "kNN-cascade", "Reward": 6.4, "n_tasks": 5},
+        {"strategy": "kNN-semantic-cascade (within-task)", "Reward": 7.0, "n_tasks": 5},
+        {"strategy": "kNN-semantic", "Reward": 6.5, "n_tasks": 5},
+        {"strategy": "kNN-semantic-cascade", "Reward": 6.4, "n_tasks": 5},
         {"strategy": "Always-Cheap", "Reward": 6.0, "n_tasks": 5},
     ]
-    assert run_eval._pick_router(rows) == "kNN-cascade"
+    assert run_eval._pick_router(rows) == "kNN-semantic-cascade"
 
 
 def test_pick_router_excludes_the_frontier_baseline_even_though_it_is_live() -> None:

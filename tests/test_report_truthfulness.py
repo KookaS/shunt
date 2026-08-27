@@ -25,9 +25,9 @@ class TestHindsightIsNeverDeployable:
 
     def test_only_the_products_own_allowlist_is_live(self):
         # The whole point of the module: the benchmark cannot mint its own "deployable".
-        for name in ("kNN-cascade", "Always-Frontier", "Always-Cheap"):
+        for name in ("kNN-semantic-cascade", "Always-Frontier", "Always-Cheap"):
             assert strategy_class.is_live(name)
-        for name in ("kNN-cascade (within-task)", "Price-Cascade", "Tier-Classifier"):
+        for name in ("kNN-semantic-cascade (within-task)", "Price-Cascade", "kNN-semantic-tier"):
             assert not strategy_class.is_live(name)
             assert strategy_class.classify(name).path_to_live
 
@@ -36,7 +36,7 @@ class TestHindsightIsNeverDeployable:
         # pick has always run WITH the escalation ladder, so the pick alone is a contrast,
         # not a configuration. A CONTROL takes no path_to_live — there is no route and there
         # should not be one.
-        found = strategy_class.classify("kNN")
+        found = strategy_class.classify("kNN-semantic")
         assert found.cls is strategy_class.StrategyClass.CONTROL
         assert found.path_to_live is None
 
@@ -248,12 +248,12 @@ class TestPairedMeasuredKillGate:
                 {"t1": (True, 5.0, False), "t2": (True, 5.0, True), "t3": (True, 5.0, False)},
                 set(),
             ),
-            "kNN-cascade": (
+            "kNN-semantic-cascade": (
                 {"t1": (True, 4.0, False), "t2": (True, 4.0, False), "t3": (False, 6.0, True)},
                 set(),
             ),
         }
-        paired = report.paired_measured("kNN-cascade", "Always-Frontier", by_strategy)
+        paired = report.paired_measured("kNN-semantic-cascade", "Always-Frontier", by_strategy)
         assert paired is not None
         assert paired["n"] == 1.0  # only t1 is measured on both sides
         assert paired["router_cost"] == 4.0

@@ -299,9 +299,10 @@ def _pass_matrix(labels: np.ndarray, n_arms: int = _MIN_ARMS) -> np.ndarray:
     # escalates would already score 1.0 and the pass rate could not discriminate at all — the
     # control would be measuring cost, not recovery. Crossed, no constant policy beats 0.5.
     #
-    # Middle arms (strategy leg only) fail everywhere, so they are never eligible and never the
-    # cheapest-untested escalation target: the shipped rule falls through to the dearest arm on
-    # no evidence, which is exactly the 0.5-scoring constant the cheap arm also is. Every task is
+    # Middle arms (strategy leg only) fail everywhere, so they are never eligible and never
+    # the cheapest-untested escalation target. On no evidence the shipped rule falls
+    # through to the CHEAPEST arm — the 0.5-scoring constant the dearest arm also is, so
+    # the analytic chance level is unchanged whichever extreme it lands on. Every task is
     # still solved by exactly one arm, so 0.5 stays the analytic chance level.
     mat = np.zeros((len(labels), n_arms), dtype=float)
     mat[labels == 0, 0] = 1.0

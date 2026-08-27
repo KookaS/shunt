@@ -15,6 +15,11 @@ from benchmark.routing.session_cascade_control import assert_ladder_quotable
 from benchmark.routing.strategies.fixed import AlwaysCheap, AlwaysFrontier, Random
 from benchmark.routing.strategies.knn import kNNStrategy
 from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
+from benchmark.routing.strategies.knn_difficulty import (
+    DifficultyBandCascadeStrategy,
+    knnDifficultyCascadeStrategy,
+    knnDifficultyStrategy,
+)
 from benchmark.routing.strategies.knn_session_cascade import kNNSessionCascadeStrategy
 from benchmark.routing.strategies.oracle import Oracle, OracleRewardAware
 from benchmark.routing.strategies.price_cascade import PriceCascade
@@ -59,19 +64,26 @@ def get_strategies(
             "always_cheap",
             "always_frontier",
             "random",
-            "knn",
-            "knn_cascade",
-            "knn_cascade_withintask",
+            "knn_semantic",
+            "knn_semantic_cascade",
+            "knn_semantic_cascade_withintask",
+            "knn_difficulty",
+            "knn_difficulty_cascade",
+            "difficulty_band_cascade",
             "price_cascade",
             "session_cascade",
-            "tier_classifier",
+            "knn_semantic_tier",
         ]
 
-    knn_p = dict(strat_cfg.get("knn", {}))
-    cascade_p = dict(strat_cfg.get("knn", {}))
-    cascade_p.update(strat_cfg.get("knn_cascade_withintask", {}))
-    tier_p = dict(strat_cfg.get("knn", {}))
-    tier_p.update(strat_cfg.get("tier_classifier", {}))
+    knn_p = dict(strat_cfg.get("knn_semantic", {}))
+    cascade_p = dict(strat_cfg.get("knn_semantic", {}))
+    cascade_p.update(strat_cfg.get("knn_semantic_cascade_withintask", {}))
+    tier_p = dict(strat_cfg.get("knn_semantic", {}))
+    tier_p.update(strat_cfg.get("knn_semantic_tier", {}))
+    # The difficulty family reads its own knobs: the semantic kNN's thresholds describe an
+    # embedding neighbourhood, and borrowing them would couple the two families' tuning.
+    difficulty_p = dict(strat_cfg.get("knn_difficulty", {}))
+    band_p = dict(strat_cfg.get("difficulty_band", {}))
 
     if k is not None:
         knn_p.setdefault("k", k)
@@ -91,18 +103,26 @@ def get_strategies(
     # Session-Cascade takes the PRODUCT's escalation knobs, not the cascade's depth: its ladder
     # length is the model pool's, and what it is parameterised by is the live recurrence policy.
     session_p = dict(strat_cfg.get("session_cascade", {}))
-    # The OPT-IN `knn_cascade` row is the kNN pick on top of that same ladder, so it takes session
-    # knobs verbatim and adds only the selection knobs. No `knn_cascade:` block of its own: a
-    # second copy of the ladder knobs is a second ladder waiting to drift from the one the
-    # Session-Cascade row prices, and the two rows are only comparable at one ladder.
+    # The OPT-IN `knn_semantic_cascade` row is the kNN pick on top of that same ladder, so it
+    # takes session knobs verbatim and adds only the selection knobs. No
+    # `knn_semantic_cascade:` block of its own: a second copy of the ladder knobs is a second
+    # ladder waiting to drift from the one the Session-Cascade row prices, and the two rows are
+    # only comparable at one ladder.
     knn_session_p = {**{key: knn_p[key] for key in _KNN_KNOBS if key in knn_p}, **session_p}
+    # The difficulty session-cadence rows mirror knn_semantic_cascade: the difficulty pick on the
+    # SAME session ladder, so the three session-cadence rows are scored at one ladder.
+    difficulty_session_p = {
+        **{key: difficulty_p[key] for key in _KNN_KNOBS if key in difficulty_p},
+        **session_p,
+    }
+    band_session_p = {**{key: band_p[key] for key in _KNN_KNOBS if key in band_p}, **session_p}
     # STRUCTURAL: refuse to build either session-cadence row at a ladder its positive control does
     # not cover, rather than produce a row nobody may quote. Raised here — before any evaluation —
     # so the failure costs nothing and cannot be mistaken for a result.
     # The fallback is the STRATEGY's own default, not a restated literal: gating on a ladder the
     # row would not have run is a green gate over an uncertified replay.
     ladder = str(session_p.get("ladder", DEFAULT_LADDER))
-    for cadence_id in ("session_cascade", "knn_cascade"):
+    for cadence_id in ("session_cascade", "knn_semantic_cascade"):
         if cadence_id in enabled:
             assert_ladder_quotable(ladder)
 
@@ -112,12 +132,15 @@ def get_strategies(
         "always_cheap": lambda: AlwaysCheap(),
         "always_frontier": lambda: AlwaysFrontier(),
         "random": lambda: Random(seed=42),
-        "knn": lambda: kNNStrategy(**knn_p),
-        "knn_cascade": lambda: kNNSessionCascadeStrategy(**knn_session_p),
-        "knn_cascade_withintask": lambda: kNNCascadeStrategy(**cascade_p),
+        "knn_semantic": lambda: kNNStrategy(**knn_p),
+        "knn_semantic_cascade": lambda: kNNSessionCascadeStrategy(**knn_session_p),
+        "knn_semantic_cascade_withintask": lambda: kNNCascadeStrategy(**cascade_p),
+        "knn_difficulty": lambda: knnDifficultyStrategy(**difficulty_p),
+        "knn_difficulty_cascade": lambda: knnDifficultyCascadeStrategy(**difficulty_session_p),
+        "difficulty_band_cascade": lambda: DifficultyBandCascadeStrategy(**band_session_p),
         "price_cascade": lambda: PriceCascade(**price_p),
         "session_cascade": lambda: SessionCascadeStrategy(**session_p),
-        "tier_classifier": lambda: TierClassifier(**tier_p),
+        "knn_semantic_tier": lambda: TierClassifier(**tier_p),
     }
 
     return [registry[name]() for name in enabled if name in registry]
@@ -168,7 +191,7 @@ def _build_arg_parser(
         "--cascade-max-tries",
         type=int,
         default=cascade_p.get("max_tries", 3),
-        help="Max models to try in the kNN-cascade (within-task) shortlist",
+        help="Max models to try in the kNN-semantic-cascade (within-task) shortlist",
     )
     return ap
 
@@ -282,7 +305,7 @@ def _paired_outcomes(
     """Shipped kNN router vs fixed-frontier (control) realized pass on the disputed set."""
     # The arm has to be a strategy `LIVE_STRATEGIES` accepts, or the gate adjudicates
     # "should we ship this" on something the product refuses to run. It used to be
-    # kNN-cascade, which is blocked (see benchmark/routing/strategy_class.py) — the same
+    # kNN-semantic-cascade, which is blocked (see benchmark/routing/strategy_class.py) — the same
     # substitution benchmark/runner/kill_gate.py was fixed away from. Single-shot: one
     # decision per task, so the contrast is single-shot-vs-single-shot rather than
     # best-of-N coverage against a single attempt.
@@ -456,7 +479,10 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     bm = config.benchmark_params()
     strat_cfg = config.strategies()
     ap = _build_arg_parser(
-        config_path, bm, strat_cfg.get("knn", {}), strat_cfg.get("knn_cascade_withintask", {})
+        config_path,
+        bm,
+        strat_cfg.get("knn_semantic", {}),
+        strat_cfg.get("knn_semantic_cascade_withintask", {}),
     )
     args = ap.parse_args()
 

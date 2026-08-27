@@ -139,6 +139,12 @@ class SelectionRule:
             total_weight = sum(weights)
             if total_weight <= 0:
                 continue
+            # `min_samples` counts only neighbours with POSITIVE evidence weight, never
+            # the raw group size: a zero-weight neighbour (verification_confidence 0 —
+            # e.g. an imputed benchmark cell — or distance >= 1.0) carries no measured
+            # signal, so counting it toward the sample floor would let synthetic fills
+            # satisfy the eligibility bar (the completed-matrix no-op).
+            measured_samples = sum(1 for w in weights if w > 0)
 
             weighted_success = (
                 sum(w * (1.0 if n.outcome else 0.0) for w, n in zip(weights, group, strict=True))
@@ -155,11 +161,13 @@ class SelectionRule:
             if not math.isfinite(weighted_cost):
                 weighted_cost = math.inf
 
-            passes = weighted_success >= self._min_success_rate and len(group) >= self._min_samples
+            passes = (
+                weighted_success >= self._min_success_rate and measured_samples >= self._min_samples
+            )
             logger.debug(
                 "select: model=%s samples=%d/%d success=%.3f/%.3f cost=%.6f -> %s",
                 model,
-                len(group),
+                measured_samples,
                 self._min_samples,
                 weighted_success,
                 self._min_success_rate,
@@ -192,7 +200,20 @@ class SelectionRule:
             if m.name not in tested_models:
                 return (m.name, "exploration_untested")
 
+        # ALL models are tested and none qualified. This used to return the STRONGEST
+        # (priciest) model as a quality bet — but that bet is not evidence-backed (the
+        # strongest is in the tested set and failed the same bar), and on an
+        # equal-coverage neighbourhood (e.g. the benchmark's completed matrix, where
+        # every neighbour carries every model) it made the single-shot rule jump to
+        # kimi-k3 (~43x deepseek-v4-flash's price) on every un-qualifying task — the
+        # main source of the single-shot control's over-provisioning and of kNN's
+        # measured cost ($13.21 vs always-cheap's $1.50). Cost-minimal instead:
+        # degenerate toward the CHEAPEST overall. This changes the LIVE base pick too —
+        # when the whole pool is tested and nothing qualifies, the base pick is now the
+        # cheapest model, not the frontier. Deliberate escalation on verified failure is
+        # the auto-escalation ladder's job (engine._maybe_escalate), which is unaffected.
+        # Flagged to the owner.
         if ranked:
-            return (ranked[-1].name, "safe_fallback")  # strongest as the safe fallback
+            return (ranked[0].name, "safe_fallback")  # cheapest overall, not the strongest
 
         return (self._cold_start_model, "safe_fallback")

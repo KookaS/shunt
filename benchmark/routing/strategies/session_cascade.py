@@ -4,7 +4,8 @@ One decision per session, effort rung then rank rung, the climbed rank persistin
 next session, every attempt billed — the cache-safe analogue of the offline cascades.
 """
 
-# WHY THIS EXISTS. The two offline cascades (Price-Cascade, kNN-cascade) retry WITHIN a task
+# WHY THIS EXISTS. The two offline cascades (Price-Cascade, kNN-semantic-cascade) retry
+# WITHIN a task
 # because in SWE-bench a task IS one attempt, so they take a verified outcome per attempt
 # mid-session — more than one decision per session, which breaks cache-safety. That is the whole
 # of their blocker. Live, a SESSION is the attempt: the cheap model runs, the suite goes red at

@@ -678,7 +678,7 @@ The ladder is a layer over base routing, not part of any one algorithm — but i
 apply to every strategy. `always_cheap` and `always_frontier` are **pinned controls**: a
 verified failure never moves them, because they are the baselines a routing comparison is
 read against. The two strategies the ladder runs under are the ones named for it:
-`session_cascade` (the default — the cheapest model, then this layer) and `knn_cascade`
+`session_cascade` (the default — the cheapest model, then this layer) and `knn_semantic_cascade`
 (the kNN pick, then this layer). Both are refused at load if you turn the layer off.
 See [Choose the strategy](configuration.md#choose-the-strategy).
 

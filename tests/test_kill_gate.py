@@ -1,6 +1,6 @@
 """Tests for the kill-gate measurement (benchmark/runner/kill_gate.py): BUG 1
 (unmeasured cells are UNSCORABLE, excluded from the equal-pass pairing) and BUG 3
-(the verdict is driven by the real kNN-cascade router, and router errors surface)."""
+(the verdict is driven by the real kNN-semantic-cascade router, and router errors surface)."""
 
 from __future__ import annotations
 

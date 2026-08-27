@@ -1,6 +1,6 @@
 """Pricing and escalation-target helpers shared by the cascade strategies.
 
-Price-Cascade is the like-for-like zero-ML baseline for kNN-cascade, so the two must
+Price-Cascade is the like-for-like zero-ML baseline for kNN-semantic-cascade, so the two must
 escalate to the SAME model or their rows are not comparable. One helper, one semantics.
 """
 

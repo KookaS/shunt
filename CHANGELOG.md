@@ -14,6 +14,35 @@ This file is the source for the GitHub release notes, so the two cannot disagree
 
 ### Changed
 
+- **`router.strategy: knn_cascade` is renamed to `knn_semantic_cascade`; the benchmark's
+  `knn` / `knn_cascade` / `knn_cascade_withintask` / `tier_classifier` ids become
+  `knn_semantic` / `knn_semantic_cascade` / `knn_semantic_cascade_withintask` /
+  `knn_semantic_tier`.** The rename makes the two routing families distinguishable: the
+  embedding-based kNN is now the **semantic** kNN, and a judge-labelled **difficulty** kNN
+  (`knn_difficulty*`) is measured beside it. Every config that booted before boots with the
+  same (strategy, escalation) pair; the only resolution that changed is one that previously
+  *failed to boot* (`knn_cascade` with no `escalation:` block, and `knn_cascade` with the
+  ladder explicitly off, now resolve through the alias like `knn` did). Both old spellings
+  (`knn`, then `knn_cascade`) are accepted as migration aliases with a boot warning for at
+  least one minor release, exactly as `knn` was before — see `parse_router_policy`.
+
+- **`gpt-5.6-terra` is added as a judge-only registry model, and `gpt-5.6-sol`'s price is
+  corrected to the live requesty listing ($2.50/$15.00, was $5/$30).** The probe showed terra's
+  difficulty labels match the claude-sonnet-5 anchor (LOO R² +0.027 vs +0.029, at a ~half the
+  list price), so it becomes the source of the committed `benchmark/routing/data/judge_difficulty.json`
+  table that the `knn_difficulty` strategies read.
+
+- **The judge-difficulty routing family is measured and falsified — none is wired into the
+  product.** `knn_difficulty` (single-shot), `knn_difficulty_cascade` and
+  `difficulty_band_cascade` are scored and plotted (12 strategies on the frontier, judge bill
+  folded into cost as `judge_label_cost`). Against the pre-registered bar — match
+  `session_cascade` within 5pp at lower model+judge cost — none passes: the difficulty cascade
+  costs exactly `session_cascade` + the judge bill at equal quality (its pick never opens above
+  the cheapest rung), and the single-shot collapses to always-cheap on bar geometry (deepseek
+  clears the eligibility threshold in every difficulty neighbourhood). All three rows stay
+  benchmark-only; `docs/routing.md` §difficulty-routing lists what moving one to inference
+  would require.
+
 - **The live pool drops the models measurement shows to be strictly dominated.** `router.yaml`'s
   `models:` list now holds only the measured-evidence pool — `deepseek-v4-flash`,
   `zai-glm-5.2`, `kimi-k3`, plus the frontier escalation tail. `qwen3.7-plus`, `gpt-5-mini` and
@@ -62,32 +91,33 @@ This file is the source for the GitHub release notes, so the two cannot disagree
   body beyond `prompt_text`. See
   [what the escalated model is told](docs/escalation.md#what-the-escalated-model-is-told--context_transfer).
 
-- **The cost-quality plane magnifies its own crowded region.** Five strategies sit at one
-  pass rate inside a third of a decade of cost, and two of their names were printed on top of
-  each other on the published figure. `cost_quality_frontier.png` now redraws that region in an
-  inset panel, with each name stacked on its own leader above its own marker. The panel is
-  **derived, not configured**: the crowd is found by measuring the labels against each other in
-  the rendered figure, the panel is placed in the emptiest region the canvas has, and its bounds
-  are the crowd's own bounding box widened to hold everything it draws. When the strategies
-  spread out and the names fit where they sit, **no panel is drawn at all**, and a crowd the
-  canvas has no room for is named in the figure's notes rather than dropped.
+- **The cost-quality plane uses three stacked full-width magnification levels to resolve crowding.**
+  `cost_quality_frontier.png` replaces the old inset-panel design with three panels stacked vertically —
+  panel A shows every strategy over the full cost range (in log scale, spanning ~2 decades), panel B redraws
+  panel A's detail window at full width (strategies whose pass rate clears the best measured row's Wilson
+  lower bound), and panel C redraws panel B's magnified group at full width (the strategies whose markers
+  overlap on the rendered canvas, where label stacking cannot fix crowding). Each panel's window is derived,
+  not configured: the detail window is computed from the data on every re-run, and the magnified group is
+  measured from the rendered parent panel's geometry. When strategies spread and names fit, **no magnified
+  panel is drawn** — the figure degrades smoothly from three levels to two or one. A strategy outside the
+  detail window is named only on panel A, at its own cost and pass rate.
 
 - **The cost of carrying context across an escalation, priced and drawn.** The benchmark
   measures a cascade whose every rung starts from a fresh context; live, shunt never rewrites
   `messages`, so the escalated model is resent the whole prior conversation by the CLI,
   uncached. `cost_quality_frontier.png` now carries a dashed horizontal bracket on each of the two
-  **deployable escalating** strategies, drawn inside the figure's magnified panel. The marker
-  it hangs from is what the benchmark measures — a fresh context on every rung, which is not a
-  config setting — the shaded segment is `context_transfer: summary` (a band, not a tick,
-  because a summariser's compression ratio is not a constant) and the tick at the right end is
-  `context_transfer: full`, the shipped default. The two blocked within-task cascades are
-  deliberately **not** bracketed: the model prices a session-boundary handoff and they have no
-  boundary to price. It is a **cost model** over measured tokens and registry input prices,
-  computed on the subset of tasks whose every billed cell carries real tokens (an imputed cell
-  carries none, and the model raises rather than charging it zero); it asserts no pass rate,
-  and the subset size is published beside every number. `strategy_summary.csv` gains
-  `context_cost_alpha_01`, `context_cost_alpha_03`, `context_cost_alpha_10` and
-  `context_cost_n` — see [benchmark metrics](docs/benchmark.md#routing-evaluation).
+  **deployable escalating** strategies, drawn in the figure's magnified panel (panel C, where
+  markers are large enough to resolve). The marker it hangs from is what the benchmark measures
+  — a fresh context on every rung, which is not a config setting — the shaded segment is
+  `context_transfer: summary` (a band, not a tick, because a summariser's compression ratio is
+  not a constant) and the tick at the right end is `context_transfer: full`, the shipped default.
+  The two blocked within-task cascades are deliberately **not** bracketed: the model prices a
+  session-boundary handoff and they have no boundary to price. It is a **cost model** over
+  measured tokens and registry input prices, computed on the subset of tasks whose every billed
+  cell carries real tokens (an imputed cell carries none, and the model raises rather than
+  charging it zero); it asserts no pass rate, and the subset size is published beside every
+  number. `strategy_summary.csv` gains `context_cost_alpha_01`, `context_cost_alpha_03`,
+  `context_cost_alpha_10` and `context_cost_n` — see [benchmark metrics](docs/benchmark.md#routing-evaluation).
 
 - **`shunt inspect` — diagnostic figures over the live outcome store.** A read-only command
   that never spends: it prints the store's census (embedded / labeled / tier-2, seeded vs live,

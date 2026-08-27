@@ -108,12 +108,13 @@ def tool_app(
         monkeypatch.setattr(server_module, "_MODEL_CONFIG_PATH", str(registry_path))
         config_dir = tmp_path / "config"
         config_dir.mkdir(exist_ok=True)
-        # `knn_cascade` explicitly: this test asserts the kNN reason vocabulary, which the
-        # shipped `session_cascade` default does not produce. `escalation` must be spelled out
-        # because a user file replaces the packaged one wholesale and an absent block reads
+        # `knn_semantic_cascade` explicitly: this test asserts the kNN reason vocabulary, which
+        # the shipped `session_cascade` default does not produce. `escalation` must be spelled
+        # out because a user file replaces the packaged one wholesale and an absent block reads
         # as OFF — which a cascade id refuses at load.
         (config_dir / "router.yaml").write_text(
-            "router:\n  strategy: knn_cascade\n  escalation:\n    enabled: true\n  models: []\n"
+            "router:\n  strategy: knn_semantic_cascade\n  escalation:\n    enabled: true\n"
+            "  models: []\n"
         )
         with TestClient(app) as client:
             yield client, upstream

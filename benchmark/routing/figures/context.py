@@ -26,10 +26,15 @@ StrategyCells = dict[str, tuple[bool, float, bool]]
 # link them relatively; the MANIFEST that describes them stays beside the code that writes it.
 MANIFEST: Path = Path("benchmark/routing/figures.json")
 
-# "The router" in every figure caption must be a strategy the PRODUCT can be configured with.
-# It read "kNN-cascade" — the BLOCKED within-task row — so every figure that said "the router"
-# described something no operator can run.
-ROUTER_STRATEGY: str = "kNN"
+# "The router" in every figure caption is the PRE-REGISTERED VERDICT ARM — the bare selection
+# rule the 5pp non-inferiority kill gate was registered on. It is deliberately NOT a strategy
+# the PRODUCT can be configured with (a CONTROL, per strategy_class.py): repointing a
+# pre-registered arm after seeing the data would rewrite the verdict, so the figures keep
+# adjudicating it even though no router.strategy value produces it. It read "kNN-cascade" — the
+# BLOCKED within-task row — before, so every figure that said "the router" described something
+# no operator could run; it is now the bare SEMANTIC selection rule, whose display name carries
+# the `-semantic` qualifier so the difficulty-based rows cannot be confused with it.
+ROUTER_STRATEGY: str = "kNN-semantic"
 BASELINE_STRATEGY: str = "Always-Frontier"
 
 # The strategy `router.strategy` actually defaults to. It is NOT `ROUTER_STRATEGY`, and the gap

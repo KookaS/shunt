@@ -215,6 +215,7 @@ def bootstrap_ci(
     seed: int = 42,
     attempts: Mapping[str, list[BilledAttempt]] | None = None,
     prices: Mapping[str, CachePrice] | None = None,
+    judge_by_task: Mapping[str, float] | None = None,
 ) -> BootstrapCIs:
     """Task-resampled 95% percentile CIs on AvgPerf%, CumReg, TotalCost and AvgCost."""
     # Cost gets a cache-aware CI for the same reason the naive total does — but only because
@@ -224,6 +225,11 @@ def bootstrap_ci(
     # the statistic it is named after. The old cross-run cache model made one task's cost depend
     # on the tasks before it, which resampling genuinely shredded; that is why this is a guard,
     # not a comment — `_assert_cache_cost_scoping` re-fires the refusal if scoping is ever broken.
+    #
+    # The NAIVE cost already includes a difficulty row's judge bill (summary.evaluate_billed
+    # folds it into the decision cost). The CACHE-AWARE resample prices the model attempts only,
+    # so the judge bill is added here per task — a judge call is never cached, so its cache-aware
+    # cost equals its naive cost by construction.
     if (attempts is None) != (prices is None):
         raise ValueError(
             "a cache-aware bootstrap CI requires BOTH the per-task attempts and the price map"
@@ -281,6 +287,8 @@ def bootstrap_ci(
             sample_cache_total = sum(
                 cache_aware_total(scope_attempts.get(tid, []), scope_prices) for tid in sample_ids
             )
+            if judge_by_task:
+                sample_cache_total += sum(judge_by_task.get(tid, 0.0) for tid in sample_ids)
             boot_total_cache.append(sample_cache_total)
             boot_avg_cache.append(sample_cache_total / len(sample_ids))
 

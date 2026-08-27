@@ -302,7 +302,7 @@ class TestTheStrategyTableCarriesItsVerdict:
         from benchmark.routing import summary
 
         with pytest.raises(TypeError):
-            summary.StrategyTable(rows=({"strategy": "kNN"},))  # type: ignore[call-arg]
+            summary.StrategyTable(rows=({"strategy": "kNN-semantic"},))  # type: ignore[call-arg]
 
     def test_every_written_row_carries_the_verdict(self, tmp_path: Path) -> None:
         import csv
@@ -314,14 +314,14 @@ class TestTheStrategyTableCarriesItsVerdict:
         table = summary.StrategyTable(
             admissibility=rejected,
             rows=(
-                {"strategy": "kNN", "AvgPerf%": 78.53},
+                {"strategy": "kNN-semantic", "AvgPerf%": 78.53},
                 {"strategy": "Oracle", "AvgPerf%": 96.61},
             ),
         )
         out = tmp_path / "strategy_summary.csv"
         summary.write_summary_csv(table, out)
         rows = list(csv.DictReader(out.open(newline="")))
-        assert [r["strategy"] for r in rows] == ["kNN", "Oracle"]
+        assert [r["strategy"] for r in rows] == ["kNN-semantic", "Oracle"]
         assert {r["instrument_admissible"] for r in rows} == {"False"}
         assert all(r["instrument_verdict"].startswith("INSTRUMENT INADMISSIBLE") for r in rows)
 
@@ -341,10 +341,12 @@ class TestTheStrategyTableCarriesItsVerdict:
             return admissibility_verdict(1.0, 0.5, chance_level=0.5, chance_band=0.1)
 
         monkeypatch.setattr(ic, "strategy_instrument_admissibility", fake)
-        table = summary.certified_table([{"strategy": "kNN"}], k=7, threshold=0.42, min_samples=5)
+        table = summary.certified_table(
+            [{"strategy": "kNN-semantic"}], k=7, threshold=0.42, min_samples=5
+        )
         assert seen == {"k": 7, "threshold": 0.42, "min_samples": 5}
         assert table.admissibility.admissible
-        assert table.rows[0]["strategy"] == "kNN"
+        assert table.rows[0]["strategy"] == "kNN-semantic"
 
 
 class TestFrontEndParity:

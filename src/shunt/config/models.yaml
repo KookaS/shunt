@@ -233,6 +233,11 @@ models:
         - id: high
           rank: 1
           api: {reasoning_effort: high}
+  # ALSO USED as a judge (since 2026-08-25) by benchmark/routing/scripts/judge_probe.py.
+  # NOT judge-only: gpt-5.6-sol is a served router model (router.yaml `models:` list),
+  # so it keeps its reasoning bracket for the effort ladder; the judge harness reads
+  # its model_id/pricing and overrides reasoning off for label-only output. Judge
+  # outputs are SYNTHETIC training-signal data, never benchmark measurements.
   gpt-5.6-sol:
     model_id: openai/gpt-5.6-sol
     provider: requesty
@@ -240,16 +245,18 @@ models:
     supports_streaming: true
     supports_cache_control: false
     pricing:
-      input_cost_per_1m: 5.0
-      output_cost_per_1m: 30.0
+      input_cost_per_1m: 2.5
+      output_cost_per_1m: 15.0
       cache_read_cost_per_1m: 0.5
       price_provider: requesty
-      price_source: https://artificialanalysis.ai/models
-      price_as_of: "2026-07-19"
+      price_source: https://www.requesty.ai/models
+      price_as_of: "2026-08-26"
       price_note: >-
-        RESEARCH-ESTIMATED (Artificial Analysis, 2026-07-19), NOT a live Requesty
-        listing. OpenAI first-party; automatic caching (no explicit breakpoints, so
-        supports_cache_control:false like gpt-5-mini). Benchmark-DISABLED.
+        LIVE REQUESTY CATALOG LISTING (verified 2026-08-26) — supersedes the
+        Artificial Analysis research estimate (2026-07-19) that overstated the price
+        2x. OpenAI first-party; automatic caching (no explicit breakpoints, so
+        supports_cache_control:false like gpt-5-mini). Also used as a judge since
+        2026-08-25 (judge_probe.py); remains a served router model.
     reasoning:
       default_arm: medium
       arms:
@@ -262,6 +269,29 @@ models:
         - id: high
           rank: 2
           api: {reasoning_effort: high}
+  # JUDGE-ONLY — never served by the router, never added to benchmark/benchmark.yaml's
+  # models list. Registered so the judge-probe harness reads its pricing/model id from
+  # the same registry as the served models (judge_probe.py). The cheap OpenAI-5.6
+  # equivalent of claude-sonnet-5 ($1/$6 vs $2/$10); adopted as the knn_difficulty
+  # label source only if a probe shows its difficulty labels match the anchor's (see
+  # benchmark/routing/data/judge_difficulty.json). Deliberately NO `reasoning` block.
+  gpt-5.6-terra:
+    model_id: openai/gpt-5.6-terra
+    provider: requesty
+    version: gpt-5.6-terra
+    supports_streaming: true
+    supports_cache_control: false
+    pricing:
+      input_cost_per_1m: 1.0
+      output_cost_per_1m: 6.0
+      cache_read_cost_per_1m: 0.1
+      price_provider: requesty
+      price_source: https://www.requesty.ai/models
+      price_as_of: "2026-08-26"
+      price_note: >-
+        LIVE REQUESTY CATALOG LISTING (verified 2026-08-26). OpenAI first-party;
+        automatic caching (no explicit breakpoints, so supports_cache_control:false
+        like gpt-5-mini). Judge-only candidate, never a routing model.
   claude-fable-5:
     model_id: anthropic/claude-fable-5
     provider: requesty
@@ -345,3 +375,25 @@ models:
         - id: max
           rank: 2
           api: {thinking: {type: enabled}, output_config: {effort: max}}
+  # JUDGE-ONLY — never served by the router, never added to benchmark/benchmark.yaml's
+  # models list. Registered so the judge-probe harness reads its pricing/model id from
+  # the same registry as the served models (benchmark/routing/scripts/judge_probe.py);
+  # judge outputs are SYNTHETIC training-signal data, never benchmark measurements.
+  # Deliberately NO `reasoning` block — kept minimal, it is not a routing candidate.
+  claude-sonnet-5:
+    model_id: anthropic/claude-sonnet-5
+    provider: requesty
+    version: claude-sonnet-5
+    supports_streaming: true
+    supports_cache_control: true
+    pricing:
+      input_cost_per_1m: 2.0
+      output_cost_per_1m: 10.0
+      cache_read_cost_per_1m: 0.2
+      price_provider: requesty
+      price_source: https://www.requesty.ai/models
+      price_as_of: "2026-08-26"
+      price_note: >-
+        LIVE REQUESTY CATALOG LISTING (verified 2026-08-26). Anthropic first-party;
+        used only as a judge (judge_probe.py anchor before gpt-5.6-terra replaced it
+        as the knn_difficulty label source).

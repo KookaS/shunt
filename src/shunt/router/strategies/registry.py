@@ -19,16 +19,18 @@ from shunt.router.strategies.knn import KnnStrategy
 # Strategies whose selection consults the kNN neighborhood + exploration knobs. The
 # fixed strategies ignore them, so exploration is off for those (see server wiring).
 # This set is keyed by the id `router.strategy` names, so it MUST move with a rename: it was
-# `{"knn"}` before the id became `knn_cascade`, and leaving it behind would have switched
-# Thompson exploration off for every install with no error and no failing test.
-EXPLORATORY_STRATEGIES: Final[frozenset[str]] = frozenset({"knn_cascade"})
+# `{"knn"}` before the id became `knn_cascade`, then `knn_semantic_cascade`; leaving it behind
+# would have switched Thompson exploration off for every install with no error and no failing
+# test.
+EXPLORATORY_STRATEGIES: Final[frozenset[str]] = frozenset({"knn_semantic_cascade"})
 
 _StrategyBuilder = Callable[[SelectionRule], RoutingStrategy]
 
 
 def _build_knn_cascade(selection_rule: SelectionRule) -> RoutingStrategy:
     # `KnnStrategy` already carries `participates_in_escalation = True`, so this builder is the
-    # kNN pick PLUS the ladder — which is what `knn_cascade` names and what has always shipped.
+    # kNN pick PLUS the ladder — which is what `knn_semantic_cascade` names and what has always
+    # shipped.
     return KnnStrategy(selection_rule)
 
 
@@ -50,7 +52,7 @@ def _build_session_cascade(selection_rule: SelectionRule) -> RoutingStrategy:
 
 
 _BUILDERS: Final[dict[str, _StrategyBuilder]] = {
-    "knn_cascade": _build_knn_cascade,
+    "knn_semantic_cascade": _build_knn_cascade,
     "always_cheap": _build_always_cheap,
     "always_frontier": _build_always_frontier,
     "session_cascade": _build_session_cascade,

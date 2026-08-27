@@ -258,7 +258,7 @@ def test_embedder_reports_not_cached_on_an_empty_cache(
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
     # The embedder verdict depends on whether the ACTIVE strategy consults it, and the shipped
     # default (`session_cascade`) does not — so this branch has to name the strategy that does.
-    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn_cascade")
+    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn_semantic_cascade")
     monkeypatch.setenv("SHUNT_EMBED_CACHE_DIR", str(cli_env / "empty-cache"))
     check = _check(doctor_report(work_dir=None, launch_dir=str(cli_env)), "embedder")
     assert check.warn is True
@@ -301,7 +301,7 @@ def test_embedder_check_survives_an_unreadable_cache_dir(
     # test used to rely on the PACKAGED DEFAULT being knn — so it passed identically under
     # always_cheap, the strategy the assertion is false for. That made it a green test encoding
     # the defect: change the shipped default and it flips from correct to wrong, silently.
-    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn")
+    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn_semantic_cascade")
     cache = cli_env / "noperm"
     cache.mkdir()
     (cache / "something").write_bytes(b"x")
@@ -584,7 +584,7 @@ def test_unreadable_populated_cache_is_not_reported_as_absent(
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
     # The embedder verdict depends on whether the ACTIVE strategy consults it, and the shipped
     # default (`session_cascade`) does not — so this branch has to name the strategy that does.
-    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn_cascade")
+    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn_semantic_cascade")
     cache = cli_env / "locked-cache"
     _plant_model_cache(cache)
     monkeypatch.setenv("SHUNT_EMBED_CACHE_DIR", str(cache))
@@ -700,7 +700,7 @@ def test_unreadable_cache_is_still_a_failure_under_knn(
     # The other half of the same contract: knn cannot route without neighbours, so the same
     # filesystem state IS fatal there. Without this pair a fix could flip the verdict globally.
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
-    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn")
+    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn_semantic_cascade")
     cache = _unreadable_cache(cli_env)
     monkeypatch.setenv("SHUNT_EMBED_CACHE_DIR", str(cache))
     try:
@@ -729,7 +729,7 @@ def test_absent_cache_still_promises_a_download_under_knn(
     cli_env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
-    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn")
+    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn_semantic_cascade")
     monkeypatch.setenv("SHUNT_EMBED_CACHE_DIR", str(cli_env / "no-cache"))
     check = _check(doctor_report(work_dir=None, launch_dir=str(cli_env)), "embedder")
     assert "600MB" in check.detail
@@ -968,7 +968,7 @@ def test_missing_key_for_the_cold_start_model_is_a_failure_under_knn(
     # A neighbour-consulting strategy has no verified outcomes on a fresh install, so the engine
     # cold-starts — and the cold-start model is deepseek-v4-flash (reads DEEPSEEK_API_KEY).
     # Checking only "some key is set" would call this serviceable while every first request fails.
-    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn")
+    monkeypatch.setenv("SHUNT_ROUTER_STRATEGY", "knn_semantic_cascade")
     monkeypatch.setenv("REQUESTY_API_KEY", _FAKE_KEY)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     report = doctor_report(work_dir=None, launch_dir=str(cli_env))

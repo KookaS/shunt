@@ -102,7 +102,7 @@ class TestRegistry:
     @pytest.mark.parametrize(
         "name,cls",
         [
-            ("knn_cascade", KnnStrategy),
+            ("knn_semantic_cascade", KnnStrategy),
             ("always_cheap", AlwaysCheapStrategy),
             ("always_frontier", AlwaysFrontierStrategy),
             ("session_cascade", SessionCascadeStrategy),
@@ -119,11 +119,13 @@ class TestRegistry:
         assert strategy.select([], pool)[0] == "c1"
 
     def test_unknown_strategy_raises(self) -> None:
-        # `knn` is the RETIRED spelling. The alias is resolved one layer up, in
-        # `parse_router_policy`; the registry itself knows only live ids, so a caller that
-        # bypassed the policy layer with the old name must be refused rather than served.
-        with pytest.raises(ValueError, match="unknown"):
-            build_strategy("knn", SelectionRule())
+        # `knn` and `knn_cascade` are the RETIRED spellings. The aliases are resolved one
+        # layer up, in `parse_router_policy`; the registry itself knows only live ids, so a
+        # caller that bypassed the policy layer with an old name must be refused rather than
+        # served.
+        for retired in ("knn", "knn_cascade"):
+            with pytest.raises(ValueError, match="unknown"):
+                build_strategy(retired, SelectionRule())
 
     def test_the_control_contract_and_the_cascade_are_opposites(self) -> None:
         # The invariant `test_a_fixed_strategy_is_a_pinned_control_and_never_escalates`
@@ -180,7 +182,7 @@ class TestExplorationStaysWiredToTheStrategyThatExplores:
         # test, because `server.py` simply skips the wiring for a name it does not find.
         from shunt.router.strategies import EXPLORATORY_STRATEGIES
 
-        assert "knn_cascade" in EXPLORATORY_STRATEGIES
+        assert "knn_semantic_cascade" in EXPLORATORY_STRATEGIES
 
     def test_the_default_strategy_is_deliberately_not_exploratory(self) -> None:
         # The shipped default is `session_cascade`, whose base pick is fixed at the cheapest

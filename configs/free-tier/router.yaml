@@ -7,8 +7,8 @@
 # capture are inert here because no capture work_dir is ever resolved.
 router:
   # The shipped default: start at the cheapest live model and let repeated verified failures
-  # climb the ladder. It does NOT consult the neighbourhood — `knn_cascade` is the opt-in that
-  # does, and the kNN/exploration knobs below are inert under this strategy.
+  # climb the ladder. It does NOT consult the neighbourhood — `knn_semantic_cascade` is the
+  # opt-in that does, and the kNN/exploration knobs below are inert under this strategy.
   strategy: session_cascade
 
   policy:
