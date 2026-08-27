@@ -363,7 +363,12 @@ def check_duplicate_keys(rows: list[dict[str, str]], default_arms: dict[str, str
 def verify_rows(rows: list[dict[str, str]], now: datetime | None = None) -> list[Finding]:
     """Run every Layer-1 authenticity check over the raw results rows."""
     reference = now if now is not None else datetime.now(UTC)
-    specs = integrity.swebench_spec_hashes()
+    # Anchor every row against the store the CONFIGURED manifest declares, not Verified:
+    # under a multimodal manifest the Verified hashes would fail every row as unregistered.
+    # Imported lazily — routing/ must not carry a load-time dependency on runner/.
+    from benchmark.runner import swebench_specs  # noqa: PLC0415
+
+    specs = integrity.all_hashes(swebench_specs.manifest_source())
     resolved = config.resolved_models()
     versions = integrity.model_versions()
     default_arms = config.default_arm_ids()

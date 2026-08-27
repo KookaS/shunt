@@ -1,0 +1,29 @@
+{
+  "instance_id": "Automattic__wp-calypso-33245",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "5d0969c7b7f1eb23d74e6b25cf3a8751ab36be05",
+  "version": "10.15.2",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "HappinessSupport - should render translated help content"
+  ],
+  "PASS_TO_PASS": [
+    "HappinessSupport - should render a support button with link to SUPPORT_ROOT if it is not for JetPack",
+    "HappinessSupport - Contact button - should be rendered with link to JETPACK_CONTACT_SUPPORT if it is for JetPack",
+    "HappinessSupport - Contact button - should render translated content",
+    "HappinessSupport - Contact button - should be rendered unless LiveChat button shows up",
+    "HappinessSupport - should render translated heading content",
+    "HappinessSupport - LiveChat button - should be rendered only when showLiveChatButton prop is true and LiveChat is available",
+    "HappinessSupport - should render a support button with link to JETPACK_SUPPORT if it is for JetPack",
+    "HappinessSupport - should have is-placeholder className only if it is a placeholder",
+    "HappinessSupport - LiveChat button - should render translated content",
+    "HappinessSupport - LiveChat button - should not fire tracks event when no event name is passed even if clicked",
+    "HappinessSupport - Contact button - should be rendered with link to CALYPSO_CONTACT if it is not for JetPack",
+    "HappinessSupport - should render a <HappychatConnection /> when showLiveChat prop is true",
+    "HappinessSupport - should render a translated support button",
+    "HappinessSupport - LiveChat button - should fire tracks event with given event name when clicked"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-33245:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Priority Support Card layout is different then others\nI noticed that the \"Priority support\" card on the plans page has different layout (icon on the right, content on the left), then all the other cards (icon on the left, content on the right)\r\n#### Steps to reproduce\r\n\r\n1. On a site with a Premium or Business plan, go to: https://wordpress.com/plans/my-plan/{site}\r\n2. Scroll down to the plan features.\r\n3. Notice how the \"Priority support\" card has a different layout, then all the other cards on the page.\r\n![image](https://user-images.githubusercontent.com/4550351/57667281-535e7b80-7646-11e9-817e-a7edd4535762.png)\r\n\r\n\r\n#### What I expected\r\nFor the \"Priority support\" card to have the icon on the left, and content on the right, like all the other cards.\r\n\r\n#dogfooding, #manual-testing\n"
+}

@@ -1,0 +1,14 @@
+{
+  "instance_id": "markedjs__marked-684",
+  "repo": "markedjs/marked",
+  "base_commit": "86214bbce13ab5f2cd5faac3adb5d31653be782e",
+  "version": "0.5",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "should run spec tests"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.markedjs_1776_marked-684:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Weird list rendering behavior\n```\n- test\n- test\n- test\n1. test\n2. test\n3. test\n```\n\nRenders as this:\n\n![screenshot 40](https://cloud.githubusercontent.com/assets/87356/5483878/54978340-8639-11e4-961b-7f5f293980c6.jpg)\n\n```\n- test\n- test\n- test\n\n1. test\n2. test\n3. test\n```\n\nRenders as\n\n![screenshot 41](https://cloud.githubusercontent.com/assets/87356/5483883/66d6c32c-8639-11e4-87cf-a18d96fd59e8.jpg)\n\nAnd this:\n\n```\n- test\n- test\n- test\n\n\n1. test\n2. test\n3. test\n```\n\nRenders correctly:\n\n![screenshot 42](https://cloud.githubusercontent.com/assets/87356/5483887/7d846408-8639-11e4-9201-a86ded31a5d1.jpg)\n\nWhy the weird behavior? Is this normal? Why is 2 spaces required after a list before starting another list? I haven't seen that any in sort of spec for how markdown works. Am I missing something here?\n\n"
+}

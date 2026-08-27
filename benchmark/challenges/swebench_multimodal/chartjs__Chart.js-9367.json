@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-9367",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "840599637f2af797d42731ec27d91e0c82325134",
+  "version": "3.4",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Plugin.decimation lttb should not crash with uneven points "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-9367:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "LTTB algorithm, screen scaling and odd width\nHi, I've found myself in front of a peculiar bug when using decimation plugin with LTTB algorithm.\r\n\r\nI currently have 2 screens:\r\n\r\n- Screen 1: \r\n  - resolution: 3840x2160\r\n  - size: 15.6\"\r\n  - scaling: 250%\r\n- Screen 2: \r\n  - resolution: 2560x1440\r\n  - size: 27\"\r\n  - scaling: 100%\r\n\r\nNow, if I try to run the following fiddle on my 1st screen:\r\nhttps://jsfiddle.net/1tsufkh6/1/\r\n\r\nIt fails with:\r\n![image](https://user-images.githubusercontent.com/22025789/124572782-377f4a80-de49-11eb-8ddb-bb33e6bee179.png)\r\n\r\nFrom what I could investigate on my own code, in the LTTB loop:\r\n```javascript\r\n// Adding offset\r\nconst avgRangeStart = Math.floor((i + 1) * bucketWidth) + 1 + start;\r\nconst avgRangeEnd = Math.min(Math.floor((i + 2) * bucketWidth) + 1, count) + start;\r\nconst avgRangeLength = avgRangeEnd - avgRangeStart;\r\n\r\nfor (j = avgRangeStart; j < avgRangeEnd; j++) {\r\n   avgX += data[j].x;\r\n   avgY += data[j].y;\r\n}\r\n\r\navgX /= avgRangeLength;\r\navgY /= avgRangeLength;\r\n\r\n// Adding offset\r\nconst rangeOffs = Math.floor(i * bucketWidth) + 1 + start;\r\nconst rangeTo = Math.floor((i + 1) * bucketWidth) + 1 + start;\r\nconst {x: pointAx, y: pointAy} = data[a];\r\n```\r\nOn the previous code, I sometimes ends up with negative avgRangeLength and rangeTo > data.length\r\n\r\nBut it only fails on the 1st screen, on the 2nd screen, no problems at all.\r\n\r\nAfter playing around a bit, I found out that it happens only if the width is odd and and if the screen scaling is not 100% (some exception may occur at different scaling)\r\n\r\nIt might not really be a ChartJS issue and more a windows thing and how it performs scaling, but I prefer to report it anyway\r\n\r\n\r\n\n"
+}

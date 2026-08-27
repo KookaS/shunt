@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-7951",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "6dbb7e74462d5b7dedf2124a622a3e678964dd83",
+  "version": "3.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/horizontal-borders.js "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-7951:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Bar Chart Border Radius\n\r\n\r\n### Feature Proposal\r\nAdd border radius settings to Bar chart\r\n\r\n### Feature Use Case\r\n\r\n\r\n\r\n## Possible Implementation\r\n\r\n\n"
+}

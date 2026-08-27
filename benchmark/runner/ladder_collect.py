@@ -21,7 +21,7 @@ from pathlib import Path
 from benchmark import config
 from benchmark.config import RankedModel
 from benchmark.routing import integrity
-from benchmark.runner import infer
+from benchmark.runner import infer, swebench_specs
 from benchmark.runner.collect import _refuse_live, _resolve_digests
 from benchmark.runner.run_matrix import (
     _FailureTracker,
@@ -54,7 +54,7 @@ def _confirm_uncapped_live() -> bool:
 
 def _sampled_tasks() -> list[str]:
     """The pinned sampled challenge set (same seed/sample as every other run mode)."""
-    hashes = integrity.all_hashes()
+    hashes = integrity.all_hashes(swebench_specs.manifest_source())
     seed = config.benchmark_params().get("seed", 42)
     return config.sample_tasks(sorted(hashes.keys()), seed=seed)
 
@@ -82,10 +82,11 @@ def _untested_tiers(matrix: dict, task: str, rung_models: list[str]) -> list[str
 
 def _prepare(tasks: list[str]) -> tuple[list[str], dict, dict, dict | None, Path]:
     """Resolve the shared collect inputs once (hashes, versions, digests, results path)."""
-    hashes = integrity.all_hashes()
+    source = swebench_specs.manifest_source()
+    hashes = integrity.all_hashes(source)
     versions = integrity.model_versions()
     check_images = bool(config.collect_config().get("check_images", False))
-    digests = _resolve_digests(tasks, check_images)
+    digests = _resolve_digests(tasks, check_images, swebench_specs.spec_module_for(source))
     return tasks, hashes, versions, digests, config.results_csv_path()
 
 

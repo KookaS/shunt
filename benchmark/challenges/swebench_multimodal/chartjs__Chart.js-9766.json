@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-9766",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "12c5f9a8396f2a472f331ef772d6c7ba5cd62513",
+  "version": "3.5",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Chart.controllers.line auto /base/test/fixtures/controller.line/stacking/bounds-data.js "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-9766:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Stacked line charts dont take stack into account when calculating min y axis tick \n### Expected vs Current Behavior\r\nWhen using stacked lines, the graphs always begin at zero despite setting beginAtZero to be false manually. See https://jsfiddle.net/y91v0fh3/ for an example of expected behavior when not stacked, and uncomment the stacked options to see erroneous behavior. I am unable to set the scales min value as many other posts suggest due to the data I will be working with having a large range of possible values.\r\n\r\n### Environment\r\nChart.js version: v3.5.1\r\nBrowser name and version: Chrome\n"
+}

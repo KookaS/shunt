@@ -1,0 +1,40 @@
+{
+  "instance_id": "Automattic__wp-calypso-22621",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "7e634d48378bf52ad659e902d3a4b82e579cc6cd",
+  "version": "8.9.4",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "getJetpackOnboardingPendingSteps() - should return pending status for the stats step",
+    "isJetpackOnboardingStepCompleted() - should return true for stats step if we have chosen to activate stats"
+  ],
+  "PASS_TO_PASS": [
+    "isJetpackOnboardingStepCompleted() - should return false for a null site ID",
+    "isJetpackOnboardingStepCompleted() - should return false for contact form step if it is specified as not selected",
+    "isJetpackOnboardingStepCompleted() - should return true for business address step if we have chosen to add a business address",
+    "isJetpackOnboardingStepCompleted() - should return true for contact form step if we have chosen to create a contact form",
+    "isJetpackOnboardingStepCompleted() - should return false for business address step if we have not added a business address",
+    "getJetpackOnboardingPendingSteps() - should return pending status for the woocommerce step",
+    "isJetpackOnboardingStepCompleted() - should return false for homepage step if we it is specified as not selected",
+    "isJetpackOnboardingStepCompleted() - should return false for an unexisting step",
+    "isJetpackOnboardingStepCompleted() - should return true for site title step if we have modified the site title",
+    "isJetpackOnboardingStepCompleted() - should return false for business address step if it is specified as not added yet",
+    "isJetpackOnboardingStepCompleted() - should return false for woocommerce step if we have not installed/activated woocommerce",
+    "isJetpackOnboardingStepCompleted() - should return false for contact form step if we have not chosen to create a contact form",
+    "isJetpackOnboardingStepCompleted() - should return false for site type step if site type is specified as not selected",
+    "isJetpackOnboardingStepCompleted() - should return false for site type step if we have not selected the site type yet",
+    "isJetpackOnboardingStepCompleted() - should return true for site type step if we have selected the site type",
+    "isJetpackOnboardingStepCompleted() - should return false if we have no settings for that site",
+    "isJetpackOnboardingStepCompleted() - should return false for stats step if it is specified as not activated",
+    "isJetpackOnboardingStepCompleted() - should return false for homepage step if we have not selected the homepage format yet",
+    "isJetpackOnboardingStepCompleted() - should return true for site title step if we have modified the site description",
+    "isJetpackOnboardingStepCompleted() - should return true for homepage step if we have selected the homepage format",
+    "isJetpackOnboardingStepCompleted() - should return false if site title and description have not been modified yet",
+    "isJetpackOnboardingStepCompleted() - should return true for woocommerce step if we have chosen to install woocommerce",
+    "isJetpackOnboardingStepCompleted() - should return false for stats step if we have not activated stats",
+    "isJetpackOnboardingStepCompleted() - should return false for woocommerce step if it is specified as not installed/activated yet"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-22621:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Jetpack Onboarding: Introduce a Stats step\nThis is a completely new step that will allow the user to enable the Stats module after connecting.\r\n\r\nInitially, the step shows an introduction screen:\r\n\r\n![](https://cldup.com/T9ECZ-HxdS.png)\r\n\r\nClicking the CTA button leads to the JPC flow if the user hasn't connected yet (we might need alternative copy for the headings):\r\n\r\n![](https://cldup.com/lfJaNoj9ci.png)\r\n\r\n![](https://cldup.com/vOjXnIxw8r.png)\r\n\r\nNote that we'll need to preserve the JPO wizard navigation back / skip links at the bottom while in the JPC flow.\r\n\r\nAfter connecting (or clicking the button after being connected already), stats module is being enabled for the user and they're presented with the following success screen:\r\n\r\n![](https://cldup.com/7TLyDhlufk.png)\r\n\r\nWhere the success screen CTA leads to the next step.\r\n\r\nFor more information see p6TEKc-1Rd-p2\n"
+}

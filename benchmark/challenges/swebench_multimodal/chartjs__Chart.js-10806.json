@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-10806",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "c35d0c6e48ece06b2f420e3804c5f7267820d129",
+  "version": "4.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Chart.controllers.doughnut auto /base/test/fixtures/controller.doughnut/single-slice-circumference-405.js "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-10806:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Pie Chart hoverOffset bugs on a specific value\n### Expected behavior\n\nWhen hovering, while using hoverOffset,  any border of the initial circle should not appear in any case.\n\n### Current behavior\n\nIf you provide the pie chart an array containing a value \"385\" while the rest of the values in the array are 0, it messes up when you hover. This only happens when using the hoverOffset option.\n\n### Reproducible sample\n\nhttps://jsfiddle.net/5rnyo4qc/12/\n\n### Optional extra steps/info to reproduce\n\nJust pass an array with a 385 value at any index while the rest of the values are 0 like [0,0,385,0] and use hoverOffset and you'll see the bug when you hover.\n\n### Possible solution\n\n_No response_\n\n### Context\n\n_No response_\n\n### chart.js version\n\nv3.9.1\n\n### Browser name and version\n\nChrome v106.0.5249.119\n\n### Link to your project\n\n_No response_\n"
+}

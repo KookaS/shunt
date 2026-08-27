@@ -1,0 +1,29 @@
+{
+  "instance_id": "Automattic__wp-calypso-33752",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "a8b6633f060ab38130c363009b8e6aa10fa4055a",
+  "version": "10.15.2",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "HappinessSupport - should render translated help content"
+  ],
+  "PASS_TO_PASS": [
+    "HappinessSupport - should render a support button with link to SUPPORT_ROOT if it is not for JetPack",
+    "HappinessSupport - Contact button - should be rendered with link to JETPACK_CONTACT_SUPPORT if it is for JetPack",
+    "HappinessSupport - Contact button - should render translated content",
+    "HappinessSupport - Contact button - should be rendered unless LiveChat button shows up",
+    "HappinessSupport - should render translated heading content",
+    "HappinessSupport - LiveChat button - should be rendered only when showLiveChatButton prop is true and LiveChat is available",
+    "HappinessSupport - should render a support button with link to JETPACK_SUPPORT if it is for JetPack",
+    "HappinessSupport - should have is-placeholder className only if it is a placeholder",
+    "HappinessSupport - LiveChat button - should render translated content",
+    "HappinessSupport - LiveChat button - should not fire tracks event when no event name is passed even if clicked",
+    "HappinessSupport - Contact button - should be rendered with link to CALYPSO_CONTACT if it is not for JetPack",
+    "HappinessSupport - should render a <HappychatConnection /> when showLiveChat prop is true",
+    "HappinessSupport - should render a translated support button",
+    "HappinessSupport - LiveChat button - should fire tracks event with given event name when clicked"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-33752:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Happiness Support card needs preventWidows treatment\n\r\n\r\nFollowing from #33040 \r\n\r\n#### Steps to reproduce\r\n1. Starting at URL: `plans/my-plan`\r\n2. Notice the widows when looking at the \"Priority support\" card (try resizing your browser)\r\n\r\n#### What I expected\r\n\r\n\"your account.\" should be on the same line\r\n\r\n#### What happened instead\r\n\r\n\"account.\" was on its own (see screenshot)\r\n\r\n#### Screenshot\r\n\r\n![widow](https://user-images.githubusercontent.com/177929/58649318-b49f7380-8303-11e9-8f78-6a8dead59f41.png)\r\n\r\n#### Note\r\n\r\nI tried to apply `preventWidows()` to `this.getSupportText()` (L171 client/components/happiness-support/index.jsx) but this doesn't seem to work because of the `<strong />` component.\n"
+}

@@ -1,0 +1,38 @@
+{
+  "instance_id": "diegomura__react-pdf-433",
+  "repo": "diegomura/react-pdf",
+  "base_commit": "f508d4e9938e80e888deb2dc8cada6d84e116427",
+  "version": "1.1",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "tests/background.test.js",
+    "tests/borders.test.js"
+  ],
+  "PASS_TO_PASS": [
+    "tests/base.test.js",
+    "tests/transform.test.js",
+    "tests/url.test.js",
+    "tests/attributedString.test.js",
+    "tests/font.test.js",
+    "tests/cache.test.js",
+    "tests/text.test.js",
+    "tests/view.test.js",
+    "tests/nodeApi.test.js",
+    "tests/document.test.js",
+    "tests/jpeg.test.js",
+    "tests/note.test.js",
+    "tests/png.test.js",
+    "tests/link.test.js",
+    "tests/pageSize.test.js",
+    "tests/stylesheet.test.js",
+    "tests/page.test.js",
+    "tests/elements.test.js",
+    "tests/pdf.test.js",
+    "tests/domApi.test.js",
+    "tests/layout.test.js",
+    "tests/node.test.js"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.diegomura_1776_react-pdf-433:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Setting a border on a rounded <View> causes unexpected results\n\r\n**OS:**\r\nmacOS 10.13 High Sierra\r\n\r\n**React-pdf version:**\r\n@react-pdf/renderer@^1.0.0-alpha.25\r\n\r\n**Description:**\r\nI am attempting to draw a circle with a border by rounding a `<View />` and adding a border. \r\n\r\n```\r\nconst Quixote = () => (\r\n  <Document>\r\n    <Page style={styles.body}>\r\n      <View style={styles.circle}></View>\r\n    </Page>\r\n  </Document>\r\n);\r\n\r\nconst styles = StyleSheet.create({\r\n  body: {\r\n    paddingTop: 35,\r\n    paddingBottom: 65,\r\n    paddingHorizontal: 35,\r\n  },\r\n  circle: {\r\n    width: 50,\r\n    height: 50,\r\n    backgroundColor: 'green',\r\n    borderRadius: 50,\r\n    border: '2 solid red'\r\n  }\r\n\r\n});\r\n\r\nReactPDF.render(<Quixote />);\r\n```\r\n\r\nWhen I set the `borderRadius` to 1, the border drawn mostly goes around the view. \r\n![screen shot 2018-11-29 at 12 14 46 pm](https://user-images.githubusercontent.com/4199296/49249306-b037e380-f3d0-11e8-96cd-29eee986683b.png)\r\n\r\nWhen I set `borderRadius` to 3, the border drawn already starts to have issues.\r\n![screen shot 2018-11-29 at 12 14 51 pm](https://user-images.githubusercontent.com/4199296/49249354-c5ad0d80-f3d0-11e8-8e2d-393dee2530e1.png)\r\n\r\nAs I increase the borderRadius to make the view more circular the rendering gets really strange.\r\n`borderRadius @ 20`\r\n![screen shot 2018-11-29 at 12 14 58 pm](https://user-images.githubusercontent.com/4199296/49249430-f42ae880-f3d0-11e8-9272-cefd5bca1b0d.png)\r\n\r\n`borderRadius @ 30`\r\n![screen shot 2018-11-29 at 12 15 02 pm](https://user-images.githubusercontent.com/4199296/49249444-fb51f680-f3d0-11e8-8f24-49d22bc27962.png)\r\n\r\nI would love the border implementation to better support rounded views! Thanks a bunch!\n"
+}

@@ -1,0 +1,17 @@
+{
+  "instance_id": "chartjs__Chart.js-10157",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "c80b1450f55189a03bf3781e04559eb9b68f2129",
+  "version": "3.7",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/minBarLength/vertical-pos.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/minBarLength/horizontal-pos.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/minBarLength/vertical-neg.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/minBarLength/horizontal-neg.js "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-10157:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "borderRadius gets ignored for the bottom corners of 0-value bars in bar chart when borderSkipped and minBarLength are set\n## Expected Behavior\r\nWhen setting the following properties on a dataset:\r\n```js\r\nminBarLength: 50,\r\nborderRadius: 100,\r\nborderSkipped: false,\r\n```\r\nbars with a value of 0 should show up as a circle with all corners respecting the `borderRadius` setting\r\n\r\n## Current Behavior\r\nbars with a value of 0 are showing up instead with the bottom two corners ignoring the `borderRadius` setting and rendering as semi-circles with flat bottoms, like this:\r\n![Screen Shot 2021-12-17 at 12 18 06 PM](https://user-images.githubusercontent.com/10648471/146602938-9d5be17b-e050-4a9a-b9ac-5f9f51e08e8b.png)\r\n\r\n## Steps to Reproduce\r\nExample: https://codepen.io/dcj/pen/VwMbGZM\r\n\r\n## Context\r\nTrying to respect the designed version of the chart, where the value of some bars will be 0, and want to render those in a consistent way that respects the design\r\n\r\n## Environment\r\n* Chart.js version: latest\r\n* Browser name and version: happens the same in latest version of Safari, Chrome, Brave, Firefox\r\n* Link to your project: [I can add a GitHub link to a PR where this will live, but it's not clean enough to push up yet]\n"
+}

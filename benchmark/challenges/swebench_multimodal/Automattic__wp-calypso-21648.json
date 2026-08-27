@@ -1,0 +1,30 @@
+{
+  "instance_id": "Automattic__wp-calypso-21648",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "9dc9380527d54dcc2e0679c8f092ec9d55037f29",
+  "version": "8.9.3",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "reducer - should not use default value for settings with no value or default if option is disabled",
+    "actions - #emailSettingsSubmitSettings() - should dispatch an success action",
+    "reducer - should use default value for settings with no value or default if option is enabled"
+  ],
+  "PASS_TO_PASS": [
+    "reducer - should update setting with new value.",
+    "reducer - should store data from the action",
+    "actions - #fetchEmailSettings() - should dispatch an request action",
+    "actions - #fetchEmailSettings() - should dispatch a success action with settings information when request completes",
+    "actions - #emailSettingsInvalidValue() - should dispatch a action that will inform that settings are not valid",
+    "reducer - should decode entities in woocommerce_email_from_name",
+    "actions - #fetchEmailSettings() - should not dispatch if settings are already fetched for this site",
+    "reducer - should use default value from setting for settings with default and no value.",
+    "actions - #emailSettingsSaveSettings() - should dispatch a action that will trigger saving settings",
+    "actions - #fetchEmailSettings() - should not dispatch if settings are already loading for this site",
+    "actions - #emailSettingChange() - should dispatch a action with changed setting",
+    "reducer - should mark the email settings tree as \"loading\"",
+    "actions - #emailSettingsSubmitSettings() - should dispatch an request action"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-21648:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Store: Settings: Email: Undecoded entity in From-Name placeholder\nObserved on today's master\r\n\r\n#### Steps to reproduce\r\n1. On a site with an encodable character in its Site Title (e.g. Allendav's Store Test)\r\n2. Starting at URL: http://calypso.localhost:3000/store/settings/email/{DOMAIN}\r\n3. Clear the From Name field\r\n4. See the undecoded entity\r\n\r\n<img width=\"993\" alt=\"entity\" src=\"https://user-images.githubusercontent.com/1595739/35405551-58f061cc-01bb-11e8-85bf-e80cf159d485.png\">\r\n\n"
+}

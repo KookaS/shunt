@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-9027",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "e021a77214daecbca0502da9d4245acbc2c46a1e",
+  "version": "3.2",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Linear Scale should not throw errors when chart size is negative "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-9027:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "RangeError: minimumFractionDigits value is out of range. (Thrown from `new Chart()`) \n\r\n\r\nHi all,\r\n\r\nThanks for the great library. I don't have a repro for this (famous last words) but it seems to happen when a specific chart is created. The chart library is calculating `NaN` for the chart height (even though it should likely just be `0`)\r\n\r\n## Expected Behavior\r\n\r\nError should not be thrown.\r\n\r\n## Current Behavior\r\n\r\n\r\n```\r\nRangeError: minimumFractionDigits value is out of range.\r\n    at new NumberFormat (<anonymous>)\r\n    at getNumberFormat (helpers.segment.js:2155)\r\n    at formatNumber (helpers.segment.js:2161)\r\n    at LinearScale.numeric (chart.esm.js:3177)\r\n    at callback (helpers.segment.js:89)\r\n    at LinearScale.generateTickLabels (chart.esm.js:3710)\r\n    at LinearScale._convertTicksToLabels (chart.esm.js:3870)\r\n    at LinearScale.update (chart.esm.js:3620)\r\n    at fitBoxes (chart.esm.js:2710)\r\n    at Object.update (chart.esm.js:2827)\r\n    at Chart._updateLayout (chart.esm.js:5460)\r\n    at Chart.update (chart.esm.js:5441)\r\n    at new Chart (chart.esm.js:5180)\r\n    at SafeSubscriber._next (chart.component.ts:285)\r\n    at SafeSubscriber.__tryOrUnsub (Subscriber.js:183)\r\n```\r\n\r\nFirst call to getNumberFormat:\r\n![image](https://user-images.githubusercontent.com/362329/116908742-4101f180-ac11-11eb-9c15-f0e808189ccb.png)\r\n\r\nSecond call to getNumberFormat:\r\n![image](https://user-images.githubusercontent.com/362329/116908782-4c551d00-ac11-11eb-8b79-dfbe585b56c9.png)\r\n\r\n\r\nIntermediate values during chart construction:\r\n![image](https://user-images.githubusercontent.com/362329/116909229-e9b05100-ac11-11eb-9e0c-21c0c0ca3f81.png)\r\n\r\n\r\n\r\nRangeError is thrown.\r\n\r\n## Possible Solution\r\n\r\n\r\n## Steps to Reproduce\r\n\r\n\r\n## Context\r\n\r\n\r\n## Environment\r\n\r\n* Chart.js version: ^3.2.1\r\n* Browser name and version:\r\n```\r\nGoogle Chrome | 90.0.4430.93\u00a0(Official Build)\u00a0(x86_64)\r\n-- | --\r\nRevision | 4df112c29cfe9a2c69b14195c0275faed4e997a7-refs/branch-heads/4430@{#1348}\r\nOS | macOS Version 11.2.3 (Build 20D91)\r\nJavaScript | V8\u00a09.0.257.23\r\nUser Agent | Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)\r\n\r\n\r\n```\r\n* Link to your project:\r\nNone yet.\n"
+}

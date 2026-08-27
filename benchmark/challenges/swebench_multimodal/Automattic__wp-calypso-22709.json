@@ -1,0 +1,17 @@
+{
+  "instance_id": "Automattic__wp-calypso-22709",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "58478c529c2ea594a96c89a8c8daa3f7d22c2dda",
+  "version": "8.9.4",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "getJetpackOnboardingPendingSteps() - should return pending status for the contact form step"
+  ],
+  "PASS_TO_PASS": [
+    "getJetpackOnboardingPendingSteps() - should return pending status for the stats step",
+    "getJetpackOnboardingPendingSteps() - should return pending status for the woocommerce step"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-22709:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Jetpack Onboarding: Introduce a success screen for Contact Form step\nIf the users have inserted a form and connected successfully, we will display this screen instead of the contact form tile. If they haven't inserted a contact form, they should see the tile, and if they haven't connected, we should lead them to the JPC flow if they try to reach step 4 again.\r\n\r\nIt's worth to mention that this is the point where we should move the actual contact form insertion to, because it should happen only after the user has connected.\r\n\r\n![](https://cldup.com/06u0fqzCrV.png)\r\n\r\nFor more information see p6TEKc-1Rd-p2\n"
+}

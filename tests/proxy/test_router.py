@@ -66,7 +66,14 @@ def _fake_lifespan_embedder() -> Any:
 
 @pytest.fixture
 def model_pool() -> ModelPool:
+    # Mirror `proxy/server.py`'s boot exactly: the server restricts the registry pool to the
+    # policy's live list before serving, so an unrestricted pool here would assert fallback
+    # behaviour over models the router never sees — and a probe- or judge-only registry row
+    # would silently move these expectations.
+    from shunt.router.policy import apply_env_overrides, load_router_policy
+
     pool = ModelPool()
+    pool.restrict_to_live(apply_env_overrides(load_router_policy()).models)
     return pool
 
 
@@ -671,11 +678,12 @@ async def test_retry_then_fallback(router: ProxyRouter, session: Session) -> Non
         # First call fails (deepseek-v4-flash), a fallback model succeeds
         mock_acompletion.side_effect = [rate_err, rate_err, rate_err, mock_response]
 
-        # deepseek-v4-flash is retried 2x, then the next pool model in the unrestricted
-        # registry (qwen3.7-plus) serves the fallback response.
+        # deepseek-v4-flash is retried 2x, then the next model in the LIVE pool
+        # (zai-glm-5.2) serves the fallback response. The pool here is restricted the way
+        # the server restricts it, so only a router.yaml model can be reached.
         result, model_name, reason = await router.route_chat_completion(body, session)
 
-    assert model_name == "qwen3.7-plus"
+    assert model_name == "zai-glm-5.2"
     assert result["choices"][0]["message"]["content"] == "from fallback"
 
 

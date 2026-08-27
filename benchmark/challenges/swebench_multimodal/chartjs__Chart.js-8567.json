@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-8567",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "91628c144944029505de093c43733961ab4f420f",
+  "version": "3.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Chart.layouts auto /base/test/fixtures/core.layouts/long-labels.js "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-8567:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Bar chart y-scale labels overlapping\nI've upgraded from version 2.7.3 to version 2.9.3, and using the bar chart with multiple data sets the y-axis labels are overlapping and not being properly calculated. I've attahced two code pens below of the difference in behaviours between 2.7.3 and 2.9.3\r\n\r\n## Expected Behavior\r\nThe labels on the y-axis to be calculated like they are in version 2.7.3\r\nhttps://jsfiddle.net/g6ntz7bq/1/\r\n\r\n## Current Behavior\r\nIn version 2.9.3 the labels are overlapping:\r\nhttps://jsfiddle.net/26zr917t/1/\r\n\r\n## Steps to Reproduce (for bugs)\r\nSee the fiddle https://jsfiddle.net/26zr917t/1/\r\n\r\n## Context\r\n![image](https://user-images.githubusercontent.com/2039538/74322233-88d1fa00-4d7b-11ea-825d-58ec7fae41b9.png)\r\n\r\n\r\n## Environment\r\n\r\n* Chart.js version: 2.9.3\r\n* Browser name and version: Chrome Version 79.0.3945.130\r\n* Link to your project: https://jsfiddle.net/26zr917t/1/\r\n\n"
+}

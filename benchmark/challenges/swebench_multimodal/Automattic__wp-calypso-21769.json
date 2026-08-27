@@ -1,0 +1,22 @@
+{
+  "instance_id": "Automattic__wp-calypso-21769",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "6812e4b9ed2cbf65cf7ecaba2ff5fcb75e37865b",
+  "version": "8.9.3",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "selectors - #getHelpSelectedSiteId() - if customer selected site is not available, uses first site",
+    "selectors - #getHelpSelectedSiteId() - if selected site is not available, uses first site"
+  ],
+  "PASS_TO_PASS": [
+    "selectors - #getHelpSelectedSiteId() - uses selected site if customer selected site is not available",
+    "selectors - #getHelpSelectedSiteId() - uses primary site if customer selected site or global selected site is not available",
+    "selectors - #getHelpSelectedSiteId() - if sites are not loaded, returns null",
+    "selectors - #getHelpSelectedSiteId() - defaults to customer chosen site",
+    "selectors - #getHelpSiteId() - should return null for default state",
+    "selectors - #getHelpSiteId() - should return courses for given state"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-21769:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Support Contact Form: breaks when no primary site exists\n#### Steps to reproduce\r\n1. Starting at URL: wordpress.com/me/account\r\n2. set a primary site to a free, test site that you don't mind deleting\r\n3. go into site settings and delete it\r\n4. now you have a site with no primary site and no site selected\r\n5. Click the help button in wordpress.com/me\r\n6. Click contact us\r\n\r\n#### What I expected\r\nSomething to happen - like an error (better but not ideal) or a site picker (since the issue is that we don't have site selected yet to load the form with).\r\n\r\n\r\n#### What happened instead\r\nNothing, but a slew of console errors:\r\n```\r\nhelp.1f7980126b15040106c3.min.js:5 Uncaught TypeError: Cannot read property 'ID' of null\r\n    at t.value (help.1f7980126b15040106c3.min.js:5)\r\n    at d._renderValidatedComponentWithoutOwnerOrContext (vendor.5147b04b7f0d25caa892.min.js:18)\r\n    at d._renderValidatedComponent (vendor.5147b04b7f0d25caa892.min.js:18)\r\n    at d.performInitialMount (vendor.5147b04b7f0d25caa892.min.js:17)\r\n    at d.mountComponent (vendor.5147b04b7f0d25caa892.min.js:17)\r\n    at Object.mountComponent (vendor.5147b04b7f0d25caa892.min.js:19)\r\n    at d.performInitialMount (vendor.5147b04b7f0d25caa892.min.js:17)\r\n    at d.mountComponent (vendor.5147b04b7f0d25caa892.min.js:17)\r\n    at Object.mountComponent (vendor.5147b04b7f0d25caa892.min.js:19)\r\n    at d.performInitialMount (vendor.5147b04b7f0d25caa892.min.js:17)\r\n```\r\n\r\n#### Browser / OS version\r\nChrome\r\n\r\n#### Screenshot / Video\r\nThis is what the user experienced in their console:\r\n![screen shot 2017-10-24 at 3 42 15 pm](https://user-images.githubusercontent.com/8921630/31966870-f74a7ab8-b8c0-11e7-9410-2dff77f72719.png)\r\n\r\nThis is what it looked like in their browser:\r\n![screen shot 2017-10-24 at 3 25 25 pm](https://user-images.githubusercontent.com/8921630/31966937-2731b908-b8c1-11e7-9781-d2aa943e30d1.png)\r\n\r\n\r\n#### Context / Source\r\n#user-reported this over email - they have paid sites like http://ncch.org/ on their account so should have smooth access to our contact form\n"
+}

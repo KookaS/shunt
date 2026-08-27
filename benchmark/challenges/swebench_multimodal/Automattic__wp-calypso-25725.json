@@ -1,0 +1,17 @@
+{
+  "instance_id": "Automattic__wp-calypso-25725",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "af9cf1f55288ebefb6cd1d796df3893db41f2292",
+  "version": "10.5.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "handleTransferSuccess() - should return a success notice action and a function"
+  ],
+  "PASS_TO_PASS": [
+    "requestPlanOwnershipTransfer() - should return an action for HTTP request to transfer the site plan to another user",
+    "handleTransferError() - should return an error notice action"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-25725:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Plans: Allow changing owner of a plan\nCurrently, only an Administrator of a site (WordPress.com or Jetpack) can purchase a plan, and once they have purchased it, they are the owner and no one else can control that plan.\r\n\r\nWe should make it so that customers can transfer ownership of a purchased plan to any other Administrator on their site. \r\n\r\nI propose that on this view (under Me > Manage Purchases > Purchases), we make the Owner box clickable, and have it go into a simple flow for transferring ownership.\r\n\r\n![purchases_ _manage_purchase_ _wordpress_com](https://user-images.githubusercontent.com/108942/38649487-26ec03f4-3db4-11e8-973c-8e16a078bcec.png)\r\n\r\nWe would _only_ make it clickable if there were other Administrators on this site. If there were, and you clicked, you'd be given a big warning about how once you transfer ownership you won't be able to cancel/manage the plan, and that your billing details will be transferred along with it, etc. You'd be shown a list of Administrators on the site, click one, and then we'd transfer ownership of the plan over to that person. Ideally we'd also send an email to both you and the new owner telling them what happened (and add an entry to the Activity Log as well).\r\n\r\ncc @rralian in case this is a complete no-go in our billing system, although I believe we can/do currently have this functionality in our admin tools on the backend.\n"
+}

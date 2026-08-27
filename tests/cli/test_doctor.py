@@ -28,6 +28,24 @@ def _registry_key_vars() -> set[str]:
     return {p.api_key_env_var for p in load_registry().providers.values() if p.api_key_env_var}
 
 
+def _live_pool_key_vars() -> set[str]:
+    """Every api_key_env_var reachable from the LIVE pool — what doctor is expected to name."""
+    # Derived from the same pool doctor reads, so adding or dropping a live model moves both
+    # together; a hardcoded set here would rot exactly as the docstring above warns.
+    import os
+
+    from shunt.models import ModelPool
+    from shunt.router.policy import apply_env_overrides, load_router_policy
+
+    # Exactly what `diagnostics._load_policy` + `_load_pool` do: the env-overlaid policy, the
+    # registry pool, then narrowed to the policy's live list. Without `restrict_to_live` this
+    # is the whole registry and the assertion below would demand names doctor never prints.
+    pool = ModelPool(config_path=os.environ.get("SHUNT_MODEL_CONFIG_PATH"))
+    pool.restrict_to_live(apply_env_overrides(load_router_policy()).models)
+    models = (pool.get_model(n) for n in pool.model_names())
+    return {m.api_key_env_var for m in models if m is not None and m.api_key_env_var}
+
+
 @pytest.fixture
 def cli_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A hermetic data dir + the PACKAGED registry/policy (no dev-machine ~/.config/shunt)."""
@@ -844,12 +862,24 @@ def test_no_credential_env_value_ever_reaches_any_output(
     _run(as_json=True)
     json_out = capsys.readouterr().out
 
-    for var, value in sentinels.items():
-        assert var in text_out, f"{var} must still be NAMED — presence reporting is the point"
+    # The NO-LEAK half spans every registry key variable, including providers with no live
+    # model: a value must never surface, whether or not doctor has reason to name the variable.
+    for value in sentinels.values():
         for rendered in (text_out, json_out):
             assert value not in rendered
             # Not even a prefix: a truncated secret survives a naive `value not in` check.
             assert value[:8] not in rendered
+
+    # The NAMING half is what keeps the no-leak half from passing vacuously, so it is asserted
+    # only over the variables doctor is SUPPOSED to print. `_credentials_check` reports "which
+    # provider key each LIVE model needs" — a registry provider with no live model (a probe- or
+    # judge-only entry) is deliberately absent, and demanding its name would report a MISSING
+    # key that cannot affect routing. Derived from the live pool, never hardcoded.
+    live_vars = _live_pool_key_vars()
+    assert live_vars, "the live pool must name at least one key variable"
+    assert live_vars <= set(sentinels), "a live model needs a key var absent from the registry"
+    for var in live_vars:
+        assert var in text_out, f"{var} must still be NAMED — presence reporting is the point"
 
 
 # ── F-12: model-pool health and loop health, the two §2 reuses that were absent ──

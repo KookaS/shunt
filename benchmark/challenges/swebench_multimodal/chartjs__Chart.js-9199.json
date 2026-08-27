@@ -1,0 +1,15 @@
+{
+  "instance_id": "chartjs__Chart.js-9199",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "599e23abfd1bb3545e350d62647f19911125872b",
+  "version": "3.3",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Legend block tests auto /base/test/fixtures/plugin.legend/label-textAlign/rtl-right.js ",
+    "Legend block tests auto /base/test/fixtures/plugin.legend/label-textAlign/rtl-left.js "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-9199:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Rtl regresssions in v3\n## Expected Behavior\r\n`rtl: true` in legend should draw it rtl (box to the right of the text) like in charts v2.\r\n\r\n## Current Behavior\r\ntext goes off screen, not rendered at all.\r\n\r\n## Possible Solution\r\nI have no idea. The refactor to v3 completely changed (ruined?) the original rtl helper that I've written.  \r\nThere are major regressions, like `renderText` rendering multiples lines always aligned to the left, while it should be alignment-aware.\r\nAnd everything else has changed.\r\n\r\nLooks like `_textX` should be updated to be rtl-aware.\r\n\r\n## Steps to Reproduce\r\nhttps://codepen.io/danielgindi/pen/eYveogd\r\n\r\n## Context\r\nCannot upgrade to v3 due to rtl issues.\r\n\r\n## Environment\r\n* Chart.js version: 3.3.2\r\n* Chrome 91.0.4472.77\r\n\n"
+}

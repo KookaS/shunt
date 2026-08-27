@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-11352",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "201ddffa1d0d0bf61a4372ff1386dbcffd606850",
+  "version": "4.3",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Legend block tests auto /base/test/fixtures/plugin.legend/legend-doughnut-right-center-mulitiline-labels.json "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-11352:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Legend label click (& other events) use wrong label with multi-line, gets worse the more labels there are\n### Expected behavior\n\nClicking anywhere in a multi-line label performs the click action (or hover event) on that legend item, not the one above it.\n\n### Current behavior\n\nIf legend is positioned `right` and labels are multi-line (2 lines for me), then clicking a legend label (for default behavior of hiding/showing), will perform that on the label above the one you click. This gets worse (more off) the more labels you have (like 5+). For example, clicking the 4th label performs the action on the 3rd.\r\n\r\n![LegenLabelClick-Hover](https://user-images.githubusercontent.com/12361341/236559775-b3c7823e-816b-43cd-b6eb-c44d0ca8dc7b.gif)\r\n\n\n### Reproducible sample\n\nhttps://www.chartjs.org/docs/latest/samples/legend/events.html\n\n### Optional extra steps/info to reproduce\n\nI don't use Codepen, but on this samples page:\r\nhttps://www.chartjs.org/docs/latest/samples/legend/events.html\r\n\r\nIf you position legend to the right, and use the following for labels, you can easily see it.\r\n```\r\nlabels: [['Red Test','Test line 2'], ['Blue test','Test line 2'], ['Yellow test','Test line 2'], ['Green test','Test line 2'], ['Purple test','Test line 2'], ['Orange test','Test line 2']],\r\n```\n\n### Possible solution\n\n_No response_\n\n### Context\n\n_No response_\n\n### chart.js version\n\nv4.3.0\n\n### Browser name and version\n\nFirefox Windows 102.10, and Edge Windows\n\n### Link to your project\n\n_No response_\n"
+}

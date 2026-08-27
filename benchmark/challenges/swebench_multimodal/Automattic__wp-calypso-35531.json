@@ -1,0 +1,21 @@
+{
+  "instance_id": "Automattic__wp-calypso-35531",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "9e445e13dd96de61e7b7c5c98ad98e12268a4d12",
+  "version": "10.15.2",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "PlanStorage basic tests - should not render for contributors"
+  ],
+  "PASS_TO_PASS": [
+    "PlanStorage basic tests - should not render for jetpack sites",
+    "PlanStorage basic tests - should not render when site plan slug is empty",
+    "PlanStorage basic tests - should render a PlanStorageBar",
+    "PlanStorage basic tests - should not blow up and have class .plan-storage",
+    "PlanStorage basic tests - should not render when storage is unlimited",
+    "PlanStorage basic tests - should render when storage is limited"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-35531:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Media: Hide upgrade nudge for editor and author roles\nOn a WordPress.com site with public visibility (can be seen on https://wordpress.com/settings/general), visiting the https://wordpress.com/media page shows an upgrade nudge at the top right (next to the storage space usage).\r\n\r\nExamples:\r\n\r\nAs seen on an editor profile on a site:\r\n\r\n<img width=\"352\" alt=\"Screenshot 2019-08-18 at 13 01 21\" src=\"https://user-images.githubusercontent.com/18581859/63221565-9afe2180-c1b8-11e9-9a21-75af5cd75175.png\">\r\n\r\nAs seen on an author profile on another site:\r\n\r\n<img width=\"351\" alt=\"Screenshot 2019-08-18 at 13 01 18\" src=\"https://user-images.githubusercontent.com/18581859/63221567-9b96b800-c1b8-11e9-927f-52d47ead4789.png\">\r\n\r\n\r\nThis nudge should be hidden for editor and author roles, as they cannot upgrade a site. Only the admins can.\n"
+}

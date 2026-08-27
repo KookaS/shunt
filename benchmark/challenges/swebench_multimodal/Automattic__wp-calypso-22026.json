@@ -1,0 +1,28 @@
+{
+  "instance_id": "Automattic__wp-calypso-22026",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "adc68ed44a6cb224a1dcfa0642284e2bf0fe4f77",
+  "version": "8.9.3",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "selectors - getShipToCountrySetting - should get the setting from state.",
+    "selectors - getShipToCountrySetting - should get the siteId from the UI tree if not provided."
+  ],
+  "PASS_TO_PASS": [
+    "selectors - #areSettingsGeneralLoading - should be false when woocommerce state is not available.",
+    "selectors - #areSettingsGeneralLoaded - should be false when woocommerce state is not available.",
+    "selectors - #areSettingsGeneralLoaded - should be false when settings are loaded only for a different site.",
+    "selectors - #areSettingsGeneralLoading - should be false when settings are loaded only for a different site.",
+    "selectors - #areSettingsGeneralLoading - should be false when settings are loaded.",
+    "selectors - #areSettingsGeneralLoaded - should be true when settings are loaded.",
+    "selectors - #getPaymentCurrencySettings - should get the currency settings from the state.",
+    "selectors - #areSettingsGeneralLoading - should be true when settings are currently being fetched.",
+    "selectors - #areSettingsGeneralLoading - should get the siteId from the UI tree if not provided.",
+    "selectors - #areSettingsGeneralLoaded - should be false when settings are currently being fetched.",
+    "selectors - #areSettingsGeneralLoaded - should get the siteId from the UI tree if not provided.",
+    "selectors - #getPaymentCurrencySettings - should get the siteId from the UI tree if not provided."
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-22026:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Store: Address loading indicator needs spacing between unit inputs\nWhen loading the shipping page, the address loading indicator touches the unit inputs. There should be spacing between this.\r\n\r\n<img width=\"881\" alt=\"screen shot 2018-01-29 at 11 43 01 am\" src=\"https://user-images.githubusercontent.com/689165/35530703-b1add6c4-04e9-11e8-91cf-258ed9dd1b59.png\">\r\n\r\ncc @budzanowski \r\n\n"
+}

@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-9613",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "8d68b119bcb95af182cc69d42acad8490af53d3e",
+  "version": "3.5",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Chart.plugins config.options.plugins should filter event callbacks by plugin events array "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-9613:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Plugin event filters receive normalized event type and fail when normalization occurs\n### Discussed in https://github.com/chartjs/Chart.js/discussions/9580\r\n\r\n<div type='discussions-op-text'>\r\n\r\n<sup>Originally posted by **beibean** August 25, 2021</sup>\r\nHi there,\r\n\r\nI am using a touchscreen on a embedded device and after migrating from v2.9.4 to v3.5.1 I am not able to show tooltip as used to show it before.\r\n\r\nI only need to show tooltip when user touches any part of the graph. We detect touches with ***pointerdown*** and ***pointerup events***. After the library upgrade only the point is hover but the tooltip won't show:\r\n\r\n![image](https://user-images.githubusercontent.com/21239979/130746913-786e3664-9bd2-4562-904c-03d09089020f.png)\r\n\r\n\r\n[Here is a project to reproduce it](https://stackblitz.com/edit/angular-component-df9lph?file=src%2Fapp%2Fapp.component.ts).\r\n\r\nAny new configuration I overlooked or any suggestion to fix this?\r\n\r\n</div>\r\n\r\n## Description\r\n\r\nThis originates from https://github.com/chartjs/Chart.js/pull/8876\r\n\r\nThe event type is changed here:\r\nhttps://github.com/chartjs/Chart.js/blob/fca030922360a1a2d1292f6936276ad11a7cf7d9/src/platform/platform.dom.js#L106\r\n\r\nOriginal types are used to filter and it does not match.\r\n\r\nThis can be worked around by adding the normalized events: `events: ['mousedown', 'mouseup']` to `options.plugins.tooltip`\r\n\n"
+}

@@ -108,8 +108,8 @@ statuses below are the current audit of that contract:
   scored with the `edit_gated` counter, which decides where the reproduction phase ends by reading
   each step's `action` — a field the live decision never receives, and one no `EscalationPolicy`
   knob can ask for. The numbers are real; they bound a policy production does not run.
-- **PARTLY — all benchmark data in git.** Tracked: `routing/results.csv`, the 500 instance
-  specs, `routing/data/challenges.json`, the committed trajectory JSONL files (one per live
+- **PARTLY — all benchmark data in git.** Tracked: `routing/results.csv`, the instance
+  specs (500 in swebench_verified, 102 in swebench_multimodal), `routing/data/challenges.json` and `routing/data/challenges_multimodal.json`, the committed trajectory JSONL files (one per live
   session, counted by `benchmark.escalation.corpus.census()`) with their per-step
   stamps, `manifest.json`, `admissibility.json`, `stamp_ledger.json`, and the report PNGs.
   Untracked: the per-step diffs above, the ~100 GB image set, and the HF dataset rows. Everything
@@ -172,20 +172,23 @@ benchmark/
   admissibility.py             # Re-export shim over shunt.analysis.admissibility (the adjudicator ships in the wheel)
   model_coverage.py            # Per-model corpus coverage — flags enabled models the collection missed
   challenges/                  # Individual challenge files
-    swebench_verified/         # SWE-bench Verified instance SPECS (the sole source, runnable)
+    swebench_verified/         # SWE-bench Verified instance SPECS (500 instances, Python only)
+    swebench_multimodal/       # SWE-bench Multimodal instance SPECS (102 instances, multi-language)
   runner/
     swebench_specs.py          # Spec load/materialise (repos pulled on demand, not vendored)
     infer.py                   # predictions.jsonl: gold (keyless) | live (key-gated)
     swebench_harness.py        # Thin wrapper over `python -m swebench.harness.run_evaluation`
     swebench_smoke.py          # $0 gold-patch smoke driver
     select_swebench.py         # Rank Verified instances from SWE-bench/experiments
-    build_challenges.py        # Reproducible producer: materialise all 500 specs + rebuild challenges.json
+    build_challenges.py        # Reproducible producer: materialise swebench_verified (500) + rebuild challenges.json
+    swebench_multimodal_specs.py # Producer for the multimodal source (102 specs, dispatched by manifest source)
     sampling.py                # Nested, diversity-first run order (partial runs reuse cached cells)
     calibration.py             # Deterministic full-matrix calibration holdout (hash-thresholding)
   routing/                     # Active: routing strategy benchmark
     results.csv                # THE committed source of truth — per-cell outcomes from live runs
     data/                      # Curated read-only inputs
-      challenges.json          # Challenge index of the 500 swebench_verified specs (challenges, tasks)
+      challenges.json          # Challenge index of swebench_verified specs (500 instances, challenges & tasks)
+      challenges_multimodal.json # Challenge index of swebench_multimodal specs (102 instances, challenges & tasks)
       seed/                    # LFS-tracked warm-start bundles (one .npz per embedder fingerprint + plain manifest.json)
     strategies/                # Routing strategies (one file per strategy)
       __init__.py
@@ -249,12 +252,17 @@ python3 -m benchmark.model_coverage
 
 ### Scaling the suite / cost-safe partial runs
 
-The 500-challenge suite is regenerable from the pinned dataset:
+The swebench_verified suite (500 instances) is regenerable from the pinned dataset:
 
 ```sh
-python3 -m benchmark.runner.build_challenges         # materialise 500 specs + rebuild challenges.json
+python3 -m benchmark.runner.build_challenges         # materialise swebench_verified (500) + rebuild challenges.json
 python3 -m benchmark.runner.build_challenges --limit 5   # cheap dry build of the first few
 ```
+
+The swebench_multimodal suite (102 instances) requires invoking the multimodal producer directly
+(`python3 -m benchmark.runner.swebench_multimodal_specs`). It writes its OWN manifest,
+`routing/data/challenges_multimodal.json` (override with `--manifest-out`) — never the configured
+manifest, which under the shipped `benchmark.yaml` is the swebench_verified index.
 
 Live runs are gated by `benchmark.sample_size` in `benchmark.yaml` (0 = all). Because
 `runner/sampling.py` orders challenges into a **fixed, diversity-first, nested**
@@ -311,28 +319,25 @@ parsing. Needs Docker + the `benchmark` extra: `pip install -e '.[dev,benchmark]
 
 ### Instance-spec setup (not vendored repos)
 
-Each task is a small **spec** under `challenges/swebench_verified/<instance_id>.json`
+Each task is a small **spec** under `challenges/<source>/<instance_id>.json` (currently `swebench_verified/` or `swebench_multimodal/`)
 holding only what's needed to run + identify it: `instance_id, repo, base_commit,
 version, difficulty_stratum, FAIL_TO_PASS, PASS_TO_PASS, image_ref, dataset_revision`.
 `dataset_revision` pins the HF dataset commit the fields were pulled from — the spec's
-provenance. `swebench_specs.py` also writes a `problem_statement` — the upstream issue
+provenance. Spec producers also write a `problem_statement` — the upstream issue
 text, the same string the harness hands the agent — so that routing embeds the task
 rather than the `description` label; it is excluded from the spec content hash (it adds
-no execution identity), so backfilling it stales no cached result cell. **Every one of
-the 500 committed specs and every `tasks` entry in `routing/data/challenges.json`
-carries that field** (backfilled 2026-08-05), so `strategies.routing_text()` embeds the
+no execution identity), so backfilling it stales no cached result cell. **Every committed spec and every `tasks` entry in `routing/data/challenges.json` or `routing/data/challenges_multimodal.json`
+carries that field** (swebench_verified backfilled 2026-08-05), so `strategies.routing_text()` embeds the
 issue text — no `description` fallback remains on the current manifest. The repo snapshot,
 environment, and patches are **pulled on
-demand** from the HF dataset (`princeton-nlp/SWE-bench_Verified`) and the prebuilt
-instance image — no repos are copied into the tree. The suite is the full **500
-Verified instances** across 12 repos (django, sympy, sphinx, matplotlib,
+demand** from the HF dataset and the prebuilt instance image — no repos are copied into the tree. The swebench_verified suite (500 instances) spans 12 Python repos (django, sympy, sphinx, matplotlib,
 scikit-learn, astropy, xarray, pytest, pylint, requests, seaborn, flask), each
 with a verified prebuilt `swebench/sweb.eval.x86_64.*` image and a spread of
-difficulty strata; live runs cover a nested partial subset (`sample_size`).
+difficulty strata. The swebench_multimodal suite (102 instances) covers JavaScript, TypeScript, and other languages. Live runs cover a nested partial subset (`sample_size`).
 Materialise specs by id. This writes **spec files only** — it does not touch
-`routing/data/challenges.json`, and routing reads only that manifest. Rebuilding
-the manifest (`build_challenges` above) re-materialises all
-500 specs from the pinned revision *and* rewrites the manifest in one pass.
+`routing/data/challenges.json` or `routing/data/challenges_multimodal.json`, and routing reads only the configured manifest. Rebuilding
+the manifest (`build_challenges` for verified; equivalent pattern for multimodal) re-materialises
+all specs from the pinned revision *and* rewrites the manifest in one pass.
 
 ```sh
 python -m benchmark.runner.swebench_specs astropy__astropy-7166 psf__requests-1142 …

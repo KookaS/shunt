@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-8867",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "ba84cc5c2aaf500739b202702fac24da74ede50d",
+  "version": "3.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Core.scale auto /base/test/fixtures/core.scale/ticks-mirror.js "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-8867:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "[FEATURE] Allow Axis ticks to render inside chart bounds e.g. `ticksInside`\nMy request is relevant to line charts. I wonder if there could be an option to render ticks inside the chart area?\r\n\r\nHere's an xAxis example of how things layout without the xAxis shown:\r\n\r\n<img width=\"322\" alt=\"screen shot 2017-07-18 at 11 57 03\" src=\"https://user-images.githubusercontent.com/1318466/28313802-11565fca-6bb0-11e7-9f1c-578591f0cf33.png\">\r\n\r\nAs you can see, when I hide the xAxis scales the chart displays full-width perfectly, edge to edge.\r\n\r\nHowever, when I enable the xAxis I get padding left and right of the chart to facilitate the tick label sitting centrally with the first and last data point:\r\n\r\n<img width=\"322\" alt=\"screen shot 2017-07-18 at 11 58 18\" src=\"https://user-images.githubusercontent.com/1318466/28313834-359aaae4-6bb0-11e7-9793-3bbd5e5725cd.png\">\r\n\r\n# Request\r\nWould you consider adding an option that spaces the tick labels inside the chart bounds? To illustrate, the feature would allow a layout like this with ticks in either Axis rendered within the chart bounds:\r\n\r\n![stats](https://user-images.githubusercontent.com/1318466/28313889-62bea084-6bb0-11e7-977e-5e7d3364c29e.png)\r\n\r\n\r\n## Environment\r\nChart js 2.6.0\r\n\n"
+}

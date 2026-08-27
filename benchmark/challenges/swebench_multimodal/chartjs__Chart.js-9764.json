@@ -1,0 +1,18 @@
+{
+  "instance_id": "chartjs__Chart.js-9764",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "12c5f9a8396f2a472f331ef772d6c7ba5cd62513",
+  "version": "3.5",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Chart.controllers.bubble auto /base/test/fixtures/controller.bubble/padding.js ",
+    "Chart.controllers.bubble auto /base/test/fixtures/controller.bubble/clip.js ",
+    "Chart.controllers.bubble auto /base/test/fixtures/controller.bubble/point-style.json ",
+    "Chart.controllers.bubble auto /base/test/fixtures/controller.bubble/radius-data.js ",
+    "Core.scale auto /base/test/fixtures/core.scale/border-behind-elements.js "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-9764:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "hover radius not working correctly\n## Expected Behavior\r\n\r\nAs described [here](https://www.chartjs.org/docs/latest/charts/bubble.html#interactions), hover radius is defined as *additional* radius when hovered. Setting hover radius to 0 should result in the same size for hover / not hover.\r\n\r\n## Current Behavior\r\nWhen the hover radius is set to 0, the bubble disappears on hover. When the hover radius is set to the same as the radius, the bubble gets bigger.\r\n\r\n## Steps to Reproduce\r\nhttps://codepen.io/elitastic/pen/jOLPZvP\r\n\r\n## Environment\r\n\r\n* Chart.js version: 3.5.1\r\n* Browser name and version: Chrome 94\r\n\n"
+}

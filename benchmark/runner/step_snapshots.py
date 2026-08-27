@@ -102,11 +102,44 @@ def message_list_path(trajectory_id: str, root: Path = MESSAGE_LIST_ROOT) -> Pat
     return root / f"{trajectory_id}.json"
 
 
+def clear_trajectory_scratch(
+    trajectory_id: str,
+    snapshots_root: Path = SNAPSHOT_ROOT,
+    message_list_root: Path = MESSAGE_LIST_ROOT,
+) -> None:
+    """Delete a trajectory's snapshot dir + saved message list (a fresh start owns the scratch)."""
+    # A FRESH run (the first run, or the fallback-fresh after a failed resume) must not leave the
+    # prior partial run's files behind: a later resume pairs `snapshots[max(...)]` with the loaded
+    # conversation, and a stale high-index diff from a DISCARDED run would rebuild a tree the loaded
+    # conversation never had. Clearing here, where the fresh run is decided, is what keeps the
+    # trajectory's snapshot set and message list coherent with the run that just started. A RESUME
+    # must NOT call this — it needs the prior snapshots to reconstruct the checkout.
+    out = snapshot_dir(trajectory_id, snapshots_root)
+    if out.is_dir():
+        for path in out.glob(_STEP_GLOB):
+            try:
+                path.unlink()
+            except OSError:
+                _LOG.warning("could not remove stale snapshot %s; leaving it", path)
+        try:
+            out.rmdir()
+        except OSError:
+            _LOG.warning("could not remove stale snapshot dir %s; leaving it", out)
+    messages = message_list_path(trajectory_id, message_list_root)
+    try:
+        messages.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        _LOG.warning("could not remove stale message list %s; leaving it", messages)
+
+
 __all__ = [
     "DIFF_COMMAND",
     "MESSAGE_LIST_ROOT",
     "SNAPSHOT_ROOT",
     "StepSnapshotRecorder",
+    "clear_trajectory_scratch",
     "message_list_path",
     "read_snapshots",
     "snapshot_dir",

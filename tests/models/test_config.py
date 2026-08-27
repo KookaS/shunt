@@ -47,6 +47,10 @@ DEFAULT_MODEL_NAMES: Final = [
     # knn_difficulty label source over the claude-sonnet-5 anchor (see
     # benchmark/routing/data/judge_difficulty.json).
     "gpt-5.6-terra",
+    # PROBE-ONLY (2026-08-26): the revealed identity of the retired stealth/ox-alpha.
+    # Never served by the router, never in the benchmark's models list — registered so the
+    # 41 cells collected during OpenRouter's $0 free window keep a priced registry row.
+    "zai-glm-5.3-flash",
 ]
 
 
@@ -282,11 +286,14 @@ class TestRestrictToLive:
 class TestFallbackChain:
     def test_self_first_then_rank_neighbours(self) -> None:
         pool = ModelPool()
-        # qwen3.7-plus (1.60) sits at rank 1; nearest neighbours are gpt-5-mini (2.25)
-        # then deepseek-v4-flash (0.42).
+        # qwen3.7-plus (1.60) sits at rank 2 of the UNRESTRICTED registry; nearest neighbours
+        # are zai-glm-5.3-flash (0.65) then gpt-5-mini (2.25), with deepseek-v4-flash (0.42)
+        # one step further out. This ranks the whole registry, probe- and judge-only rows
+        # included — the server restricts to the policy's live list before serving
+        # (`proxy/server.py`), which is what keeps a probe-only row out of real routing.
         chain = pool.fallback_chain("qwen3.7-plus")
         assert chain[0] == "qwen3.7-plus"
-        assert set(chain[:3]) == {"qwen3.7-plus", "gpt-5-mini", "deepseek-v4-flash"}
+        assert set(chain[:3]) == {"qwen3.7-plus", "zai-glm-5.3-flash", "gpt-5-mini"}
         # Exhaustive and duplicate-free, whatever the pool holds.
         assert chain == list(dict.fromkeys(chain))
         assert set(chain) == set(pool.model_names())
@@ -401,14 +408,19 @@ class TestDefaultRegistryHasReasoning:
     # NOTE: gpt-5.6-sol is deliberately NOT here — it is a served router model
     # (router.yaml `models:` list), so it keeps its reasoning bracket.
     JUDGE_ONLY_MODELS: Final = frozenset({"claude-sonnet-5", "gpt-5.6-terra"})
+    # PROBE-ONLY rows are exempt for a different reason than the judge-only ones: their
+    # committed result rows carry the legacy `reasoning="default"` placeholder, and declaring
+    # a bracket now would re-alias those measured rows to an arm they never ran (see
+    # benchmark/config.py `_alias_legacy_reasoning`). Also absent from router.yaml/benchmark.yaml.
+    PROBE_ONLY_MODELS: Final = frozenset({"zai-glm-5.3-flash"})
 
     def test_every_default_model_declares_a_reasoning_block(self) -> None:
         pool = ModelPool()
         for name in DEFAULT_MODEL_NAMES:
             model = pool.get_model(name)
             assert model is not None
-            if name in self.JUDGE_ONLY_MODELS:
-                assert model.reasoning is None, f"{name} is judge-only and must stay reasoning-free"
+            if name in self.JUDGE_ONLY_MODELS or name in self.PROBE_ONLY_MODELS:
+                assert model.reasoning is None, f"{name} must stay reasoning-free"
                 continue
             assert model.reasoning is not None, f"{name} missing reasoning block"
             assert model.reasoning.default_arm in {a.id for a in model.reasoning.arms}

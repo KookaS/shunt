@@ -12,7 +12,8 @@ routing/
   docs_corpus.py              # Cached seed-only store the committed docs figures render from
   live_split.py               # Held-out task split for the live evaluation (pure hash-threshold)
   data/                       # Curated read-only inputs
-    challenges.json           # Index of the 500 swebench_verified specs (challenges, tasks)
+    challenges.json           # Index of swebench_verified specs (500 instances, challenges, tasks)
+    challenges_multimodal.json # Index of swebench_multimodal specs (102 instances, challenges, tasks)
     live_split_manifest.json  # The resolved live-eval holdout: salt, fraction, revision, ids, digest
     seed/                     # LFS-tracked warm-start bundles (one .npz per embedder fingerprint + plain manifest.json)
   strategies/
@@ -58,7 +59,8 @@ routing/
   reports/                    # derived CSV/JSON only (gitignored); the PNGs live in docs/assets/figures/routing/
 benchmark/
   challenges/
-    swebench_verified/        # The 500 instance specs (the sole challenge source)
+    swebench_verified/        # The 500 swebench_verified instance specs (Python-only)
+    swebench_multimodal/      # The 102 swebench_multimodal instance specs (multi-language)
 ```
 
 There is a **single committed data source of truth**:
@@ -406,24 +408,23 @@ docker compose -f benchmark/compose.yaml run --rm benchmark  # simulated loop + 
 
 ## Challenge store
 
-The **sole** challenge source is **SWE-bench Verified**. Each task is a minimal
-spec under `benchmark/challenges/swebench_verified/{instance_id}.json`
+The **challenge sources** are **SWE-bench Verified** (swebench_verified, 500 Python instances) and **SWE-bench Multimodal** (swebench_multimodal, 102 multi-language instances). Each task is a minimal
+spec under `benchmark/challenges/<source>/{instance_id}.json`
 (`instance_id, repo, base_commit, version, difficulty_stratum, FAIL_TO_PASS,
 PASS_TO_PASS, image_ref, dataset_revision`) whose repo/patch content is pulled on
-demand by the official harness — nothing is vendored. The suite is the full **500
-instances** across 12 repos with a spread of difficulty strata; every one has a
-verified prebuilt `swebench/sweb.eval.x86_64.*` image. Live runs cover a nested
-partial subset set by `sample_size` (see the harness README).
+demand by the official harness — nothing is vendored. The swebench_verified suite spans 12 repos with a spread of difficulty strata; every one has a
+verified prebuilt `swebench/sweb.eval.x86_64.*` image. The swebench_multimodal suite covers repositories in multiple languages. Live runs cover a nested
+partial subset set by `sample_size` and configured by the manifest source (see the harness README).
 `integrity.swebench_spec_hash()` hashes each spec; live `(instance, model)`
 outcomes flow into `results.csv` with the spec hash as `version_hash`.
 See the benchmark README's *SWE-bench Verified execution* section for the
 spec → image → ephemeral-container run flow and the gold-smoke / `--live` commands.
 
-The canonical index is `benchmark/routing/data/challenges.json`:
+The canonical indices are `benchmark/routing/data/challenges.json` (swebench_verified) and `benchmark/routing/data/challenges_multimodal.json` (swebench_multimodal):
 - `challenges` — lightweight index (id, source, language, difficulty)
 - `tasks` — metadata dict (id → description, repo, base_commit, difficulty, spec
   path). `routing_text()` prefers `problem_statement` and every committed entry
-  carries it (all 500, backfilled 2026-08-05), so strategies embed the issue text
+  carries it, so strategies embed the issue text
   rather than the `description` label
   (`<repo>@<commit12> - resolve <test-id>`, median 106 characters — kept as a
   contrast row so the input change is visible, not asserted)

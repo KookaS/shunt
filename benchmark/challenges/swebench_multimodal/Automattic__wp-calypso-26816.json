@@ -1,0 +1,30 @@
+{
+  "instance_id": "Automattic__wp-calypso-26816",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "5bb7ee7beec05830b9edbaa2f12d3bf27d67a079",
+  "version": "10.9.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "reducer - should export expected reducer keys",
+    "isGutenbergOptInDialogShowing() - should return false if the isGutenbergOptInDialogShowing reducer is false",
+    "actions - showGutenbergOptInDialog() - should return an action object",
+    "actions - hideGutenbergOptInDialog() - should return an action object",
+    "isGutenbergOptInDialogShowing() - should return true if the isGutenbergOptInDialogShowing reducer is true",
+    "isGutenbergOptInDialogShowing() - should return false if the value is not known"
+  ],
+  "PASS_TO_PASS": [
+    "reducer - #siteSelectionInitialized() - should be true if siteId is null",
+    "reducer - #isNotificationsOpen() - should toggle open when closed",
+    "reducer - #siteSelectionInitialized() - should be true when a site is selected",
+    "reducer - #selectedSiteId() - should set to null if siteId is undefined",
+    "reducer - #selectedSiteId() - should set the selected site ID",
+    "reducer - #isNotificationsOpen() - should default to false",
+    "reducer - #siteSelectionInitialized() - should be true if siteId is undefined",
+    "reducer - #siteSelectionInitialized() - should default to false",
+    "reducer - #selectedSiteId() - should default to null",
+    "reducer - #isNotificationsOpen() - should toggle closed when open"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-26816:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Gutenberg: Modal to try new Editor\nInitial version implemented in #26816.\r\n\r\nFollow-up tasks:\r\n\r\n- [ ] remember dismissal in userprefs & default dialog to visible on load\r\n- [ ] redirect to wp-admin for Jetpack/AT sites (TBD)\r\n- [x] add click tracking events to both buttons in dialog\r\n- [x] make sidebar image clickable?\r\n\r\nOriginal issue:\r\n\r\nLet's create a modal that will display on the /post and /page editor when the `gutenberg` feature flag is enabled. Clicking on  \"Use the Classic Editor\" Will dismiss the modal, while clicking on the primary button will redirect to `/gutenberg/{post-type}` or the wp-admin Gutenberg editor. Let's add a relevant click event for each action.\r\n\r\nCopy is not final and may be subject to change. Please ping @shaunandrews  if we need assets.\r\n\r\n![screen shot 2018-08-09 at 3 13 05 pm](https://user-images.githubusercontent.com/1270189/43928725-c822bd22-9be6-11e8-8d9d-1cf85bc78168.png)\r\n\r\nClicking on Learn More should display the modal again:\r\n\r\n![screen shot 2018-08-09 at 3 38 53 pm](https://user-images.githubusercontent.com/1270189/43929554-6151eb64-9bea-11e8-87fd-71a910e68295.png)\r\n\r\n\r\nBonus Design Question: Should we add an option to not show this modal again for a while?\r\n\n"
+}

@@ -1,0 +1,17 @@
+{
+  "instance_id": "chartjs__Chart.js-8593",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "275fdaf3dad77908053e4598a52093f671dc7b9e",
+  "version": "3.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Test the radial linear scale Should have the correct default config ",
+    "Test the radial linear scale should correctly get angles for all points ",
+    "Test the radial linear scale should correctly get the correct label alignment for all points ",
+    "Chart.controllers.polarArea should update elements with start angle from options "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-8593:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Rotation in Radar chart is missing.\n\r\n\r\nHi, I am looking for a feature which is required in **Radar Chart**. I want to **Rotate** radar chart at following degree (1.22 * Math.Pi).\r\nI tried many ways but It stick with default degree which is -0.5*Math.PI.\r\n\r\n![image](https://user-images.githubusercontent.com/13778401/95996023-a3e59400-0e4b-11eb-8d5c-d23da877a561.png)\r\n\r\n  \n"
+}

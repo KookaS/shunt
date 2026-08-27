@@ -1,0 +1,30 @@
+{
+  "instance_id": "Automattic__wp-calypso-26286",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "e9d12f1585da7f7bd4ee03f47f43bfd7a2247ab8",
+  "version": "10.6.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "getCurrentSection - returns null for activity log page"
+  ],
+  "PASS_TO_PASS": [
+    "iOS deep links - returns a URI even if the path is null",
+    "iOS deep links - includes fragment in URI",
+    "getCurrentSection - returns reader if in reader section",
+    "iOS deep links - returns URIs for each path",
+    "iOS deep link fragments - passes through a non-root Reader path",
+    "iOS deep link fragments - returns a fragment for each section",
+    "iOS deep link fragments - returns a valid Reader URI for the root path",
+    "getCurrentSection - returns null if in a disallowed section",
+    "getCurrentSection - returns stats if in stats section",
+    "getCurrentSection - returns notes if notes is open",
+    "iOS deep link fragments - passes through a Stats path",
+    "iOS deep link fragments - returns an empty fragment for other sections",
+    "getCurrentSection - returns editor if in editor section",
+    "iOS deep link fragments - returns a fragment for a null path",
+    "iOS deep link fragments - properly encodes tricky fragments"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-26286:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Activity Log: app banner related to Stats is shown\nVisit https://wordpress.com/stats/activity/YOURSITESLUG in a mobile device. I was actually able to find this in Chrome's mobile emulator in dev tools:\r\n\r\n<img width=\"336\" alt=\"captura de pantalla 2018-03-22 a la s 10 34 26\" src=\"https://user-images.githubusercontent.com/1041600/37774589-66c5670e-2dbf-11e8-8248-9d61ac3a6358.png\">\r\n\r\nRight now we have nothing in the Redux state that allows us to discriminate this based on `/activity`.\r\n\r\n<img width=\"280\" alt=\"captura de pantalla 2018-03-22 a la s 10 50 05\" src=\"https://user-images.githubusercontent.com/1041600/37774590-6705676e-2dbf-11e8-9123-82ac9a0c4682.png\">\r\n\r\nAs can be seen in https://github.com/Automattic/wp-calypso/blob/master/client/blocks/app-banner/index.jsx#L149 it only looks at `/stats` and this is why this banner is showing.\r\n\r\nWe should have more information about the path being visited so we can exclude it in AL.\r\n\n"
+}

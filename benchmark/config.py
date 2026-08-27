@@ -198,6 +198,13 @@ def live_cost_limit() -> float:
     return float(live_config().get("cost_limit", 4.0))
 
 
+def resume_enabled() -> bool:
+    """Gate for per-cell conversation resume — default False (always a fresh start)."""
+    # Off by default so an existing run is byte-identical: without `resume.enabled`, a leftover
+    # partial conversation on disk is ignored and the cell restarts from zero every window.
+    return bool(get().get("resume", {}).get("enabled", False))
+
+
 def _pricing_dict() -> dict:
     """Return pricing as {model: {input, output}} for every priced registry model."""
     pricing = load_pricing()

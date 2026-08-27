@@ -1,0 +1,251 @@
+{
+  "schema_version": "1",
+  "trajectories": {
+    "astropy__astropy-13453__zai-glm-5.3-flash__default": {
+      "content_sha256": "dcbe3747a43b10ea3eb2cc52a94bdb2aca561d9a110f709655527773a58d07e2",
+      "n_steps": 29,
+      "snapshot_steps": 28,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-13579__zai-glm-5.3-flash__default": {
+      "content_sha256": "1a1ce5fd944d4192df5d3c80f936ca40d48e2f95cad59dd104407cf179936496",
+      "n_steps": 30,
+      "snapshot_steps": 29,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-14995__zai-glm-5.3-flash__default": {
+      "content_sha256": "fc06e9d37a65ffa44e6650c434b3c33c10ace690f1b33cfc1c4a22d0ed429102",
+      "n_steps": 18,
+      "snapshot_steps": 17,
+      "terminal_resolved": true
+    },
+    "astropy__astropy-7166__zai-glm-5.3-flash__default": {
+      "content_sha256": "bbf8cc9ab3d59048e8de18d45a121ab6c95fed5d986613b23d841f39f4913ee8",
+      "n_steps": 17,
+      "snapshot_steps": 16,
+      "terminal_resolved": true
+    },
+    "django__django-10880__zai-glm-5.3-flash__default": {
+      "content_sha256": "bc028a50c9830e60b027659592c67a99c8a559e3eda54590439c0c27a3aa1e4a",
+      "n_steps": 23,
+      "snapshot_steps": 22,
+      "terminal_resolved": true
+    },
+    "django__django-12325__zai-glm-5.3-flash__default": {
+      "content_sha256": "e784e31977d40c3b94938f1d22a9988722b2a59af7d06e5bbe35fdb64de6b6f1",
+      "n_steps": 39,
+      "snapshot_steps": 38,
+      "terminal_resolved": true
+    },
+    "django__django-15563__zai-glm-5.3-flash__default": {
+      "content_sha256": "6778c8182a6ae265a73f78a9e5f4e710efdd6e82b70e88606af7fc50735eb583",
+      "n_steps": 53,
+      "snapshot_steps": 52,
+      "terminal_resolved": true
+    },
+    "django__django-16569__zai-glm-5.3-flash__default": {
+      "content_sha256": "b08c4375736031ae4b1a865faf0d54c5b6ebd340d17a98ad931384db0e3d3ed2",
+      "n_steps": 16,
+      "snapshot_steps": 15,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-13989__zai-glm-5.3-flash__default": {
+      "content_sha256": "e284d5a0ac6ccaefc658f1bfde3d6082ff56bfe4bae9ae37179ec8fad322649e",
+      "n_steps": 12,
+      "snapshot_steps": 11,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-20826__zai-glm-5.3-flash__default": {
+      "content_sha256": "591ff33abf22da564ea464e9026eb2909435358cfb41854a1c85c9cd12e65227",
+      "n_steps": 38,
+      "snapshot_steps": 37,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-23412__zai-glm-5.3-flash__default": {
+      "content_sha256": "2a8652c4240403b19b6935394415508b3ced4f7eecce4cb755978e7a7354bdab",
+      "n_steps": 32,
+      "snapshot_steps": 31,
+      "terminal_resolved": true
+    },
+    "matplotlib__matplotlib-25122__zai-glm-5.3-flash__default": {
+      "content_sha256": "8a12e24fdaa96ddd6bc401a06dfcc64183901f5fd276e717ed8d82748075edc2",
+      "n_steps": 20,
+      "snapshot_steps": 19,
+      "terminal_resolved": true
+    },
+    "mwaskom__seaborn-3069__zai-glm-5.3-flash__default": {
+      "content_sha256": "9f84f901dafa87a28fe63c1eddaea9a6962e44de6735edb9c7be5cad7c40040f",
+      "n_steps": 61,
+      "snapshot_steps": 60,
+      "terminal_resolved": true
+    },
+    "mwaskom__seaborn-3187__zai-glm-5.3-flash__default": {
+      "content_sha256": "ecb68a6a7ac5f21f565f8e0420de7be314b98396dbe48eb22f6f4b3bbee01845",
+      "n_steps": 28,
+      "snapshot_steps": 27,
+      "terminal_resolved": true
+    },
+    "pallets__flask-5014__zai-glm-5.3-flash__default": {
+      "content_sha256": "911982c34b2d147bf7a330855b646e47ec70a2118aebb768b59443aa6331a200",
+      "n_steps": 21,
+      "snapshot_steps": 20,
+      "terminal_resolved": true
+    },
+    "psf__requests-1142__zai-glm-5.3-flash__default": {
+      "content_sha256": "ceabb7c60231af6501c7f9a43e9209331e07b8a37591ed54ceb4b2fdf1bec9e9",
+      "n_steps": 31,
+      "snapshot_steps": 30,
+      "terminal_resolved": true
+    },
+    "psf__requests-2931__zai-glm-5.3-flash__default": {
+      "content_sha256": "b54c23ec15c0563973fb3ba01cd9eb02e540c985d2fa051a1020d49b1db80e3a",
+      "n_steps": 16,
+      "snapshot_steps": 15,
+      "terminal_resolved": true
+    },
+    "psf__requests-5414__zai-glm-5.3-flash__default": {
+      "content_sha256": "aa5499bc6d7ce50160e5ea6f2fce07613e91d9d2ef5bf602aa3c98cce3d5a852",
+      "n_steps": 18,
+      "snapshot_steps": 17,
+      "terminal_resolved": true
+    },
+    "psf__requests-6028__zai-glm-5.3-flash__default": {
+      "content_sha256": "2dbc601db3d51ec83d93c744c41f25fdd2e799dff96e0955f4677c76b5830557",
+      "n_steps": 26,
+      "snapshot_steps": 25,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-3151__zai-glm-5.3-flash__default": {
+      "content_sha256": "ebb038aee6ece70af3808dc937207e4f4c0183648b843ae3290027dde8636947",
+      "n_steps": 12,
+      "snapshot_steps": 11,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4356__zai-glm-5.3-flash__default": {
+      "content_sha256": "5afedbc7142d00af913fa2c3ccfa5daa4eee87d4302fd6f59944a5418f956c36",
+      "n_steps": 24,
+      "snapshot_steps": 23,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-4629__zai-glm-5.3-flash__default": {
+      "content_sha256": "216f2850266167ddf21780901b200ea46cb92d4835c9533c7a8c332f8a24d3ca",
+      "n_steps": 14,
+      "snapshot_steps": 13,
+      "terminal_resolved": true
+    },
+    "pydata__xarray-6992__zai-glm-5.3-flash__default": {
+      "content_sha256": "06f6419fe7c792b3014e6706a8d2a21953f98c9415c8874cb1c135b12449b7b5",
+      "n_steps": 65,
+      "snapshot_steps": 64,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-4551__zai-glm-5.3-flash__default": {
+      "content_sha256": "677ca03a1a23ccf8e249bc2443f845fefe4f96b4fbb045f1dc076296e531bedf",
+      "n_steps": 33,
+      "snapshot_steps": 32,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-4604__zai-glm-5.3-flash__default": {
+      "content_sha256": "bdf1e6fce6d2b0061650979ae5c76f9f00df840e1a6add6a32f302d5c7985cbb",
+      "n_steps": 26,
+      "snapshot_steps": 25,
+      "terminal_resolved": false
+    },
+    "pylint-dev__pylint-4970__zai-glm-5.3-flash__default": {
+      "content_sha256": "c1cdb76a3719f3e30b0089952867d5a0e4bc97b20f814f14430c43dd718a429d",
+      "n_steps": 59,
+      "snapshot_steps": 58,
+      "terminal_resolved": true
+    },
+    "pylint-dev__pylint-6903__zai-glm-5.3-flash__default": {
+      "content_sha256": "086d6f8aaced697c605a58318e675eb8c2f404f1c2710ecc337f8dd9254a3910",
+      "n_steps": 14,
+      "snapshot_steps": 13,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-6197__zai-glm-5.3-flash__default": {
+      "content_sha256": "9bf0b375cfe357e091a65423f5978ceaf3579f32b8214e098606d02a5602df6e",
+      "n_steps": 43,
+      "snapshot_steps": 42,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7205__zai-glm-5.3-flash__default": {
+      "content_sha256": "869a63918b3f5ccdc281d9fb73f98554d9b15319f6be0f883a3e34cc8cfe8a7f",
+      "n_steps": 22,
+      "snapshot_steps": 21,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7324__zai-glm-5.3-flash__default": {
+      "content_sha256": "dc7671e013a4dd0f68e703490afd96f23cf6c1c26372fddf583502b27e3c0279",
+      "n_steps": 41,
+      "snapshot_steps": 40,
+      "terminal_resolved": true
+    },
+    "pytest-dev__pytest-7521__zai-glm-5.3-flash__default": {
+      "content_sha256": "988a1867c693f6aa504b49535a409fa11dd9fa605c52c407f88b618112016c5a",
+      "n_steps": 27,
+      "snapshot_steps": 26,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-10908__zai-glm-5.3-flash__default": {
+      "content_sha256": "158988eb28a6da5594ed118c44e69c671e2c313b6b9d1acd6f9cf62462ca16aa",
+      "n_steps": 14,
+      "snapshot_steps": 13,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-13496__zai-glm-5.3-flash__default": {
+      "content_sha256": "28dd1079c33622ade7f453a79ed7a9493facc5928fb0b7cfc28ea200ee6377ec",
+      "n_steps": 16,
+      "snapshot_steps": 15,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-14496__zai-glm-5.3-flash__default": {
+      "content_sha256": "18c543b75d57ca511722fdf890b08e25144fa8092a1465b5ada56d454ed82870",
+      "n_steps": 22,
+      "snapshot_steps": 21,
+      "terminal_resolved": true
+    },
+    "scikit-learn__scikit-learn-25102__zai-glm-5.3-flash__default": {
+      "content_sha256": "4f12c360688bd0ece6dc2ab4d149a3d81ad86ce348e28a3c5d66b0bbd6d54179",
+      "n_steps": 35,
+      "snapshot_steps": 34,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-10614__zai-glm-5.3-flash__default": {
+      "content_sha256": "1bb4c51af38a43924363dce316903e5af6fae3288c525098983af0cfb3351697",
+      "n_steps": 94,
+      "snapshot_steps": 93,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-8621__zai-glm-5.3-flash__default": {
+      "content_sha256": "a8ce67822bcbb97a057b6daaa60c690d3b1169810f221239d9e77c56d9afe0b5",
+      "n_steps": 23,
+      "snapshot_steps": 22,
+      "terminal_resolved": true
+    },
+    "sphinx-doc__sphinx-9229__zai-glm-5.3-flash__default": {
+      "content_sha256": "84e7f2da89ba6a76b75dc14f27edc034ef6b89c63483862a45442b4f5e9cfb68",
+      "n_steps": 44,
+      "snapshot_steps": 43,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-18199__zai-glm-5.3-flash__default": {
+      "content_sha256": "1b691a7185aeb850243328ac5a62c7657a8626e7b99566e3babd16768fc8dc6d",
+      "n_steps": 21,
+      "snapshot_steps": 20,
+      "terminal_resolved": false
+    },
+    "sympy__sympy-21612__zai-glm-5.3-flash__default": {
+      "content_sha256": "3c7b01366097b964b30337c781033b238e3ccd4e40d67c5810a6e312ff2f4b14",
+      "n_steps": 26,
+      "snapshot_steps": 25,
+      "terminal_resolved": true
+    },
+    "sympy__sympy-22714__zai-glm-5.3-flash__default": {
+      "content_sha256": "2426e59a6f3bc0880a7cc60c188a5aad015db51006936e6dcf3f2b7ef8b4b27d",
+      "n_steps": 24,
+      "snapshot_steps": 23,
+      "terminal_resolved": true
+    }
+  }
+}

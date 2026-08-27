@@ -24,6 +24,13 @@ providers:
     base_url: https://api.deepseek.com/v1
     api_key_env_var: DEEPSEEK_API_KEY
     litellm_prefix: deepseek          # litellm's own provider id
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env_var: OPENROUTER_API_KEY
+    # litellm's OWN provider id, matching configs/free-tier/models.yaml and
+    # examples/providers/openrouter.yaml: litellm dials OpenRouter directly and reads
+    # OPENROUTER_API_KEY canonically, so `litellm_model_target` need not thread base_url.
+    litellm_prefix: openrouter
 # ── models ───────────────────────────────────────────────────────────────────
 # Required core (model_id, provider, supports_streaming, supports_cache_control)
 # makes a model routable. The optional `pricing` block makes it benchmarkable AND
@@ -397,3 +404,25 @@ models:
         LIVE REQUESTY CATALOG LISTING (verified 2026-08-26). Anthropic first-party;
         used only as a judge (judge_probe.py anchor before gpt-5.6-terra replaced it
         as the knn_difficulty label source).
+  zai-glm-5.3-flash:
+    model_id: z-ai/glm-5.3-flash
+    provider: openrouter
+    version: glm-5.3-flash
+    supports_streaming: true
+    supports_cache_control: false
+    pricing:
+      input_cost_per_1m: 0.15
+      output_cost_per_1m: 0.50
+      cache_read_cost_per_1m: 0.03
+      price_provider: openrouter
+      price_source: https://openrouter.ai/z-ai/glm-5.3-flash
+      price_as_of: "2026-08-27"
+      price_note: >-
+        Revealed identity of the retired stealth/ox-alpha. LIST price recorded
+        (verified on the price_source 2026-08-27): $0.15/M in, $0.50/M out,
+        $0.03/M cache-read. A ZAI 50%-off promo ($0.075 / $0.25 / $0.015) runs to
+        2026-09-09 16:00 UTC; list is recorded instead so the registry never
+        UNDERSTATES spend once the promo lapses. The 41 committed cells ran during
+        the earlier Aug 20-26 $0 free window and carry a true real_cost of 0 —
+        they are held valid by the dated free-window exemption in
+        benchmark/routing/validate.py, NOT by pricing this model at $0.

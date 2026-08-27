@@ -1,0 +1,24 @@
+{
+  "instance_id": "Automattic__wp-calypso-25257",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "24f0f91bbd36dc626fac11714a900d5b4d9b5cf9",
+  "version": "8.11.2",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "handlers - #onFetchSuccess() - should dispatch a success action with product category information when request completes",
+    "handlers - #onFetchError() - should dispatch error",
+    "handlers - #fetch() - should dispatch a get action"
+  ],
+  "PASS_TO_PASS": [
+    "handlers - #handleProductCategoryUpdate - should dispatch a success action with extra properties",
+    "handlers - #handleProductCategoryCreate - should dispatch a post action",
+    "handlers - #handleProductCategoryCreate - should dispatch a success action with extra properties",
+    "handlers - #handleProductCategoryDelete - should dispatch a deleted action on success",
+    "handlers - #handleProductCategoryUpdate - should dispatch a put action",
+    "handlers - #handleProductCategoryDelete - should dispatch a delete action",
+    "handlers - #handleProductCategoryCreate - should dispatch a success function with extra parameters"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-25257:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Products cannot be added to Store if category contains an \"&\".\n\r\n\r\n#### Steps to reproduce\r\n1. Starting at URL: https://wordpress.com/store/\r\n2. Click \"add\" to create a product: https://wordpress.com/store/products/\r\n3. Enter a title, price, etc.\r\n4. For the category, either select one that's already made that has an \"&\" in it (via WP-Admin for example), or create a new one. Example: \"Hats & Visors\".\r\n5. If this is the first product, it sometimes will successfully publish the product.\r\n6. For any subsequent product in that category, or if the category already existed, error \"There was a problem saving\" \"Please try again\" will display.\r\n\r\n#### What I expected\r\nTo successfully save & publish a new product.\r\n\r\n#### What happened instead\r\nError  \"There was a problem saving\" \"Please try again\" displayed.\r\n\r\n#### Browser / OS version\r\nFirefox 59.0.3 / Windows 10\r\n\r\n#### Screenshot / Video\r\n\r\n![screenshot-2018-4-30 new product est 1999 wordpress com](https://user-images.githubusercontent.com/10121835/39454068-c9affc3c-4c9e-11e8-9141-eef8b77d2dc8.png)\r\n\r\n#### Context / Source\r\n\r\n\r\n3251489-hc\r\n\r\nProducts created via WP-Admin are unaffected by the issue.\r\n\r\n\r\n\n"
+}

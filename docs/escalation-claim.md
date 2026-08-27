@@ -287,7 +287,7 @@ per-step number is read on the 723.
 Cost comes from the provider's billed `real_cost`
 (`session_value.png.cost_provenance.source`). Every one of the 822 sessions joins
 to a cost (`...join.join_rate` = 1.0, `n_joined` = 822 of `n_sessions` = 822).
-That rate is per *session*; the underlying result table holds 1224 rows
+That rate is per *session*; the underlying result table holds 1265 rows
 (`...join.n_result_rows`), and no published key states the join grain, so read
 the 100% as session coverage and nothing finer.
 

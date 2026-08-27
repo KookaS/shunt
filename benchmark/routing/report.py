@@ -964,7 +964,30 @@ def _load_raw_results() -> RawResults | None:
         raw = config.load_results()
     except Exception:  # noqa: BLE001 (arm plots are all optional)
         return None
-    return raw or None
+    return _only_enabled_models(raw) or None
+
+
+def _only_enabled_models(raw: RawResults) -> RawResults:
+    """Drop cells for models outside benchmark.yaml's enabled set."""
+    # results.csv legitimately carries cells for models the benchmark does not evaluate — a
+    # probe-only collection such as zai-glm-5.3-flash's free window. The arm plots and the
+    # Arm-oracle / Arm-bandit strategies read this cache directly, so without this filter such
+    # a model becomes an extra complementarity column and a rung those strategies can pick,
+    # scoring them on a model the router cannot serve and the benchmark never enabled. Every
+    # other routing analysis already scopes to `enabled_models()` (run_eval, report ordering,
+    # compute_costs, sensitivity, plot_exploration, figures/context); this makes the arm path
+    # agree with them. An empty/failed registry read leaves `raw` untouched rather than
+    # silently emptying every arm plot.
+    try:
+        enabled = set(config.enabled_models())
+    except Exception:  # noqa: BLE001 (registry optional at plot time)
+        return raw
+    if not enabled:
+        return raw
+    return {
+        challenge: {model: arms for model, arms in by_model.items() if model in enabled}
+        for challenge, by_model in raw.items()
+    }
 
 
 def _report_imputation_outputs(

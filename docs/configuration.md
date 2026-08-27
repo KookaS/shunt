@@ -63,11 +63,12 @@ that file at startup, and a real environment variable always wins over a value i
 it. `.env` is gitignored; keep it that way.
 
 To find the variable for a provider, look at its `api_key_env_var` — in
-`src/shunt/config/models.yaml` for the two shipped providers, or in that
-provider's `examples/providers/<name>.yaml` fragment for the rest. `OPENAI_API_KEY`
-for OpenAI, `GROQ_API_KEY` for Groq, and so on. Two of the providers are
-aggregators — Requesty and OpenRouter — where one key reaches many vendors. Local
-models (Ollama, vLLM) need no key at all.
+`src/shunt/config/models.yaml` for the three providers the registry declares
+(Requesty, DeepSeek, and OpenRouter, the last of which backs no model the router
+picks by default), or in that provider's `examples/providers/<name>.yaml` fragment
+for the rest. `OPENAI_API_KEY` for OpenAI, `GROQ_API_KEY` for Groq, and so on. Two
+of the providers are aggregators — Requesty and OpenRouter — where one key reaches
+many vendors. Local models (Ollama, vLLM) need no key at all.
 
 ## Add a model
 

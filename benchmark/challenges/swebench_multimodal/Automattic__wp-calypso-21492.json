@@ -1,0 +1,19 @@
+{
+  "instance_id": "Automattic__wp-calypso-21492",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "97d16987f9b4897e3e71ab9d3688ad59d4c57e3d",
+  "version": "8.9.3",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "getRoleFromScope - should return null if scope is malformed",
+    "getRoleFromScope - should return role from scope",
+    "getRoleFromScope - should return null if no role is found",
+    "getRoleFromScope - should return null if no hash is found"
+  ],
+  "PASS_TO_PASS": [
+    "addCalypsoEnvQueryArg - should add config env_id as calypso_env"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-21492:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Jetpack Connect: Plans page inadvertently shows site entry screen for subscribers\nIt seems that when a non-admin user attempts to connect their site, initiating the flow in Jetpack, after connection, they're directed to `/jetpack/connect/plans`, but they see the JPC initial site entry screen instead of the plans page.\r\n\r\n#### Steps to reproduce\r\n* Connect a Jetpack site with your Jetpack site admin user.\r\n* Login in WP.com with another user.\r\n* Create a non-admin (subscriber) user with the same email that you use for the .com account in the last step.\r\n* Login to your Jetpack site with the new subscriber user.\r\n* Connect the site for the subscriber user, starting from wp-admin.\r\n* Approve the connection in the JPC flow.\r\n* Witness a short redirect loop in the URL bar.\r\n* You're presented with the JPC initial site entry step, rather than the plans page (but the URL is `/jetpack/connect/plans`).\r\n\r\n#### What I expected\r\nTo be redirected back to wp-admin.\r\n\r\n#### What happened instead\r\nI was presented with the JPC plans page URL, but it displayed the JPC initial site entry step.\r\n\r\n#### Screenshot / Video\r\n![](https://cldup.com/A0Nsu9q2Uw.png)\r\n\r\n#### Context / Source\r\nFound while manually testing Jetpack 5.5beta3\r\n\r\n#manual-testing\n"
+}

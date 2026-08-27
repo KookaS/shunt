@@ -1,0 +1,29 @@
+{
+  "instance_id": "Automattic__wp-calypso-34820",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "4250bc3ebba1c9fe1cbf0e913723f1177985dca2",
+  "version": "10.15.2",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "UserUtils - with logout url - replaces |subdomain| when present but no domain",
+    "Cart Store - Transaction Payment Set - should extract location from payment method for stored",
+    "Cart Store - Store should ignore update actions that arrive after disable",
+    "UserUtils - with logout url - works when |subdomain| is not present",
+    "Cart Store - Store should have method emitChange",
+    "Cart Store - Store should be an object",
+    "Cart Store - Store should have method get",
+    "Cart Store - Transaction Payment Set - should extract location from payment method for unrecognized",
+    "Cart Store - Transaction Payment Set - should extract location from payment method for credits",
+    "UserUtils - with logout url - replaces |subdomain| when present and have domain",
+    "Cart Store - Transaction Payment Set - Should not report a known payment method",
+    "Cart Store - Transaction Payment Set - should extract location from payment method for creditCard",
+    "UserUtils - without logout url - uses userData.logout_URL when available",
+    "Cart Store - Transaction Payment Set - Should not ignore missing country code values",
+    "Cart Store - Transaction Payment Set - Should report an unknown payment method",
+    "Cart Store - Transaction Payment Set - Should report an unknown payment method parameters"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-34820:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Signup: Selecting \"Online Store\" results in a blank screen\n\r\n\r\n#### Steps to reproduce\r\n1. Starting at URL: https://wordpress.com/start/\r\n2. Pick the \"Online Store\" segment\r\n3. Notice how a blank screen is being displayed instead of the Domain Search page\r\n\r\nNote: This happened when I was in an Incognito window.\r\n\r\n#### What I expected\r\nTo be taken to the next step which is Domain Search\r\n\r\n#### What happened instead\r\nI was shown a blank screen\r\n\r\nEdit: These were the errors captured by @jblz  and @creativecoder:\r\n\r\n![Screenshot 2019-07-22 10 39 34](https://user-images.githubusercontent.com/4924246/61652573-1974ab80-ac6d-11e9-82d8-ce764b45c22e.png)\r\n\r\n![Screenshot 2019-07-22 10 39 25](https://user-images.githubusercontent.com/4924246/61652579-1c6f9c00-ac6d-11e9-985d-9b9006d70c00.png)\r\n\r\n#### Browser / OS version\r\nGoogle Chrome Version 75.0.3770.142\r\nMacOS Mojave 10.14.2\r\n\r\n#### Screenshot / Video\r\nhttps://cloudup.com/c2kEkexQRrW - it's the first few seconds on this video. This happened twice and I was able to record it the second time. Refreshing fixed it.\r\n\r\ncc @jblz @creativecoder @michaeldcain \r\n\r\n\n"
+}

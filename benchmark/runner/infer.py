@@ -10,6 +10,7 @@ import functools
 import json
 import logging
 import os
+import types
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
@@ -64,6 +65,7 @@ _KEY_ENV: Final[tuple[str, ...]] = (
     "XAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
 )
 
 
@@ -109,6 +111,13 @@ class AgentRunTimeoutError(RuntimeError):
         self.out_tok = out_tok
         self.calls = calls
         self.cost = cost
+
+
+class ResumeFallbackError(RuntimeError):
+    """A resume attempt could not reconstruct a trustworthy environment.
+
+    Raised internally to restart the cell as a clean fresh run — never to poison it.
+    """
 
 
 def has_api_keys(env: dict[str, str] | None = None) -> bool:
@@ -188,6 +197,10 @@ class AgentPatch:
     # Per-step code snapshots (git diff of the checkout keyed by assistant-turn index), captured
     # observe-only during the run for offline verified-outcome replay. Empty when unavailable.
     snapshots: dict[int, str] = field(default_factory=dict)
+    # True iff this run CONTINUED a saved partial conversation (conversation resume) rather than
+    # starting fresh. Carried so the trajectory capture can record the total per-step snapshot
+    # count across the resumed run, which the offline replay pairs against the scratch.
+    resumed: bool = False
 
 
 def generate_patch_live(
@@ -508,6 +521,237 @@ def _scaffold_config_overlay(
     }
 
 
+# ---------------------------------------------------------------------------
+# conversation resume — continue a throttled/aborted cell from its saved messages
+# ---------------------------------------------------------------------------
+
+# The heredoc delimiter used to pipe a snapshot diff through `env.execute` (which has no stdin
+# plumbing). A QUOTED delimiter means bash performs NO interpolation on the diff body.
+_RESUME_PATCH_DELIMITER: Final[str] = "SHUNT_RESUME_PATCH_7f3a9c"
+
+# A saved conversation is only resumable from a clean boundary: the last message must be a tool
+# observation (the model saw its result) or a user-role format-error retry. A trailing assistant
+# message means an action was issued but never observed — resuming would re-send dangling
+# tool_calls some providers reject, so those conversations start fresh.
+_RESUME_SAFE_LAST_ROLES: Final[tuple[str, ...]] = ("tool", "user")
+
+
+def _interrupt_messages(exc: BaseException) -> tuple[dict[str, Any], ...]:
+    """The messages an interrupt/format exception carries (mini-swe-agent convention)."""
+    messages = getattr(exc, "messages", ())
+    return messages if isinstance(messages, tuple) else tuple(messages)
+
+
+def _strip_exit_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop trailing terminal (role='exit') messages from a saved conversation."""
+    stripped = list(messages)
+    while stripped and stripped[-1].get("role") == "exit":
+        stripped.pop()
+    return stripped
+
+
+def _assistant_turn_count(messages: list[dict[str, Any]]) -> int:
+    """The number of assistant turns a saved conversation already contains."""
+    return sum(1 for m in messages if isinstance(m, dict) and m.get("role") == "assistant")
+
+
+def _resume_messages(trajectory_id: str) -> list[dict[str, Any]] | None:
+    """The resumable prior conversation for a trajectory, or None (no resume / unsafe)."""
+    # Detection: the scratch message list exists, is non-trivial (≥1 assistant turn), and ends at a
+    # clean boundary. run_live_cell only ever invokes the scaffold on an ungraded (missing) cell,
+    # so any saved conversation it finds is a partial one — a graded cell is never re-run.
+    from benchmark.runner.step_snapshots import message_list_path  # noqa: PLC0415
+
+    path = message_list_path(trajectory_id)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        _LOG.warning("resume: unreadable message list for %s; starting fresh", trajectory_id)
+        return None
+    messages = data.get("messages") if isinstance(data, dict) else None
+    if not isinstance(messages, list):
+        return None
+    messages = [m for m in messages if isinstance(m, dict)]
+    messages = _strip_exit_messages(messages)
+    if _assistant_turn_count(messages) == 0:
+        return None
+    if messages[-1].get("role") not in _RESUME_SAFE_LAST_ROLES:
+        _LOG.warning("resume: %s ended mid-turn; starting fresh", trajectory_id)
+        return None
+    return messages
+
+
+def _resume_step_limit(step_limit: int, loaded: list[dict[str, Any]]) -> int:
+    """Remaining step budget for a resumed cell — the full budget minus loaded turns, ≥1."""
+    return max(1, step_limit - _assistant_turn_count(loaded))
+
+
+# The smallest cap a resumed cell may be handed. NOT 0.0: mini-swe-agent 2.4.5 gates on
+# `0 < self.config.cost_limit <= self.cost` (agents/default.py, DefaultAgent.query), so a cap of
+# 0.0 DISABLES the ceiling entirely — handing an exhausted cell 0.0 would remove the cap it just
+# blew through. A tiny positive cap is the exact analogue of `_resume_step_limit`'s floor of 1:
+# the pre-call check passes once (self.cost starts at 0.0), so the cell gets at most ONE more
+# model call and then exits LimitsExceeded. Refusing the resume outright is worse for spend —
+# the fallback is a FRESH run at the FULL cap.
+_MIN_RESUME_COST_LIMIT: Final[float] = 0.01
+
+
+def _resume_cost_limit(cost_limit: float, loaded: list[dict[str, Any]]) -> float:
+    """Remaining USD budget for a resumed cell — the full cap minus what the loaded turns spent."""
+    # A resumed cell is a FRESH DefaultAgent: `self.cost` restarts at 0.0 and the per-cell cap is
+    # re-armed from scratch, so passing `cost_limit` through unchanged lets one cell spend the cap
+    # once per resume (unbounded across N resumes). Reduce it exactly as the step budget is
+    # reduced. `_sum_usage` is the cost basis used everywhere else in this module — the provider's
+    # cache-aware `usage.cost` where present — so the reduction is in REAL dollars.
+    if cost_limit <= 0.0:
+        return cost_limit  # the ceiling is disabled upstream; a resume must not invent one
+    spent = _sum_usage(loaded)[3]
+    return max(_MIN_RESUME_COST_LIMIT, cost_limit - spent)
+
+
+def _apply_resume_diff(env: Any, diff: str) -> bool:
+    """Apply one cumulative snapshot diff to /testbed inside the agent container (rc == 0)."""
+    from benchmark.runner.step_snapshots import TESTBED  # noqa: PLC0415
+
+    command = (
+        f"git -C {TESTBED} apply - <<'{_RESUME_PATCH_DELIMITER}'\n{diff}\n{_RESUME_PATCH_DELIMITER}"
+    )
+    try:
+        out = env.execute({"command": command})
+    except Exception:  # noqa: BLE001 (reconstruction failure → fall back to a fresh start)
+        _LOG.exception("resume: diff application command failed")
+        return False
+    return int(out.get("returncode", -1)) == 0
+
+
+def _restore_checkout(env: Any, trajectory_id: str, loaded_turn_count: int | None = None) -> bool:
+    """Reconstruct the checkout to match a saved conversation (last cumulative snapshot).
+
+    Best-effort by design: only TRACKED working-tree edits are restored — untracked files and any
+    agent ``git commit`` (which moves HEAD) are NOT (warned on the apply path).
+    """
+    # Each step diff is `git diff HEAD` — CUMULATIVE against the base, so the LAST captured
+    # snapshot alone carries the full tracked-file state (applying 0..k-1 sequentially would
+    # double-apply and reject). Any failure (missing scratch, patch does not apply) returns False
+    # so the caller falls back to a clean fresh start — never resumes into a possibly-wrong tree.
+    from benchmark.runner.step_snapshots import read_snapshots  # noqa: PLC0415
+
+    snapshots = read_snapshots(trajectory_id)
+    if not snapshots:
+        _LOG.warning("resume: no per-step snapshots for %s; starting fresh", trajectory_id)
+        return False
+    # Consistency guard, TWO-SIDED. The invariant: `_attach_snapshot_recorder`'s wrapper captures
+    # `index = <assistant messages> - 1` AFTER each step returns, so the k-th assistant turn writes
+    # index k-1 and a conversation of N turns whose last turn executed is reconstructed by index
+    # N-1 exactly. Anything HIGHER is stale residue from a longer, discarded run (its message list
+    # was replaced by a shorter one) — a tree this conversation never had. Anything LOWER means the
+    # set is incomplete (a swallowed `capture` exec error, a partial `clear_trajectory_scratch`, a
+    # trailing format-error turn that never executed) — resuming would continue an N-turn
+    # conversation against a tree frozen several turns back. Both are unresumable: refuse, and the
+    # caller falls back to a fresh start.
+    if loaded_turn_count is not None and max(snapshots) != loaded_turn_count - 1:
+        _LOG.warning(
+            "resume: snapshots for %s reach step %d but the loaded conversation's %d assistant "
+            "turns require step %d — an incomplete or discarded run's set; starting fresh",
+            trajectory_id,
+            max(snapshots),
+            loaded_turn_count,
+            loaded_turn_count - 1,
+        )
+        return False
+    diff = snapshots[max(snapshots)]
+    _LOG.warning(
+        "resume: reconstructing %s restores only TRACKED working-tree edits — untracked files "
+        "the agent created and any agent `git commit`s (which move HEAD) are NOT restored; the "
+        "tree is best-effort, not a byte-exact replay",
+        trajectory_id,
+    )
+    if not diff.strip():
+        # NOT "the tree is at base state". The snapshot is `git diff HEAD` (step_snapshots
+        # DIFF_COMMAND), i.e. worktree-vs-HEAD in the AGENT's container — and an agent that ran
+        # `git add -A && git commit` moves HEAD onto its own work, making that diff exactly 0 bytes
+        # while the work sits on disk. Empty is therefore indistinguishable between "changed
+        # nothing" and "committed everything", and this recorder captures nothing that separates
+        # them. Restoring nothing and returning True would resume a PAID conversation against a
+        # base checkout under the "trustworthy environment" contract; refuse instead — a fresh run
+        # is cheap, a wrong tree is not.
+        _LOG.warning(
+            "resume: the last snapshot for %s is empty — indistinguishable between an unchanged "
+            "tree and an agent that committed its work (HEAD moved); starting fresh",
+            trajectory_id,
+        )
+        return False
+    return _apply_resume_diff(env, diff)
+
+
+def _resume_run(
+    agent: Any,
+    task: str,
+    *,
+    format_error_cls: type[BaseException],
+    interrupt_cls: type[BaseException],
+) -> dict[str, Any]:
+    """Continue a pre-seeded conversation — DefaultAgent.run() minus its message reset."""
+    # =============================================================================
+    # MIRROR WARNING — mini-swe-agent 2.4.5 (DefaultAgent.run, agents/default.py)
+    # -----------------------------------------------------------------------------
+    # This loop is a hand-copy of DefaultAgent.run() adjusted for the resume case, and
+    # pyproject.toml pins the scaffold only as `mini-swe-agent>=2.4` (unpinned). On ANY
+    # mini-swe-agent upgrade, RE-VERIFY this mirror line-by-line against the installed
+    # DefaultAgent.run() before trusting a resumed run — the loop (step, format-error
+    # retry count + RepeatedFormatError exit, interrupt handling, finally-save, exit-role
+    # stop) silently drifts otherwise. The ONLY intended differences from the original:
+    # no `self.messages = []` reset and no system+instance re-add (the loaded history is
+    # already seeded and must be preserved).
+    # =============================================================================
+    agent.extra_template_vars |= {"task": task}
+    while True:
+        try:
+            agent.step()
+            agent.n_consecutive_format_errors = 0
+        except format_error_cls as exc:
+            agent.n_consecutive_format_errors += 1
+            if 0 < agent.config.max_consecutive_format_errors <= agent.n_consecutive_format_errors:
+                agent.add_messages(
+                    *_interrupt_messages(exc),
+                    {
+                        "role": "exit",
+                        "content": "RepeatedFormatError",
+                        "extra": {"exit_status": "RepeatedFormatError", "submission": ""},
+                    },
+                )
+            else:
+                agent.add_messages(*_interrupt_messages(exc))
+        except interrupt_cls as exc:
+            agent.add_messages(*_interrupt_messages(exc))
+        except Exception as exc:  # noqa: BLE001 (mirrors DefaultAgent.run's fall-through)
+            agent.handle_uncaught_exception(exc)
+            raise
+        finally:
+            agent.save(agent.config.output_path)
+        if agent.messages[-1].get("role") == "exit":
+            break
+    return agent.messages[-1].get("extra", {})
+
+
+def _seed_resume(
+    agent: Any,
+    messages: list[dict[str, Any]],
+    *,
+    format_error_cls: type[BaseException],
+    interrupt_cls: type[BaseException],
+) -> None:
+    """Pre-seed the agent's conversation and route ``run()`` through the resume loop."""
+    # Copies, never aliases: the loaded dicts must not be mutated by the running agent.
+    agent.messages = [dict(m) for m in messages]
+    run = functools.partial(
+        _resume_run, format_error_cls=format_error_cls, interrupt_cls=interrupt_cls
+    )
+    agent.run = types.MethodType(run, agent)
+
+
 def _invoke_scaffold(
     spec: swebench_specs.SwebenchSpec,
     model: str,
@@ -518,34 +762,122 @@ def _invoke_scaffold(
     cost_limit: float | None = None,
 ) -> AgentPatch:
     """Invoke mini-swe-agent (v2) for one instance/model/arm (only reached when keys exist)."""
-    from minisweagent.agents import get_agent  # noqa: PLC0415
-    from minisweagent.config import builtin_config_dir, get_config_from_spec  # noqa: PLC0415
-    from minisweagent.models import get_model  # noqa: PLC0415
-    from minisweagent.run.benchmarks.swebench import get_sb_environment  # noqa: PLC0415
-    from minisweagent.utils.serialize import recursive_merge  # noqa: PLC0415
-
     from benchmark.escalation.live_capture import make_trajectory_id  # noqa: PLC0415
 
     instance = _load_instance(spec.instance_id)
     model_string, model_kwargs = litellm_model_target(model)
+    trajectory_id = make_trajectory_id(spec.instance_id, model, arm)
+    # A resumable saved conversation exists? (config-gated; a graded cell is never re-invoked, so
+    # any conversation found here is a partial one.) Resume is attempted, never forced: a
+    # reconstruction failure falls back to a clean fresh run at the FULL step budget.
+    resume = _resume_messages(trajectory_id) if config.resume_enabled() else None
+    if resume is not None:
+        _LOG.warning(
+            "resume: %s found a %d-turn saved conversation; continuing instead of restarting",
+            trajectory_id,
+            _assistant_turn_count(resume),
+        )
+    while True:
+        try:
+            return _invoke_scaffold_attempt(
+                instance,
+                model_string,
+                model_kwargs,
+                trajectory_id,
+                model,
+                arm,
+                timeout=timeout,
+                step_limit=step_limit,
+                cost_limit=cost_limit,
+                resume=resume,
+            )
+        except ResumeFallbackError:
+            _LOG.warning(
+                "resume: reconstruction for %s failed; restarting the cell as a fresh run",
+                trajectory_id,
+            )
+            resume = None
+
+
+def _invoke_scaffold_attempt(
+    instance: dict[str, Any],
+    model_string: str,
+    model_kwargs: dict[str, Any],
+    trajectory_id: str,
+    model: str,
+    arm: str,
+    *,
+    timeout: int,
+    step_limit: int,
+    cost_limit: float | None,
+    resume: list[dict[str, Any]] | None,
+) -> AgentPatch:
+    """One full live attempt — continuing *resume* when provided, else a clean fresh start."""
+    from minisweagent.agents import get_agent  # noqa: PLC0415
+    from minisweagent.config import builtin_config_dir, get_config_from_spec  # noqa: PLC0415
+    from minisweagent.exceptions import FormatError, InterruptAgentFlow  # noqa: PLC0415
+    from minisweagent.models import get_model  # noqa: PLC0415
+    from minisweagent.run.benchmarks.swebench import get_sb_environment  # noqa: PLC0415
+    from minisweagent.utils.serialize import recursive_merge  # noqa: PLC0415
+
+    # A FRESH start owns the trajectory's scratch: clear the prior partial run's snapshot dir and
+    # saved message list so stale higher-index diffs from a DISCARDED run cannot poison a later
+    # resume (a resume pairs `snapshots[max(...)]` with the loaded conversation, and a stale max
+    # from an older, longer run would rebuild a tree the loaded conversation never had). Fires on
+    # the first run too — clearing an empty scratch is a no-op. Deliberately NOT on the resume
+    # path, which needs the prior snapshots to reconstruct the checkout.
+    if resume is None:
+        from benchmark.runner.step_snapshots import clear_trajectory_scratch  # noqa: PLC0415
+
+        clear_trajectory_scratch(trajectory_id)
+
+    # A resumed cell must NOT get a fresh full step budget: the loaded assistant turns already
+    # consumed part of it. Budget is floored at 1 so a resumed cell always gets at least one step.
+    effective_step_limit = (
+        _resume_step_limit(step_limit, resume) if resume is not None else step_limit
+    )
+    # The USD cap is re-armed on a fresh agent object exactly like the step count, so it is reduced
+    # exactly like the step count. `timeout` deliberately is NOT: it feeds wall_time_limit_seconds
+    # and the external watchdog, both of which bound THIS process's invocation (measured from a
+    # freshly stamped `_start_time`). Wall-clock is not a budget the resume double-spends — the
+    # prior run's seconds are gone, not re-consumable — and its job is to kill a HUNG process, which
+    # needs a full window; shortening it would reap a healthy resumed run instead.
+    declared_cost_limit = config.live_cost_limit() if cost_limit is None else cost_limit
+    effective_cost_limit = (
+        _resume_cost_limit(declared_cost_limit, resume)
+        if resume is not None
+        else declared_cost_limit
+    )
     default_config = get_config_from_spec(str(builtin_config_dir / "benchmarks" / "swebench.yaml"))
     base_kwargs = default_config.get("model", {}).get("model_kwargs", {})
-    trajectory_id = make_trajectory_id(spec.instance_id, model, arm)
     overlay = _scaffold_config_overlay(
         model_string,
         _scaffold_model_kwargs(model, arm, base_kwargs, model_kwargs),
         timeout=timeout,
-        step_limit=step_limit,
-        cost_limit=config.live_cost_limit() if cost_limit is None else cost_limit,
+        step_limit=effective_step_limit,
+        cost_limit=effective_cost_limit,
         trajectory_id=trajectory_id,
     )
     merged = recursive_merge(default_config, overlay)
     env = get_sb_environment(merged, instance)
+    # Reconstruct the filesystem to match the saved conversation BEFORE the agent is created, so a
+    # wrong or missing tree aborts the resume (falling back to fresh) instead of running against it.
+    # The loaded assistant-turn count gates the reconstruction: a snapshot index the conversation
+    # cannot justify (stale files from a discarded run) must never be applied.
+    if resume is not None and not _restore_checkout(
+        env, trajectory_id, _assistant_turn_count(resume)
+    ):
+        _reap_container(env)
+        raise ResumeFallbackError(
+            f"resume reconstruction failed for {trajectory_id}; restarting fresh"
+        )
     model_obj = get_model(config=merged.get("model", {}))
     _harden_model_retries(model_obj)
     agent = get_agent(model_obj, env, merged.get("agent", {}), default_type="default")
     _harden_output_write(agent)
     recorder = _attach_snapshot_recorder(agent, env)
+    if resume is not None:
+        _seed_resume(agent, resume, format_error_cls=FormatError, interrupt_cls=InterruptAgentFlow)
     try:
         info = _run_agent_bounded(
             agent, instance["problem_statement"], env, _external_watchdog_s(timeout)
@@ -554,7 +886,10 @@ def _invoke_scaffold(
         raise  # already reaped inside _run_agent_bounded; do not reclassify
     except Exception as exc:
         _reap_container(env)
-        _reraise_classified(spec.instance_id, model, exc)
+        _reraise_classified(str(instance["instance_id"]), model, exc)
+    # Cost/token accounting covers the WHOLE cell: agent.messages holds the seeded history plus the
+    # new turns, and _sum_usage walks every assistant message's real usage — the row reflects the
+    # entire cell, not just the resumed tail.
     messages: list[dict[str, Any]] = getattr(agent, "messages", [])
     in_tok, out_tok, calls, cost = _sum_usage(messages)
     return AgentPatch(
@@ -566,6 +901,7 @@ def _invoke_scaffold(
         exit_status=str(info.get("exit_status") or ""),
         messages=messages,
         snapshots=recorder.snapshots if recorder is not None else {},
+        resumed=resume is not None,
     )
 
 
@@ -641,8 +977,24 @@ def _capture_escalation_trajectory(
             capture_live_trajectory,
             make_trajectory_id,
         )
-        from benchmark.runner.step_snapshots import write_snapshots  # noqa: PLC0415
+        from benchmark.runner.step_snapshots import (  # noqa: PLC0415
+            read_snapshots,
+            write_snapshots,
+        )
 
+        trajectory_id = make_trajectory_id(instance_id, model, arm)
+        # Persist per-step diffs to the gitignored scratch keyed the SAME way as the trajectory
+        # jsonl, so the offline replay pass can pair them by trajectory id. A RESUME appends new
+        # indices on top of the prior run's files (the recorder keys by assistant-turn, so the
+        # continuation indices are disjoint) — a fresh run simply overwrites its own indices.
+        if patch.snapshots:
+            write_snapshots(trajectory_id, patch.snapshots)
+        # The committed count must equal what the offline replay finds on disk: for a resumed run
+        # that is ALL diffs for the trajectory (prior + this window's tail); for a fresh run it is
+        # exactly what this run captured.
+        snapshot_steps = (
+            len(read_snapshots(trajectory_id)) if patch.resumed else len(patch.snapshots)
+        )
         capture_live_trajectory(
             patch.messages,
             instance_id=instance_id,
@@ -651,12 +1003,8 @@ def _capture_escalation_trajectory(
             resolved=resolved,
             # Recorded even (especially) when it is 0 — that is the committed proof the offline
             # replay needs to tell "captured nothing" from "this checkout lacks the scratch".
-            snapshot_steps=len(patch.snapshots),
+            snapshot_steps=snapshot_steps,
         )
-        if patch.snapshots:
-            # Persist per-step diffs to the gitignored scratch keyed the SAME way as the trajectory
-            # jsonl, so the offline replay pass can pair them by trajectory id.
-            write_snapshots(make_trajectory_id(instance_id, model, arm), patch.snapshots)
     except Exception:  # noqa: BLE001 (observe-only: capture must never break a paid outcome)
         _LOG.exception("escalation trajectory capture failed for %s/%s", instance_id, model)
 
@@ -725,7 +1073,8 @@ def run_live_cell(
     Gated on keys via ``generate_patch_live``. Returns the outcome shape
     ``run_matrix._build_row`` consumes (pass/in_tok/out_tok/calls/real_cost/...).
     """
-    spec = swebench_specs.load_spec(instance_id)
+    spec_module = swebench_specs.spec_module_for(swebench_specs.manifest_source())
+    spec = spec_module.load_spec(instance_id)
     if spec is None:
         raise KeyError(f"no SWE-bench spec for {instance_id!r}; materialise it first")
     actual_cost_limit = cost_limit if cost_limit is not None else config.live_cost_limit()
@@ -769,6 +1118,10 @@ def run_live_cell(
         work_dir=work_dir,
         namespace=namespace,
         timeout=timeout,
+        # The harness loads the SAME dataset split the spec came from (verified default;
+        # the multimodal dev split for a multimodal config), so grading reads the right labels.
+        dataset_name=spec_module.DATASET_NAME,
+        split=spec_module.DATASET_SPLIT,
     )
     if result.report_path is None:
         raise HarnessInfraError(

@@ -16,11 +16,16 @@ _DOC = _ROOT / "docs" / "results.md"
 
 def _derived_set_b_scorable_count() -> int:
     """Tasks in results.csv where all six enabled models were measured."""
+    # SUPERSET, not exact equality: the question is whether every enabled model has a cell,
+    # not whether the row holds nothing else. results.csv legitimately carries cells for
+    # models outside `enabled` — a probe-only collection such as zai-glm-5.3-flash's free
+    # window — and under `==` each such cell silently DROPPED its task from the fully-measured
+    # set (74 -> 33 when 41 probe cells landed), retracting a correct published number.
     import benchmark.config as config
 
     matrix = config.load_matrix()
     enabled = set(config.enabled_models())
-    return sum(1 for cells in matrix["results"].values() if set(cells) == enabled)
+    return sum(1 for cells in matrix["results"].values() if enabled <= set(cells))
 
 
 def test_derived_set_b_count_is_74() -> None:

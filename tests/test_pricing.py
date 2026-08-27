@@ -305,11 +305,17 @@ class TestReasoningConfigsAccessor:
     # benchmark.yaml's models list, so no reasoning bracket is required — the same
     # exemption test_config.py's TestDefaultRegistryHasReasoning applies.
     JUDGE_ONLY_MODELS: Final = frozenset({"claude-sonnet-5", "gpt-5.6-terra"})
+    # PROBE-ONLY models were collected in a one-off probe with NO reasoning arm declared, so
+    # their committed rows carry the legacy `reasoning="default"` placeholder. Declaring a
+    # bracket now would silently re-alias those measured rows to an arm they never ran
+    # (`config._alias_legacy_reasoning`), so the honest state is no bracket at all. Like
+    # JUDGE_ONLY_MODELS these are absent from router.yaml and benchmark.yaml's model lists.
+    PROBE_ONLY_MODELS: Final = frozenset({"zai-glm-5.3-flash"})
 
     def test_every_registry_model_has_a_reasoning_block(self):
         cfgs = config.reasoning_configs()
         for name in _models():
-            if name in self.JUDGE_ONLY_MODELS:
+            if name in self.JUDGE_ONLY_MODELS or name in self.PROBE_ONLY_MODELS:
                 continue
             assert cfgs.get(name) is not None, f"{name} missing reasoning block"
 

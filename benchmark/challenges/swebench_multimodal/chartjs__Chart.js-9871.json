@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-9871",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "6bc47d3cea5ac0f496dc1b6bd53ed2fa5e1446d1",
+  "version": "3.6",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Arc element tests should determine if in range when full circle "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-9871:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Polar Area Chart with single element is not clickable nor does it show a tooltip over colored area\n\r\n\r\n## Expected Behavior\r\nA PolarArea chart with a single item should show a tooltip and be clickable just like PolarArea charts with multiple items\r\n\r\n## Current Behavior\r\nThe single item renders as a complete circle and the only area of the chart sensitive to mouseover is the vertical line which starts the item arc but that is only 1-2 pixels wide\r\n\r\n## Possible Solution\r\n\r\n\r\n## Steps to Reproduce\r\nCreate a Polar Area chart with just a single item. It will fill the entire circle but inly the leading edge will respond to mouseover\r\n\r\n## Context\r\nThe chart with only a single segment is not usable as is since the end user is unable to click the segment to get more details\r\n\r\n## Environment\r\nChart.js versions: 3.6.0 and 3.5.1\r\nBrowsers: Chrome (95.0.4638.69), Brave (1.31.88), Firefox (93.0)\r\nProject link: Not available\r\n\r\n![screenshot-737](https://user-images.githubusercontent.com/81261942/139717879-7797fb43-b437-4ee0-bea6-ca34cbf75a23.png)\r\n![screenshot-738](https://user-images.githubusercontent.com/81261942/139717896-bd5ca61c-14a6-43f3-a5d1-d8f1a79977c0.png)\r\n\n"
+}
