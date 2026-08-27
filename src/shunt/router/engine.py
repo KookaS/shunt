@@ -540,11 +540,12 @@ class RouterEngine:
             total_cost += w * n.cost
         if total_weight > 0:
             return total_cost / total_weight
-        # No history for this model — which is exactly the escalation case
-        # (exploration_untested / safe_fallback), i.e. the most expensive routes. Returning
-        # 0.0 booked those as free and let them inflate the budget's baseline for nothing;
-        # the priciest observed model is a conservative stand-in. Reading a price table here
-        # is not an option: the router must not depend on benchmark pricing (SH005).
+        # No history for this model — the escalation path (exploration_untested /
+        # safe_fallback can both land on an untested model). Returning
+        # 0.0 booked those as free and let them inflate the budget's baseline for
+        # nothing; the priciest observed model is a conservative stand-in. Reading a
+        # price table here is not an option: the router must not depend on benchmark
+        # pricing (SH005).
         known = [s.cost for s in self._candidate_stats(neighbors) if math.isfinite(s.cost)]
         return max(known) if known else 0.0
 

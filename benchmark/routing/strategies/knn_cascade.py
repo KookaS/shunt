@@ -19,7 +19,7 @@ from ._cascade_common import (
 # routing family shares (same precedent as tier_classifier). A local `TextEmbedding(...)`
 # here hardcoded the model name past `load_embedding_config()`, so flipping
 # `embedding.yaml`'s active row (or SHUNT_EMBEDDER_MODEL) would silently score kNN and
-# kNN-cascade in two different embedding spaces; it also skipped the durable cache_dir,
+# kNN-semantic-cascade in two different embedding spaces; it also skipped the durable cache_dir,
 # the 4000-char clip, `fingerprint()`, and the SHUNT_DISALLOW_REAL_EMBEDDER test wall.
 from .knn import _embed_texts
 
@@ -56,9 +56,9 @@ def compute_cascade_order(
     # version put the frontier first on 79% of tasks in a cascade documented as cheap-first.
     # `model in pricing` is the LIKE-FOR-LIKE bar: Price-Cascade draws its candidates from
     # `matrix["models"]` (priced by construction), so admitting an unpriced model here would
-    # let kNN-cascade route somewhere its own baseline structurally cannot, and the published
-    # head-to-head is only a comparison if both draw from the same universe. Sorting an
-    # unpriced model last was not enough — it stayed inside the `max_tries` shortlist.
+    # let kNN-semantic-cascade route somewhere its own baseline structurally cannot, and the
+    # published head-to-head is only a comparison if both draw from the same universe. Sorting
+    # an unpriced model last was not enough — it stayed inside the `max_tries` shortlist.
     eligible = [
         model
         for model, outcomes in neighbor_results.items()
@@ -111,7 +111,7 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
 
     @property
     def name(self) -> str:
-        return "kNN-cascade (within-task)"
+        return "kNN-semantic-cascade (within-task)"
 
     def select(self, task_id: str, task_meta: dict, matrix: dict) -> str:
         if not matrix.get("results"):

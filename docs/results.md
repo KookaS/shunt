@@ -16,10 +16,10 @@ now does so on a **cache-safe strategy you can select by name**
 `Session-Cascade`, which makes one decision per session, costs **$28.71
 cache-aware at 96.74%** on the 184-task scoring path, against `Price-Cascade`'s
 $27.11 at the same pass rate and Always-Frontier's $96.02 at 95.11%. That row
-**is** what a default install runs. Its sibling `kNN-cascade`
-(`router.strategy: knn_cascade`, the opt-in routing model) opens the same ladder
+**is** what a default install runs. Its sibling `kNN-semantic-cascade`
+(`router.strategy: knn_semantic_cascade`, the opt-in routing model) opens the same ladder
 on the kNN pick rather than on the cheapest model, and reaches the same 96.74%
-for **$38.26 cache-aware** — on this corpus, dominated. Read that verdict with
+for **$38.49 cache-aware** — on this corpus, dominated. Read that verdict with
 the caveat it comes with: [the shipped default, and the routing model priced
 against it](#the-shipped-default-and-the-routing-model-priced-against-it).
 On the harder, fully-measured 74-task set `Session-Cascade` <!-- frozen-value: n=74, date=2026-08-11, run=49b8362 -->
@@ -142,8 +142,8 @@ strategies used to embed the manifest `description` — `<repo>@<commit12> - res
 manifest has been rebuilt with the real statements (median 1185 characters),
 `routing_text()` prefers them, and every row below is recomputed on that basis.
 
-Routing quality **fell**: kNN went from 81.71% to **78.26%**, which is inside noise of
-Always-Cheap's 75.54%, and Tier-Classifier from 67.43% to **65.76%**. The 106-character
+Routing quality **fell**: kNN went from 81.71% to **77.72%**, which is inside noise of
+Always-Cheap's 75.54%, and kNN-semantic-tier from 67.43% to **65.76%**. The 106-character
 label was not merely uninformative — it was mildly *leaky*, because the repo name it
 carried is a weak proxy for task difficulty. Given the correct input, the learned router
 is not distinguishable from the trivial policy. The zero-ML rows (Oracle, Price-Cascade,
@@ -152,31 +152,35 @@ Always-Cheap, Always-Frontier) use no embeddings and are unchanged.
 Seven **router-selection** strategies — each one a rule for picking the model a
 task *starts* on — scored on the same 184 tasks (16 unscorable), from
 [`strategy_summary.csv`](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/strategy_summary.csv).
-Two further scored strategies, `Session-Cascade` and `kNN-cascade`, are not
+Two further scored strategies, `Session-Cascade` and `kNN-semantic-cascade`, are not
 selection rules at all: they model the escalation *layer* over whatever base
 routing chose, so they get [their own
 section](#routing-at-session-cadence) rather than rows here. Both are selectable
 — `router.strategy: session_cascade` is that layer over an `always_cheap` base
-and is the **shipped default**, and `router.strategy: knn_cascade` is the same
+and is the **shipped default**, and `router.strategy: knn_semantic_cascade` is the same
 layer over the kNN pick, which you opt into. Costs in this
 table are naive per-task sums, cache-blind:
 
 | strategy | passes | pass rate | 95% CI | total cost | avg cost/task | cumulative regret |
-|---|---|---:|---|---:|---:|---:|
+|---|---:|---|---:|---:|---:|---:|
 | Oracle (hindsight, not deployable) | 178 | 96.74% | 94.02–98.91 | $18.33 | $0.0996 | 0.00 |
 | Price-Cascade (blocked, not deployable) | 178 | 96.74% | 94.02–98.91 | $27.11 | $0.1473 | 0.88 |
-| kNN-cascade (within-task) (blocked, not deployable) | 178 | 96.74% | 94.02–98.91 | $30.44 | $0.1655 | 1.21 |
+| kNN-semantic-cascade (within-task) (blocked, not deployable) | 178 | 96.74% | 94.02–98.91 | $30.44 | $0.1655 | 1.21 |
+| Session-Cascade (`strategy: session_cascade` — the shipped default) | 178 | 96.74% | 94.02–98.91 | $33.56 | $0.1824 | 1.52 |
+| kNN-difficulty-cascade (blocked, not deployable) | 178 | 96.74% | 94.02–98.91 | $33.86 | $0.1840 | 1.55 |
+| Difficulty-Band-cascade (blocked, not deployable) | 178 | 96.74% | 94.02–98.91 | $34.77 | $0.1890 | 1.64 |
 | Always-Frontier | 175 | 95.11% | 91.85–97.83 | $96.02 | $0.5218 | 10.77 |
-| kNN | 144 | 78.26% | 72.28–84.24 | $13.21 | $0.0718 | 33.49 |
+| kNN-semantic | 143 | 77.72% | 71.20–83.70 | $11.79 | $0.0641 | 34.35 |
 | Always-Cheap | 139 | 75.54% | 69.02–81.52 | $1.50 | $0.0081 | 37.32 |
-| Tier-Classifier (blocked, not deployable) | 121 | 65.76% | 58.70–72.28 | $11.53 | $0.0627 | 56.32 |
+| kNN-difficulty (control — never shippable) | 139 | 75.54% | 69.02–81.52 | $1.80 | $0.0098 | 37.35 |
+| kNN-semantic-tier (blocked, not deployable) | 121 | 65.76% | 58.70–72.28 | $11.53 | $0.0627 | 56.32 |
 
 Only `Always-Frontier` and `Always-Cheap` in this table name a strategy the router
 will accept — `LIVE_STRATEGIES` in `src/shunt/router/policy.py` is the allowlist, and
 `router.strategy` is validated against it at boot. `kNN` is **not** one of them: it is
 the selection rule with the escalation ladder removed, which no configuration produces,
 and it is kept as the control that isolates what the ladder buys. The selectable
-`knn_cascade` is that same pick **with** the ladder — the opt-in routing strategy, not the
+`knn_semantic_cascade` is that same pick **with** the ladder — the opt-in routing strategy, not the
 shipped default, which is `session_cascade` and never queries the neighbourhood at all. The remaining rows are real
 measurements of things you cannot configure; `benchmark/routing/strategy_class.py`
 carries each one's blocker and its path to live.
@@ -192,14 +196,14 @@ mid-session; that is more than one decision per session and it breaks
 cache-safety, so `price_cascade` is rejected at boot. The $27.11 @ 96.74%
 operating point measures a mechanism, not a product capability.
 
-The learned `kNN-cascade (within-task)` costs **more** ($30.44 against $27.11) for the same
+The learned `kNN-semantic-cascade (within-task)` costs **more** ($30.44 against $27.11) for the same
 96.74%, and is blocked on the same cache-safety ground. The machine learning is
 not paying for itself. What buys the quality back is **verified escalation** —
 which is why the shipped router carries an escalation ladder rather than a
 cascade, at a lower ceiling (see [escalation](escalation.md)).
 
 Even the regret ordering is unresolved: Price-Cascade's bootstrap interval on
-total regret is [0.56, 1.24] and kNN-cascade (within-task)'s is [0.80, 1.68]. They overlap.
+total regret is [0.56, 1.24] and kNN-semantic-cascade (within-task)'s is [0.80, 1.68]. They overlap.
 
 ### Measured versus projected
 
@@ -209,10 +213,10 @@ That table is still part projection. Of the dollars behind it:
 |---|---:|---:|
 | Always-Cheap | 3.3% | 10 of 139 |
 | Oracle | 3.9% | 14 of 178 |
-| Tier-Classifier | 24.6% | 36 of 121 |
+| kNN-semantic-tier | 24.6% | 36 of 121 |
 | **Price-Cascade** | **27.7%** | 25 of 178 |
-| **kNN-cascade (within-task)** | **28.1%** | 31 of 178 |
-| kNN | 36.1% | 30 of 144 |
+| **kNN-semantic-cascade (within-task)** | **28.1%** | 31 of 178 |
+| kNN-semantic | 35.7% | 25 of 143 |
 | **Always-Frontier** | **44.9%** ($43.15 of $96.02) | 89 of 175 |
 
 Every projected cell is filled `pass=True`. Imputation is not neutral: the
@@ -256,8 +260,8 @@ Three reasons, which we would rather state than have you find.
 
 ### The plain kNN strategy is weaker still
 
-It buys about 2.7pp of pass rate over always-cheapest for roughly 8.8× the cost,
-and that margin sits far inside both intervals: [72.28, 84.24] against
+It buys about 2.2pp of pass rate over always-cheapest for roughly 7.9× the cost,
+and that margin sits far inside both intervals: [71.20, 83.70] against
 [69.02, 81.52]. Indistinguishable at this sample size.
 
 ## Routing at session cadence
@@ -291,7 +295,7 @@ from the product's own `LIVE_STRATEGIES` rather than restated. It was previously
 BLOCKED on a narrow technicality — that no `router.strategy` value named a
 *layer* — which was true and also read, in every figure, as "you cannot run
 this". Registering the preset removes the technicality instead of hedging around
-it. Note what stays blocked: `Price-Cascade` and `kNN-cascade (within-task)` verify **inside**
+it. Note what stays blocked: `Price-Cascade` and `kNN-semantic-cascade (within-task)` verify **inside**
 one task, and no configuration will ever do that here.
 
 **What the row does not say is whether its rungs are worth buying.** It prices
@@ -305,18 +309,18 @@ skips the best-measured rung (kimi-k3) on a price slot. Read the two together.
 
 Both selectable cascades climb the **same** ladder; they differ in one thing, the rung the
 first session opens on. `session_cascade` opens it on the *cheapest* model.
-`knn_cascade` — the opt-in routing strategy — opens it on the **kNN pick**. Both rows below
+`knn_semantic_cascade` — the opt-in routing strategy — opens it on the **kNN pick**. Both rows below
 are replayed through the same `EscalationRunner`, the same rank floor and the same billing
 loop, so the difference between them is the opening rung and nothing else.
 
 | strategy | passes | pass rate | 95% CI | naive cost | cache-aware cost | avg cost/task | cumulative regret |
 |---|---|---:|---|---:|---:|---:|---:|
 | **Session-Cascade (`strategy: session_cascade`, the default)** | 178 | **96.74%** | 94.02–98.91 | $33.56 | **$28.71** | $0.1824 | 1.52 [0.99, 2.13] |
-| kNN-cascade (`strategy: knn_cascade`, opt-in) | 178 | 96.74% | 94.02–98.91 | $43.01 | $38.26 | $0.2337 | 2.47 [1.85, 3.13] |
+| kNN-semantic-cascade (`strategy: knn_semantic_cascade`, opt-in) | 178 | 96.74% | 94.02–98.91 | $43.28 | $38.49 | $0.2352 | 2.50 [1.87, 3.18] |
 
 **On this corpus the routing model is dominated by the cheap start.** Both reach 96.74% —
 the ladder walks to a model that solves the task either way — and opening on the kNN pick
-instead of on the cheapest model costs **$9.55 more cache-aware** ($38.26 against $28.71)
+instead of on the cheapest model costs **$9.78 more cache-aware** ($38.49 against $28.71)
 for no measured quality. That is the same verdict the selection-rule rows already carry,
 arriving by a second route: the embedding buys nothing here the ladder does not already
 deliver, and it pays for models the ladder would have skipped. It is also why the default
@@ -340,7 +344,7 @@ measured. We do not claim it settles the question in production, and we have not
 quantified the gap — this paragraph is an argument for why the offline number is the
 cheap start's best case, not a correction to it.
 
-Two things the `knn_cascade` row does **not** say. It is **not pre-registered**: the 5pp
+Two things the `knn_semantic_cascade` row does **not** say. It is **not pre-registered**: the 5pp
 non-inferiority gate named the bare kNN selection rule as its verdict arm before any of
 this was measured, and that arm is deliberately left where it is — repointing it after
 seeing the data would rewrite the registered test. The
@@ -383,12 +387,12 @@ cells are monotone-imputed. Its subset guard, verbatim:
 | Oracle (hindsight — bound) | 96.74% | — | $18.33 | [11.05, 27.18] | $18.33 |
 | Price-Cascade (blocked) | 96.74% | 94.02–98.91 | $27.11 | [17.92, 37.81] | $27.11 |
 | **Session-Cascade, `rank_shortlist=3` (`strategy: session_cascade`)** | **96.74%** | 94.02–98.91 | $33.56 | [22.53, 46.14] | **$28.71** |
-| kNN-cascade (within-task) (blocked) | 96.74% | 94.02–98.91 | $30.44 | [20.39, 42.06] | $30.44 |
+| kNN-semantic-cascade (within-task) (blocked) | 96.74% | 94.02–98.91 | $30.44 | [20.39, 42.06] | $30.44 |
 | Session-Cascade, `rank_shortlist=0` (pre-shortlist) | 96.57% | 93.71–98.86 | $48.19 | [29.32, 69.57] | $35.79 | <!-- frozen-value: n=180, date=2026-08-10, run=49b8362 -->
 | Always-Frontier | 95.11% | 91.85–97.83 | $96.02 | [88.73, 104.19] | $96.02 |
-| kNN (control — the pick without the ladder) | 78.26% | 72.28–84.24 | $13.21 | [9.15, 17.76] | $13.21 |
+| kNN-semantic (control — the pick without the ladder) | 77.72% | 71.20–83.70 | $11.79 | [7.80, 16.13] | $11.79 |
 | Always-Cheap | 75.54% | 69.02–81.52 | $1.50 | [1.31, 1.71] | $1.50 |
-| Tier-Classifier (blocked) | 65.76% | — | $11.53 | [8.85, 14.62] | $11.53 |
+| kNN-semantic-tier (blocked) | 65.76% | — | $11.53 | [8.85, 14.62] | $11.53 |
 
 **Set B — raw, un-imputed, fully-measured tasks only: 74 scorable.** Every <!-- frozen-value: n=74, date=2026-08-11, run=49b8362 -->
 cell here was actually run; the scorable count is re-derived from
@@ -404,8 +408,8 @@ never a hardcoded number. Its subset guard, verbatim:
 | **Session-Cascade, `rank_shortlist=3` (`strategy: session_cascade`)** | **90.91%** | 83.33–96.97 | $33.75 | [24.39, 44.23] | **$28.76** |
 | Session-Cascade, `rank_shortlist=0` | 90.91% | 84.85–96.97 | $66.89 | [47.66, 89.68] | $49.34 | <!-- frozen-value: n=74, date=2026-08-11, run=49b8362 -->
 | Always-Frontier | 86.36% | 80.30–93.94 | $37.63 | [30.57, 45.58] | $37.63 |
-| kNN-cascade (within-task) | 90.91% | 84.85–95.45 | $34.09 | [24.40, 46.95] | $34.09 |
-| kNN | 54.55% | 42.42–66.67 | $12.34 | [6.45, 18.85] | $12.34 |
+| kNN-semantic-cascade (within-task) | 90.91% | 84.85–95.45 | $34.09 | [24.40, 46.95] | $34.09 |
+| kNN-semantic | 54.55% | 42.42–66.67 | $12.34 | [6.45, 18.85] | $12.34 |
 | Always-Cheap | 49.25% | 37.31–62.69 | $0.72 | [0.57, 0.88] | $0.72 |
 
 Note the guards run in **opposite directions**. Set A drops the tasks the cheap
@@ -420,12 +424,17 @@ load-bearing point** — not either set's dollar figure.
 Both cost columns are reported because they are different quantities, and only
 one of them is the bill.
 
-`Session-Cascade` is the **only** strategy in either table the cache term moves.
-That is not an accident of the model: it is the only strategy that re-serves the
-*same* model on consecutive attempts, because its first escalation rung raises
-reasoning effort rather than rank. Every other strategy here either never retries
-or steps to a different model on each attempt, which forfeits the cached prefix,
-so its naive and cache-aware totals are the same number.
+`Session-Cascade` is the **only** strategy in the two Set tables below the
+cache term moves — the comparison table above reports single, cache-blind totals
+only. That is not an accident of the model: among the strategies those tables
+carry, Session-Cascade is the only one that re-serves the *same* model on
+consecutive attempts, because its first escalation rung raises reasoning effort
+rather than rank. Every other row there either never retries or steps to a
+different model on each attempt, which forfeits the cached prefix, so its naive
+and cache-aware totals are the same number. (The two **difficulty cascades** —
+`kNN-difficulty-cascade`, `Difficulty-Band-cascade` — also re-serve one model and
+therefore move under the cache term too; they are absent from those tables, and
+their numbers are in [routing.md](routing.md#fig-cost-quality-frontier).)
 
 The size of the term tracks how much same-model repetition each configuration
 does. At `rank_shortlist=3` it removes 14% of the naive total on set A ($33.56 →
@@ -456,14 +465,14 @@ shared tasks:
 |---|---:|---|---|
 | `sl=3` vs Price-Cascade | +$1.37 | [+0.82, +2.00] | real, and small | <!-- frozen-value: n=175, date=2026-08-10, run=49b8362 -->
 | `sl=2` vs Price-Cascade | +$0.76 | [−0.06, +1.85] | not distinguishable | <!-- frozen-value: n=175, date=2026-08-10, run=49b8362 -->
-| `sl=3` vs kNN-cascade (within-task) | −$1.23 | [−3.42, +0.73] | not distinguishable | <!-- frozen-value: n=175, date=2026-08-10, run=49b8362 -->
+| `sl=3` vs kNN-semantic-cascade (within-task) | −$1.23 | [−3.42, +0.73] | not distinguishable | <!-- frozen-value: n=175, date=2026-08-10, run=49b8362 -->
 | `sl=3` vs `sl=0` | −$13.30 | [−21.00, −6.42] | the shortlist pays | <!-- frozen-value: n=175, date=2026-08-10, run=49b8362 -->
 | `sl=3` vs Always-Frontier | −$66.12 | [−74.19, −57.90] | the headline | <!-- frozen-value: n=175, date=2026-08-10, run=49b8362 -->
 | `sl=2` vs `sl=3` | +$0.61 | [−0.42, +1.47] | not distinguishable | <!-- frozen-value: n=175, date=2026-08-10, run=49b8362 -->
 
 So: paying one decision per session instead of one per attempt costs $1.37 over
 `Price-Cascade` on this set, and buys cache-safety and a mechanism you can
-actually enable. Against `kNN-cascade (within-task)` the two are not distinguishable. Against
+actually enable. Against `kNN-semantic-cascade (within-task)` the two are not distinguishable. Against
 Always-Frontier the gap is large and the interval is nowhere near zero.
 
 The last row is why the shipped default stays at 3. `rank_shortlist=2` is not

@@ -56,6 +56,11 @@ SUMMARY_FIELDS: Final[tuple[str, ...]] = (
     # a reader can see whether the cache assumption moved anyone.
     "Pareto",
     "Pareto_naive",
+    # The MEASURED per-task judge label cost a difficulty strategy paid to label the scored
+    # tasks (0.0 for every other row). It is FOLDED INTO the totals above — the decision cost
+    # carries it, so TotalCost / TotalCost_cacheaware / the bootstrap CIs are judge + model —
+    # and published here so the split is auditable rather than hidden.
+    "judge_label_cost",
     # Whether this row was scored on the full sample or a coverage-selected slice of it, and the
     # measured difficulty gap when it was. See benchmark/routing/selection_guard.py.
     "subset_selected",
@@ -148,20 +153,20 @@ def evaluate(strategy: object, matrix: dict, tasks: list[str]) -> tuple[list[Dec
     """Run one strategy, returning ``(decisions, unscorable)``: ``(task, model, passed,
     cost)`` tuples plus the task ids that cannot be scored — the chosen cell was never
     measured, or a cascade's PATH crossed an unmeasured cell (callers must exclude them)."""
-    decisions, unscorable, _attempts = evaluate_billed(strategy, matrix, tasks)
+    decisions, unscorable, _attempts, _judge = evaluate_billed(strategy, matrix, tasks)
     return decisions, unscorable
 
 
 def evaluate_billed(
     strategy: object, matrix: dict, tasks: list[str]
-) -> tuple[list[Decision], set[str], dict[str, list[Attempt]]]:
-    """``evaluate`` plus each task's billed attempt sequence, from the SAME single pass.
-
-    The cache-aware cost model needs the attempt ORDER, which the collapsed decision hides.
-    """
+) -> tuple[list[Decision], set[str], dict[str, list[Attempt]], dict[str, float]]:
+    """``evaluate`` plus each task's billed attempts AND per-task judge cost, in one pass.
+    The cache-aware model needs attempt ORDER; the judge-bill model needs the per-task cost a
+    difficulty strategy reports on every ``select`` the way a cascade reports its ladder total."""
     decisions: list[Decision] = []
     unscorable: set[str] = set()
     attempts: dict[str, list[Attempt]] = {}
+    judge_by_task: dict[str, float] = {}
     for tid in tasks:
         task_meta = matrix["tasks"].get(tid, {})
         model = strategy.select(tid, task_meta, matrix)  # type: ignore[attr-defined]
@@ -183,7 +188,13 @@ def evaluate_billed(
         passed = outcome.get("pass", False)
         cascade_cost = getattr(strategy, "cascade_total_cost", None)
         cost = cascade_cost if cascade_cost is not None else outcome.get("cost", 0.0)
-        decisions.append((tid, model, passed, cost))
+        # The MEASURED per-task judge label cost a difficulty strategy reports on `select` (0.0
+        # for every other strategy). Folded into the decision cost so the naive total, its
+        # bootstrap CI and every reward-based metric include the judge bill — the difficulty
+        # rows' whole cost is judge + model runs, not model runs alone.
+        judge = float(getattr(strategy, "judge_cost_total", 0.0) or 0.0)
+        judge_by_task[tid] = judge
+        decisions.append((tid, model, passed, cost + judge))
         # A cascade publishes its per-attempt billing; a single-shot decision IS one attempt.
         # Copied, because the strategy overwrites the attribute on the next `select`.
         billed = getattr(strategy, "cascade_attempts", None)
@@ -203,7 +214,7 @@ def evaluate_billed(
                 )
             ]
         )
-    return decisions, unscorable, attempts
+    return decisions, unscorable, attempts, judge_by_task
 
 
 def compute_strategy_rows(
@@ -275,6 +286,7 @@ def _cache_aware_cost(
     decisions: list[Decision],
     attempts: dict[str, list[Attempt]],
     prices: dict[str, CachePrice],
+    judge_by_task: dict[str, float] | None = None,
 ) -> float:
     """Total cost of the scored tasks' billed attempts once repeat-model caching is priced."""
     # SCOPED PER TASK, and that is the load-bearing choice. A task here is one session, and a
@@ -283,7 +295,14 @@ def _cache_aware_cost(
     # the whole run as one sequence instead would hand a fixed-model baseline a discount on every
     # task after the first (measured: it cuts Always-Frontier from $88.61 to $23.51 on this
     # corpus), which is not caching — it is treating 175 independent sessions as one conversation.
-    return sum(cache_aware_total(attempts.get(tid, []), prices) for tid, _m, _p, _c in decisions)
+    #
+    # A difficulty row's judge bill is added on top: the decision cost already carries it (so the
+    # NAIVE total is right), but the cache-aware model prices the MODEL attempts only, and a
+    # judge call is never cached — its cache-aware cost equals its naive cost by construction.
+    total = sum(cache_aware_total(attempts.get(tid, []), prices) for tid, _m, _p, _c in decisions)
+    if judge_by_task:
+        total += sum(judge_by_task.get(tid, 0.0) for tid, _m, _p, _c in decisions)
+    return total
 
 
 def _context_columns(
@@ -339,7 +358,7 @@ def _strategy_row(  # noqa: PLR0913
     probe: dict | None = None,
     seed: int = 42,
 ) -> dict:
-    decisions, strat_unscorable, attempts = evaluate_billed(strategy, matrix, tasks)
+    decisions, strat_unscorable, attempts, judge_by_task = evaluate_billed(strategy, matrix, tasks)
     # A task is comparable only if BOTH the strategy and the oracle landed on a
     # measured cell; otherwise it is a coverage gap, not a real fail@$0, and must
     # not corrupt pass rate / cost. Filtering keeps strategy/oracle position-aligned.
@@ -360,8 +379,9 @@ def _strategy_row(  # noqa: PLR0913
         seed=seed,
         attempts=attempts,
         prices=prices,
+        judge_by_task=judge_by_task,
     )
-    cache_total = _cache_aware_cost(decisions, attempts, prices or {})
+    cache_total = _cache_aware_cost(decisions, attempts, prices or {}, judge_by_task)
     n = len(decisions)
     probe_matrix = matrix if probe is None else probe
     selection = selection_guard.assess(
@@ -378,6 +398,12 @@ def _strategy_row(  # noqa: PLR0913
         "n_unscorable": len(excluded),
         **metrics,
         **comparison,
+        # The MEASURED per-task judge label cost over the SCORED tasks — what a difficulty
+        # row's judge bill added to the totals below (0 for every other strategy). It is
+        # published beside the totals it is folded into, so a reader can see the split.
+        "judge_label_cost": round(
+            sum(judge_by_task.get(tid, 0.0) for tid, _m, _p, _c in decisions), 4
+        ),
         "TotalCost_cacheaware": round(cache_total, 4),
         "TotalCost_cacheaware_ci_lower": cis.total_cost_cacheaware[0],
         "TotalCost_cacheaware_ci_upper": cis.total_cost_cacheaware[1],

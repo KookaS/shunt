@@ -33,7 +33,7 @@ It exits non-zero only when the router could not serve a request at all: no prov
 resolves, the registry or `router.yaml` will not load, every model's circuit breaker is
 open, or the bind address is unusable. A degraded-but-working install still exits `0`.
 Note that the embedder verdict depends on `router.strategy`, and that the **default**
-lands on the lenient side. Only `knn_cascade` embeds; under it a missing or unreadable
+lands on the lenient side. Only `knn_semantic_cascade` embeds; under it a missing or unreadable
 weights cache is **fatal**. Under the default `session_cascade` — and under `always_cheap`
 and `always_frontier` — nothing embeds at all, so the same cache is a **warning**, and
 `doctor` names the strategy in the message so the downgrade is never silent. Downloading
@@ -275,7 +275,7 @@ are pinned controls kept for baselines.
 | Value | What it does |
 |---|---|
 | `session_cascade` (default) | **Start cheap and climb.** Every session begins on the cheapest healthy model; a repeated verified failure raises a rung at the next session boundary, and the climbed rung persists for that repo. It does **not** consult the neighbourhood — no embedding, no index, no per-task model choice — so the `policy:` and `exploration:` blocks are inert under it. It is the default because the offline corpus measures it at the same pass rate as the kNN start for materially less money. |
-| `knn_cascade` | **Route smart, then climb.** Embed the first turn, look up verified neighbours, take the cheapest model clearing the success bar ([the routing model](routing.md)) — then climb the same ladder from there. This is the opt-in that turns per-task routing on. Spelled `knn` before the rename; that value still works, with a warning, and still resolves here rather than to the new default. |
+| `knn_semantic_cascade` | **Route smart, then climb.** Embed the first turn, look up verified neighbours, take the cheapest model clearing the success bar ([the routing model](routing.md)) — then climb the same ladder from there. This is the opt-in that turns per-task routing on. Spelled `knn`, then `knn_cascade`, before the second rename; those values still work, with a warning, and still resolve here rather than to the new default. |
 | `always_cheap` | Cheapest healthy model, every session. No embedding, no index, no climbing. |
 | `always_frontier` | Strongest healthy model, every session. |
 
@@ -290,8 +290,9 @@ rather than documented-and-hoped:
   reads as OFF for any strategy you name yourself (so an old config cannot be flipped on
   behind your back). A file containing only `strategy: session_cascade` therefore fails to
   boot — spell the block out, as below. The one exception is a file that names **no**
-  strategy, or the legacy `strategy: knn`: those resolve the ladder to **on**, because they
-  never named a cascade and turning it off would change what a pre-rename install does.
+  strategy, or a legacy strategy (`knn` / `knn_cascade`): those resolve the ladder to **on**,
+  because a defaulted or migrated strategy never named a cascade explicitly, and resolving
+  the absent block to off would change what a pre-rename install does.
 - It needs a repo to test. Without a resolvable `capture.work_dir` there is no verified
   failure, so nothing ever climbs and you are running `always_cheap`. The router warns
   twice at boot in that state; see [Record verified outcomes automatically](#record-verified-outcomes-automatically).
@@ -301,7 +302,7 @@ Two consequences of the default that are easy to miss, because they are absences
 neighbourhood, never scores candidates — so the `exploration:` block below is **inert**
 under it (it perturbs a kNN base pick that is never made), and `shunt doctor` treats a
 missing embedding-weights cache as a warning rather than a failure. Setting
-`strategy: knn_cascade` is what turns [the routing model](routing.md) on; on the offline
+`strategy: knn_semantic_cascade` is what turns [the routing model](routing.md) on; on the offline
 corpus that cost more than it bought, which is why it is not the default — see
 [the two priced against each other](results.md#the-shipped-default-and-the-routing-model-priced-against-it).
 
@@ -334,7 +335,7 @@ router:
 This is the live spelling of the benchmark's `Session-Cascade` row. What it is *not* is a
 within-task cascade: Shunt makes one model decision per session and never switches inside
 a cached turn, so it cannot try a cheap model, read your tests, and retry bigger within one
-task. The offline `price_cascade` / `knn_cascade_withintask` rows measure that, are rejected
+task. The offline `price_cascade` / `knn_semantic_cascade_withintask` rows measure that, are rejected
 at boot, and stay that way — [Results](results.md#routing-results) carries what the difference costs.
 
 ### Choose which models are live-routable
@@ -380,7 +381,7 @@ so restate every setting you care about:
 
 ```yaml
 router:
-  strategy: knn_cascade
+  strategy: knn_semantic_cascade
   models:
     - deepseek-v4-flash
     - zai-glm-5.2
@@ -391,7 +392,7 @@ Because those overrides stack, the config actually in force is not always the fi
 last edited. Shunt prints it at startup, so you never have to guess:
 
 ```
-Shunt config | strategy=knn_cascade
+Shunt config | strategy=knn_semantic_cascade
 Shunt config | knn: k=20 success_rate_threshold=0.60 min_samples=3
 Shunt config | exploration: enabled=True budget_frac=0.15 conservative_alpha=0.10 ...
 Shunt config | budget: max_spend_usd=unlimited
@@ -407,7 +408,7 @@ env var:
 
 | What | Flag on `shunt start` | Environment variable |
 |------|----------------------|----------------------|
-| Active strategy | `--strategy knn_cascade` | `SHUNT_ROUTER_STRATEGY` |
+| Active strategy | `--strategy knn_semantic_cascade` | `SHUNT_ROUTER_STRATEGY` |
 | Exploration on/off | `--explore` / `--no-explore` | `SHUNT_EXPLORATION_ENABLED` |
 | Exploration budget | `--explore-budget-frac 0.2` | `SHUNT_EXPLORE_BUDGET_FRAC` |
 | Log verbosity | `--log-level debug` | `SHUNT_LOG_LEVEL` |
@@ -434,7 +435,7 @@ before editing it.
 
 Exploration ships `enabled: true`, but under the **shipped default strategy it never
 fires at all**: it perturbs the kNN base pick, and `session_cascade` makes no such pick.
-The whole `exploration:` block is inert until you set `strategy: knn_cascade`. Even then
+The whole `exploration:` block is inert until you set `strategy: knn_semantic_cascade`. Even then
 its effect is limited today: outcomes can be recorded
 manually via `shunt flag <session_id> good|bad`, or automatically once you configure a
 capture work_dir (below); with neither, the outcome count typically stays near zero and

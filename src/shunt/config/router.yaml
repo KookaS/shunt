@@ -15,17 +15,18 @@ router:
   # fails. It is the default because it is the measured frontier row: on the offline corpus it
   # reaches the same pass rate as the kNN-started cascade for materially less money.
   #
-  # `knn_cascade` starts each task at the model the kNN pick selects — embed the first turn,
-  # look up verified neighbours, take the cheapest model clearing the success bar — and then
-  # climbs the same ladder from there. Choose it when you want the routing model itself, and
-  # accept paying for a smarter start. It was previously spelled `knn`, which read as
-  # "selection only, no escalation" and was a lie about the behaviour; `knn` is still accepted
-  # as a migration alias (with a warning) for at least one minor release, and it resolves to
-  # `knn_cascade` — never to the new default, because it means kNN routing. Plain kNN WITHOUT
-  # the ladder is not selectable, because nothing ever shipped it.
+  # `knn_semantic_cascade` starts each task at the model the kNN pick selects — embed the first
+  # turn, look up verified neighbours, take the cheapest model clearing the success bar — and
+  # then climbs the same ladder from there. Choose it when you want the routing model itself,
+  # and accept paying for a smarter start. It was previously spelled `knn`, then `knn_cascade`;
+  # `knn` read as "selection only, no escalation" and was a lie about the behaviour. Both old
+  # spellings are still accepted as migration aliases (with a warning) for at least one minor
+  # release, and they resolve to `knn_semantic_cascade` — never to the new default, because they
+  # mean kNN routing. Plain kNN WITHOUT the ladder is not selectable, because nothing ever
+  # shipped it.
   #
-  # Exploration (below) applies to `knn_cascade` only: there is nothing to explore over when
-  # the base pick is fixed at the cheapest model.
+  # Exploration (below) applies to `knn_semantic_cascade` only: there is nothing to explore
+  # over when the base pick is fixed at the cheapest model.
   #
   # Selecting either with `escalation.enabled: false` is a load error — with the ladder off
   # the name promises a cascade the install does not run. Both need a `capture.work_dir` for
@@ -37,17 +38,18 @@ router:
   # one model is not a reason to run a router.
   strategy: session_cascade
 
-  # Knobs for the kNN pick. Read only under `knn_cascade` — the default cascade starts at the
-  # cheapest model and never queries the neighbourhood, so these values are inert until you
-  # select the routing strategy above.
+  # Knobs for the kNN pick. Read only under `knn_semantic_cascade` — the default cascade starts
+  # at the cheapest model and never queries the neighbourhood, so these values are inert until
+  # you select the routing strategy above.
   policy:
     k: 20
     success_rate_threshold: 0.6   # lower = more cost savings, higher = more reliability
     min_samples: 3
 
-  # Cost-aware Thompson-sampling exploration. Applies to `knn_cascade` ONLY: it perturbs the
-  # kNN base pick, and the default `session_cascade` has no base pick to perturb, so under the
-  # shipped strategy this whole block is inert. Shipped ON so the router can gather
+  # Cost-aware Thompson-sampling exploration. Applies to `knn_semantic_cascade` ONLY: it
+  # perturbs the kNN base pick, and the default `session_cascade` has no base pick to perturb,
+  # so under the shipped strategy this whole block is inert. Shipped ON so the router can
+  # gather
   # evidence, but be clear about what that costs today: outcome capture is manual
   # (`shunt flag`), and the one offline replay measured exploration at -2.8pp pass
   # rate and +$0.013/task with its learning benefit set to zero. Set

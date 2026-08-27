@@ -230,7 +230,9 @@ def test_min_samples_gates_qualification(
             "always_frontier",
             id="strategy=always_frontier",
         ),
-        pytest.param("knn", _CHEAP, "cold_start", id="strategy=knn"),
+        pytest.param(
+            "knn_semantic_cascade", _CHEAP, "cold_start", id="strategy=knn_semantic_cascade"
+        ),
     ],
 )
 def test_strategy_env_override_changes_the_served_model(

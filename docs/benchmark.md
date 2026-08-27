@@ -24,13 +24,13 @@ different meanings, so keep them apart (see the note below the table).
 | `arm_sampling.default_only_models` | collect | Models pinned to their default reasoning arm (no effort sweep). |
 | `collect.*` (`audit_fraction`, `noninferiority_margin`, `phase_a_mode` …) | collect | Knobs for the `cost_optimal` sampler only. |
 | `sample_size`, `seed`, `n_default` | collect | **Which tasks** run and how many (nested order). |
-| `strategies.enabled` | evaluate | **Which routing policies are scored offline** over the cache — `oracle`, `always_cheap`, `always_frontier`, `knn`, `knn_cascade`, `knn_cascade_withintask`, `price_cascade`, `session_cascade`, `tier_classifier`. |
-| `strategies.knn.*`, `knn_cascade_withintask.*` … | evaluate | Per-policy hyperparameters (`k`, `success_rate_threshold`, `max_tries`). `knn_cascade` has no block of its own — it takes the `knn` selection knobs and the `session_cascade` ladder knobs, so the two session-cadence rows can never be scored at two different ladders. |
+| `strategies.enabled` | evaluate | **Which routing policies are scored offline** over the cache — `oracle`, `always_cheap`, `always_frontier`, `knn_semantic`, `knn_semantic_cascade`, `knn_semantic_cascade_withintask`, `knn_difficulty`, `knn_difficulty_cascade`, `difficulty_band_cascade`, `price_cascade`, `session_cascade`, `knn_semantic_tier`. |
+| `strategies.knn_semantic.*`, `knn_semantic_cascade_withintask.*`, `knn_difficulty.*`, `difficulty_band.*` … | evaluate | Per-policy hyperparameters (`k`, `success_rate_threshold`, `max_tries`). `knn_semantic_cascade` has no block of its own — it takes the `knn_semantic` selection knobs and the `session_cascade` ladder knobs, so the four session-cadence rows (`session_cascade`, `knn_semantic_cascade`, `knn_difficulty_cascade`, `difficulty_band_cascade`) can never be scored at two different ladders. The difficulty family's judge cost is not a knob — it is the measured per-task bill from `judge_difficulty.json`. |
 | `routing.control_model` | evaluate | The fixed-frontier baseline the kill-gate is measured against. |
 
 **The two "strategy" words.** `--strategy` (a CLI flag) chooses *how live data is
 collected*; `strategies:` (a config block) lists *the routing policies scored on that
-data*. A cheap-first cascade is a **policy you evaluate** (`knn_cascade_withintask`), never the
+data*. A cheap-first cascade is a **policy you evaluate** (`knn_semantic_cascade_withintask`), never the
 way data is collected — a cascade collector would never observe the frontier on easy
 tasks and would bias the baseline (see [the kill-gate and partial-coverage limits](#honest-limits)).
 
@@ -607,12 +607,15 @@ its own when read outside these docs.
 | Always-Cheap | Route all to the cheapest model (derived from the pricing matrix) |
 | Always-Frontier | Route all to the most expensive model |
 | Random | Uniform random per task (mean over seeds) |
-| kNN | Embed task → retrieve similar → cheapest capable model. A CONTROL: the selection rule with the escalation ladder removed, which no `router.strategy` value produces |
-| kNN-cascade | The opt-in routing strategy: the kNN pick, then the escalation ladder at session cadence |
+| kNN-semantic | Embed task → retrieve similar → cheapest capable model. A CONTROL: the selection rule with the escalation ladder removed, which no `router.strategy` value produces |
+| kNN-semantic-cascade | The opt-in routing strategy: the kNN pick, then the escalation ladder at session cadence |
 | Session-Cascade | The shipped default: the cheapest model, then that same ladder — no embedding, no neighbourhood query |
-| kNN-cascade (within-task) | kNN-informed try-verify-escalate INSIDE one task — blocked, not deployable |
+| kNN-semantic-cascade (within-task) | kNN-informed try-verify-escalate INSIDE one task — blocked, not deployable |
+| kNN-difficulty | Judge-difficulty selection rule with the ladder removed. A CONTROL — no `router.strategy` value produces it. Judge labels from `gpt-5.6-terra` (committed `judge_difficulty.json`) |
+| kNN-difficulty-cascade | Judge-difficulty pick, then the session ladder — blocked, not deployable (needs a per-task judge call at inference) |
+| Difficulty-Band-cascade | "Just the judge label + escalation": same-difficulty-band members vote, the cheapest in-band model whose pass rate clears the bar opens the ladder — blocked, not deployable |
 | Price-Cascade | Try-verify-escalate in ascending price order — no embeddings, no kNN |
-| Tier-Classifier | Single-shot: predict the crossover tier, route there directly |
+| kNN-semantic-tier | Single-shot: predict the crossover tier, route there directly |
 
 `Price-Cascade` is the zero-ML floor for cascade routing: it tries the `max_tries`
 cheapest measured models cheapest-first, stops at the first patch that passes, and
@@ -646,7 +649,7 @@ Scored offline, the embedding-based routing strategies split by workload:
   strategies embedded the short `description` label rather than the task's
   `problem_statement`, so it was pending re-measurement. The manifest has since been
   rebuilt with the real statements (2026-08-05), and the re-measured numbers fell:
-  kNN 78.26% is inside noise of Always-Cheap — a settled null, not a coverage gap
+  kNN-semantic 77.72% is inside noise of Always-Cheap — a settled null, not a coverage gap
   ([Results](results.md#routing-results)). The router is wired into the live proxy
   (it decides the first turn), outcomes are recorded automatically at session close
   (via off-wire test re-execution when configured), and the learning loop is live.

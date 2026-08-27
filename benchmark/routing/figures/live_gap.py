@@ -109,8 +109,10 @@ SPEC = FigureSpec(
     title="What the bound's quality costs, and which of those prices you may actually pay",
     reading=(
         "Left: every strategy that reaches the bound's pass rate within one percentage "
-        "point, as total spend on a log axis, cheapest at the bottom, coloured by class. A "
-        "GREEN bar is a price you can pay today — `router.strategy` names it. "
+        "point, as a DOT at its total spend on a log axis, cheapest at the bottom, coloured "
+        "by class. The axis is logarithmic, so only the dot's POSITION carries the price; the "
+        "grey rule behind it is a reading guide and its length means nothing. A GREEN dot is "
+        "a price you can pay today — `router.strategy` names it. "
         "The blue bracket is the span between the cheapest LIVE way to buy that quality and "
         "the cheapest BLOCKED one — engineering work, not physics. The red bracket is the "
         "span from there down to the bound, which no strategy of any class can cross. "
@@ -120,13 +122,13 @@ SPEC = FigureSpec(
         "reaches, with the reason that class is kept in the corpus."
     ),
     goal=(
-        "Read the CHEAPEST GREEN bar first — that is what this quality actually costs a "
-        "deployment, and if there is no green bar in the band the subtitle says so instead "
+        "Read the CHEAPEST GREEN dot first — that is what this quality actually costs a "
+        "deployment, and if there is no green dot in the band the subtitle says so instead "
         "of pricing an empty set. Then read the two brackets against each other. A large "
         "blue span and a small red one means the shipped router's deficit is a backlog item; "
         "the reverse means the corpus has been squeezed and the remaining distance is a "
         "property of the models, not of the routing. Neither bracket is a result you can "
-        "deploy — the whole point of separating the classes is that only the green bars are "
+        "deploy — the whole point of separating the classes is that only the green dots are "
         "purchasable."
     ),
     definitions=(
@@ -174,20 +176,41 @@ SPEC = FigureSpec(
 
 def _draw_band(ax: Axes, band: list[tuple[str, StrategyClass, float, float]]) -> None:
     ys = list(range(len(band)))
+    # Scale and limits FIRST: the grey guide rule behind each dot starts at the axis floor,
+    # so it has to be able to read a floor that is already final.
+    ax.set_xscale("log")
+    costs = [r[2] for r in band]
+    ax.set_xlim(min(costs) * 0.45, max(costs) * 4.2)
     for y, (name, cls, cost, perf) in zip(ys, band, strict=True):
         # Hollow means the MECHANISM already runs; the class colour still says "blocked".
         # Same fill convention as cost_quality_frontier.png, so the one reader who sees both
         # figures learns it once. Without it this panel counts a shipped, default-on
         # mechanism into a bracket labelled "unlocked by wiring the blocked ones".
         ships = shipped_mechanism(name) is not None
-        ax.barh(
-            y,
-            cost,
-            height=0.6,
-            facecolor="none" if ships else _CLASS_COLOUR[cls],
-            edgecolor=_CLASS_COLOUR[cls],
-            linewidth=1.6 if ships else 0.0,
-            zorder=2,
+        # A DOT, not a bar. The x axis is logarithmic because these prices span a decade,
+        # and a bar drawn on a log axis encodes log(cost) − log(axis floor) as its length:
+        # the $43.28 row was 2.6x the length of the $18.33 one for 2.4x the money by
+        # coincidence, and moving the axis floor would have changed every ratio on the
+        # canvas without changing a single number. A dot carries position only, which is
+        # the one channel a log axis reads honestly. The guide rule behind it is grey and
+        # unlabelled precisely so it is not read as a magnitude.
+        ax.plot(
+            [ax.get_xlim()[0], cost],
+            [y, y],
+            color="#dddddd",
+            lw=0.9,
+            zorder=1,
+            solid_capstyle="butt",
+        )
+        ax.plot(
+            [cost],
+            [y],
+            "o",
+            markersize=9,
+            markerfacecolor="none" if ships else _CLASS_COLOUR[cls],
+            markeredgecolor=_CLASS_COLOUR[cls],
+            markeredgewidth=1.6,
+            zorder=3,
         )
         ax.text(
             cost * 1.06,
@@ -200,9 +223,6 @@ def _draw_band(ax: Axes, band: list[tuple[str, StrategyClass, float, float]]) ->
         )
     ax.set_yticks(ys)
     ax.set_yticklabels([r[0] for r in band], fontsize=8)
-    ax.set_xscale("log")
-    costs = [r[2] for r in band]
-    ax.set_xlim(min(costs) * 0.45, max(costs) * 4.2)
     # Two bracket rows plus their labels live below the bars; -1.25 is what keeps the
     # lower label inside the canvas instead of clipped by the axis.
     ax.set_ylim(-1.25, len(band) - 0.25)
@@ -264,6 +284,10 @@ def _draw_census(ax: Axes, rows: list[tuple[str, StrategyClass, float, float]]) 
     # Room for the label beside the longest bar, scaled to that bar rather than to the
     # strategy total — an axis sized by the total left the bars stranded at the left edge.
     ax.set_xlim(0, max(widest, 1) * 2.9)
+    # Tick only over counts that exist. The label gutter forces the axis out to ~14 for a
+    # panel whose largest class holds 5 strategies, and a tick at 14 advertises a scale the
+    # data never reaches — a reader sizes the bars against the ticks, not against the spine.
+    ax.set_xticks(range(0, max(widest, 1) + 1))
     ax.set_ylim(-0.6, len(present) - 0.4)
     ax.set_xlabel("strategies in this class", fontsize=9)
     ax.grid(axis="x", color="#eeeeee", lw=0.6)

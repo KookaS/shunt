@@ -172,9 +172,26 @@ class TestEscalation:
             ]
         )
         model, reason = rule.select(neighbors, pool, cold_start_active=False)
-        # All tested and none eligible — should fall back to smartest
+        # All tested and none eligible — cost-minimal fallback, NOT the strongest
+        # (the regression this pins: it used to return the frontier model, the driver
+        # of the single-shot control's over-provisioning on the completed matrix).
         assert reason == "safe_fallback"
-        assert model == "frontier-fail"
+        assert model == "cheap-fail"
+
+    def test_all_tested_fallback_prefers_cheapest_over_strongest(self):
+        rule = SelectionRule()
+        pool = FakeModelPool("cheap-fail", "mid-fail", "frontier-fail")
+        neighbors = (
+            [_neighbor("cheap-fail", outcome=False, cost=1.0, confidence=0.9) for _ in range(5)]
+            + [_neighbor("mid-fail", outcome=False, cost=2.0, confidence=0.9) for _ in range(5)]
+            + [
+                _neighbor("frontier-fail", outcome=False, cost=10.0, confidence=0.9)
+                for _ in range(5)
+            ]
+        )
+        model, reason = rule.select(neighbors, pool, cold_start_active=False)
+        assert model == "cheap-fail"
+        assert reason == "safe_fallback"
 
     def test_mixed_rank_pool(self):
         # weakest -> strongest by rank
@@ -185,19 +202,20 @@ class TestEscalation:
         assert model == "cheapy"
         assert reason == "exploration_untested"
 
-        # All tested → safe fallback to frontier
+        # All tested → cost-minimal safe fallback to the cheapest
         neighbors = (
             [_neighbor("cheapy", outcome=False, cost=1.0, confidence=0.9) for _ in range(5)]
             + [_neighbor("middy", outcome=False, cost=2.0, confidence=0.9) for _ in range(5)]
             + [_neighbor("fronty", outcome=False, cost=3.0, confidence=0.9) for _ in range(5)]
         )
         model, reason = rule.select(neighbors, pool, cold_start_active=False)
-        assert model == "fronty"
+        assert model == "cheapy"
         assert reason == "safe_fallback"
 
-    def test_safe_fallback_on_the_real_pool_is_the_priciest_model(self):
-        # _escalate now returns ranked_models()[-1] — the highest-rank (priciest) model.
-        # Over the full registry that is claude-fable-5 ($60/M total), the top rank.
+    def test_safe_fallback_on_the_real_pool_is_the_cheapest_model(self):
+        # `_escalate` returns ranked_models()[0] — the cheapest model — when every model
+        # is tested and none qualifies. Over the full registry that is deepseek-v4-flash
+        # ($0.42/M total), the bottom rank.
         rule = SelectionRule()
         pool = ModelPool()
         names = [m.name for m in pool.ranked_models()]
@@ -206,7 +224,8 @@ class TestEscalation:
         ]
         model, reason = rule.select(neighbors, pool, cold_start_active=False)
         assert reason == "safe_fallback"
-        assert model == "claude-fable-5"
+        assert model == names[0]
+        assert model == "deepseek-v4-flash"
 
 
 class TestConfidenceWeighting:
@@ -243,6 +262,36 @@ class TestConfidenceWeighting:
         # model-b is cheaper and eligible
         model, reason = rule.select(neighbors, pool, cold_start_active=False)
         assert model == "model-b"
+
+    def test_imputed_passes_do_not_vote_as_measured(self):
+        # The benchmark wires imputed cells (monotone-ladder pass=True fills) to
+        # verification_confidence 0.0, so a model whose ONLY evidence is imputed passes
+        # must not clear the bar on them — its group gets zero total weight and is skipped.
+        rule = SelectionRule(min_samples=2, min_success_rate=0.6)
+        pool = FakeModelPool("model-a", "model-b")
+        neighbors = [
+            _neighbor("model-a", outcome=True, cost=1.0, confidence=0.0, distance=0.0)
+            for _ in range(5)
+        ]
+        model, reason = rule.select(neighbors, pool, cold_start_active=False)
+        assert reason in ("exploration_untested", "safe_fallback")
+        assert model == "model-b"  # the untested/cheapest model, not the imputed-pass one
+
+    def test_min_samples_counts_only_measured_neighbours(self):
+        # min_samples must reflect MEASUREMENT: zero-weight (imputed / distance>=1)
+        # neighbours carry no signal and must not satisfy the sample floor. Here
+        # model-a has 3 raw neighbours but only 2 measured, so min_samples=3 rejects it.
+        rule = SelectionRule(min_samples=3, min_success_rate=0.6)
+        pool = FakeModelPool("model-a", "model-b")
+        neighbors = [
+            _neighbor("model-a", outcome=True, cost=5.0, confidence=1.0, distance=0.0),
+            _neighbor("model-a", outcome=True, cost=5.0, confidence=1.0, distance=0.0),
+            _neighbor("model-a", outcome=True, cost=5.0, confidence=0.0, distance=0.0),
+        ]
+        model, reason = rule.select(neighbors, pool, cold_start_active=False)
+        # model-a is below the measured floor → escalate to the untested model
+        assert model == "model-b"
+        assert reason == "exploration_untested"
 
 
 class TestUnknownCostNeverSortsCheapest:

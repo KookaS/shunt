@@ -364,7 +364,8 @@ def _embedder_check(strategy: str, needs_neighbors: bool) -> Check:
         return Check("embedder", f"{model_name} — weights cached in {cache}")
     if not needs_neighbors:
         # Every remaining state is a degraded cache, and none of them can break a fixed
-        # strategy — WARN so the operator still sees it before switching to knn_cascade, ok so the
+        # strategy — WARN so the operator still sees it before switching to knn_semantic_cascade,
+        # ok so the
         # exit code keeps telling the truth about whether a request can be served.
         return Check(
             "embedder",

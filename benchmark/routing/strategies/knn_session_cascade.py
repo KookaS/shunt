@@ -1,7 +1,7 @@
 """kNN-seeded session cascade: the kNN pick opens the ladder, session cadence climbs it.
 
-The OPT-IN `router.strategy: knn_cascade` (the shipped default, `session_cascade`, opens at the
-cheapest model) — the first benchmark row that starts where the kNN pick lands.
+The OPT-IN `router.strategy: knn_semantic_cascade` (the shipped default, `session_cascade`,
+opens at the cheapest model) — the first benchmark row that starts where the kNN pick lands.
 """
 
 # WHY A SUBCLASS AND NOT A SECOND REPLAY. `SessionCascadeStrategy` already replays the shipped
@@ -80,7 +80,7 @@ class kNNSessionCascadeStrategy(SessionCascadeStrategy):  # noqa: N801 (kNN is t
     @property
     def name(self) -> str:
         """Display name shown in eval output and plots."""
-        return "kNN-cascade"
+        return "kNN-semantic-cascade"
 
     def _initial_rank_floor(self, task_id: str, matrix: dict, rungs: Sequence[str]) -> int:
         """The rung the kNN pick lands on, as an index into the price-ordered ladder."""

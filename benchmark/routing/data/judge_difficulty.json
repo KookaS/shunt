@@ -1,0 +1,819 @@
+{
+  "adoption_rule": "gpt-5.6-terra adopted because |LOO_R2_terra - LOO_R2_anchor| = 0.002 <= 0.01 (+0.027 vs +0.029) at half the price and a different model family",
+  "aggregation": "difficulty = mean over round-2 runs; judge_cost_usd = mean raw_cost over that task's runs (one judge call per task at inference)",
+  "generated": "20260826T133414Z",
+  "judge": "gpt-5.6-terra",
+  "source_artifacts": [
+    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260825T184846Z.jsonl",
+    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T062249Z.jsonl",
+    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T073306Z.jsonl",
+    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T073333Z.jsonl",
+    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T083444Z.jsonl",
+    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T131615Z.jsonl",
+    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T131631Z.jsonl",
+    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T131645Z.jsonl",
+    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_r2_recovered.jsonl"
+  ],
+  "tasks": {
+    "astropy__astropy-12907": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001399
+    },
+    "astropy__astropy-13033": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.002018
+    },
+    "astropy__astropy-13236": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001678
+    },
+    "astropy__astropy-13398": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001969
+    },
+    "astropy__astropy-13453": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.002841
+    },
+    "astropy__astropy-13579": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.00212
+    },
+    "astropy__astropy-13977": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001637
+    },
+    "astropy__astropy-14096": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001242
+    },
+    "astropy__astropy-14182": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.001712
+    },
+    "astropy__astropy-14309": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001958
+    },
+    "astropy__astropy-14365": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001552
+    },
+    "astropy__astropy-14369": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002057
+    },
+    "astropy__astropy-14508": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002158
+    },
+    "astropy__astropy-14539": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001685
+    },
+    "astropy__astropy-14598": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.002183
+    },
+    "astropy__astropy-14995": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002198
+    },
+    "astropy__astropy-7166": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.000833
+    },
+    "astropy__astropy-7336": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001503
+    },
+    "astropy__astropy-7606": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001262
+    },
+    "astropy__astropy-7671": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001658
+    },
+    "astropy__astropy-8707": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001211
+    },
+    "astropy__astropy-8872": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002759
+    },
+    "django__django-10880": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.000868
+    },
+    "django__django-11099": {
+      "difficulty": 1.0,
+      "judge_cost_usd": 0.001024
+    },
+    "django__django-11119": {
+      "difficulty": 1.5,
+      "judge_cost_usd": 0.000979
+    },
+    "django__django-11885": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001352
+    },
+    "django__django-12325": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001154
+    },
+    "django__django-13128": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.000895
+    },
+    "django__django-13158": {
+      "difficulty": 3.5,
+      "judge_cost_usd": 0.001265
+    },
+    "django__django-13449": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002426
+    },
+    "django__django-13837": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.001503
+    },
+    "django__django-13964": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001505
+    },
+    "django__django-14404": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.00092
+    },
+    "django__django-14559": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.00104
+    },
+    "django__django-14771": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.001386
+    },
+    "django__django-14915": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001265
+    },
+    "django__django-14999": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.002493
+    },
+    "django__django-15098": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002115
+    },
+    "django__django-15268": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001377
+    },
+    "django__django-15525": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.00175
+    },
+    "django__django-15563": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001622
+    },
+    "django__django-15629": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001854
+    },
+    "django__django-16145": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001103
+    },
+    "django__django-16569": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.00153
+    },
+    "django__django-16612": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001186
+    },
+    "django__django-16631": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001152
+    },
+    "matplotlib__matplotlib-13989": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001629
+    },
+    "matplotlib__matplotlib-20676": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.001528
+    },
+    "matplotlib__matplotlib-20826": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.002059
+    },
+    "matplotlib__matplotlib-20859": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001984
+    },
+    "matplotlib__matplotlib-22719": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.003268
+    },
+    "matplotlib__matplotlib-22865": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.00155
+    },
+    "matplotlib__matplotlib-23299": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001681
+    },
+    "matplotlib__matplotlib-23412": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001894
+    },
+    "matplotlib__matplotlib-24026": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001967
+    },
+    "matplotlib__matplotlib-24177": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001769
+    },
+    "matplotlib__matplotlib-24570": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001494
+    },
+    "matplotlib__matplotlib-24627": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001073
+    },
+    "matplotlib__matplotlib-24637": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.001757
+    },
+    "matplotlib__matplotlib-24870": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.001404
+    },
+    "matplotlib__matplotlib-25122": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001355
+    },
+    "matplotlib__matplotlib-25287": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001818
+    },
+    "matplotlib__matplotlib-25311": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001165
+    },
+    "matplotlib__matplotlib-25479": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002379
+    },
+    "matplotlib__matplotlib-25775": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001116
+    },
+    "matplotlib__matplotlib-26113": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.003283
+    },
+    "matplotlib__matplotlib-26208": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.00196
+    },
+    "matplotlib__matplotlib-26342": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.00108
+    },
+    "matplotlib__matplotlib-26466": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001532
+    },
+    "mwaskom__seaborn-3069": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001375
+    },
+    "mwaskom__seaborn-3187": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001463
+    },
+    "pallets__flask-5014": {
+      "difficulty": 1.0,
+      "judge_cost_usd": 0.000794
+    },
+    "psf__requests-1142": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.000931
+    },
+    "psf__requests-1724": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.002763
+    },
+    "psf__requests-1766": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001118
+    },
+    "psf__requests-1921": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.001112
+    },
+    "psf__requests-2317": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001157
+    },
+    "psf__requests-2931": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001168
+    },
+    "psf__requests-5414": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001562
+    },
+    "psf__requests-6028": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001543
+    },
+    "pydata__xarray-2905": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002034
+    },
+    "pydata__xarray-3095": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001867
+    },
+    "pydata__xarray-3151": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002169
+    },
+    "pydata__xarray-3305": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001872
+    },
+    "pydata__xarray-3677": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001584
+    },
+    "pydata__xarray-3993": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001226
+    },
+    "pydata__xarray-4075": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.002108
+    },
+    "pydata__xarray-4094": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001926
+    },
+    "pydata__xarray-4356": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001213
+    },
+    "pydata__xarray-4629": {
+      "difficulty": 1.5,
+      "judge_cost_usd": 0.001503
+    },
+    "pydata__xarray-4687": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001989
+    },
+    "pydata__xarray-4695": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.001947
+    },
+    "pydata__xarray-4966": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001924
+    },
+    "pydata__xarray-6461": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001255
+    },
+    "pydata__xarray-6599": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002308
+    },
+    "pydata__xarray-6721": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.003422
+    },
+    "pydata__xarray-6744": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001649
+    },
+    "pydata__xarray-6938": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001617
+    },
+    "pydata__xarray-6992": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001552
+    },
+    "pydata__xarray-7229": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001637
+    },
+    "pydata__xarray-7233": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.00182
+    },
+    "pydata__xarray-7393": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002227
+    },
+    "pylint-dev__pylint-4551": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001298
+    },
+    "pylint-dev__pylint-4604": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001183
+    },
+    "pylint-dev__pylint-4661": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.00122
+    },
+    "pylint-dev__pylint-4970": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001071
+    },
+    "pylint-dev__pylint-6386": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001145
+    },
+    "pylint-dev__pylint-6528": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001867
+    },
+    "pylint-dev__pylint-6903": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001544
+    },
+    "pylint-dev__pylint-7080": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.007524
+    },
+    "pylint-dev__pylint-7277": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001337
+    },
+    "pylint-dev__pylint-8898": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001581
+    },
+    "pytest-dev__pytest-10051": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001579
+    },
+    "pytest-dev__pytest-10081": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002691
+    },
+    "pytest-dev__pytest-10356": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001871
+    },
+    "pytest-dev__pytest-5262": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001836
+    },
+    "pytest-dev__pytest-5631": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001944
+    },
+    "pytest-dev__pytest-5787": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.002272
+    },
+    "pytest-dev__pytest-5809": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001233
+    },
+    "pytest-dev__pytest-5840": {
+      "difficulty": 3.5,
+      "judge_cost_usd": 0.001393
+    },
+    "pytest-dev__pytest-6197": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001845
+    },
+    "pytest-dev__pytest-6202": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.002027
+    },
+    "pytest-dev__pytest-7205": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001837
+    },
+    "pytest-dev__pytest-7236": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002115
+    },
+    "pytest-dev__pytest-7324": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001024
+    },
+    "pytest-dev__pytest-7432": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001217
+    },
+    "pytest-dev__pytest-7490": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.004822
+    },
+    "pytest-dev__pytest-7521": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.001753
+    },
+    "pytest-dev__pytest-7571": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001019
+    },
+    "pytest-dev__pytest-7982": {
+      "difficulty": 1.5,
+      "judge_cost_usd": 0.001003
+    },
+    "pytest-dev__pytest-8399": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001289
+    },
+    "scikit-learn__scikit-learn-10297": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001517
+    },
+    "scikit-learn__scikit-learn-10908": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001723
+    },
+    "scikit-learn__scikit-learn-12682": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001053
+    },
+    "scikit-learn__scikit-learn-12973": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001535
+    },
+    "scikit-learn__scikit-learn-13135": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.002279
+    },
+    "scikit-learn__scikit-learn-13142": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001681
+    },
+    "scikit-learn__scikit-learn-13328": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.002055
+    },
+    "scikit-learn__scikit-learn-13439": {
+      "difficulty": 1.0,
+      "judge_cost_usd": 0.001496
+    },
+    "scikit-learn__scikit-learn-13496": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.00135
+    },
+    "scikit-learn__scikit-learn-13779": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001075
+    },
+    "scikit-learn__scikit-learn-14053": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.002281
+    },
+    "scikit-learn__scikit-learn-14087": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002081
+    },
+    "scikit-learn__scikit-learn-14141": {
+      "difficulty": 1.0,
+      "judge_cost_usd": 0.000801
+    },
+    "scikit-learn__scikit-learn-14496": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001858
+    },
+    "scikit-learn__scikit-learn-14629": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001775
+    },
+    "scikit-learn__scikit-learn-14710": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.002296
+    },
+    "scikit-learn__scikit-learn-14983": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001532
+    },
+    "scikit-learn__scikit-learn-15100": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001895
+    },
+    "scikit-learn__scikit-learn-25102": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001886
+    },
+    "scikit-learn__scikit-learn-25232": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.00142
+    },
+    "scikit-learn__scikit-learn-25747": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002353
+    },
+    "scikit-learn__scikit-learn-25973": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001667
+    },
+    "scikit-learn__scikit-learn-9288": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001602
+    },
+    "sphinx-doc__sphinx-10323": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.002317
+    },
+    "sphinx-doc__sphinx-10614": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.002309
+    },
+    "sphinx-doc__sphinx-11510": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.002179
+    },
+    "sphinx-doc__sphinx-7590": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001093
+    },
+    "sphinx-doc__sphinx-7757": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001152
+    },
+    "sphinx-doc__sphinx-7889": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.00144
+    },
+    "sphinx-doc__sphinx-8035": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001116
+    },
+    "sphinx-doc__sphinx-8056": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001627
+    },
+    "sphinx-doc__sphinx-8120": {
+      "difficulty": 3.5,
+      "judge_cost_usd": 0.001694
+    },
+    "sphinx-doc__sphinx-8269": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.001354
+    },
+    "sphinx-doc__sphinx-8475": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001112
+    },
+    "sphinx-doc__sphinx-8548": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001539
+    },
+    "sphinx-doc__sphinx-8551": {
+      "difficulty": 3.5,
+      "judge_cost_usd": 0.001818
+    },
+    "sphinx-doc__sphinx-8621": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001868
+    },
+    "sphinx-doc__sphinx-9229": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001714
+    },
+    "sphinx-doc__sphinx-9320": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001332
+    },
+    "sphinx-doc__sphinx-9461": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001787
+    },
+    "sphinx-doc__sphinx-9591": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.00178
+    },
+    "sphinx-doc__sphinx-9602": {
+      "difficulty": 3.5,
+      "judge_cost_usd": 0.001471
+    },
+    "sphinx-doc__sphinx-9658": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.002192
+    },
+    "sphinx-doc__sphinx-9673": {
+      "difficulty": 3.5,
+      "judge_cost_usd": 0.001507
+    },
+    "sphinx-doc__sphinx-9698": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001224
+    },
+    "sphinx-doc__sphinx-9711": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001492
+    },
+    "sympy__sympy-12489": {
+      "difficulty": 3.5,
+      "judge_cost_usd": 0.001247
+    },
+    "sympy__sympy-13480": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001076
+    },
+    "sympy__sympy-13852": {
+      "difficulty": 3.5,
+      "judge_cost_usd": 0.002741
+    },
+    "sympy__sympy-13877": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.002036
+    },
+    "sympy__sympy-13878": {
+      "difficulty": 4.0,
+      "judge_cost_usd": 0.001553
+    },
+    "sympy__sympy-13974": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.00153
+    },
+    "sympy__sympy-14248": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001172
+    },
+    "sympy__sympy-14976": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.002043
+    },
+    "sympy__sympy-15017": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001354
+    },
+    "sympy__sympy-16450": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001231
+    },
+    "sympy__sympy-16597": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.000927
+    },
+    "sympy__sympy-17139": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.002003
+    },
+    "sympy__sympy-17318": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.002275
+    },
+    "sympy__sympy-17630": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001741
+    },
+    "sympy__sympy-17655": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.001645
+    },
+    "sympy__sympy-18199": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.000965
+    },
+    "sympy__sympy-20154": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.000963
+    },
+    "sympy__sympy-20590": {
+      "difficulty": 2.5,
+      "judge_cost_usd": 0.001114
+    },
+    "sympy__sympy-20916": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.000931
+    },
+    "sympy__sympy-21596": {
+      "difficulty": 3.5,
+      "judge_cost_usd": 0.002189
+    },
+    "sympy__sympy-21612": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.00122
+    },
+    "sympy__sympy-22714": {
+      "difficulty": 3.0,
+      "judge_cost_usd": 0.001735
+    },
+    "sympy__sympy-24539": {
+      "difficulty": 2.0,
+      "judge_cost_usd": 0.001148
+    }
+  }
+}

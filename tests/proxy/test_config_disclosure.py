@@ -20,8 +20,8 @@ def disclosure(caplog: pytest.LogCaptureFixture) -> str:
 
 def test_it_states_the_selected_algorithm_and_its_knobs(disclosure: str) -> None:
     # The shipped default is the cheap-start cascade; the kNN knobs are still disclosed
-    # because a config may select `knn_cascade`, and a knob printed only under the strategy
-    # that reads it would make the disclosure depend on the value it is disclosing.
+    # because a config may select `knn_semantic_cascade`, and a knob printed only under the
+    # strategy that reads it would make the disclosure depend on the value it is disclosing.
     assert "strategy=session_cascade" in disclosure
     assert "k=20" in disclosure
     assert "success_rate_threshold=0.60" in disclosure

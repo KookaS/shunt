@@ -261,6 +261,128 @@ trajectories will tell us whether escalation helps. The fix is randomised
 escalation at flagged checkpoints with logged propensities, and it needs a live
 run to collect.
 
+## Three claims we retracted after auditing our own benchmark
+
+An audit of every committed figure found that three conclusions we were about to
+sell you were **measurement artifacts**. We record it here rather than quietly
+fixing it, because how a project handles its own bad results is the only evidence
+you have about the rest of its numbers.
+
+**We were not embedding the task — and now we are.** The router used to embed a
+string built as `repo@sha — resolve <pytest node id>`: a median of 106 characters
+containing a repo slug, a truncated commit hash and a test path. No problem
+statement, no code, nothing about difficulty. 61% of each task's twenty nearest
+neighbours shared its repo against a 10% chance rate — it was behaving as a path
+detector. So *"prompt embeddings cannot separate task difficulty"* had never been
+tested.
+
+It has been now. The task manifest was rebuilt from the pinned SWE-bench revision
+with the real `problem_statement` (median 1,185 characters), `routing_text()`
+prefers it, and every committed routing figure and number is computed on that
+basis. Two independent statistics, both in the committed pipeline:
+
+| | embedding | human difficulty tag | shuffled null 95% |
+|---|---:|---:|---|
+| Neighbourhood Brier skill | −0.045 | **+0.038** | [−0.104, −0.012] |
+| Leave-one-out R² on `p_solve` | −0.053 | **+0.076** | [−0.115, −0.001] |
+
+The embedding sits inside the null on the correct input, while a crude three-level
+human tag clears it on the same pipeline, the same n and the same null. That is a
+**working positive control beside a negative result**, which is what makes this a
+falsification rather than a coverage gap — the distinction we previously could not
+claim. Task identity accounts for ~57% of outcome variance, so there is structure
+there; this encoder does not reach it.
+
+Routing quality *fell* when the input was corrected: kNN went from 81.71% to
+**77.72%**, which is inside noise of always-cheap's 75.54%. The 106-character label
+was not merely uninformative, it was mildly leaky — the repo name it carried is a
+weak difficulty proxy. Given the right input, the learned router is not
+distinguishable from the trivial policy. Figures:
+[`embedding_signal`](routing.md#fig-embedding-signal),
+[`knn_calibration`](routing.md#fig-knn-calibration).
+
+**The detection floor still bounds what a null here can mean.** Running
+
+```sh
+python3 -m benchmark.routing.sensitivity
+```
+
+puts the weakest effect this test can detect at 80% power at **AUROC ≈ 0.88**, the
+most sensitive of the eight configurations it sweeps. Published task-difficulty
+detectors sit near 0.62. So the falsification is specific and bounded: on this
+corpus, at this n, this encoder carries no routable signal — not that no encoder
+could.
+
+**Our escalation baseline was reading the test labels.** The comparison gave each
+run the leave-one-out failure rate of *its own instance's other runs*, while the
+cross-validation split grouped by instance — so the baseline was scored on labels
+from its own test fold. A router meeting a new task has no such siblings. That is
+where `AUROC 0.883` came from; computed honestly it is about 0.42–0.45. Since the
+headline was `detector − baseline`, the detector was being asked to beat an
+oracle, which is why it reported −0.000.
+
+Worse, the permutation test that was supposed to catch this **could not fire.**
+Shuffling labels globally collapses the baseline to chance, giving the null 0.5
+of headroom while the observed statistic was arithmetically capped at 0.117 — and
+the null's 97.5th percentile sat at 0.117. No detector, however good, could ever
+have passed that gate. The null now permutes labels **inside each challenge**, so
+every challenge keeps its outcome multiset and the baseline is identical under
+the null and the observation; only the prefix's contribution is nulled.
+
+**And the comparison was floored the wrong way — or rather, not at all.** The
+honest prior scores *below* chance on this corpus (0.42 at 5 decisions), so
+`combined − prior` was handing the detector the baseline's deficit as if it were
+skill. Measured against `max(prior, 0.5)`, as it always should have been, the
+headline increment at 5 decisions falls from **+0.144 to +0.061** — 57% of it was
+the broken comparator. What remains does not clear the corrected null.
+
+**Our escalation baseline was reading the fold identity.** The prior column,
+`prior_from_splits`, gives every test row its train-fold base rate. Under the old
+GroupKFold, that value is the exact arithmetic complement of the fold's own test
+prevalence (measured corr = −1.0000 at every depth). The prior thus acted as a
+fold-identity proxy: it added zero within-fold discrimination
+(within-fold Spearman = 1.000000) while shifting the pooled AUROC. The
+incremental headline at depth 20 was published as +0.076, p = 0.015. But six
+columns of pure Gaussian noise over the real challenge group structure produced
+E[incremental] = +0.042 at depth 20, with a maximum of +0.080 across 8 seeds —
+the published +0.076 was *smaller* than what pure noise produced. StratifiedGroupKFold
+now collapses the fold-prevalence spread from 0.141 to 0.011, and a null-corpus
+regression test pins E[incremental] ~ 0. The pre-existing positive-control
+fixture was structurally immune (one failed and one resolved run per challenge
+makes every fold base rate exactly 0.5), which is why it never caught the defect.
+A label-substitution positive control tested the real six features against model
+identity (cheap vs frontier): AUROC 0.497/0.525/0.538 at depths 5/10/20, versus
+0.428/0.491/0.543 against the real failure label — both measured before the
+state-capture audit marked unverifiable steps as unmeasured. That the shipped
+features cannot distinguish model identity — a fact unambiguously present in
+trajectory patterns — shows the gate was a null generator, not an instrument.
+
+So we are withdrawing *"the escalation model does not work"* and replacing it
+with something less satisfying and more accurate: **we cannot yet tell** — at
+least not for a shallow-prefix detector, which is why that half still reads
+`NO_SKILL`; the escalation results now attribute the signal to the recurrence
+rule at the **shipped** threshold once the reproduction phase is excluded
+(eval-only; status `OK_OFFLINE_ONLY` at the edit-gated `escalate_after_n=3`,
+AUROC 0.722, see [Results](results.md#escalation-results)).
+The prefix evaluation could only ever have detected a detector at AUROC ≥ 0.59.
+The raw features hint at ≈ 0.52 — squarely inside the blind spot. Resolving it
+needs roughly four times the distinct challenges (152 → ~640); more runs per
+existing challenge buy almost nothing, because the clustering already inflates
+variance ~3×.
+
+**What survives all of it:** the cascade result. It is untouched by every defect
+above, because it uses no model, so there was no model to get wrong — and it is
+no longer only a measurement. `Price-Cascade` at $27.11 against Always-Frontier's
+$96.02 is still blocked at boot and still unrunnable, but the session-cadence
+ladder reaches the same 96.74% for $28.71 cache-aware, is cache-safe by
+construction, ships enabled, and is now nameable as
+`router.strategy: session_cascade`. What the audit and the un-imputed basis together
+sharpened is the *size*: on fully-measured tasks the saving is ~25%, not ~75%.
+And ~90% of the headroom is mechanical, which bounds the entire remaining prize
+for a perfect difficulty predictor at **about $7.0 on a $96.02 base**. That number
+is the honest answer to "how much is routing intelligence worth here", and it is
+small.
+
 ## Contributing
 
 If you have trajectory data, a detector that beats the baselines above, or a

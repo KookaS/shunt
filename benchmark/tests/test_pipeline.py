@@ -119,7 +119,9 @@ def stub(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
     rec = _Recorder(
         stdout_map={
             pipeline.ESCALATION_EVAL: '{\n  "status": "OK",\n  "reason": "beats no-skill"\n}',
-            pipeline.ROUTING_EVAL: "  Paired contrast (kNN vs Always-Frontier) [all tasks]: +3.0pp",
+            pipeline.ROUTING_EVAL: (
+                "  Paired contrast (kNN-semantic-cascade vs Always-Frontier) [all tasks]: +3.0pp"
+            ),
         }
     )
     monkeypatch.setattr(pipeline, "run_module", rec)

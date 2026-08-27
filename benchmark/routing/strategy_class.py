@@ -45,20 +45,24 @@ class Classification:
 
 # Benchmark code reports by display name (`Strategy.name`); the product configures by
 # id (`router.strategy`). Every cross-check between the two has to go through this map,
-# so it is the only place the two vocabularies meet.
+# so it is the only place the two vocabularies meet. The pre-rename ids `knn`/`knn_cascade`
+# are handled by the product's own migration aliases, not restated here.
 DISPLAY_TO_ID: Final[Mapping[str, str]] = MappingProxyType(
     {
-        "kNN": "knn",
-        "kNN-cascade": "knn_cascade",
+        "kNN-semantic": "knn_semantic",
+        "kNN-semantic-cascade": "knn_semantic_cascade",
+        "kNN-difficulty": "knn_difficulty",
+        "kNN-difficulty-cascade": "knn_difficulty_cascade",
+        "Difficulty-Band-cascade": "difficulty_band_cascade",
         "Always-Cheap": "always_cheap",
         "Always-Frontier": "always_frontier",
         "Oracle": "oracle",
         "Oracle-reward": "oracle_reward",
         "Random": "random",
-        "kNN-cascade (within-task)": "knn_cascade_withintask",
+        "kNN-semantic-cascade (within-task)": "knn_semantic_cascade_withintask",
         "Price-Cascade": "price_cascade",
         "Session-Cascade": "session_cascade",
-        "Tier-Classifier": "tier_classifier",
+        "kNN-semantic-tier": "knn_semantic_tier",
     }
 )
 
@@ -71,8 +75,8 @@ _CASCADE_BLOCKER: Final[str] = (
 # what it costs. State the SHORTFALL with the route, so nobody reads "there is a path" as
 # "the blocked row's number is available": paying one decision per session instead of one per
 # attempt costs +$1.37 [+0.82, +2.00] paired against Price-Cascade, and is not distinguishable
-# from kNN-cascade (within-task) (-$1.23 [-3.42, +0.73]). That is the price of the cache-safety
-# spine, and it is the whole of what these two rows now measure.
+# from kNN-semantic-cascade (within-task) (-$1.23 [-3.42, +0.73]). That is the price of the
+# cache-safety spine, and it is the whole of what these two rows now measure.
 _CASCADE_PATH: Final[str] = (
     "TAKEN: the same ladder, paced one decision per session, is selectable as "
     "`router.strategy: session_cascade` (src/shunt/router/policy.py LIVE_STRATEGIES) — "
@@ -80,7 +84,8 @@ _CASCADE_PATH: Final[str] = (
     "frontier because the engine's per-task rank floor persists the climbed rung across "
     "sessions (engine.py `_lift_to_rank_floor`). Session-Cascade "
     "(strategies/session_cascade.py) measures what that cadence costs: +$1.37 paired against "
-    "Price-Cascade, indistinguishable from kNN-cascade (within-task). What stays blocked is "
+    "Price-Cascade, indistinguishable from kNN-semantic-cascade (within-task). What stays "
+    "blocked is "
     "the WITHIN-TASK cadence itself, and permanently: it is excluded by design, not "
     "pending. These two rows "
     "are kept as the comparator that prices session cadence, not as unbuilt work"
@@ -102,7 +107,7 @@ _NON_LIVE: Final[Mapping[str, Classification]] = MappingProxyType(
             StrategyClass.BOUND,
             "picks the best REALIZED (model, arm) for the query task (report.py:315)",
         ),
-        "kNN": Classification(
+        "kNN-semantic": Classification(
             StrategyClass.CONTROL,
             "the selection rule with the escalation ladder removed. No `router.strategy` value "
             "produces it; it is kept as the contrast that isolates what the ladder buys",
@@ -119,16 +124,37 @@ _NON_LIVE: Final[Mapping[str, Classification]] = MappingProxyType(
             "the live exploration layer (src/shunt/router/exploration.py) already "
             "implements cost-aware Thompson sampling over the neighbourhood",
         ),
-        "kNN-cascade (within-task)": Classification(
+        "kNN-semantic-cascade (within-task)": Classification(
             StrategyClass.BLOCKED, _CASCADE_BLOCKER, _CASCADE_PATH
         ),
         "Price-Cascade": Classification(StrategyClass.BLOCKED, _CASCADE_BLOCKER, _CASCADE_PATH),
-        "Tier-Classifier": Classification(
+        "kNN-semantic-tier": Classification(
             StrategyClass.BLOCKED,
             "its model order comes from an offline-fit capability rank derived from the "
             "outcome matrix (config.py:487), which the live path cannot compute",
             "swap the rank source to the live CapabilityRankResolver "
             "(src/shunt/router/capability_rank.py); nothing else blocks it",
+        ),
+        "kNN-difficulty": Classification(
+            StrategyClass.CONTROL,
+            "the judge-difficulty selection rule with the escalation ladder removed. No "
+            "`router.strategy` value produces it; it is kept as the contrast that isolates "
+            "what the ladder buys on the difficulty axis",
+        ),
+        "kNN-difficulty-cascade": Classification(
+            StrategyClass.BLOCKED,
+            "needs a judge call per task at inference: a judge provider + key, a task-boundary "
+            "difficulty label, and a difficulty index over labelled history — none of which "
+            "the live path has",
+            "docs/routing.md §difficulty-routing lists exactly what to add (judge config, "
+            "per-task label at the task boundary, difficulty index build, cold-start fallback "
+            "to session_cascade); nothing else blocks it",
+        ),
+        "Difficulty-Band-cascade": Classification(
+            StrategyClass.BLOCKED,
+            "the same judge dependency as kNN-difficulty-cascade — a per-task difficulty "
+            "label is required before the band rule can fire",
+            "docs/routing.md §difficulty-routing; identical path to kNN-difficulty-cascade",
         ),
     }
 )

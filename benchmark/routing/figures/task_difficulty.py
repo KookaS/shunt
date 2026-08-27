@@ -127,7 +127,9 @@ def _draw_bands(ax: Axes, counts: dict[int, int], unsolved: int) -> None:
         )
     ax.set_xticks(xs)
     ax.set_xticklabels(labels, fontsize=8)
-    ax.set_ylim(0, max(values) * 1.28)
+    # 1.28 reserved a fifth of the panel for a two-line label that needs about a
+    # sixteenth of it.
+    ax.set_ylim(0, max(values) * 1.12)
     ax.set_ylabel("tasks", fontsize=9)
     ax.grid(axis="y", color="#eeeeee", lw=0.6)
     ax.set_axisbelow(True)
@@ -155,7 +157,8 @@ def _draw_allocation(
     ax.set_xticks(xs)
     ax.set_xticklabels([str(n) for n in order], fontsize=8)
     ax.set_xlabel("models that solved the task (harder ← → easier)", fontsize=9)
-    ax.set_ylim(0, 1.14)
+    # Shares reach exactly 1.0; the headroom is for the one-line n= label at 1.02.
+    ax.set_ylim(0, 1.08)
     ax.set_ylabel("share of the router's picks", fontsize=9)
     # Patch handles, not empty `bar` calls: an empty bar draws nothing, so matplotlib
     # gave every legend entry the default colour and the key contradicted the stacks.

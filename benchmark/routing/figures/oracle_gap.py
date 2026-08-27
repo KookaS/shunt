@@ -169,7 +169,10 @@ def _draw_waterfall(ax: Axes, dec: dict[str, float]) -> None:
     # total alone pushed those labels off the canvas and into the title band.
     lo, hi = min(levels), max(levels)
     span = (hi - lo) or 1.0
-    ax.set_ylim(lo - 0.14 * span, hi + 0.26 * span)
+    # Headroom sized to the two-line value labels, not to a round fraction: at 0.26 above
+    # and 0.14 below, a quarter of this panel was blank paper under a waterfall that
+    # starts at zero.
+    ax.set_ylim(lo - 0.04 * span, hi + 0.13 * span)
     running = 0.0
     for i, (_label, value, colour) in enumerate(parts):
         ax.text(
@@ -287,7 +290,12 @@ def _draw_gamma(ax: Axes, ranks: dict[str, list[int]]) -> None:
         )
     ax.set_xscale("log")
     ax.set_xticks(xs)
-    ax.set_xticklabels([f"{g:g}" for g in xs], fontsize=7.5)
+    # ROTATED, because this panel's series names are data-anchored at the last gamma and
+    # `fit_end_labels` widens the axis until they fit — which pushes the six grid points
+    # into the left third of a log axis. Horizontal, the six labels ran together as one
+    # unreadable string ("0.0010.0030.010.030.10.33"); rotation is what makes a tick
+    # legible at whatever spacing the name gutter leaves.
+    ax.set_xticklabels([f"{g:g}" for g in xs], fontsize=7.5, rotation=45.0, ha="right")
     ax.minorticks_off()
     ax.set_xlim(xs[0] * 0.7, xs[-1] * 6.0)
     ax.invert_yaxis()

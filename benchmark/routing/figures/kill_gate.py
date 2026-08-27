@@ -276,8 +276,13 @@ def _draw_forest(ax: Axes, bases: list[Basis], margin: float) -> None:
     ax.set_yticks(ys)
     ax.set_yticklabels([f"{b.label}\nn={b.n}" for b in bases], fontsize=8)
     ax.set_xlabel("paired pass-rate difference, router − fixed-frontier (pp)", fontsize=9)
-    span = max([abs(b.lo_pp) for b in bases] + [abs(b.hi_pp) for b in bases] + [6.0])
-    ax.set_xlim(-span * 1.15, span * 1.75)
+    # Tight on the DATA, then `fit_end_labels` widens by exactly what the row texts need.
+    # The old `span * 1.75` right limit was a guess laid on top of that measurement, and it
+    # left a third of the panel empty: nothing is plotted past +5pp.
+    lo = min([b.lo_pp for b in bases] + [-100.0 * margin])
+    hi = max([b.hi_pp for b in bases] + [0.0])
+    span = max(hi - lo, 6.0)
+    ax.set_xlim(lo - span * 0.06, hi + span * 0.06)
     ax.set_ylim(-0.7, len(bases) - 0.3)
     ax.legend(fontsize=7.5, loc="lower right", frameon=False)
     ax.grid(axis="x", color="#eeeeee", lw=0.6)

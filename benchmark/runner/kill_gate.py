@@ -155,7 +155,7 @@ def evaluate_router(
     #
     # AND IT IS STILL NOT THE SHIPPED DEFAULT. `router.strategy` defaults to `session_cascade`
     # — the cheap-start ladder, which consults no neighbours — and the nearest selectable kNN
-    # configuration, `knn_cascade`, is this pick PLUS the escalation ladder. Either way the
+    # configuration, `knn_semantic_cascade`, is this pick PLUS the escalation ladder. Either way the
     # pre-registered arm adjudicates a configuration no operator can select. That is a
     # pre-existing defect the rename exposed, not one it created: the ladder has been on by
     # default since escalation shipped, so this arm has never been the shipped router. It is
@@ -711,7 +711,9 @@ def _format_report(  # noqa: PLR0913
 
     lines.append(_arm_line("Control", control_pass, control_naive, control_cache, control_switches))
     lines.append(
-        _arm_line("Router (kNN, live)", router_pass, router_naive, router_cache, router_switches)
+        _arm_line(
+            "Router (kNN-semantic, live)", router_pass, router_naive, router_cache, router_switches
+        )
     )
     lines.append(
         _arm_line("Oracle (ref)", oracle_pass, oracle_naive, oracle_cache, oracle_switches)

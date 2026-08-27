@@ -530,8 +530,8 @@ def strategies() -> dict:
 def knn_params() -> dict:
     """Merged kNN + within-task-cascade strategy params (cascade keys override knn)."""
     strat = strategies()
-    params = dict(strat.get("knn", {}))
-    params.update(strat.get("knn_cascade_withintask", {}))
+    params = dict(strat.get("knn_semantic", {}))
+    params.update(strat.get("knn_semantic_cascade_withintask", {}))
     return params
 
 
@@ -837,12 +837,15 @@ def validate(config_path: str | Path | None = None) -> list[str]:
         "always_cheap",
         "always_frontier",
         "random",
-        "knn",
-        "knn_cascade",
-        "knn_cascade_withintask",
+        "knn_semantic",
+        "knn_semantic_cascade",
+        "knn_semantic_cascade_withintask",
+        "knn_difficulty",
+        "knn_difficulty_cascade",
+        "difficulty_band_cascade",
         "price_cascade",
         "session_cascade",
-        "tier_classifier",
+        "knn_semantic_tier",
     }
     for name in strat_cfg.get("enabled", []):
         if name not in known:

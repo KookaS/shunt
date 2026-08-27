@@ -247,7 +247,7 @@ class TestkNNCascadeStrategy:
         from benchmark.routing.strategies.knn_cascade import kNNCascadeStrategy
 
         strategy = kNNCascadeStrategy()
-        assert strategy.name == "kNN-cascade (within-task)"
+        assert strategy.name == "kNN-semantic-cascade (within-task)"
 
 
 class TestCascadeNeverRetriesAModel:
@@ -845,3 +845,74 @@ class TestProblemStatementIsCommittedData:
         assert integrity.hash_content(base) == integrity.hash_content(
             {**base, "problem_statement": "requests sets Content-Length on GET"}
         )
+
+
+class TestMatrixOutcomeIndexImputedConfidence:
+    """Imputed (monotone-ladder) neighbour cells must not vote as measured.
+
+    The kNN strategies are scored on the coverage-COMPLETED matrix, so every neighbour
+    task carries an `imputed` flag per cell; a measured cell keeps confidence 1.0.
+    """
+
+    @staticmethod
+    def _index(embeddings):
+        import hnswlib
+        import numpy as np
+
+        n = len(embeddings)
+        index = hnswlib.Index(space="cosine", dim=int(embeddings.shape[1]))
+        index.init_index(max_elements=n, ef_construction=10, M=8)
+        index.add_items(np.asarray(embeddings, dtype=np.float32), np.arange(n), num_threads=1)
+        index.set_ef(4)
+        return index
+
+    def _matrix(self) -> dict:
+        return {
+            "models": {"model-a": {}, "model-b": {}},
+            "tasks": {"t1": {"problem_statement": "alpha"}, "t2": {"problem_statement": "beta"}},
+            "results": {
+                # t2 measured on model-a (a fail); model-b's pass=True is a monotone fill.
+                "t2": {
+                    "model-a": {"pass": False, "cost": 0.1, "imputed": False},
+                    "model-b": {"pass": True, "cost": 0.5, "imputed": True},
+                },
+            },
+        }
+
+    def test_imputed_cells_carry_zero_confidence(self):
+        import numpy as np
+
+        from benchmark.routing.strategies.knn import MatrixOutcomeIndex
+
+        embeddings = np.eye(2, 4, dtype=np.float32)
+        idx = MatrixOutcomeIndex(
+            task_ids=["t1", "t2"],
+            embeddings=embeddings,
+            index=self._index(embeddings),
+            matrix=self._matrix(),
+        )
+        results = idx.query(embeddings[0])  # nearest to t1 is t2 (self excluded)
+        by_model = {r.model: r for r in results}
+        assert by_model["model-a"].verification_confidence == pytest.approx(1.0)
+        assert by_model["model-b"].verification_confidence == pytest.approx(0.0)
+        # the imputed pass must not reach the selection rule as a verified success
+        assert by_model["model-b"].outcome is True  # flag survives for transparency
+
+    def test_raw_matrix_without_imputed_flags_stays_measured(self):
+        import numpy as np
+
+        from benchmark.routing.strategies.knn import MatrixOutcomeIndex
+
+        matrix = self._matrix()
+        for cell in matrix["results"]["t2"].values():
+            cell.pop("imputed", None)
+        embeddings = np.eye(2, 4, dtype=np.float32)
+        idx = MatrixOutcomeIndex(
+            task_ids=["t1", "t2"],
+            embeddings=embeddings,
+            index=self._index(embeddings),
+            matrix=matrix,
+        )
+        results = idx.query(embeddings[0])
+        assert results
+        assert all(r.verification_confidence == pytest.approx(1.0) for r in results)

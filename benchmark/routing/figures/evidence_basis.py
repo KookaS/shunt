@@ -97,6 +97,12 @@ def _draw_split(  # noqa: PLR0913 (one argument per drawn channel plus the share
 ) -> None:
     # Both split panels take the SAME row order, so a reader comparing a strategy's
     # dollars against its passes reads across one line rather than hunting for the row.
+    # The value string is kept SHORT deliberately. It is data-anchored past the end of the
+    # bar, so constrained layout shrinks the panel to make room for whatever it overhangs
+    # and `fit_end_labels` then widens the axis against that shrunken geometry — a longer
+    # label costs axis span twice over. "(45% projected)" ran the dollars axis to $220 for
+    # a $96 maximum; "· 45% proj." lands it at $161 with the panel title already saying
+    # "measured vs projected".
     ys = list(range(len(names)))[::-1]
     for y, name in zip(ys, names, strict=True):
         measured = splits[name][f"measured_{key}"]
@@ -109,7 +115,7 @@ def _draw_split(  # noqa: PLR0913 (one argument per drawn channel plus the share
             ax.text(
                 total * 1.03,
                 y,
-                f"{shown}  ({imputed / total:.0%} projected)",
+                f"{shown} · {imputed / total:.0%} proj.",
                 fontsize=7,
                 va="center",
                 color="#333333",
@@ -119,6 +125,9 @@ def _draw_split(  # noqa: PLR0913 (one argument per drawn channel plus the share
     top = max(
         (splits[n][f"measured_{key}"] + splits[n][f"imputed_{key}"] for n in names), default=1.0
     )
+    # A small margin on the bars; `fit_end_labels` then buys exactly the room the value
+    # strings need. The old 1.42 was a guess ON TOP of that measurement and left half of
+    # panel A empty — nothing is plotted past $96 on an axis that ran to $200.
     ax.set_xlim(0, top * 1.42)
     ax.set_xlabel(label, fontsize=9)
     ax.grid(axis="x", color="#eeeeee", lw=0.6)
@@ -147,6 +156,7 @@ def _draw_bands(ax: Axes, rows: list[dict]) -> None:
     ax.set_yticks(ys)
     ax.set_yticklabels([f"band {r['band']}" for r in rows], fontsize=8)
     top = max((int(r["real"]) + int(r["imputed"]) + int(r["unknown"]) for r in rows), default=1)
+    # Same rule as the split panels: tight on the data, widened by measurement below.
     ax.set_xlim(0, top * 2.15)
     ax.set_xlabel("cells in the band", fontsize=9)
     ax.legend(

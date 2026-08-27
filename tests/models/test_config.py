@@ -39,6 +39,14 @@ DEFAULT_MODEL_NAMES: Final = [
     "claude-fable-5",
     "claude-opus-4-8",
     "claude-opus-4-6",
+    # JUDGE-ONLY (2026-08-25): never served by the router, never in the benchmark's
+    # models list — registered so the judge-probe harness reads its pricing from the
+    # same registry as the served models.
+    "claude-sonnet-5",
+    # JUDGE-ONLY (2026-08-26): the cheap OpenAI-5.6 difficulty judge — adopted as the
+    # knn_difficulty label source over the claude-sonnet-5 anchor (see
+    # benchmark/routing/data/judge_difficulty.json).
+    "gpt-5.6-terra",
 ]
 
 
@@ -386,11 +394,22 @@ class TestReasoningConfigSchema:
 
 
 class TestDefaultRegistryHasReasoning:
+    # JUDGE_ONLY_MODELS are deliberately exempt: they are registered so the judge-probe
+    # harness reads their pricing from the registry, but they are never in router.yaml's
+    # or benchmark.yaml's models list, so no reasoning bracket (a routing/benchmark-arm
+    # concern) is required — see the JUDGE-ONLY comment in src/shunt/config/models.yaml.
+    # NOTE: gpt-5.6-sol is deliberately NOT here — it is a served router model
+    # (router.yaml `models:` list), so it keeps its reasoning bracket.
+    JUDGE_ONLY_MODELS: Final = frozenset({"claude-sonnet-5", "gpt-5.6-terra"})
+
     def test_every_default_model_declares_a_reasoning_block(self) -> None:
         pool = ModelPool()
         for name in DEFAULT_MODEL_NAMES:
             model = pool.get_model(name)
             assert model is not None
+            if name in self.JUDGE_ONLY_MODELS:
+                assert model.reasoning is None, f"{name} is judge-only and must stay reasoning-free"
+                continue
             assert model.reasoning is not None, f"{name} missing reasoning block"
             assert model.reasoning.default_arm in {a.id for a in model.reasoning.arms}
 

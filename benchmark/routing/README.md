@@ -20,8 +20,8 @@ routing/
     oracle.py                 # Upper bound: perfect per-task selection
     fixed.py                  # Always-cheap, always-frontier, random
     knn.py                    # kNN retrieval (shunt's approach)
-    knn_cascade.py            # kNN-informed verify-and-escalate, WITHIN one task (blocked)
-    knn_session_cascade.py    # THE OPT-IN `knn_cascade`: kNN pick + the session-cadence ladder
+    knn_cascade.py             # kNN-informed verify-and-escalate, WITHIN one task (blocked)
+    knn_session_cascade.py    # THE OPT-IN `knn_semantic_cascade`: kNN pick + the session-cadence ladder
   exploration_replay.py       # Direct-Method replay of the SHIPPED exploration policy on the dense slice
   run_eval.py                 # Evaluate all strategies
   instrument_control.py       # Positive control + destroyed-signal null (both selection rules)
@@ -40,10 +40,18 @@ routing/
     arm_manipulation.py       # Manipulation check FIRST, then the reasoning-arm contrast
   scripts/                    # Analysis + figure producers (read results.csv, write docs/assets/figures/routing/)
     compute_costs.py          # Per-model cost/pass rollup from the outcome cache
+    consistency_probe.py      # Benchmark-internal consistency: replay same task/model, measure variance
+    consistency_probe_metrics.py # Compute consistency metrics (variance, determinism tests)
+    cost_quality_headline.py   # Four-point simplification of cost_quality_frontier.png for the front page
+    derive_judge_difficulty.py # Generate judge_difficulty.json from judge probe outputs
+    judge_probe.py            # Live LLM-as-a-judge difficulty labels on the measured task set (gitignored JSONL)
+    judge_probe_metrics.py    # Judge labels vs measured outcomes: AUC/R², agreement, stability, LLM-as-router analysis, human-tag control
+    learnability_probe.py     # Embedding learnability control: how much signal survives random shuffling
     knn_nulls.py              # Permutation nulls + the shared kNN selection rule (no plotting)
     ladder_evidence.py        # Per-rung escalation evidence: price multiple, helps/hurts, null
     plot_exploration.py       # Exploration cost/quality and where the budget went
     plot_knn_nulls.py         # embedding_signal: transfer curve, positive control, cross-repo
+    predict_then_cascade_eval.py # Evaluate predict-then-cascade gates (accuracy, threshold sweep)
     threshold_sweep.py        # kNN sweep with real outer-loop CV -> the regime map
     viz_knn.py                # knn_calibration: reliability of the weighted neighbour rate
   artifacts/                  # gitignored — parameterized run_eval outputs + embedding cache
@@ -369,12 +377,13 @@ docker compose -f benchmark/compose.yaml run --rm benchmark  # simulated loop + 
 |--------|---------|
 | AvgPerf% | Tasks solved correctly |
 | AvgPerf_ci_lower / AvgPerf_ci_upper | 95% bootstrap CI on AvgPerf% |
-| TotalCost | Total backend model cost (USD) |
+| TotalCost | Total backend model cost (USD) — for the difficulty rows this is **model + judge label cost** (the per-task judge bill is folded into the total) |
 | Reward | `Σ(1.0 × passed − γ × cost)` per task (γ=0.1 default) |
 | CumReg | `total(oracle_reward) − total(strategy_reward)` |
 | CumReg_ci_lower / CumReg_ci_upper | 95% bootstrap CI on CumReg |
 | rAcc | Fraction of tasks where strategy picked same model as oracle |
 | Pareto | True if strategy is on the Pareto frontier (no other strategy has higher AvgPerf% AND lower TotalCost) |
+| judge_label_cost | The MEASURED per-task judge label cost a difficulty row paid over its scored tasks (0.0 for every other row); published beside the totals it is folded into |
 | instrument_admissible / instrument_verdict | The two-sided instrument verdict for the SHIPPED selection path (`run_strategy_control`), stamped on every row |
 
 ## Baselines
@@ -385,12 +394,15 @@ docker compose -f benchmark/compose.yaml run --rm benchmark  # simulated loop + 
 | Always-Cheap | Route all to cheapest model (derived from pricing matrix) |
 | Always-Frontier | Route all to most expensive model (derived from pricing matrix) |
 | Random | Uniform random (mean over seeds) |
-| kNN | Embed task → retrieve similar → cheapest capable (a CONTROL: the pick without the ladder) |
-| kNN-cascade | The opt-in routing strategy (`router.strategy: knn_cascade`): the kNN pick, then the session-cadence escalation ladder |
-| kNN-cascade (within-task) | kNN-informed try-verify-escalate INSIDE one task (blocked) |
+| kNN-semantic | Embed task → retrieve similar → cheapest capable (a CONTROL: the pick without the ladder) |
+| kNN-semantic-cascade | The opt-in routing strategy (`router.strategy: knn_semantic_cascade`): the kNN pick, then the session-cadence escalation ladder |
+| kNN-semantic-cascade (within-task) | kNN-informed try-verify-escalate INSIDE one task (blocked) |
+| kNN-difficulty | Judge-difficulty selection rule with the ladder removed (a CONTROL — the pick without the ladder). Judge labels from `gpt-5.6-terra` (committed `judge_difficulty.json`) |
+| kNN-difficulty-cascade | Judge-difficulty pick, then the session ladder (blocked — needs a per-task judge call at inference) |
+| Difficulty-Band-cascade | "Just the judge label + escalation": same-difficulty-band members vote, the cheapest in-band model whose pass rate clears the bar opens the ladder (blocked) |
 | Price-Cascade | Try-verify-escalate in ascending price order — no embeddings, no kNN |
 | Session-Cascade | **The shipped default.** The escalation ladder at session cadence: one decision per session, effort rung then rank rung, climbed rank persisting, cache-safe analogue |
-| Tier-Classifier | Single-shot: predict the crossover tier, route there directly |
+| kNN-semantic-tier | Single-shot: predict the crossover tier, route there directly |
 
 ## Challenge store
 

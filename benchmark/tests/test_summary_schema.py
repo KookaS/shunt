@@ -190,7 +190,7 @@ class TestPerModelNoteRowsDeriveFromTheResultsTable:
 
         rows = [
             {
-                "strategy": "kNN",
+                "strategy": "kNN-semantic",
                 "AvgPerf%": "78.89",
                 "TotalCost_cacheaware": "11.6115",
                 "TotalCost": "11.6115",
@@ -212,7 +212,8 @@ class TestPerModelNoteRowsDeriveFromTheResultsTable:
             },
         ]
         assert per_strategy_note_rows(rows) == [
-            "kNN: \\$11.61 cache-aware / \\$11.61 naive, 78.89% (n=180, control — never shippable)",
+            "kNN-semantic: \\$11.61 cache-aware / \\$11.61 naive, 78.89% "
+            "(n=180, control — never shippable)",
             "Always-Frontier: \\$91.15 cache-aware / \\$91.15 naive, 95.00% "
             "(n=180, live, on the frontier)",
             "Price-Cascade: \\$22.07 cache-aware / \\$22.07 naive, 96.67% "

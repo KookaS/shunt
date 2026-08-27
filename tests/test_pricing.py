@@ -300,9 +300,17 @@ class TestRegistryShipsWithThePackage:
 
 
 class TestReasoningConfigsAccessor:
+    # JUDGE-ONLY models are deliberately reasoning-free: they are registered so the
+    # judge-probe harness reads their pricing, but never in router.yaml's or
+    # benchmark.yaml's models list, so no reasoning bracket is required — the same
+    # exemption test_config.py's TestDefaultRegistryHasReasoning applies.
+    JUDGE_ONLY_MODELS: Final = frozenset({"claude-sonnet-5", "gpt-5.6-terra"})
+
     def test_every_registry_model_has_a_reasoning_block(self):
         cfgs = config.reasoning_configs()
         for name in _models():
+            if name in self.JUDGE_ONLY_MODELS:
+                continue
             assert cfgs.get(name) is not None, f"{name} missing reasoning block"
 
     def test_deepseek_bracket_matches_adr(self):

@@ -8,6 +8,26 @@ For anything non-trivial, **open an issue or discussion first** to confirm the c
 fits before you invest in a PR. This protects your time and the reviewer's. Bug fixes,
 docs, and tests don't need this — just send them.
 
+## What belongs in Shunt
+
+Four criteria decide whether a proposal fits. Read them as scope rather than slogans:
+a change that breaks one is out, however well it scores.
+
+- **Data driven.** The label is a verified outcome from our own run: did your
+  tests pass? Not a model's self-reported confidence, and not someone's guess
+  about what "hard" looks like.
+- **Lightweight.** It runs on any laptop. A router that needs a big machine to
+  save you money defeats its own purpose.
+- **Divide and conquer.** Routing and escalation are separate supervised
+  problems with separate datasets, so each can be replaced and beaten on its own.
+- **Open.** A tool that runs on your laptop holding your provider keys has to be
+  inspectable to be trustworthy. You own the model pool, the keys and the
+  learning data. Nothing phones home.
+
+Routing is a statistics problem before it is a systems problem. Making the pipeline
+faster buys nothing until the decision rule is right, so we take that rule from wherever
+it comes — deterministic, statistical or learned — and judge it only on our own data.
+
 ## Contributor sign-off — DCO, not a CLA
 
 We use the **Developer Certificate of Origin (DCO)**, *not* a CLA. You keep the copyright

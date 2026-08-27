@@ -687,6 +687,11 @@ def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
         # any results.csv edit. Fingerprinted here so the committed figures can never outlive
         # the registry they were drawn from again.
         _REPO_ROOT / "src" / "shunt" / "config" / "models.yaml",
+        # The knn_difficulty strategies read the committed derived judge-difficulty table
+        # (task -> difficulty + measured judge cost). A re-derived table re-prices and
+        # re-routes those rows, so it must mark the strategy-comparing figures stale just
+        # like any other data input they are scored on.
+        _ROUTING / "data" / "judge_difficulty.json",
         # ladder_rungs.png derives its panel B from router.yaml's `models:` list (the live
         # pool), so a knob change silently invalidates every routing figure that draws the
         # shipped ladder — mirroring the escalation half's fingerprint of the same file.
@@ -711,6 +716,19 @@ _STANDALONE: Final[tuple[FigureJob, ...]] = (
             _SCRIPTS / "plot_knn_nulls.py",
             _SCRIPTS / "knn_nulls.py",
             _SCRIPTS / "viz_knn.py",
+            analysis=_ROUTING_ANALYSIS,
+        ),
+    ),
+    # The README's headline companion to cost_quality_frontier.png: four rows of the DERIVED
+    # strategy summary, redrawn on one linear plane. It is a standalone job rather than a
+    # report figure precisely because it re-derives nothing — the summary CSV is a declared
+    # input below, so a re-derived summary ages it exactly like a code edit does.
+    FigureJob(
+        "benchmark.routing.scripts.cost_quality_headline",
+        ("cost_quality_headline.png",),
+        _figure_inputs(
+            _SCRIPTS / "cost_quality_headline.py",
+            _ROUTING / "reports" / "strategy_summary.csv",
             analysis=_ROUTING_ANALYSIS,
         ),
     ),

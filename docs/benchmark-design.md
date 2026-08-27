@@ -53,8 +53,13 @@ benchmark/
       fixed.py                            Always-cheap, always-frontier, random
       knn.py                              Embed task → retrieve neighbours → cheapest capable
       knn_cascade.py                      kNN-informed try-verify-escalate (within one task)
-      knn_session_cascade.py              The opt-in `knn_cascade`: kNN pick + the session ladder
+      knn_difficulty.py                   Judge-difficulty pick (single-shot + session cascades)
+      knn_session_cascade.py              The opt-in `knn_semantic_cascade`: kNN pick + the session ladder
       session_cascade.py                  The shipped default: always-cheap pick + the session ladder
+      predict_then_cascade.py             Binary gate: cheap-direct vs session-cascade ladder
+      price_cascade.py                    Try-verify-escalate in ascending price order (zero-ML)
+      tier_classifier.py                  Single-shot: predict crossover tier, route there directly
+      _cascade_common.py                  Shared cascade utilities (internal)
       _template.py                        Skeleton for a new strategy
     run_eval.py                           Evaluate all strategies × tasks
     metrics.py                            Reward, regret, efficiency
@@ -118,11 +123,15 @@ shown as a price word rather than a number. The measured comparison is in
 | **Always-Frontier** | Always most expensive model (derived from pricing matrix). Maximum cost baseline. |
 | **Random** | Random model per task (mean over N seeds). Null baseline. |
 
-Additional strategies in `strategies/`: kNN (a control — the selection rule without the
-ladder), Session-Cascade (**the shipped default**: the session-cadence escalation ladder
-over an always-cheap pick), kNN-cascade (the opt-in `knn_cascade`: that same ladder over
-the kNN pick), kNN-cascade (within-task) and Price-Cascade (the zero-ML price-ascending
-cascade — the floor a learned router has to beat), and Tier-Classifier.
+Additional strategies in `strategies/`: kNN-semantic (a control — the selection rule without
+the ladder), Session-Cascade (**the shipped default**: the session-cadence escalation ladder
+over an always-cheap pick), kNN-semantic-cascade (the opt-in `knn_semantic_cascade`: that same ladder over
+the kNN pick), kNN-semantic-cascade (within-task), Price-Cascade (the zero-ML price-ascending
+cascade — the floor a learned router has to beat), and kNN-semantic-tier. The judge-difficulty
+family routes on an LLM-judge difficulty label instead of an embedding:
+`knn_difficulty.py` holds kNN-difficulty (single-shot control), kNN-difficulty-cascade and
+Difficulty-Band-cascade (session-cadence), reading the committed `data/judge_difficulty.json` —
+all three measured, none cleared the inference bar, all benchmark-only.
 
 **Every rung of a replayed cascade starts from a fresh tree and a fresh context.** That is
 a property of this harness, not of the product: the matrix records one outcome per

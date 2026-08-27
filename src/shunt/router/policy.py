@@ -35,13 +35,14 @@ logger = logging.getLogger(__name__)
 #
 # ``session_cascade`` is the SHIPPED DEFAULT (see ``router.yaml``): the ladder opens at the
 # cheapest model and consults no neighbourhood, so a default install never embeds.
-# ``knn_cascade`` is the OPT-IN routing strategy, and its name is the honest one for what a kNN
-# install has always run: the kNN pick has carried ``participates_in_escalation = True`` since
-# escalation shipped ON, so a config reading ``strategy: knn`` was already a kNN pick plus the
-# ladder. Plain kNN WITHOUT the ladder is no longer a selectable deployable option; ``knn`` is
-# accepted only as a migration alias (see ``parse_router_policy``).
+# ``knn_semantic_cascade`` is the OPT-IN routing strategy, and its name is the honest one for
+# what a kNN install has always run: the kNN pick has carried ``participates_in_escalation
+# = True`` since escalation shipped ON, so a config reading ``strategy: knn`` was already a
+# kNN pick plus the ladder. Plain kNN WITHOUT the ladder is no longer a selectable deployable
+# option; the pre-rename ids ``knn`` and ``knn_cascade`` are accepted only as migration
+# aliases (see ``parse_router_policy``).
 LIVE_STRATEGIES: Final[tuple[str, ...]] = (
-    "knn_cascade",
+    "knn_semantic_cascade",
     "always_cheap",
     "always_frontier",
     "session_cascade",
@@ -50,15 +51,20 @@ LIVE_STRATEGIES: Final[tuple[str, ...]] = (
 # The presets above are only themselves with the escalation layer on: without it each config
 # resolves to its plain base selection rule under a name promising a cascade.
 SESSION_CASCADE_STRATEGY: Final[str] = "session_cascade"
-KNN_CASCADE_STRATEGY: Final[str] = "knn_cascade"
+KNN_CASCADE_STRATEGY: Final[str] = "knn_semantic_cascade"
 _CASCADE_IDS: Final[frozenset[str]] = frozenset({SESSION_CASCADE_STRATEGY, KNN_CASCADE_STRATEGY})
 
-# The pre-rename spelling of ``knn_cascade``. Accepted for at least one minor release so an
-# existing router.yaml keeps booting; see ``parse_router_policy`` for the resolution rules.
-LEGACY_STRATEGY_ALIASES: Final[dict[str, str]] = {"knn": KNN_CASCADE_STRATEGY}
+# The pre-rename spellings of ``knn_semantic_cascade`` (``knn``, then ``knn_cascade`` after
+# the first rename). Accepted for at least one minor release so an existing router.yaml keeps
+# booting; see ``parse_router_policy`` for the resolution rules.
+LEGACY_STRATEGY_ALIASES: Final[dict[str, str]] = {
+    "knn": KNN_CASCADE_STRATEGY,
+    "knn_cascade": KNN_CASCADE_STRATEGY,
+}
 
 # Per-cascade error vocabulary: the base selection rule the preset wraps, and the id an operator
-# who genuinely wants that rule WITHOUT the ladder should name instead. `knn_cascade` has no such
+# who genuinely wants that rule WITHOUT the ladder should name instead. `knn_semantic_cascade`
+# has no such
 # alternative — plain kNN stopped being selectable with this rename — so it points at the nearest
 # non-escalating fixed router rather than at a name that no longer exists.
 _CASCADE_BASES: Final[dict[str, tuple[str, str]]] = {

@@ -107,5 +107,14 @@ benchmark/escalation/reports/*
 !benchmark/escalation/reports/metrics.json
 !benchmark/escalation/reports/difficulty_go_no_go.json
 
+# strategy_summary.csv is TRACKED for the same reason, and only that file. It is the derived
+# table cost_quality_headline.png is drawn from and cost_quality_frontier.png is scored
+# against, so a committed PNG can be checked against its numbers after the fact — and the
+# figure's freshness digest names it as an input, which is a claim a clone cannot verify on a
+# file it does not have. Everything else under reports/ stays a rebuildable intermediate.
+!benchmark/routing/reports/
+benchmark/routing/reports/*
+!benchmark/routing/reports/strategy_summary.csv
+
 # The docs-figure seed store: a rebuildable cache of the committed bundle, never committed.
 benchmark/routing/.build/
