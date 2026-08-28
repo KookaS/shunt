@@ -1,0 +1,14 @@
+{
+  "instance_id": "markedjs__marked-1674",
+  "repo": "markedjs/marked",
+  "base_commit": "0cd85983ce810c5f833c939cdf66b341dc2d6825",
+  "version": "1.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "New list_loose_tasks should pass"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.markedjs_1776_marked-1674:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Crash when rendering an empty checkbox list item\n### Describe the bug\r\nRendering an empty checkbox list item leads to a crash:\r\n> `Uncaught TypeError: Cannot read property 'type' of undefined`\r\n\r\n### To Reproduce\r\n\r\n[Click here to see the crash on Marked demo](https://marked.js.org/demo/?text=%20%20-%20%5B%20%5D%20checklist%20item%0A%0A%20%20-%20%5B%20%5D%20&options=%7B%0A%20%22baseUrl%22%3A%20null%2C%0A%20%22breaks%22%3A%20false%2C%0A%20%22gfm%22%3A%20true%2C%0A%20%22headerIds%22%3A%20true%2C%0A%20%22headerPrefix%22%3A%20%22%22%2C%0A%20%22highlight%22%3A%20null%2C%0A%20%22langPrefix%22%3A%20%22language-%22%2C%0A%20%22mangle%22%3A%20true%2C%0A%20%22pedantic%22%3A%20false%2C%0A%20%22sanitize%22%3A%20false%2C%0A%20%22sanitizer%22%3A%20null%2C%0A%20%22silent%22%3A%20false%2C%0A%20%22smartLists%22%3A%20false%2C%0A%20%22smartypants%22%3A%20false%2C%0A%20%22tokenizer%22%3A%20null%2C%0A%20%22xhtml%22%3A%20false%0A%7D&version=master)\r\n![image](https://user-images.githubusercontent.com/1694410/81624131-6de74400-93c3-11ea-8eb7-ac3a1145afc4.png)\r\n\r\n### Expected behavior\r\nNo crash and a correctly rendered checkbox.\r\n\n"
+}

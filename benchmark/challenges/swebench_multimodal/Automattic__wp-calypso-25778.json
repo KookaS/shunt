@@ -1,0 +1,23 @@
+{
+  "instance_id": "Automattic__wp-calypso-25778",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "54d626a276373d45ffddd2cf4f7099733c8e43de",
+  "version": "10.5.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "wpcom-api - post comments request - #announceFailure - should dispatch an error notice"
+  ],
+  "PASS_TO_PASS": [
+    "wpcom-api - post comments request - #addComments - should dispatch a comments receive action",
+    "wpcom-api - post comments request - #fetchPostComments() - should dispatch an HTTP request to the post replies endpoint, before the oldest contiguous comment in state",
+    "wpcom-api - post comments request - #addComments - should dispatch a comments receive action and a count receive action when comments found",
+    "wpcom-api - post comments request - #handleDeleteSuccess - should request a fresh copy of a comments page when the query object is filled",
+    "wpcom-api - post comments request - #handleDeleteSuccess - should show a success notice if the related option is set",
+    "wpcom-api - post comments request - #handleDeleteSuccess - should not do anything when no options are set",
+    "wpcom-api - post comments request - #fetchPostComments() - should dispatch an HTTP request to the post replies endpoint",
+    "wpcom-api - post comments request - commentsFromApi - should decode author name entities"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-25778:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Reader: failed comment loading produces a plague of error notices\nWhen opening a Jetpack post for a site that has the JSON API turned off, the replies endpoint returns a 403 and this happens:\r\n\r\n![image](https://user-images.githubusercontent.com/17325/40953053-23bd94ba-68d2-11e8-854c-eef25826e32f.png)\r\n\r\nIn this situation, we should limit the retries and preferably show the error message in the comments section rather than firing a ton of error notices. Even better, we could set comments to 'off' in the API response if the Jetpack JSON API is turned off for their site.\n"
+}

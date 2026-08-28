@@ -1,0 +1,23 @@
+{
+  "instance_id": "Automattic__wp-calypso-27090",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "c73ce2eab8daebaeec5803c30427f2c91c8ef9c0",
+  "version": "10.9.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "selectors - #getRecentViewsForPost() - should default to null",
+    "reducer - #items() - should default to an empty object",
+    "reducer - #items() - should override previous recent post views",
+    "onSuccess - should return a receiveRecentPostViews action with the data",
+    "fetch - should dispatch an http request",
+    "reducer - #items() - should index recent post views by ID for each site",
+    "reducer - #items() - should accumulate recent post views",
+    "selectors - #getRecentViewsForPost() - should return recent views for a post by site and id",
+    "actions - #receiveRecentPostViews - should create an action for requesting recent post views",
+    "actions - #receiveRecentPostViews() - should create an action for receiving recent post views"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-27090:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Posts: Show view counts in Blog Posts list\nAs noted on #26708 and p8F9tW-RX-p2, there are a lot of customers that would like to see the view counts on the Blog Posts list brought back.\r\n\r\n@Automattic/tanooki is looking into bringing back this functionality (or similar functionality) with a less resource-intensive implementation that delivers better performance for both customers' devices and our servers. There are some possible options to explore mentioned on p8F9tW-RX-p2.\r\n\r\nIf performance constraints necessitate a change from the original experience, this issue will be updated accordingly.\r\n\r\nBefore:\r\n\r\n<img width=\"736\" alt=\"screencapture at wed aug 15 13 22 45 edt 2018\" src=\"https://user-images.githubusercontent.com/2098816/44163026-1b62e180-a090-11e8-9378-79271c20464e.png\">\r\n\r\nAfter:\r\n\r\n<img width=\"738\" alt=\"screencapture at wed aug 15 13 21 39 edt 2018\" src=\"https://user-images.githubusercontent.com/2098816/44163020-169e2d80-a090-11e8-9160-5b98596b09c1.png\">\r\n\r\n----\r\n\r\n### Acceptance criteria\r\n\r\n1.\r\n- Given a site with blog posts with views\r\n- When Blog Posts is visited\r\n- Then the \"X Views\" counts are present on the post items in the list\r\n\r\n2.\r\n- Given a site with blog posts with views\r\n- When Blog Posts is visited\r\n- Then an acceptable number of requests are made to receive necessary data (will work with Systems to make sure that any solution is acceptable)\r\n\r\n3.\r\n- Given a customer with multiple sites with blog posts with views\r\n- When Blog Posts is visited in All My Sites mode\r\n- Then the \"X Views\" counts are present on the post items in the list\r\n\r\n4.\r\n- Given a customer with multiple sites with blog posts with views\r\n- When Blog Posts is visited in All My Sites mode\r\n- Then an acceptable number of requests are made to receive necessary data (will work with Systems to make sure that any solution is acceptable)\r\n\r\n### Tasks\r\n\r\n- [x] [Grant] Design for post-views endpoint that will support getting a total number of views over a date range for all specified posts in one request\r\n- [x] [Grant] Build post-views endpoint\r\n- [x] Write tests for endpoint\r\n- [x] [Cain] Update the Posts list to use the posts-views endpoint (one request for each \"page\" of posts) and display \"x Recent Views\" (with a more descriptive title text) that links to the full stats page for that post\r\n\r\n## PR\r\n\r\nhttps://github.com/Automattic/wp-calypso/pull/27090\n"
+}

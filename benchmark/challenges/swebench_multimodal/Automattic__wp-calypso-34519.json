@@ -1,0 +1,14 @@
+{
+  "instance_id": "Automattic__wp-calypso-34519",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "9231480516c5a3eed1d400baceca5b7169eba4cb",
+  "version": "10.15.2",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "AppsBadge - should render"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-34519:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Checklist: Add app nudge to congratulations screen\nAs part of recent changes to the Checklist, the nudge to download the mobile app was removed since it's less of a site setup task and more of a post-launch onboarding nudge. We should eventually nudge an app download after a user's site is launched via Private by Default, but until the feature is re-enabled let's add it to the Checklist \"congratulations\" screen after a user completes all of their tasks.\r\n\r\nDiscussion: paObgF-iw-p2\r\n\r\nThe mock uses the view from `/me/get-apps` as a nudge to both desktop and mobile apps.\r\n\r\n**Mock:**\r\n![app-nudge](https://user-images.githubusercontent.com/942359/60456532-78fc1000-9c07-11e9-993c-509d21a1bd0e.png)\r\n\r\n@shaunandrews @rachelmcr @elibud @adamziel @fditrapani \r\n\n"
+}

@@ -1,0 +1,15 @@
+{
+  "instance_id": "chartjs__Chart.js-8710",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "bbf298f4614c058e2ec86329566a56bfcd8bc685",
+  "version": "3.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Linear Scale Should correctly use the locale setting when getting a label ",
+    "Logarithmic Scale tests should correctly use the locale when generating the label "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-8710:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": " Pre-release v3.0.0-rc.3 - scatter chart: Render Graph Error on  scatter :  RangeError: ...\n\r\n\r\n## Expected Behavior\r\n\r\nError: Render Graph Error on  scatter :  RangeError: minimumFractionDigits value is out of range.\r\n\r\n![Bildschirmfoto 2021-03-24 um 07 20 56](https://user-images.githubusercontent.com/30198737/112266299-161c9900-8c74-11eb-9ea9-9c05719f195a.png)\r\n\r\n\r\n\r\nthis.chart.options.locale = 'de_DE'\r\n\r\n```\r\n  numeric(tickValue, index, ticks) {\r\n    if (tickValue === 0) {\r\n      return '0';\r\n    }\r\n    const locale = this.chart.options.locale;\r\n    let notation;\r\n    let delta = tickValue;\r\n    if (ticks.length > 1) {\r\n      const maxTick = Math.max(Math.abs(ticks[0].value), Math.abs(ticks[ticks.length - 1].value));\r\n      if (maxTick < 1e-4 || maxTick > 1e+15) {\r\n        notation = 'scientific';\r\n      }\r\n      delta = calculateDelta(tickValue, ticks);\r\n    }\r\n    const logDelta = log10(Math.abs(delta));\r\n    const numDecimal = Math.max(Math.min(-1 * Math.floor(logDelta), 20), 0);\r\n    const options = {notation, minimumFractionDigits: numDecimal, maximumFractionDigits: numDecimal};\r\n    Object.assign(options, this.options.ticks.format);\r\n    return formatNumber(tickValue, locale, options);\r\n  },\r\n```\r\n## Current Behavior\r\n\r\n ---> **locale undefined**\r\n```\r\nreturn formatNumber(tickValue, locale, options);\r\n```\r\n\r\n## Environment\r\n\r\n* Chart.js version:  Pre-release v3.0.0-rc.3\r\n* Browser name and version: any\r\n\r\n\n"
+}

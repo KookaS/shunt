@@ -1,0 +1,31 @@
+{
+  "instance_id": "Automattic__wp-calypso-29804",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "73ff0f9af67b31202eadf17fa93be4d406d418ab",
+  "version": "10.14.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "VideoAudioPosts should use proper description - for premium plan value_bundle-2y",
+    "VideoAudioPosts should use proper description - for premium plan value_bundle"
+  ],
+  "PASS_TO_PASS": [
+    "VideoAudioPosts basic tests - should not blow up and have proper CSS class",
+    "VideoAudioPosts should use proper description - for ecommerce plan ecommerce-bundle",
+    "VideoAudioPosts should use proper description - for business plan business-bundle",
+    "VideoAudioPosts should use proper description - for plans jetpack_premium_monthly",
+    "VideoAudioPosts should use proper description - for plans personal-bundle",
+    "VideoAudioPosts should use proper description - for business plan business-bundle-2y",
+    "VideoAudioPosts should use proper description - for plans jetpack_personal_monthly",
+    "VideoAudioPosts should use proper description - for plans jetpack_business",
+    "VideoAudioPosts should use proper description - for plans personal-bundle-2y",
+    "VideoAudioPosts should use proper description - for plans jetpack_premium",
+    "VideoAudioPosts should use proper description - for plans jetpack_personal",
+    "VideoAudioPosts should use proper description - for plans jetpack_business_monthly",
+    "VideoAudioPosts should use proper description - for plans jetpack_free",
+    "VideoAudioPosts should use proper description - for ecommerce plan ecommerce-bundle-2y",
+    "VideoAudioPosts should use proper description - for plans free_plan"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-29804:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Checkout: Thank you: WordPress.com Premium: Improve clarity on available storage space\n#### Steps to reproduce \r\n\r\n- Start with a free or WordPress.com Personal plan site\r\n- Upgrade to WordPress.com Premium plan from https://wordpress.com/plans\r\n- After payment, notice the feature set that mentions `Video and audio posts` on the \"checkout thank you\" page\r\n\r\n#### What happens\r\n\r\nIt reads `Enrich your posts with video and audio, uploaded directly on your site. No ads or limits. The Premium plan also adds 10GB of file storage.`\r\n\r\n<img width=\"1281\" alt=\"screenshot 2018-12-29 at 21 03 48\" src=\"https://user-images.githubusercontent.com/18581859/50539967-17eb7500-0baf-11e9-84eb-a48df94f64f1.png\">\r\n\r\n#### What is expected instead\r\n\r\n- The reference to \"no limits\" is removed, as we do have a limit on the storage space for WordPress.com Premium plan\r\n- The last line of the copy can be updated to `The WordPress.com Premium plan offers 13GB of file storage.` as the current line adds to confusion. The plan **does** add 10GB of file storage to free WordPress.com sites, but it **does not** add 10GB of file storage to WordPress.com Personal plan sites which already have 6GB in total. For simplicity's sake, updating the copy to what's available in total makes sense to me. \r\n\r\nRelated: #29801\nCheckout: Thank you: WordPress.com Premium: Improve clarity on available storage space\n#### Steps to reproduce \r\n\r\n- Start with a free or WordPress.com Personal plan site\r\n- Upgrade to WordPress.com Premium plan from https://wordpress.com/plans\r\n- After payment, notice the feature set that mentions `Video and audio posts` on the \"checkout thank you\" page\r\n\r\n#### What happens\r\n\r\nIt reads `Enrich your posts with video and audio, uploaded directly on your site. No ads or limits. The Premium plan also adds 10GB of file storage.`\r\n\r\n<img width=\"1281\" alt=\"screenshot 2018-12-29 at 21 03 48\" src=\"https://user-images.githubusercontent.com/18581859/50539967-17eb7500-0baf-11e9-84eb-a48df94f64f1.png\">\r\n\r\n#### What is expected instead\r\n\r\n- The reference to \"no limits\" is removed, as we do have a limit on the storage space for WordPress.com Premium plan\r\n- The last line of the copy can be updated to `The WordPress.com Premium plan offers 13GB of file storage.` as the current line adds to confusion. The plan **does** add 10GB of file storage to free WordPress.com sites, but it **does not** add 10GB of file storage to WordPress.com Personal plan sites which already have 6GB in total. For simplicity's sake, updating the copy to what's available in total makes sense to me. \r\n\r\nRelated: #29801\n"
+}

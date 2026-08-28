@@ -1,0 +1,15 @@
+{
+  "instance_id": "markedjs__marked-1936",
+  "repo": "markedjs/marked",
+  "base_commit": "18207d18b14c00cb33d3e6090177851b3fa57109",
+  "version": "2.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "CommonMark List items should pass example 225",
+    "CommonMark List items should pass example 227"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.markedjs_1776_marked-1936:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Lexer: Space after list appears in last list_item\nmarked 2.0.0\r\n\r\nSorry if it is not a bug, but a feature... \r\n\r\nIn a semantic tree (marked.lexer) an empty space between List and Paragraph appears in a last `list_item`. It looks unlogical. \r\n\r\nWhile traverse the tree, you should write additional code for exclude this empty space from `list_item`. And then write code to add space between List and Paragraph. \r\n\r\nExpected: Space node should be at the first level of the semantic tree, between the List and the next Paragraph  \r\n\r\nfor reproduce, please visit: \r\nhttps://codesandbox.io/s/markedjs-klt1h?file=/src/marked8lexer.js\r\n\r\n```javascript\r\nimport marked from \"marked\";\r\n\r\nconst markdownText = `This is paragraph \r\n\r\nthis is a list with 3 items: \r\n\r\n- item one \r\n- item two \r\n- item tree \r\n\r\nHere is another paragrah.`;\r\n\r\nconst lexerArray = marked.lexer(markdownText);\r\n\r\nconsole.log(lexerArray);\r\n```\r\n![Screenshot from 2021-02-15 19-40-18](https://user-images.githubusercontent.com/1222611/107973010-b8869400-6fc5-11eb-839b-ac9d66c0500d.png)\r\n\r\n\n"
+}

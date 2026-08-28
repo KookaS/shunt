@@ -6,8 +6,10 @@ the harness (no vendored repos). See ``benchmark/README.md``.
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Final
 
 from benchmark import config
@@ -162,6 +164,31 @@ def all_specs() -> list[SwebenchSpec]:
         return []
     specs = [spec_from_dict(json.loads(p.read_text())) for p in sorted(directory.glob("*.json"))]
     return specs
+
+
+def manifest_source() -> str:
+    """The source name the configured challenges manifest declares (default ``SOURCE``)."""
+    try:
+        manifest = config.load_challenges()
+    except (FileNotFoundError, ValueError):
+        return SOURCE
+    declared = manifest.get("source")
+    return str(declared) if declared else SOURCE
+
+
+def spec_module_for(source: str) -> ModuleType:
+    """The spec module backing a source name (multimodal companion, else this module).
+
+    Imported lazily so ``swebench_multimodal_specs`` (which imports this module at load
+    time) can load without a cycle; raises for an unknown source.
+    """
+    if source == SOURCE:
+        return sys.modules[__name__]
+    from benchmark.runner import swebench_multimodal_specs
+
+    if source == swebench_multimodal_specs.SOURCE:
+        return swebench_multimodal_specs
+    raise KeyError(f"no spec module for source {source!r}")
 
 
 def write_spec(spec: SwebenchSpec) -> Path:

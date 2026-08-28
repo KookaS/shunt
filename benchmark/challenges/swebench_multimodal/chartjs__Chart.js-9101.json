@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-9101",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "927f24a809834100c138dc70cffd9e9b920478a5",
+  "version": "3.2",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Chart.DatasetController getContext should reflect updated data "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-9101:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Shifting items of array option for dataset breaks the chart\n## Expected Behavior\r\n\r\nI created a line chart, and a dataset has a backgroundColor array. When the first items of the data and backgroundColor arrays are removed using `shift()`, it should be correctly reflected in the chart.\r\n\r\n## Current Behavior\r\n\r\nWhen the first items of the data and backgroundColor arrays are removed, elements in the chart have wrong colors.\r\n\r\n<img width=\"491\" alt=\"Screen Shot 2021-05-15 at 12 22 33 AM\" src=\"https://user-images.githubusercontent.com/723188/118299781-c2ac2600-b513-11eb-9267-6701697702d1.png\">\r\n\r\n## Possible Solution\r\n\r\nNot sure, but I suspect that the caching when resolving the options might cause the problem.\r\n\r\n## Steps to Reproduce\r\n\r\nPress 'Push Data' button, then press 'Shift Data' button.\r\n\r\nhttps://jsfiddle.net/nagix/6n34bsym/\r\n\r\n## Environment\r\n\r\n* Chart.js version: 3.2.1\n"
+}

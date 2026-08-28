@@ -1,0 +1,17 @@
+{
+  "instance_id": "markedjs__marked-1262",
+  "repo": "markedjs/marked",
+  "base_commit": "579f7bfb562bdeeaf0ee98deaba5a8334f9602d1",
+  "version": "0.3",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Marked Table cells should pass example 9",
+    "Marked Table cells should pass example 8",
+    "Marked Table cells should pass example 5",
+    "Marked Table cells should pass example 7"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.markedjs_1776_marked-1262:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "table render error\nThis markdown \r\n\r\n```\r\n| \u53c2\u6570 | \u8bf4\u660e | \u7c7b\u578b | \u53ef\u9009\u503c | \u9ed8\u8ba4\u503c |\r\n| --- | --- | --- | --- | --- |\r\n| itemRender | \u81ea\u5b9a\u4e49\u94fe\u63a5\u51fd\u6570\uff0c\u548c react-router \u914d\u7f6e\u4f7f\u7528 | (route, params, routes, paths) => ReactNode |  | - |\r\n| params | \u8def\u7531\u7684\u53c2\u6570 | object |  | - |\r\n| routes | router \u7684\u8def\u7531\u6808\u4fe1\u606f | object\\[] |  | - |\r\n| separator | \u5206\u9694\u7b26\u81ea\u5b9a\u4e49 | string\\|ReactNode |  | '/' |\r\n```\r\n\r\nWill be rendered by `Marked` as ( **Marked Version** : 0.4.0 )\r\n\r\n<img width=\"783\" alt=\"screen shot 2018-06-11 at 8 56 07 pm\" src=\"https://user-images.githubusercontent.com/2193211/41232736-e1a5fd5a-6db9-11e8-9f18-0b0ac28e018f.png\">\r\n\r\n\r\nActually it should be\r\n\r\n| \u53c2\u6570 | \u8bf4\u660e | \u7c7b\u578b | \u53ef\u9009\u503c | \u9ed8\u8ba4\u503c |\r\n| --- | --- | --- | --- | --- |\r\n| itemRender | \u81ea\u5b9a\u4e49\u94fe\u63a5\u51fd\u6570\uff0c\u548c react-router \u914d\u7f6e\u4f7f\u7528 | (route, params, routes, paths) => ReactNode |  | - |\r\n| params | \u8def\u7531\u7684\u53c2\u6570 | object |  | - |\r\n| routes | router \u7684\u8def\u7531\u6808\u4fe1\u606f | object\\[] |  | - |\r\n| separator | \u5206\u9694\u7b26\u81ea\u5b9a\u4e49 | string\\|ReactNode |  | '/' |\r\n\n"
+}

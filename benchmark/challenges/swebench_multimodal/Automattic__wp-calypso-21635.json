@@ -1,0 +1,14 @@
+{
+  "instance_id": "Automattic__wp-calypso-21635",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "0bab036290b284735a7b5043cc11d194bd8ec37d",
+  "version": "8.9.3",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Ebanx payment processing methods - isValidCPF - should return true for valid CPF (Brazilian tax identification number)"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-21635:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Reader: rename showEmailSettings to showNotificationSettings\nRenames the prop `showEmailSettings` to `showNotificationSettings` to reflect the fact that the popover now deals with new post notifications _and_ email notification settings (see https://github.com/Automattic/wp-calypso/pull/20824).\r\n\r\n<img width=\"286\" alt=\"33993970-aa3dba40-e0d0-11e7-85d0-ce073095b506\" src=\"https://user-images.githubusercontent.com/17325/34728766-ae1c4992-f552-11e7-9f13-13a2314655d2.png\">\r\n\r\n### To test\r\n\r\nIn http://calypso.localhost:3000/following/manage, ensure that the recommended sites under the search box do not have a 'Settings' link, even if you're following one of them:\r\n\r\n![screen shot 2018-01-09 at 15 27 36](https://user-images.githubusercontent.com/17325/34728795-c63610b2-f552-11e7-9bf0-5fa45c7c8ae7.png)\r\n\n"
+}

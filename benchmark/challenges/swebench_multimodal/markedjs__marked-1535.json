@@ -1,0 +1,14 @@
+{
+  "instance_id": "markedjs__marked-1535",
+  "repo": "markedjs/marked",
+  "base_commit": "2df12a7f2a0544a979efc49ab9ee4407354002eb",
+  "version": "0.7",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "New list_loose_tasks should pass"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.markedjs_1776_marked-1535:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Checkbox rendering bug\n**Describe the bug**\r\nIf newline exists between checkbox list, it looks like doesn't render well\r\n\r\n**To Reproduce**\r\n```\r\n- Tasks\r\n- [x] Task1\r\n- [ ] Task2\r\n\r\n- [ ] Another Task\r\n\r\n```\r\n\r\n![image](https://user-images.githubusercontent.com/520523/62999436-5f5a1380-bea9-11e9-8b34-c233b31800bf.png)\r\n\r\n1. [Marked Demo](https://marked.js.org/demo/?text=-%20Tasks%0A-%20%5Bx%5D%20Task1%0A-%20%5B%20%5D%20Task2%0A%0A-%20%5B%20%5D%20Another%20Task%0A&options=%7B%0A%20%22baseUrl%22%3A%20null%2C%0A%20%22breaks%22%3A%20false%2C%0A%20%22gfm%22%3A%20true%2C%0A%20%22headerIds%22%3A%20true%2C%0A%20%22headerPrefix%22%3A%20%22%22%2C%0A%20%22highlight%22%3A%20null%2C%0A%20%22langPrefix%22%3A%20%22language-%22%2C%0A%20%22mangle%22%3A%20true%2C%0A%20%22pedantic%22%3A%20false%2C%0A%20%22sanitize%22%3A%20false%2C%0A%20%22sanitizer%22%3A%20null%2C%0A%20%22silent%22%3A%20false%2C%0A%20%22smartLists%22%3A%20false%2C%0A%20%22smartypants%22%3A%20false%2C%0A%20%22xhtml%22%3A%20false%0A%7D&version=0.7.0)\r\n2. [CommonMark Demo](https://spec.commonmark.org/dingus/?text=-%20Tasks%0A-%20%5Bx%5D%20Task1%0A-%20%5B%20%5D%20Task2%0A%0A-%20%5B%20%5D%20Another%20Task%0A)\r\n\r\n\r\n\n"
+}

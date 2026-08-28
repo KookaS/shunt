@@ -32,6 +32,18 @@ SUSPICIOUS_ZERO: Final[str] = "SUSPICIOUS_ZERO"
 MISSING_COLLECTION_FIELD: Final[str] = "MISSING_COLLECTION_FIELD"
 BRACKET_OVER_COVERAGE: Final[str] = "BRACKET_OVER_COVERAGE"
 
+# Promotional $0 windows: (model, first UTC date, last UTC date), both inclusive.
+# A model is priced at its REAL rate in the registry — so a future run is billed, gated by
+# the uncached-budget wall and caught by the accounting check — while cells genuinely
+# collected inside the window keep a true real_cost of 0. Scoped by model AND by date, so
+# a paid run on the same id outside the window is still an ACCOUNTING_HOLE. Add a row only
+# with the provider's published promo dates; never to silence a harvesting failure.
+_FREE_WINDOWS: Final[tuple[tuple[str, str, str], ...]] = (
+    # OpenRouter listed z-ai/glm-5.3-flash (then stealth/ox-alpha) at $0 for this window;
+    # the 41 committed cells all fall inside it. Price source in the registry entry.
+    ("zai-glm-5.3-flash", "2026-08-20", "2026-08-26"),
+)
+
 # Registry price fields (both the load_pricing and the _pricing_dict spellings).
 _PRICE_KEYS: Final[tuple[str, ...]] = (
     "input_cost_per_1m",
@@ -222,6 +234,14 @@ def _check_schema(row: dict, derived: str) -> list[Violation]:
     return out
 
 
+def _in_free_window(model: str, computed_at: str) -> bool:
+    """True iff the row was collected inside a provider's genuinely-$0 promotional window."""
+    for name, start, end in _FREE_WINDOWS:
+        if name == model and start <= computed_at[: len(start)] <= end:
+            return True
+    return False
+
+
 def _check_accounting(row: dict, derived: str, pricing: dict) -> Violation | None:
     """The $35 fingerprint: PAID model, calls>0, real_cost==0, and NOT censored."""
     # Censored rows (resource-limit stops) are EXEMPT: a reaped cell may have run
@@ -234,6 +254,8 @@ def _check_accounting(row: dict, derived: str, pricing: dict) -> Violation | Non
     if censoring.is_censored_reason(derived):
         return None
     if not is_paid_model(str(row.get("model", "")), pricing):
+        return None
+    if _in_free_window(str(row.get("model", "")), str(row.get("computed_at", ""))):
         return None
     return Violation(
         Severity.ERROR,

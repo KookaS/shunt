@@ -1,0 +1,16 @@
+{
+  "instance_id": "Automattic__wp-calypso-31830",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "09c44691e663a6f2173fe7bc15d7e3b6dc299afb",
+  "version": "10.15.2",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "mobile-app - should identify the Android mobile app",
+    "mobile-app - should identify the iOS mobile app",
+    "mobile-app - should not identify an unknown user agent"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-31830:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Hide app banners from within the mobile apps\n#### Steps to reproduce\r\n1. Use the mobile app and navigate to \"My Sites\"\r\n2. Select a site and scroll down to \"View My Site\"\r\n3. Select \"My Site\" from the masterbar and navigate to Stats\r\n4. See the app banner at the bottom\r\n\r\n#### What I expected\r\nMy website without an app banner\r\n\r\n#### What happened instead\r\nThe app banner is shown\r\n\r\n#### Browser / OS version\r\nWordPress iOS and Android app\r\n\r\n#### Screenshot / Video\r\n![img_7491](https://user-images.githubusercontent.com/1158819/53675164-b3997000-3c48-11e9-855b-cac84489e8bd.png)\r\n\r\n\r\n\r\n#### Context / Source\r\n\r\nWe are already within the app. It's very confusing for the user.\r\n\r\n#dogfooding\r\n\n"
+}

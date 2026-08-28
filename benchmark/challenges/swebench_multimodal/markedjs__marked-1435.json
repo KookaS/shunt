@@ -1,0 +1,14 @@
+{
+  "instance_id": "markedjs__marked-1435",
+  "repo": "markedjs/marked",
+  "base_commit": "ae9484d35939d2bf72e038c0977cb2eeab4495f7",
+  "version": "0.6",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Marked Links should pass example 16"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.markedjs_1776_marked-1435:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "[Bug] We have to use '\\' to add the '('\n![image](https://user-images.githubusercontent.com/40081831/53847026-28263300-3fea-11e9-8c93-9acc880bde90.png)\r\n\r\nNotice that we have to add '\\' in front of \"(\", otherwises this won't be analyzed out.\r\n\r\nThe original words are in the attached sample:\r\n[Sample.txt](https://github.com/markedjs/marked/files/2933754/Sample.txt).\r\n\r\nFor more\uff0cplease refer to\uff1ahttps://github.com/nodejs/nodejs.org/issues/2119\r\n\n"
+}

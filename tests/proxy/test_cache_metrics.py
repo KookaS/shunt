@@ -44,10 +44,19 @@ def _response(cached: int, prompt: int) -> Any:
     )
 
 
+def _live_pool() -> ModelPool:
+    """The pool the server actually serves: the registry, restricted to the policy's live list."""
+    from shunt.router.policy import apply_env_overrides, load_router_policy
+
+    pool = ModelPool()
+    pool.restrict_to_live(apply_env_overrides(load_router_policy()).models)
+    return pool
+
+
 @pytest.fixture
 def router() -> ProxyRouter:
     return ProxyRouter(
-        model_pool=ModelPool(),
+        model_pool=_live_pool(),
         session_manager=SessionManager(inactivity_timeout=900, grace_period=120),
         retry_count=1,
     )
@@ -133,12 +142,12 @@ async def test_fallback_records_served_model_and_serving_log(
         mock_acompletion.side_effect = [failure, _response(0, 5)]
         _, model_name = await router._route_with_fallback(kwargs, session)
 
-    # The locked default (deepseek-v4-flash) fails, the next pool model (qwen3.7-plus)
+    # The locked default (deepseek-v4-flash) fails, the next LIVE pool model (zai-glm-5.2)
     # serves — the log names the real served model, not the locked one.
-    assert model_name == "qwen3.7-plus"
-    assert session.metadata["last_turn_served_model"] == "qwen3.7-plus"
+    assert model_name == "zai-glm-5.2"
+    assert session.metadata["last_turn_served_model"] == "zai-glm-5.2"
     assert (
-        f"serving: session={session.session_id} locked=deepseek-v4-flash served=qwen3.7-plus"
+        f"serving: session={session.session_id} locked=deepseek-v4-flash served=zai-glm-5.2"
         in caplog.text
     )
 

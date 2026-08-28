@@ -1,0 +1,41 @@
+{
+  "instance_id": "Automattic__wp-calypso-22782",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "5f4c22c561a31972c973dc9dadd907836070bceb",
+  "version": "8.9.4",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "index - Masking - American Express Card - formats a number as 4-6-5 with any sort of whitespace",
+    "index - Masking - All Other Credit Cards - 19 digit cards format as 4-4-4-7",
+    "index - Masking - American Express Card - formats a number as 4-6-5",
+    "index - Masking - Diner Credit Cards - formats a number as 4-4-4-2",
+    "index - Masking - All Other Credit Cards - formats a number as 4-4-4-4",
+    "index - Masking - All Other Credit Cards - formats a number as 4-4-4-4 with any sort of whitespace",
+    "index - Masking - All Other Credit Cards - has a maximum length of 19",
+    "index - Masking - Diner Credit Cards - formats a number as 4-4-4-2 with any sort of whitespace",
+    "index - Masking - American Express Card - formats a number as 4-6-5 and trims to 15 digits"
+  ],
+  "PASS_TO_PASS": [
+    "index - Validation - Mastercard: range 51-55 - should return `mastercard` for 5100000000000000",
+    "index - Validation - American Express - should return `amex` for 378282246310005",
+    "index - Validation - Discover Card: starts with 6011, 64, 65 - should return `discover` for 6011000990139424",
+    "index - Validation - Mastercard: range 2221-2720 - should return `mastercard` for 2223003122003222",
+    "index - Validation - Mastercard: range 2221-2720 - should return `mastercard` for 2221000000000000",
+    "index - Validation - Mastercard: range 2221-2720 - should return `mastercard` for 2720990000000000",
+    "index - Validation - Other Brands - should return `unionpay` for 6240008631401148",
+    "index - Validation - Mastercard: range 51-55 - should not return mastercard for 5600000000000000",
+    "index - Validation - Other Brands - should return `jcb` for 3530111333300000",
+    "index - Validation - Other Brands - should return `diners` for 38520000023237",
+    "index - Validation - Discover Card: starts with 6011, 64, 65 - should return `discover` for 6445644564456445",
+    "index - Validation - American Express - should return `amex` for 370000000000002",
+    "index - Validation - Other Brands - should return `diners` for 30569309025904",
+    "index - Validation - Discover Card: starts with 6011, 64, 65 - should not return Discover for 622125",
+    "index - Validation - Mastercard: range 51-55 - should not return mastercard for 5099999999999999",
+    "index - Validation - Visa - should return `visa` for 4242424242424242",
+    "index - Validation - Mastercard: range 51-55 - should return `mastercard` for 5599000000000000",
+    "index - Validation - Visa - should return `visa` for 4000000400000008"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-22782:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Checkout: American Express credit card numbers aren't formatted correctly during checkout\n#### Steps to reproduce\r\n1. Starting at URL: https://wordpress.com/checkout/example.wordpress.com/personal\r\n2. Try to purchase a Personal plan on a your site\r\n3. In the checkout form, add an Amex number (instead of Visa or Mastercard)\r\n4. Note the expected format is visually incorrect, leading to confusion for customers trying to verify their card number before submitting it\r\n\r\n#### What I expected\r\nTo see American Express card number format respected: `1234 123456 12345`.\r\n\r\n#### What happened instead\r\nIt looks like we only format in groups of 4 for all card types, so an Amex number ends up displaying in the form field like this: `1234 1234 5612 345`\r\n\r\n#### Screenshot / Video\r\n<img width=\"768\" alt=\"screen shot 2018-01-29 at 08 24 04\" src=\"https://user-images.githubusercontent.com/66797/35518737-9d088bb6-04cf-11e8-9334-74b20dd2b6d7.png\">\r\n\r\n#### Context / Source\r\nSource: @m #flowsharing  via a friend of his in #reallife \r\n\n"
+}

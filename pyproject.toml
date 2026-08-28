@@ -79,7 +79,7 @@ benchmark = [
     "scipy>=1.13",
     "swebench>=4.1",
     "datasets>=3.0",
-    "mini-swe-agent>=2.4",
+    "mini-swe-agent>=2.4,<2.5",
     "orjson>=3.10",
 ]
 # `shunt inspect` renders diagnostic figures over the live outcome store. matplotlib

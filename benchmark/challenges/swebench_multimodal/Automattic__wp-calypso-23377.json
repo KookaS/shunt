@@ -1,0 +1,23 @@
+{
+  "instance_id": "Automattic__wp-calypso-23377",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "01c60033934bb2c7df5ac14e1153f7739696042e",
+  "version": "8.9.4",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "middleware - handlers - onPostSaveSuccess() - should dispatch success notice for trash",
+    "middleware - handlers - onPostSaveSuccess() - should dispatch success notice for publish"
+  ],
+  "PASS_TO_PASS": [
+    "middleware - handlers - onPostRestoreFailure() - should dispatch error notice with unknown title",
+    "middleware - handlers - onPostDeleteFailure() - should dispatch error notice with truncated title if known",
+    "middleware - handlers - onPostRestoreFailure() - should dispatch error notice with truncated title if known",
+    "middleware - noticesMiddleware() - should not trigger the observer when meta.notices.skip is set to true",
+    "middleware - handlers - onPostDeleteFailure() - should dispatch error notice with unknown title",
+    "middleware - handlers - onPostSaveSuccess() - should not dispatch if status has no corresponding text",
+    "middleware - noticesMiddleware() - should trigger the observer corresponding to the dispatched action type"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-23377:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Editor: Trashing a post immediately requests you to restore it\n\r\n\r\n#### Steps to reproduce\r\n1. Edit a post or page.\r\n2. In the editor settings (click the cog) there's a trash button at the button. Click it.\r\n3. You'll get a confirmation. Go ahead and confirm the trash.\r\n4. The confirmation will go away, and the trash button changes to say \"Trashing...\"\r\n5. A few seconds go by and the screen flashes, and then a restore dialog pops up telling you that you need to restore the post in order to edit it.\r\n\r\n#### What I expected\r\nAfter trashing the post, I expected to see a success message and an undo button. And at the very least, I'd expect to wind up somewhere other than the editor with a restore message.\r\n\r\n#### What happened instead\r\nI got a restore message with a primary action, that if I clicked, would just undo the trashing I did.\r\n\r\n#### Browser / OS version\r\nSafari, OS X latest\r\n\r\n#### Screenshot / Video\r\n![slice](https://user-images.githubusercontent.com/191598/33783581-5a521520-dc2b-11e7-8742-b150bb089aeb.png)\r\n\n"
+}

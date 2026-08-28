@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-11116",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "23e8f7d378a84dddd17d958a888ffff7f120c38c",
+  "version": "4.2",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Linear Scale Should not generate any ticks > max if max is specified "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-11116:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "A tick is sometimes rendered outside of the user-defined `max` axis limit when `includeBounds=false`\n### Expected behavior\r\n\r\nWhen `includeBounds` on the axis of a line chart is set to `false` and `min` and `max` of the axis are defined, there shouldn't be any ticks outside of the defined axis limits.\r\n\r\n### Current behavior\r\n\r\nIn some cases, a tick is created outside of the user-defined `max` axis limit. This especially happens with small axis limits (in my code sample: `min: 2.404e-8, max: 2.4141e-8`).\r\n\r\n### Reproducible sample\r\n\r\nhttps://codepen.io/CodingMarco/pen/vYadxqv\r\n\r\n### Optional extra steps/info to reproduce\r\n\r\n_No response_\r\n\r\n### Possible solution\r\n\r\nPlease see my proposed fix: https://github.com/CodingMarco/Chart.js/commit/1f1fd7971b4c05efb11fa3127ce1f2ea088c72bb.\r\nThis commit would fix the issue, however I'm looking for feedback if this is the correct way of fixing it.\r\nMaybe another option would be to fix the calculation of numSpaces, but I think the advantage of my proposed fix is that it works in all edge cases.\r\n\r\nAll currently existing tests run successfully with my fix.\r\n\r\n### Context\r\n\r\nWhen plotting eye diagrams commonly used to characterize digital signals, it looks very ugly if there is space next to the eye diagram (without the fix, see left image). With my proposed fix, it looks much better (see right image).\r\n<img src=\"https://user-images.githubusercontent.com/26282917/213943418-e08053cb-c5a2-456d-bb9d-29341dafb80d.png\" width=\"300\"> <img src=\"https://user-images.githubusercontent.com/26282917/213943502-215bcbc9-0dcf-4c57-8b08-a74af0cdf3a3.png\" width=\"300\">\r\n\r\n\r\n### chart.js version\r\n\r\nv4.2.0\r\n\r\n### Browser name and version\r\n\r\n_No response_\r\n\r\n### Link to your project\r\n\r\n_No response_\n"
+}

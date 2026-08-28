@@ -43,7 +43,7 @@
   <a href="https://kookas.github.io/shunt/"><img src="https://img.shields.io/badge/docs-kookas.github.io%2Fshunt-blue" alt="Docs"></a>
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License">
   <img src="https://img.shields.io/badge/status-pre--alpha-orange" alt="Status">
-  <img src="https://img.shields.io/badge/models-11%20across%202%20providers-blue" alt="Models">
+  <img src="https://img.shields.io/badge/models-7%20across%202%20providers-blue" alt="Models">
   <img src="https://img.shields.io/badge/telemetry-none-brightgreen" alt="Telemetry">
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs">
 </p>

@@ -1,0 +1,16 @@
+{
+  "instance_id": "markedjs__marked-2483",
+  "repo": "markedjs/marked",
+  "base_commit": "b01ae92d1a57cfda9f8dc82c11b152db3a77cc8d",
+  "version": "4.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "New fences_following_list should pass",
+    "New fences_with_blankline_following_list_0 should pass",
+    "New heading_following_list should pass"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.markedjs_1776_marked-2483:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "[BUG] The fenced code block that follows the list is strange.\n**Marked version:**\r\n4.0.16\r\n\r\n**Describe the bug**\r\nThe fenced code block that follows the list is strange.\r\nIf code block contains blankline, it is not judged as code block.\r\n\r\n**To Reproduce**\r\n\r\n![repro1](https://user-images.githubusercontent.com/80378/169825319-7f786584-0be3-4694-8962-530731a28ad0.png)\r\n\r\n[Marked Demo permalink](https://marked.js.org/demo/?outputType=html&text=-%20abc%0A%60%60%60ruby%0Aa%0A%0Ab%0A%60%60%60%0A&options=%7B%0A%20%22baseUrl%22%3A%20null%2C%0A%20%22breaks%22%3A%20false%2C%0A%20%22extensions%22%3A%20null%2C%0A%20%22gfm%22%3A%20true%2C%0A%20%22headerIds%22%3A%20true%2C%0A%20%22headerPrefix%22%3A%20%22%22%2C%0A%20%22highlight%22%3A%20null%2C%0A%20%22langPrefix%22%3A%20%22language-%22%2C%0A%20%22mangle%22%3A%20true%2C%0A%20%22pedantic%22%3A%20false%2C%0A%20%22sanitize%22%3A%20false%2C%0A%20%22sanitizer%22%3A%20null%2C%0A%20%22silent%22%3A%20false%2C%0A%20%22smartLists%22%3A%20false%2C%0A%20%22smartypants%22%3A%20false%2C%0A%20%22tokenizer%22%3A%20null%2C%0A%20%22walkTokens%22%3A%20null%2C%0A%20%22xhtml%22%3A%20false%0A%7D&version=4.0.16)\r\n\r\n[CommonMark Dingus permalink](https://spec.commonmark.org/dingus/?text=-%20abc%0A%60%60%60ruby%0Aa%0A%0Ab%0A%60%60%60%0A)\r\n\r\n----\r\n\r\n**If there is no blankline, no problem.**\r\n\r\n[Marked Demo permalink](https://marked.js.org/demo/?outputType=html&text=-%20abc%0A%60%60%60ruby%0Aa%0Ab%0A%60%60%60%0A&options=%7B%0A%20%22baseUrl%22%3A%20null%2C%0A%20%22breaks%22%3A%20false%2C%0A%20%22extensions%22%3A%20null%2C%0A%20%22gfm%22%3A%20true%2C%0A%20%22headerIds%22%3A%20true%2C%0A%20%22headerPrefix%22%3A%20%22%22%2C%0A%20%22highlight%22%3A%20null%2C%0A%20%22langPrefix%22%3A%20%22language-%22%2C%0A%20%22mangle%22%3A%20true%2C%0A%20%22pedantic%22%3A%20false%2C%0A%20%22sanitize%22%3A%20false%2C%0A%20%22sanitizer%22%3A%20null%2C%0A%20%22silent%22%3A%20false%2C%0A%20%22smartLists%22%3A%20false%2C%0A%20%22smartypants%22%3A%20false%2C%0A%20%22tokenizer%22%3A%20null%2C%0A%20%22walkTokens%22%3A%20null%2C%0A%20%22xhtml%22%3A%20false%0A%7D&version=4.0.16)\r\n\r\n**Expected behavior**\r\nFences that follow the list should ignore blank lines.\r\nI want the following HTML output.\r\n\r\n```html\r\n<ul>\r\n<li>abc<pre><code class=\"language-ruby\">a\r\n\r\nb\r\n</code></pre>\r\n</li>\r\n</ul>\r\n```\r\n\n"
+}

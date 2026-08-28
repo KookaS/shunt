@@ -1,0 +1,15 @@
+{
+  "instance_id": "markedjs__marked-2627",
+  "repo": "markedjs/marked",
+  "base_commit": "2c9728da0c36ba30ac91362bdcd93bdc63a1bd35",
+  "version": "4.1",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Lexer inline inlineTokens escaped punctuation inside emphasis",
+    "New escape_within_emphasis should pass"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.markedjs_1776_marked-2627:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Broken \"Strong\" transform\n**Marked version:** 4.0.1\r\n\r\n**Describe the bug**\r\nif inside bold text from the right border there is an escaped square open bracket and there is a closing brace behind \"**\", then bold text is not recognized\r\n\r\n**To Reproduce**\r\n\r\n1. [Marked Demo](https://marked.js.org/demo/?outputType=html&text=**strong%20text%5C%5B**%5C%5D&options=%7B%0A%20%22baseUrl%22%3A%20null%2C%0A%20%22breaks%22%3A%20true%2C%0A%20%22extensions%22%3A%20null%2C%0A%20%22gfm%22%3A%20true%2C%0A%20%22headerIds%22%3A%20false%2C%0A%20%22headerPrefix%22%3A%20%22%22%2C%0A%20%22highlight%22%3A%20null%2C%0A%20%22langPrefix%22%3A%20%22language-%22%2C%0A%20%22mangle%22%3A%20false%2C%0A%20%22pedantic%22%3A%20false%2C%0A%20%22sanitize%22%3A%20true%2C%0A%20%22sanitizer%22%3A%20null%2C%0A%20%22silent%22%3A%20false%2C%0A%20%22smartLists%22%3A%20true%2C%0A%20%22smartypants%22%3A%20true%2C%0A%20%22tokenizer%22%3A%20null%2C%0A%20%22walkTokens%22%3A%20null%2C%0A%20%22xhtml%22%3A%20true%0A%7D&version=4.0.1)\r\n2. [CommonMark Demo](https://spec.commonmark.org/dingus/?text=**strong%20text%5C%5B**%5C%5D)\r\n\r\n**Expected behavior**\r\n![image](https://user-images.githubusercontent.com/8930952/141372010-ef8bf7de-dff7-4c55-94f7-18357e69acf4.png)\r\n\n"
+}

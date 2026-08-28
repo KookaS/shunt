@@ -1,0 +1,25 @@
+{
+  "instance_id": "Automattic__wp-calypso-30240",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "fac839d3f39b142a7257510e46e7916def20f0ca",
+  "version": "10.14.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "<SiteInformation /> - should render",
+    "<SiteVerticalsSuggestionSearch /> - should render"
+  ],
+  "PASS_TO_PASS": [
+    "<SiteVerticalsSuggestionSearch /> - should pass an exact non-user vertical match to the `onChange` prop",
+    "<SiteVerticalsSuggestionSearch /> - sortSearchResults() - should not sort when no `startsWith` suggestions",
+    "<SiteVerticalsSuggestionSearch /> - sortSearchResults() - should return sorted results with `startsWith` matches at the start and exact match at the end",
+    "<SiteVerticalsSuggestionSearch /> - sortSearchResults() - should omit non-matchess",
+    "<SiteInformation /> - should call `updateStep()` from `handleInputChange()`",
+    "<SiteInformation /> - should call `submitStep()` from `handleSubmit()`",
+    "<SiteVerticalsSuggestionSearch /> - should cancel debounced invocations when the search value is falsey or has fewer chars than `props.charsToTriggerSearch`",
+    "<SiteInformation /> - should update field attributes based on the informationFields array values",
+    "<SiteVerticalsSuggestionSearch /> - should trigger search after > 1 characters and call `onChange` prop"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-30240:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Signup: Make input width consistent across steps\nWe have various steps in signup that show a single input with a button. I'd like to see us make all these inputs have the same max-width. The width of the `site-topic` input seems like a sane place to start \u2014\u00a0lets make all the other inputs that width.\r\n\r\n<img width=\"869\" alt=\"image\" src=\"https://user-images.githubusercontent.com/191598/51353429-a18bb580-1a7e-11e9-8907-ce25188067b0.png\">\r\n\n"
+}

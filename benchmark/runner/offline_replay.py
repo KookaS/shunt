@@ -236,11 +236,23 @@ def replay_snapshots(
 # ---------------------------------------------------------------------------
 
 
+def _as_shell_sequence(test_cmd: object) -> str:
+    """Join SWE-bench's two ``test_cmd`` shapes into one shell command."""
+    # Some JS repos (e.g. ``chartjs/Chart.js``) declare a LIST of setup-then-test commands
+    # where python repos declare a single string; swebench's own ``get_test_cmds`` normalises
+    # the same two shapes. ``str()`` on the list leaks a Python repr into the container.
+    if isinstance(test_cmd, str):
+        return test_cmd
+    if isinstance(test_cmd, list):
+        return " && ".join(str(part) for part in test_cmd)
+    raise TypeError(f"unsupported test_cmd shape {type(test_cmd)!r}")
+
+
 def swebench_test_command(repo: str, version: str) -> str:
     """The per-repo/version test command from SWE-bench's own spec map (django ≠ pytest)."""
     from swebench.harness.constants import MAP_REPO_VERSION_TO_SPECS  # noqa: PLC0415
 
-    return str(MAP_REPO_VERSION_TO_SPECS[repo][version]["test_cmd"])
+    return _as_shell_sequence(MAP_REPO_VERSION_TO_SPECS[repo][version]["test_cmd"])
 
 
 def swebench_test_directives(instance_id: str) -> list[str]:

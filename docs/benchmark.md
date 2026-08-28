@@ -36,16 +36,19 @@ tasks and would bias the baseline (see [the kill-gate and partial-coverage limit
 
 ## Challenge source
 
-The sole challenge source is **SWE-bench Verified** — real GitHub bug-fix tasks
-with human-verified test sets. Each task is a minimal spec under
-`benchmark/challenges/swebench_verified/{instance_id}.json` carrying the upstream
+The live benchmark uses **SWE-bench Verified** — real GitHub bug-fix tasks
+with human-verified test sets (500 instances across 12 Python repositories). A second
+store, **SWE-bench Multimodal** (102 instances in multiple languages), is committed
+but not wired to live runs. Each task is a minimal spec under
+`benchmark/challenges/<source>/{instance_id}.json` carrying the upstream
 `repo`, `base_commit`, `version`, `FAIL_TO_PASS` / `PASS_TO_PASS` test sets, a
 `difficulty_stratum`, an `image_ref`, and a pinned `dataset_revision`. Repo and
 patch content are pulled on demand by the official harness — nothing is vendored.
 The `problem_statement` handed to the agent is fetched from the dataset at run time;
 it is **also stored** in each spec and mirrored in every `tasks` entry of
-`routing/data/challenges.json` (backfilled 2026-08-05 from the pinned dataset
-revision), so `routing_text()` embeds the issue text rather than the `description`
+`routing/data/challenges.json` (swebench_verified, backfilled 2026-08-05 from the pinned
+dataset revision) or `routing/data/challenges_multimodal.json` (multimodal), so
+`routing_text()` embeds the issue text rather than the `description`
 label ([Results](results.md#routing-results)).
 
 The challenge suite is the full **500-instance** SWE-bench Verified set across 12

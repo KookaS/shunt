@@ -415,7 +415,7 @@
         "How much of the corpus exploration left un-probed is NOT drawn: the replay report carries aggregate decisions, not the per-(task, model) probe record that question needs.",
         "The two marginal pass-rate CIs overlap ([66%, 80%] vs [62%, 77%]) \u2014 at 143 paired tasks only the paired difference separates the arms",
         "NO FRONTIER ARM IN THIS SLICE: the dense sub-grid covers only deepseek-v4-flash, gpt-5-mini \u2014 the priciest model here is \\$2.25/Mtok against \\$18.00 across all enabled models (kimi-k3, zai-glm-5.2, kimi-k2.5, qwen3.7-plus are absent). The exploration overhead measured here is between CHEAP models and is a LOWER BOUND on the shipped policy's, where an exploratory pull can land on the frontier model",
-        "THE DROPPED BASELINE CELLS ARE NOT A RANDOM SAMPLE: all 31 unscorable exploit-only cells are qwen3.7-plus, a model outside the dense slice \u2014 so the exploit-only arm is systematically missing that model's tasks, not a random subset. The overhead is therefore reported PAIRED, over only the tasks both arms scored"
+        "THE DROPPED BASELINE CELLS ARE NOT A RANDOM SAMPLE: all 31 unscorable exploit-only cells are zai-glm-5.3-flash, a model outside the dense slice \u2014 so the exploit-only arm is systematically missing that model's tasks, not a random subset. The overhead is therefore reported PAIRED, over only the tasks both arms scored"
       ],
       "n": {
         "paired tasks": 143,

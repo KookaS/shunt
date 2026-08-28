@@ -1,0 +1,31 @@
+{
+  "instance_id": "Automattic__wp-calypso-23017",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "2a551f4bca5cc25baa9d2ac5cf5b2684ef4ee98c",
+  "version": "8.9.4",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "index - #subscribedWithinPastWeek - should return false when no subscribed date",
+    "index - #subscribedWithinPastWeek - should return true when subscribed less than 1 week ago",
+    "index - #subscribedWithinPastWeek - should return false when subscribed more than 1 week ago",
+    "index - #isPaidWithCredits - should false when not paid with credits",
+    "index - #isPaidWithCredits - should be true when paid with credits",
+    "index - #isPaidWithCredits - should be false when payment not set on purchase"
+  ],
+  "PASS_TO_PASS": [
+    "index - #isCancelable - should be cancelable when the purchase is refundable",
+    "index - #isCancelable - should not be cancelable if domain is pending transfer",
+    "index - #isRemovable - should not be removable when site redirect purchase is not expired",
+    "index - #isCancelable - should be cancelable when the purchase can have auto-renew disabled",
+    "index - #isRemovable - should be removable when domain registration purchase is expired",
+    "index - #isRemovable - should not be removable when domain registration purchase is not expired",
+    "index - #isCancelable - should not be cancelable when the purchase is included in a plan",
+    "index - #isRemovable - should not be removable when domain mapping purchase is not expired",
+    "index - #isCancelable - should not be cancelable when the purchase is expired",
+    "index - #isRemovable - should be removable when site redirect purchase is expired",
+    "index - #isRemovable - should be removable when domain mapping purchase is expired"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-23017:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Jetpack monthly plans show \"errors\" about expiring in a month\nWe offer Jetpack plans billed monthly, but in the Manage Purchases section of Calypso, they show up as if there's a problem, causing anxiety and concern for folks, when there's nothing actually wrong.\r\n\r\n![screen shot 2018-02-23 at 7 57 59 am](https://user-images.githubusercontent.com/108942/36600385-57b4073a-186f-11e8-806a-f05e603aae81.png)\r\n\r\nWe should reduce the severity of that notice, or possibly even just remove it entirely.\r\n\r\nNote: this might be because I am using credits on this purchase, so it cannot (currently) auto-renew. If that's the case, then we should make the message be more about having a billable payment method on file or something that makes a bit more contextual sense.\n"
+}

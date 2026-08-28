@@ -1,0 +1,30 @@
+{
+  "instance_id": "chartjs__Chart.js-9399",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "31be6100015fbca3b639bcd63f9d03b52f21e171",
+  "version": "3.4",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/baseLine/right.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/borderRadius/border-radius.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/horizontal-borders.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/borderWidth/indexable.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/bar-base-value.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/borderWidth/value.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/baseLine/value-x.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/borderWidth/object.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/borderRadius/border-radius-stacked-number-with-order.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/baseLine/mid-x.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/baseLine/value-y.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/baseLine/left.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/borderRadius/border-radius-stacked-number-mixed-chart.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/baseLine/bottom.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/baseLine/top.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/baseLine/mid-y.js ",
+    "Chart.controllers.bar auto /base/test/fixtures/controller.bar/borderRadius/border-radius-stacked-number.js "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-9399:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Bar chart \"categoryPercentage: 1\" and \"barPercentage: 1\" are not really 100% width\n## Expected Behavior\r\nBars should have 100% width without any empty space or borders between them.\r\nLike here: https://chartio.com/images/tutorials/charts/histograms/histogram-example-1.png\r\n\r\n## Current Behavior\r\nBars have empty space or borders between them, and not same between each bar\r\n\r\n## Steps to Reproduce\r\nhttps://codepen.io/gagrison/pen/NWjrEMq\r\n\r\n## Context\r\nI'm trying to make histogram chart with connected bars like here:\r\nhttps://chartio.com/images/tutorials/charts/histograms/histogram-example-1.png\r\n\r\n## Environment\r\n\r\n* Chart.js version: 3.4.0\r\n* Browser name and version: Chrome 91.0.4472.114\r\n* Link to your project: https://codepen.io/gagrison/pen/NWjrEMq\r\n\n"
+}

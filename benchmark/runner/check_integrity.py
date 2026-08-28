@@ -153,9 +153,12 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> int:
     config.load(args.config)
 
     cache = config.load_results()
-    # SWE-bench Verified is the sole challenge source: a cell's version_hash is the
-    # content hash of its instance spec (base_commit + F2P/P2P + provenance).
-    hashes = integrity.swebench_spec_hashes()
+    # A cell's version_hash is the content hash of its instance spec (base_commit +
+    # F2P/P2P + provenance), read from the store the CONFIGURED manifest declares —
+    # gating a multimodal cache against the Verified store would report every cell removed.
+    source = swebench_specs.manifest_source()
+    spec_module = swebench_specs.spec_module_for(source)
+    hashes = integrity.all_hashes(source)
 
     removed, changed = check_hashes(cache, hashes)
 
@@ -169,7 +172,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> int:
 
     image_drift: list[tuple[str, str, str, str]] = []
     if args.check_images:
-        refs = swebench_specs.spec_image_refs(sorted(cache.keys()))
+        refs = spec_module.spec_image_refs(sorted(cache.keys()))
         image_drift = check_image_digests(cache, image_version.resolve_spec_digests(refs))
 
     derived: list[str] = []

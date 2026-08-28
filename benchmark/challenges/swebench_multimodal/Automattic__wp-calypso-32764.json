@@ -1,0 +1,24 @@
+{
+  "instance_id": "Automattic__wp-calypso-32764",
+  "repo": "Automattic/wp-calypso",
+  "base_commit": "f6bd966b656c4c84ea0aebcdd341f601cd8cc292",
+  "version": "10.15.2",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "PendingPayments - Non empty list - Main.pending-payments Connect(Localized(PurchasesHeader))[section=\"pending\"]",
+    "PendingPayments - Loading Placeholder - Main.pending-payments Connect(Localized(PurchasesHeader))[section=\"pending\"]",
+    "PendingPayments - Empty placeholder - Main.pending-payments Connect(Localized(PurchasesHeader))[section=\"pending\"]"
+  ],
+  "PASS_TO_PASS": [
+    "PendingPayments - Loading Placeholder - Main.pending-payments Localized(MeSidebarNavigation)",
+    "PendingPayments - Empty placeholder - Main.pending-payments Localized(MeSidebarNavigation)",
+    "PendingPayments - Non empty list - Main.pending-payments Localized(MeSidebarNavigation)",
+    "PendingPayments requestId - returns the same requestId on multiple calls",
+    "PendingPayments - Non empty list - Main.pending-payments Connect(Localized(PendingListItem))",
+    "PendingPayments - Loading Placeholder - Connect(PurchasesSite)[isPlaceholder=true]",
+    "PendingPayments - Empty placeholder - .pending-payments .pending-payments__no-content EmptyContent"
+  ],
+  "image_ref": "swebench/sweb.eval.x86_64.automattic_1776_wp-calypso-32764:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Billing: Move upcoming charges to a separate tab\n<img width=\"851\" alt=\"Screenshot_2019-03-06_at_12 47 18\" src=\"https://user-images.githubusercontent.com/2124984/56368778-1d081a80-61c6-11e9-9019-4ea367451580.png\">\r\n\r\nThe upcoming charges section feels tacked on in its current state. It makes more sense to put it under Pending Payments, or perhaps an Upcoming Charges tab of its own. \n"
+}

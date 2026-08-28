@@ -3492,7 +3492,7 @@ requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.112" },
     { name = "matplotlib", marker = "extra == 'benchmark'", specifier = ">=3.9" },
     { name = "matplotlib", marker = "extra == 'inspect'", specifier = ">=3.9" },
-    { name = "mini-swe-agent", marker = "extra == 'benchmark'", specifier = ">=2.4" },
+    { name = "mini-swe-agent", marker = "extra == 'benchmark'", specifier = ">=2.4,<2.5" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },

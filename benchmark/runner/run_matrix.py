@@ -42,6 +42,7 @@ _KEY_ENV: Final[tuple[str, ...]] = (
     "XAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
 )
 
 
@@ -1252,7 +1253,12 @@ def _parse_cells(raw: str) -> list[tuple[str, str, str]]:
 def _run_full(args: argparse.Namespace) -> int:
     """Exhaustive matrix: classify every enabled model x sampled challenge, run+merge when live."""
     matrix = config.load_matrix(config.challenges_path())
-    hashes = integrity.all_hashes()
+    # The configured manifest's `source` names which challenge store + spec module back
+    # the run (verified default; the multimodal companion for challenges_multimodal.json).
+    # Verified configs resolve to the same module + store as before, so nothing changes there.
+    source = swebench_specs.manifest_source()
+    spec_module = swebench_specs.spec_module_for(source)
+    hashes = integrity.all_hashes(source)
     versions = integrity.model_versions()
     models = config.enabled_models()
     cache = config.load_results()
@@ -1266,7 +1272,7 @@ def _run_full(args: argparse.Namespace) -> int:
     # returns None anyway, and on a fresh collection the digest only anchors drift for RE-runs.
     # None ⇒ image axis skipped, never stale.
     digests = (
-        image_version.resolve_spec_digests(swebench_specs.spec_image_refs(tasks))
+        image_version.resolve_spec_digests(spec_module.spec_image_refs(tasks))
         if args.check_images
         else None
     )

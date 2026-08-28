@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-8868",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "ba84cc5c2aaf500739b202702fac24da74ede50d",
+  "version": "3.0",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Core.scale auto /base/test/fixtures/core.scale/x-axis-position-dynamic.json "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-8868:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Custom scale position label cutoff\n## Expected Behavior\r\n\r\nThe labels should be visable as is the case with the labels on the vertical axes which also come out of the chart area\r\nThere should not get an extra horizontal line be drawn\r\n\r\n## Current Behavior\r\n\r\nthe first and last horizontal labels are getting cut off\r\n\r\n## Possible Solution\r\n\r\n\r\n## Steps to Reproduce\r\nhttps://www.chartjs.org/docs/master/samples/scale-options/center.html (the custom x and y position option)\r\n\r\n## Context\r\n\r\n\r\n## Environment\r\n\r\n* Chart.js version: chart.js 3.0.2\r\n* Browser name and version:\r\n* Link to your project:\r\n\n"
+}

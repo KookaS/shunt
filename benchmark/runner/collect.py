@@ -22,6 +22,7 @@ import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from types import ModuleType
 
 from benchmark import config
 from benchmark.routing import integrity
@@ -119,14 +120,16 @@ def _write_manifest(
     path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
 
 
-def _resolve_digests(tasks: list[str], check_images: bool) -> dict[str, str | None] | None:
+def _resolve_digests(
+    tasks: list[str], check_images: bool, spec_module: ModuleType | None = None
+) -> dict[str, str | None] | None:
     # A registry `imagetools inspect` per image — 429s on the swebench namespace and defeats
     # GHCR pre-staging, so opt-in via --check-images, NOT forced by --live (a failed resolve
     # returns None, and on a fresh collection the digest only anchors drift for RE-runs).
+    # ``spec_module`` names which store's image refs to resolve (default: Verified).
+    module = spec_module if spec_module is not None else swebench_specs
     return (
-        image_version.resolve_spec_digests(swebench_specs.spec_image_refs(tasks))
-        if check_images
-        else None
+        image_version.resolve_spec_digests(module.spec_image_refs(tasks)) if check_images else None
     )
 
 
@@ -156,7 +159,9 @@ def run_collect(
         print(f"  REFUSING: audit_salt aliases the calibration holdout salt {DEFAULT_SALT!r}.")
         return 2
 
-    hashes = integrity.all_hashes()
+    source = swebench_specs.manifest_source()
+    spec_module = swebench_specs.spec_module_for(source)
+    hashes = integrity.all_hashes(source)
     versions = integrity.model_versions()
     tasks = config.sample_tasks(
         sorted(hashes.keys()), seed=config.benchmark_params().get("seed", 42)
@@ -180,7 +185,7 @@ def run_collect(
     if preflight_refuses(live):
         return 2
 
-    digests = _resolve_digests(tasks, check_images)
+    digests = _resolve_digests(tasks, check_images, spec_module)
     results_path = config.results_csv_path()
     budget_a = knobs.get("budget_phase_a") or max_cost
     budget_c = knobs.get("budget_phase_c") or max_cost

@@ -1,0 +1,14 @@
+{
+  "instance_id": "chartjs__Chart.js-10301",
+  "repo": "chartjs/Chart.js",
+  "base_commit": "5c3dc932b615afa61580d06950712f79cfc7c4ef",
+  "version": "3.7",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "Legend block tests callbacks should call onLeave when the mouse leaves the canvas "
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.chartjs_1776_chart.js-10301:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Legend event onLeave\n### Expected behavior\n\nWhen I place the mouse outside the legend I expect the onLeave event to be called all the time.\n\n### Current behavior\n\nIn the example at https://www.chartjs.org/docs/latest/samples/legend/events.html you can hover over a legend. If you quickly place the mouse outside the chart, content sometimes are highlight anyway due to onLeave isn't called.\r\n\r\nOn this image you can see that red are still highlighted, although the cursor are outside:\r\n![image](https://user-images.githubusercontent.com/58777964/157239796-95ccabbb-7ac1-4e58-89ca-c902b1df0dfe.png)\r\n\r\nI added a console.log to the onHover and onLeave handler in the example and received this when the cursor is outside the the chart but the color are still highlighted:\r\n![image](https://user-images.githubusercontent.com/58777964/157240018-395c6e62-d8e3-431f-8926-7644d5441078.png)\n\n### Reproducible sample\n\nhttps://codesandbox.io/s/react-chartjs-2-chart-js-issue-template-forked-3kw5p0?file=/src/App.tsx\n\n### Optional extra steps/info to reproduce\n\nDrag the mouse between one of the legends and then up to the next. The problem occurs perhaps 1/10 times\r\n\r\n![image](https://user-images.githubusercontent.com/58777964/157241538-f55bf466-916f-4763-b0ea-ef78ef847127.png)\r\n\n\n### Possible solution\n\nWhile trying to find a fix for this, I played around with attaching a mouseout event, it worked better but I had problem cleaning up the eventlistener.\n\n### Context\n\n_No response_\n\n### chart.js version\n\nv3.7.1\n\n### Browser name and version\n\n_No response_\n\n### Link to your project\n\n_No response_\n"
+}

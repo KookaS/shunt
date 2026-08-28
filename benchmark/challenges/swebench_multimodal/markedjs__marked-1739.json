@@ -1,0 +1,14 @@
+{
+  "instance_id": "markedjs__marked-1739",
+  "repo": "markedjs/marked",
+  "base_commit": "a9384eea7ae8bea6ef8a95470b315c73fdb3c189",
+  "version": "1.1",
+  "difficulty_stratum": "unknown",
+  "FAIL_TO_PASS": [
+    "New html_comments should pass"
+  ],
+  "PASS_TO_PASS": [],
+  "image_ref": "swebench/sweb.eval.x86_64.markedjs_1776_marked-1739:latest",
+  "dataset_revision": "aa2db68940196b6b59ae3f577faa0c25157bdd50",
+  "problem_statement": "Comments aren't  fully supported\n**Describe the bug**\r\nThe last version (1.1.1) doesn't fully supports comments. See screenshots:\r\nGithub:\r\n![image](https://user-images.githubusercontent.com/6815714/89559434-55e65b80-d81e-11ea-9edb-601f95808607.png)\r\n![image](https://user-images.githubusercontent.com/6815714/89559455-5d0d6980-d81e-11ea-9dd1-ed9e44f10fc5.png)\r\nMarked:\r\n![image](https://user-images.githubusercontent.com/6815714/89559506-6c8cb280-d81e-11ea-8113-f28488efb488.png)\r\n\r\nSupported:\r\n```\r\n\r\n```\r\n\r\nNot supported:\r\n```\r\n\r\n\r\n\r\n\r\n\r\n\r\n**Expected behavior**\r\nComments with `--!>` at the ending are supported.\nComments aren't  fully supported\n**Describe the bug**\r\nThe last version (1.1.1) doesn't fully supports comments. See screenshots:\r\nGithub:\r\n![image](https://user-images.githubusercontent.com/6815714/89559434-55e65b80-d81e-11ea-9edb-601f95808607.png)\r\n![image](https://user-images.githubusercontent.com/6815714/89559455-5d0d6980-d81e-11ea-9dd1-ed9e44f10fc5.png)\r\nMarked:\r\n![image](https://user-images.githubusercontent.com/6815714/89559506-6c8cb280-d81e-11ea-8113-f28488efb488.png)\r\n\r\nSupported:\r\n```\r\n\r\n```\r\n\r\nNot supported:\r\n```\r\n\r\n\r\n\r\n\r\n\r\n\r\n**Expected behavior**\r\nComments with `--!>` at the ending are supported.\n"
+}

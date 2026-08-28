@@ -29,7 +29,9 @@ benchmark/
   README.md                               Model-capability benchmark overview
   benchmark.yaml                          Enabled models, strategies, and run settings
 
-  challenges/swebench_verified/           Instance specs (the sole challenge source)
+  challenges/
+    swebench_verified/                    Instance specs (500 instances, live benchmark source)
+    swebench_multimodal/                  Instance specs (102 instances, committed store, not wired to live runs)
 
   validate_results.py                     Pre-analysis data-integrity gate (fail closed, exits nonzero on ERROR)
   cost_reconcile.py                       Reconcile tracked real_cost vs owner-billed bill; cross-check + accounting-hole scan (exits nonzero on alarm)

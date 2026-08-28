@@ -1980,8 +1980,8 @@
       "join": {
         "join_rate": 1.0,
         "n_joined": 822,
-        "n_result_rows": 1224,
-        "n_result_rows_with_real_cost": 1224,
+        "n_result_rows": 1265,
+        "n_result_rows_with_real_cost": 1265,
         "n_sessions": 822
       },
       "source": "benchmark/routing/results.csv real_cost (provider-billed)"
