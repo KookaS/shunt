@@ -1,6 +1,6 @@
 """Adversarial stress-tests for the (challenge, model, reasoning-arm) outcome cache."""
 
-# Ruthlessly probes the (challenge_id, model, reasoning) 3-tuple key, the
+# Ruthlessly probes the (challenge_id, model, reasoning, rep) key, the
 # arm_hash staleness anchor, legacy "default" aliasing, and select_arms
 # determinism — the benchmark's "never recompute a paid cell / never
 # double-spend" guarantee. Offline, deterministic.
@@ -68,7 +68,7 @@ def _bracket(default_arm: str, *ranked_ids: str) -> ReasoningConfig:
 
 
 # ---------------------------------------------------------------------------
-# Case 1 — run-twice-zero-recompute on the 3-tuple (proper arm_hash stamped).
+# Case 1 — run-twice-zero-recompute on the cache key (proper arm_hash stamped).
 # ---------------------------------------------------------------------------
 
 
@@ -125,7 +125,9 @@ class TestArmCollisionNoOverwrite:
         k_high = run_matrix._row_key({"challenge_id": "c1", "model": "m", "reasoning": "high"})
         k_none = run_matrix._row_key({"challenge_id": "c1", "model": "m", "reasoning": "none"})
         assert k_high != k_none
-        assert k_high == ("c1", "m", "high")
+        # The key gained a REPLICATE index; an absent `rep` normalises to 0 so a legacy row
+        # and a freshly written first observation still name the same cell.
+        assert k_high == ("c1", "m", "high", 0)
 
 
 # ---------------------------------------------------------------------------
@@ -355,18 +357,19 @@ class TestEdgeCases:
         arms = sampling.select_arms(cid, "deepseek-v4-flash", bracket, [0.5])
         assert "high" in arms
 
-    def test_csv_round_trip_preserves_three_tuple_and_arm_hash(self, tmp_path):
+    def test_csv_round_trip_preserves_the_key_tuple_and_arm_hash(self, tmp_path):
         arm_map = _arm_map()
         res = tmp_path / "results.csv"
         rows = [_row("high", arm_map), _row("none", arm_map)]
         run_matrix.merge_rows(rows, res, tmp_path / "h.csv")
         raw = run_matrix._read_raw_rows(res)
+        # Four-tuple since the replicate axis landed; both rows are first observations (rep 0).
         assert set(raw) == {
-            ("c1", "deepseek-v4-flash", "high"),
-            ("c1", "deepseek-v4-flash", "none"),
+            ("c1", "deepseek-v4-flash", "high", 0),
+            ("c1", "deepseek-v4-flash", "none", 0),
         }
         assert (
-            raw[("c1", "deepseek-v4-flash", "high")]["arm_hash"]
+            raw[("c1", "deepseek-v4-flash", "high", 0)]["arm_hash"]
             == arm_map["deepseek-v4-flash"]["high"]
         )
 

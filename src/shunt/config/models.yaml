@@ -39,6 +39,15 @@ providers:
 # provider, NOT a pricing field): a genuine provider model change is a NEW registry
 # id, and `version` is the opt-in "force re-run under the same id" staleness key —
 # required once a model is priced.
+#
+# `serving_mode` (hosted|local) and the optional `size` block are the two axes the model-grid
+# figure draws. `size` mirrors `pricing`'s provenance discipline — `size_source` + `size_as_of`
+# — because a parameter count on a published figure is a claim like any other. A closed model
+# whose vendor publishes nothing carries the literal `UNDISCLOSED`, never a null and never a
+# third-party estimate: the absence IS the finding, and an invented count would be committed
+# fiction. `active_params` is a COMPUTE claim (what a token decodes through) and equals
+# `total_params` on a dense model; it is never a memory claim — a 284B/13B MoE still needs all
+# 284B resident.
 models:
   qwen3.7-plus:
     model_id: alibaba/qwen3.7-plus
@@ -46,6 +55,7 @@ models:
     version: qwen3.7-plus
     supports_streaming: true
     supports_cache_control: false
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 0.32
       output_cost_per_1m: 1.28
@@ -55,6 +65,12 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"
       price_note: Requesty router listing (qwen3.7-plus, alibaba). $0.40/M cache-write, $0.032/M cache-read.
+    size:
+      total_params: UNDISCLOSED
+      active_params: UNDISCLOSED
+      size_source: https://www.alibabacloud.com/help/en/model-studio/models
+      size_as_of: "2026-08-29"
+      size_note: "Closed API tier. Alibaba publishes parameter counts for its open Qwen3 weight releases but not for the Plus API tier; no vendor figure exists to cite."
     # Bracket: realizable {none,low,med,high} dedupes to {none,high}.
     # `default_arm: nothink` (NOT think) on purpose: the effort-escalation ladder
     # (`effort_then_rank`) steps the SAME model's reasoning arm first because that rung is
@@ -78,6 +94,7 @@ models:
     version: deepseek-v4-flash
     supports_streaming: true
     supports_cache_control: false
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 0.14
       output_cost_per_1m: 0.28
@@ -86,6 +103,12 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"
       price_note: Requesty router listing; paid directly via the DeepSeek API. $0.0028/M cache-read.
+    size:
+      total_params: 284000000000
+      active_params: 13000000000
+      size_source: https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash
+      size_as_of: "2026-08-29"
+      size_note: "Model card spec table: #Total Params 284B, #Activated Params 13B. The repo's safetensors index totals 290,944,616,402 under a wider convention that counts embeddings and the MTP head; the vendor headline is what is committed."
     # Bracket: realizable {none,high,max} — low/med alias to high on DeepSeek and
     # are excluded (would create duplicate bandit arms scoring identically).
     reasoning:
@@ -106,6 +129,7 @@ models:
     version: gpt-5-mini
     supports_streaming: true
     supports_cache_control: false
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 0.25
       output_cost_per_1m: 2.0
@@ -119,6 +143,12 @@ models:
         but has NO cache-read price (resends full context at full input price every turn — a
         budget bomb). Chosen from a different provider than the existing qwen3.7-plus for pool
         diversity.
+    size:
+      total_params: UNDISCLOSED
+      active_params: UNDISCLOSED
+      size_source: https://platform.openai.com/docs/models
+      size_as_of: "2026-08-29"
+      size_note: "OpenAI publishes no parameter count for any GPT-5 tier. The figures that circulate third-hand are speculation and are deliberately not carried here."
     # Bracket: realizable {minimal,low,med,high} dedupes to {minimal,medium,high}
     # — no true off; minimal is the floor.
     reasoning:
@@ -139,6 +169,7 @@ models:
     version: glm-5.2
     supports_streaming: true
     supports_cache_control: true
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 1.4
       output_cost_per_1m: 4.4
@@ -147,6 +178,12 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-16"
       price_note: Requesty router listing (fireworks/glm-5.2). $0.14/M cache-read (live catalog; was 0.260, corrected 2026-07-16).
+    size:
+      total_params: 753000000000
+      active_params: 40000000000
+      size_source: https://huggingface.co/nvidia/GLM-5.2-NVFP4
+      size_as_of: "2026-08-29"
+      size_note: "zai-org's own card publishes no parameter count. NVIDIA's NVFP4 conversion card states 753B total / 40B activated, and matches the zai-org/GLM-5.2 safetensors index (753,329,940,480) to 0.04%."
     # Bracket: realizable {none,low,med,high} dedupes to {none,high}.
     # `default_arm: nothink` for the effort-ladder's cache-safe rung — see qwen3.7-plus.
     reasoning:
@@ -164,6 +201,7 @@ models:
     version: kimi-k2.5
     supports_streaming: true
     supports_cache_control: false
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 0.6
       output_cost_per_1m: 3.0
@@ -172,6 +210,12 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"
       price_note: Requesty router listing (kimi-k2.5, moonshot). $0.100/M cache-read.
+    size:
+      total_params: 1000000000000
+      active_params: 32000000000
+      size_source: https://huggingface.co/moonshotai/Kimi-K2.5
+      size_as_of: "2026-08-29"
+      size_note: "Model card spec table (384 experts, 8 selected + 1 shared); safetensors index 1,026,879,376,368."
     # Bracket: realizable {off,on} — binary, no effort gradation.
     # `default_arm: nothink` for the effort-ladder's cache-safe rung — see qwen3.7-plus.
     reasoning:
@@ -191,6 +235,7 @@ models:
     # Conservative: mirrors kimi-k2.5 (same provider/family). Not verified against
     # a live response — sending unsupported cache_control breakpoints risks a 400.
     supports_cache_control: false
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 3.0
       output_cost_per_1m: 15.0
@@ -203,6 +248,12 @@ models:
         $0.30/M cache-read, 1M context. The cheapest-frontier model, and the benchmark's
         kill-gate control baseline (claude-opus-4-6 is enabled:false in the benchmark; it
         stays in the router registry as the top escalation target).
+    size:
+      total_params: 2800000000000
+      active_params: 104000000000
+      size_source: https://huggingface.co/moonshotai/Kimi-K3
+      size_as_of: "2026-08-29"
+      size_note: "Model card spec table (93 layers, 16 of 896 routed experts per token); safetensors index 2,779,931,837,184 corroborates. Aggregators quoting 32B active have carried K2.5's figure across \u2014 that number is a citation error, not a second source."
     # Bracket: realizable {max} — always-on; bracket collapses to a single arm.
     reasoning:
       default_arm: max
@@ -216,6 +267,7 @@ models:
     version: gemini-3.1-pro
     supports_streaming: true
     supports_cache_control: false
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 2.0
       output_cost_per_1m: 12.0
@@ -227,6 +279,12 @@ models:
         RESEARCH-ESTIMATED (Artificial Analysis, 2026-07-19), NOT a live Requesty
         listing. Google length-tiered pricing: ≤200K-context tier ($2/$4 in,
         $12/$18 out above 200K). Benchmark-DISABLED (omitted from benchmark/benchmark.yaml).
+    size:
+      total_params: UNDISCLOSED
+      active_params: UNDISCLOSED
+      size_source: https://ai.google.dev/gemini-api/docs/models
+      size_as_of: "2026-08-29"
+      size_note: "Google publishes no parameter count for the Gemini API tiers."
     # reasoning_effort is the portable OpenAI-compatible knob requesty's `openai/`
     # driver passes through; Gemini's native `thinking_level` risks a 400 there.
     # UNVERIFIED against a live response — smoke-test before relying on it.
@@ -251,6 +309,7 @@ models:
     version: gpt-5.6-sol
     supports_streaming: true
     supports_cache_control: false
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 2.5
       output_cost_per_1m: 15.0
@@ -264,6 +323,12 @@ models:
         2x. OpenAI first-party; automatic caching (no explicit breakpoints, so
         supports_cache_control:false like gpt-5-mini). Also used as a judge since
         2026-08-25 (judge_probe.py); remains a served router model.
+    size:
+      total_params: UNDISCLOSED
+      active_params: UNDISCLOSED
+      size_source: https://platform.openai.com/docs/models
+      size_as_of: "2026-08-29"
+      size_note: "OpenAI publishes no parameter count for any GPT-5 tier."
     reasoning:
       default_arm: medium
       arms:
@@ -288,6 +353,7 @@ models:
     version: gpt-5.6-terra
     supports_streaming: true
     supports_cache_control: false
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 1.0
       output_cost_per_1m: 6.0
@@ -299,12 +365,19 @@ models:
         LIVE REQUESTY CATALOG LISTING (verified 2026-08-26). OpenAI first-party;
         automatic caching (no explicit breakpoints, so supports_cache_control:false
         like gpt-5-mini). Judge-only candidate, never a routing model.
+    size:
+      total_params: UNDISCLOSED
+      active_params: UNDISCLOSED
+      size_source: https://platform.openai.com/docs/models
+      size_as_of: "2026-08-29"
+      size_note: "OpenAI publishes no parameter count for any GPT-5 tier."
   claude-fable-5:
     model_id: anthropic/claude-fable-5
     provider: requesty
     version: claude-fable-5
     supports_streaming: true
     supports_cache_control: true
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 10.0
       output_cost_per_1m: 50.0
@@ -317,6 +390,12 @@ models:
         RESEARCH-ESTIMATED (Artificial Analysis, 2026-07-19), NOT a live Requesty
         listing. Above-Opus "Fable" tier; SWE-bench Verified ~95%. Anthropic
         cache-write = 1.25x input. Adaptive reasoning always-on. Benchmark-DISABLED.
+    size:
+      total_params: UNDISCLOSED
+      active_params: UNDISCLOSED
+      size_source: https://docs.anthropic.com/en/docs/about-claude/models/overview
+      size_as_of: "2026-08-29"
+      size_note: "Anthropic publishes no parameter counts."
     reasoning:
       default_arm: think
       arms:
@@ -329,6 +408,7 @@ models:
     version: claude-opus-4-8
     supports_streaming: true
     supports_cache_control: true
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 5.0
       output_cost_per_1m: 25.0
@@ -341,6 +421,12 @@ models:
         RESEARCH-ESTIMATED (Artificial Analysis, 2026-07-19), NOT a live Requesty
         listing. SWE-bench Verified ~88.6%; same headline pricing as opus-4-6.
         Benchmark-DISABLED.
+    size:
+      total_params: UNDISCLOSED
+      active_params: UNDISCLOSED
+      size_source: https://docs.anthropic.com/en/docs/about-claude/models/overview
+      size_as_of: "2026-08-29"
+      size_note: "Anthropic publishes no parameter counts."
     reasoning:
       default_arm: nothink
       arms:
@@ -359,6 +445,7 @@ models:
     version: claude-opus-4-6
     supports_streaming: true
     supports_cache_control: true
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 5.0
       output_cost_per_1m: 25.0
@@ -368,6 +455,12 @@ models:
       price_source: https://requesty.ai/router
       price_as_of: "2026-07-15"
       price_note: Requesty router listing (claude-opus-4-6, anthropic). $6.25/M cache-write, $0.500/M cache-read.
+    size:
+      total_params: UNDISCLOSED
+      active_params: UNDISCLOSED
+      size_source: https://docs.anthropic.com/en/docs/about-claude/models/overview
+      size_as_of: "2026-08-29"
+      size_note: "Anthropic publishes no parameter counts."
     # Bracket: realizable {none,low,med,high,max} dedupes to {none,high,max} —
     # off by default; added for completeness (benchmark-disabled, see benchmark/benchmark.yaml).
     reasoning:
@@ -393,6 +486,7 @@ models:
     version: claude-sonnet-5
     supports_streaming: true
     supports_cache_control: true
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 2.0
       output_cost_per_1m: 10.0
@@ -404,12 +498,19 @@ models:
         LIVE REQUESTY CATALOG LISTING (verified 2026-08-26). Anthropic first-party;
         used only as a judge (judge_probe.py anchor before gpt-5.6-terra replaced it
         as the knn_difficulty label source).
+    size:
+      total_params: UNDISCLOSED
+      active_params: UNDISCLOSED
+      size_source: https://docs.anthropic.com/en/docs/about-claude/models/overview
+      size_as_of: "2026-08-29"
+      size_note: "Anthropic publishes no parameter counts."
   zai-glm-5.3-flash:
     model_id: z-ai/glm-5.3-flash
     provider: openrouter
     version: glm-5.3-flash
     supports_streaming: true
     supports_cache_control: false
+    serving_mode: hosted
     pricing:
       input_cost_per_1m: 0.15
       output_cost_per_1m: 0.50
@@ -426,3 +527,9 @@ models:
         the earlier Aug 20-26 $0 free window and carry a true real_cost of 0 —
         they are held valid by the dated free-window exemption in
         benchmark/routing/validate.py, NOT by pricing this model at $0.
+    size:
+      total_params: 320000000000
+      active_params: 18000000000
+      size_source: https://huggingface.co/zai-org/GLM-5.3-Flash
+      size_as_of: "2026-08-29"
+      size_note: "Model card introduction: 320B total parameters, 18B active; safetensors index 321,323,031,390."

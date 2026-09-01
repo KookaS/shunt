@@ -8,6 +8,7 @@ from typing import Final
 import pytest
 
 from benchmark import config
+from benchmark.routing.strategies import BilledAttempt
 from benchmark.routing.strategies.fixed import AlwaysCheap, AlwaysFrontier
 from benchmark.routing.summary import (
     complete_scored_matrix,
@@ -202,3 +203,52 @@ def test_drop_unsolvable_removes_dead_tasks(_cfg, monkeypatch: pytest.MonkeyPatc
     assert im is not None
     assert "dead" in im.complete and im.tau["dead"] is None
     assert "dead" not in completed["results"]  # dropped under drop_unsolvable
+
+
+class TestAnImputedCellIsNotCountedAsZeroWork:
+    """An unrun cell has no calls and no tokens — it must contribute NOTHING, never a 0."""
+
+    #
+    # THE DEFECT THIS PINS. `ImputedCell.to_cell` writes no `calls`/`in_tok`/`out_tok`, and both
+    # `BilledAttempt` constructors read them through `int(... or 0)`. `TotalCalls` and
+    # `TotalOutTok` were therefore measured-subset sums published and RANKED as corpus totals,
+    # deflated in proportion to how much each strategy imputed — unevenly, which is what made a
+    # Pareto ranking on them wrong rather than merely low. On the shipped matrix that put
+    # Always-Frontier on the calls and output-token frontiers on the strength of cells nobody
+    # ran. `counted_n` and the per-task rates are the honest form; this asserts they exist and
+    # that the counted subset really does exclude the imputed paths.
+
+    def test_the_counted_subset_excludes_a_task_whose_path_was_imputed(self) -> None:
+        from benchmark.routing.summary import _counted_tasks
+
+        # t_measured carries counts; t_imputed is an imputed cell (no `calls` key at all).
+        matrix = {
+            "results": {
+                "t_measured": {"m": {"pass": True, "cost": 1.0, "calls": 7, "out_tok": 11}},
+                "t_imputed": {"m": {"pass": True, "cost": 1.0, "imputed": True}},
+            }
+        }
+        decisions = [("t_measured", "m", True, 1.0), ("t_imputed", "m", True, 1.0)]
+        attempts = {
+            "t_measured": [BilledAttempt(model="m", cost=1.0, calls=7, out_tok=11)],
+            # The zero-coerced attempt the constructor really builds for an imputed cell.
+            "t_imputed": [BilledAttempt(model="m", cost=1.0, calls=0, out_tok=0)],
+        }
+        assert _counted_tasks(decisions, attempts, matrix) == ["t_measured"]
+
+    def test_a_row_publishes_its_counted_coverage_and_per_task_rates(self) -> None:
+        config.load("benchmark/benchmark.yaml")
+        rows = compute_strategy_rows(
+            _matrix(),
+            sorted(_matrix()["results"]),
+            [AlwaysCheap(), AlwaysFrontier()],
+            bootstrap=50,
+            seed=1,
+        )
+        for row in rows:
+            # Present and honest: never more counted tasks than the row scored.
+            assert 0 <= row["counted_n"] <= row["n_tasks"]
+            # A rate is published only where something was actually counted — an empty subset
+            # publishes NO column rather than a 0.0 that would be un-dominated by construction.
+            assert ("CallsPerTask" in row) == (row["counted_n"] > 0)
+            assert ("OutTokPerTask" in row) == (row["counted_n"] > 0)

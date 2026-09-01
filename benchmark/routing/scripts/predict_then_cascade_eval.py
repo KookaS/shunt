@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -112,8 +113,8 @@ def _cheap_passing_tasks(completed: dict) -> set[str]:
     }
 
 
-def _evaluate(matrix: dict, tasks: list[str]) -> list[dict]:
-    """The curve rows: f-grid, oracle point, and the two fixed-policy endpoints."""
+def _evaluate(matrix: dict, tasks: list[str]) -> tuple[list[dict], Censoring]:
+    """The curve rows: f-grid, oracle point, the two fixed-policy endpoints, and the censoring."""
     # The COMPLETED matrix is the one compute_strategy_rows scores every row on, so the oracle
     # gate's cheap-set and the fixed-denominator helper must read it too — a raw-matrix helper
     # counted 9 imputed-only tasks as unscorable and shrank the fixed denominator to 133.
@@ -137,7 +138,25 @@ def _evaluate(matrix: dict, tasks: list[str]) -> list[dict]:
     )
     rows.append(_curve_row(SessionCascadeStrategy(), "baseline", 0.0, completed, tasks, fixed_set))
     rows.append(_curve_row(AlwaysCheap(), "baseline", 1.0, completed, tasks, fixed_set))
-    return rows
+    return rows, censoring(completed, tasks, fixed_set)
+
+
+@dataclass(frozen=True)
+class Censoring:
+    """How much of the cheap-failing tail the completed matrix cannot score at all."""
+
+    n_cheap_failing: int
+    n_censored: int
+
+
+def censoring(completed: dict, tasks: list[str], fixed_set: set[str]) -> Censoring:
+    """The two counts the figure's limitation quotes — READ off the matrix, never retyped."""
+    # They were frozen in the FigureSpec as "42 of 45". Both were correct when written and both
+    # move the moment the matrix gains a cell, which is precisely why a literal cannot stay here.
+    cheap = _cheap_passing_tasks(completed)
+    scored = set(completed.get("results", {}))
+    failing = [tid for tid in tasks if tid in scored and tid not in cheap]
+    return Censoring(len(failing), sum(1 for tid in failing if tid not in fixed_set))
 
 
 def _session_cascade_scored(completed: dict, tasks: list[str]) -> set[str]:
@@ -179,7 +198,7 @@ def write_csv(rows: list[dict], path: Path) -> None:
             w.writerow({k: row.get(k, "") for k in CSV_FIELDS})
 
 
-def _draw_curve(ax: Axes, rows: list[dict]) -> Annotations:
+def _draw_curve(ax: Axes, rows: list[dict], censored: Censoring) -> Annotations:
     """Cost-quality: the mixture line, the fixed-denominator line, and the marked points."""
     curve = [r for r in rows if r["kind"] == "curve"]
     oracle = next(r for r in rows if r["kind"] == "oracle")
@@ -256,6 +275,15 @@ def _draw_curve(ax: Axes, rows: list[dict]) -> Annotations:
     ax.grid(True, alpha=0.18, linewidth=0.6)
     ax.tick_params(labelsize=8)
     ax.legend(fontsize=7, loc="lower left", framealpha=0.92)
+    # Every number in the blocks below is READ off the curve rows this function already holds.
+    # They were literals ("$1.17", "$1.29", "92%", "142", "184", "42 of 45") — all correct when
+    # written, all silently wrong the moment the matrix changes, and none of them provenance-
+    # marked. The cheapest point is found, not remembered, so a re-run cannot leave the sentence
+    # naming an f-value that is no longer the cheap one.
+    f0 = next(r for r in curve if r["f"] == "0.0")
+    f1 = next(r for r in curve if r["f"] == "1.0")
+    f0_cost = float(f0["TotalCost"])
+    cheapest = min(curve, key=lambda r: float(r["TotalCost"]))
     return Annotations(
         subtitle_facts=(
             f"n={sum(1 for r in curve) + 3} rows · {len(curve)} f-values + oracle + endpoints",
@@ -267,25 +295,31 @@ def _draw_curve(ax: Axes, rows: list[dict]) -> Annotations:
             "ladder already pays one cheap attempt on every cheap-solving task, so routing those "
             "cheap-direct is cost-identical and the hard tail still climbs the same ladder. That "
             "zero headroom is AT EQUAL QUALITY: on the raw-cost axis a few f>0 points are cheaper "
-            "than f=0 only at a lower pass rate (f=0.3 at ~$1.17 vs f=0's $1.29, ~92% vs 100%) — "
+            f"than f=0 only at a lower pass rate (f={cheapest['f']} at "
+            f"${float(cheapest['TotalCost']):.2f} vs f=0's ${f0_cost:.2f}, "
+            f"{float(cheapest['AvgPerf%']):.0f}% vs {float(f0['AvgPerf%']):.0f}%) — "
             "a quality tradeoff the gate would buy with misroutes, not prediction headroom. The "
             "headroom that is zero lives in the ladder ENTRY point, not in the binary decision.",
             "The pass-rate axis has a growing denominator: cheap-direct tasks are always scorable, "
-            "while the ladder's hard tail (42 tasks ending on censored frontier cells) is "
-            "unscorable, so n_scored rises from 142 at f=0 to 184 at f=1. The dashed line removes "
-            "that drift by scoring every row on Session-Cascade's own 142-task set.",
+            f"while the ladder's hard tail ({censored.n_censored} tasks ending on censored "
+            f"frontier cells) is unscorable, so n_scored rises from {f0['n_tasks']} at f=0 to "
+            f"{f1['n_tasks']} at f=1. The dashed line removes that drift by scoring every row on "
+            f"Session-Cascade's own {f0['n_tasks']}-task set.",
         ),
         limitations=(
-            "The completed matrix's hard tail is censored (42 of 45 cheap-failing tasks land on "
-            "non-observation frontier cells), so the scored curve measures the gate's behaviour on "
-            "the solvable majority, not its cost on the hard tail.",
+            f"The completed matrix's hard tail is censored ({censored.n_censored} of "
+            f"{censored.n_cheap_failing} cheap-failing tasks land on non-observation frontier "
+            "cells), so the scored curve measures the gate's behaviour on the solvable majority, "
+            "not its cost on the hard tail.",
             "The f-grid uses a deterministic per-task draw; a different draw moves the curve "
             "within the same mixture envelope.",
         ),
     )
 
 
-def _figure(rows: list[dict], path: Path, matrix: dict, tasks: list[str]) -> None:
+def _figure(
+    rows: list[dict], path: Path, matrix: dict, tasks: list[str], censored: Censoring
+) -> None:
     spec = FigureSpec(
         title="The binary gate's curve: f=0 is Session-Cascade, f=1 is Always-Cheap, oracle = f=0",
         subtitle="One decision per session boundary (cache-safe); the ladder re-serves one model.",
@@ -312,7 +346,7 @@ def _figure(rows: list[dict], path: Path, matrix: dict, tasks: list[str]) -> Non
     plot_frame.render(
         path,
         spec,
-        lambda ax: _draw_curve(ax, rows),
+        lambda ax: _draw_curve(ax, rows, censored),
         size=plot_frame.WIDE,
         provenance=Provenance(
             generator=_GENERATOR,
@@ -383,14 +417,14 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         sorted(matrix["results"].keys()), seed=config.benchmark_params().get("seed", 42)
     )
     print(f"Loaded {len(tasks)} tasks from the matrix input.")
-    rows = _evaluate(matrix, tasks)
+    rows, censored = _evaluate(matrix, tasks)
     _assert_degeneration(rows)
 
     out = Path(args.output)
     write_csv(rows, out)
     print(f"CSV written to {out}")
     if args.plot:
-        _figure(rows, Path(args.plot), matrix, tasks)
+        _figure(rows, Path(args.plot), matrix, tasks, censored)
         print(f"Figure written to {args.plot}")
     _report(rows)
 

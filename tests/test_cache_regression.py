@@ -8,7 +8,7 @@ from typing import Final
 import pytest
 
 from benchmark import config
-from benchmark.routing import impute, integrity
+from benchmark.routing import impute, integrity, validate
 from benchmark.runner import infer, run_matrix
 
 # ---------------------------------------------------------------------------
@@ -169,14 +169,28 @@ class TestMergeHistoryArchival:
         run_matrix.merge_rows([_typed_row()], results, history)
         assert not history.exists(), "identical re-run wrongly archived history"
 
-    def test_changed_pass_bool_archives_old_row(self, tmp_path):
+    def test_changed_pass_bool_without_an_anchor_move_is_refused(self, tmp_path):
+        # A flipped outcome on IDENTICAL staleness anchors is a second observation of a paid
+        # cell, not a supersession — and content cannot tell the two apart, so the caller has
+        # to say which it meant. Archiving it silently would destroy the first measurement.
         results = tmp_path / "results.csv"
         history = tmp_path / "hist.csv"
         run_matrix.merge_rows([_typed_row(**{"pass": True})], results, history)
-        run_matrix.merge_rows([_typed_row(**{"pass": False})], results, history)
-        assert history.exists()
-        assert "superseded_at" in history.read_text().splitlines()[0]
-        assert config.load_results(results)["c1"]["m1"]["default"]["pass"] is False
+        with pytest.raises(validate.DataIntegrityError) as excinfo:
+            run_matrix.merge_rows([_typed_row(**{"pass": False})], results, history)
+        assert excinfo.value.violations[0].code == validate.REPLICATE_MISKEYED
+        assert not history.exists()
+        assert config.load_results(results)["c1"]["m1"]["default"]["pass"] is True
+
+    def test_the_same_flip_recorded_as_a_replicate_keeps_both(self, tmp_path):
+        results = tmp_path / "results.csv"
+        history = tmp_path / "hist.csv"
+        run_matrix.merge_rows([_typed_row(**{"pass": True})], results, history)
+        run_matrix.merge_rows([_typed_row(**{"pass": False})], results, history, mode="replicate")
+        assert not history.exists()  # nothing was replaced, so nothing is archived
+        # rep 0 stays canonical: the scoring path still sees the first observation.
+        assert config.load_results(results)["c1"]["m1"]["default"]["pass"] is True
+        assert config.load_results(results)["c1"]["m1"]["default"]["n_reps"] == 2
 
     def test_changed_hash_archives_and_updates_current(self, tmp_path):
         results = tmp_path / "results.csv"

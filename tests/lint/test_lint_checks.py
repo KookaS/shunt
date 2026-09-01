@@ -47,6 +47,51 @@ def test_sh001_ignores_final_annotated_container(tmp_path: Path) -> None:
     assert _run("check_mutable_globals.py", str(f)) == 0
 
 
+# --- SH002: the docstring ceiling ---------------------------------------------------------
+
+
+def _docstring_module(lines: int) -> str:
+    body = "\n".join(f"line {i}" for i in range(lines))
+    return f'''"""{body}"""\n'''
+
+
+def test_sh002_catches_a_wall_of_text(tmp_path: Path) -> None:
+    """21 non-blank lines is the wall of text the ceiling exists for."""
+    f = tmp_path / "mod.py"
+    f.write_text(_docstring_module(21))
+    assert _run("check_docstring_length.py", str(f)) == 1
+
+
+def test_sh002_allows_an_intent_line_plus_a_paragraph(tmp_path: Path) -> None:
+    """At the ceiling exactly — the rationale prose the old limit of 3 pushed into comments."""
+    f = tmp_path / "mod.py"
+    f.write_text(_docstring_module(20))
+    assert _run("check_docstring_length.py", str(f)) == 0
+
+
+def test_sh002_blank_lines_and_quotes_do_not_count(tmp_path: Path) -> None:
+    body = "\n\n".join(f"line {i}" for i in range(20))
+    f = tmp_path / "mod.py"
+    f.write_text(f'''"""{body}"""\n''')
+    assert _run("check_docstring_length.py", str(f)) == 0
+
+
+def test_sh002_a_bare_noqa_for_another_code_does_not_suppress(tmp_path: Path) -> None:
+    """The hatch is code-specific — SH003's noqa must not silence SH002."""
+    f = tmp_path / "mod.py"
+    body = "\n".join(f"line {i}" for i in range(21))
+    f.write_text(f'"""{body}\n"""  # noqa: SH003 (unrelated)\n')
+    assert _run("check_docstring_length.py", str(f)) == 1
+
+
+def test_sh002_noqa_is_reachable_on_the_closing_quote_line(tmp_path: Path) -> None:
+    """A multi-line docstring's first line is inside the string, so the hatch lives after it."""
+    f = tmp_path / "mod.py"
+    body = "\n".join(f"line {i}" for i in range(21))
+    f.write_text(f'"""{body}\n"""  # noqa: SH002 (kept deliberately)\n')
+    assert _run("check_docstring_length.py", str(f)) == 0
+
+
 def test_sh004_catches_planted_story_ref(tmp_path: Path) -> None:
     f = tmp_path / "leak.py"
     f.write_text("# tracked in STORY-9.9\nx = 1\n")  # noqa: SHUNT-ISO
@@ -456,13 +501,14 @@ _HALF_PKGS: Final[dict[str, str]] = {
 }
 
 
-def _figure_tree(
+def _figure_tree(  # noqa: PLR0913 (one knob per manifest field the gate byte-locks)
     tmp_path: Path,
     *,
     pngs: tuple[str, ...] = ("kill_gate.png",),
     manifest: tuple[str, ...] | None = None,
     section_slugs: tuple[str, ...] | None = None,
     notes: tuple[str, ...] = ("x is cost.", "175 tasks"),
+    limitations: tuple[str, ...] = (),
     half: str = "routing",
 ) -> Path:
     """A minimal repo shaped like shunt: one half's figure, its row, and its section."""
@@ -481,7 +527,7 @@ def _figure_tree(
             "caveat": None,
             "reading": "x is cost.",
             "goal": "Aim top-left.",
-            "limitations": [],
+            "limitations": list(limitations),
             "notes": list(notes),
         }
         for name in (manifest if manifest is not None else pngs)
@@ -508,7 +554,7 @@ def _figure_tree(
 **What to look for.** Aim top-left.
 
 **Notes.** {"\n".join(notes)}
-"""
+{("\n**Limits.** " + " ".join(limitations) + "\n") if limitations else ""}"""
         for slug in slugs
     )
     (docs / f"{half}.md").write_text(f"# {half.title()}\n\n## Figures\n{body}\n")
@@ -601,6 +647,47 @@ def test_sh009_catches_a_figure_whose_notes_block_is_missing(tmp_path: Path) -> 
     doc = root / "docs" / "routing.md"
     doc.write_text(doc.read_text().replace("**Notes.** x is cost.\n175 tasks", ""))
     assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_accepts_a_limits_block_that_quotes_the_manifest(tmp_path: Path) -> None:
+    """The byte-lock's negative control: a faithful Limits block must stay green, or every
+    failure below would only prove the check is unconditional."""
+    root = _figure_tree(tmp_path, limitations=("Imputed cells are filled pass=True.",))
+    assert _run("check_figure_docs.py", "--root", str(root)) == 0
+
+
+def test_sh009_catches_a_mutated_limits_string(tmp_path: Path) -> None:
+    """The defect this closes: `limitations` was the ONE manifest string the gate did not
+    byte-lock, and two stale counts shipped green inside it."""
+    root = _figure_tree(tmp_path, limitations=("406/1104 scored cells (36.8%) are imputed.",))
+    doc = root / "docs" / "routing.md"
+    doc.write_text(
+        doc.read_text().replace("406/1104 scored cells (36.8%)", "403/1080 cells (37.3%)")
+    )
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_catches_a_missing_limits_block(tmp_path: Path) -> None:
+    root = _figure_tree(tmp_path, limitations=("Imputed cells are filled pass=True.",))
+    doc = root / "docs" / "routing.md"
+    doc.write_text(doc.read_text().replace("**Limits.** Imputed cells are filled pass=True.", ""))
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_catches_a_limits_block_the_figure_does_not_record(tmp_path: Path) -> None:
+    root = _figure_tree(tmp_path)
+    doc = root / "docs" / "routing.md"
+    doc.write_text(doc.read_text() + "\n**Limits.** A limit nothing derives.\n")
+    assert _run("check_figure_docs.py", "--root", str(root)) == 1
+
+
+def test_sh009_limits_lock_ignores_the_trailing_provenance_comment(tmp_path: Path) -> None:
+    """The renderer emits `<!-- n: … -->` after the last block, and Limits is normally last:
+    a lock that compared it as prose would fail every real page."""
+    root = _figure_tree(tmp_path, limitations=("Imputed cells are filled pass=True.",))
+    doc = root / "docs" / "routing.md"
+    doc.write_text(doc.read_text() + "\n<!-- n: cells=1104 --><!-- generated-by: x -->\n")
+    assert _run("check_figure_docs.py", "--root", str(root)) == 0
 
 
 def test_sh009_accepts_a_complete_bijection_for_the_inference_half(tmp_path: Path) -> None:
@@ -701,12 +788,60 @@ def test_sh007_allows_calling_the_inspect_frame(tmp_path: Path) -> None:
     assert _run("check_plot_frame.py", str(f)) == 0
 
 
+def test_sh007_catches_the_three_holes_that_once_passed(tmp_path: Path) -> None:
+    """The exact file that returned exit 0 while holding three real violations."""
+    # `ax.set(title=)` sets a title without naming set_title; `writer = fig.savefig` reaches
+    # the writer through an alias; `getattr(fig, "savefig")` never names it as an attribute.
+    # The denylist enumerated none of the three, so a producer could ship an unframed PNG.
+    f = _py(
+        tmp_path,
+        "def a(ax):\n"
+        "    ax.set(title='mine')\n"
+        "def b(fig):\n"
+        "    writer = fig.savefig\n"
+        "    writer('out.png')\n"
+        "def c(fig):\n"
+        "    getattr(fig, 'savefig')('out2.png')\n",
+    )
+    assert _run("check_plot_frame.py", str(f)) == 1
+
+
+def test_sh007_catches_each_hole_alone(tmp_path: Path) -> None:
+    """Each of the three fails on its own — one catch must not mask the other two."""
+    cases = {
+        "set_title_kw.py": "def a(ax):\n    ax.set(title='mine')\n",
+        "alias.py": "def b(fig):\n    writer = fig.savefig\n    writer('out.png')\n",
+        "getattr.py": "def c(fig):\n    getattr(fig, 'savefig')('out2.png')\n",
+        "partial.py": "import functools\ndef d(fig):\n    return functools.partial(fig.savefig)\n",
+        "callback.py": "def e(fig, on_done):\n    on_done(fig.savefig)\n",
+        "plt_title.py": "import matplotlib.pyplot as plt\ndef f():\n    plt.title('mine')\n",
+    }
+    for name, body in cases.items():
+        assert _run("check_plot_frame.py", str(_py(tmp_path, body, name=name))) == 1, name
+
+
+def test_sh007_does_not_flag_a_lookalike(tmp_path: Path) -> None:
+    """`ax.set(xlabel=)` and `str.title()` are not titles the frame owns."""
+    f = _py(
+        tmp_path,
+        "def a(ax, name):\n    ax.set(xlabel='x', ylabel='y')\n    return name.title()\n",
+        name="clean_set.py",
+    )
+    assert _run("check_plot_frame.py", str(f)) == 0
+
+
+def test_sh007_refuses_to_pass_on_an_empty_subject_set() -> None:
+    """Ten gates in this repo once reported green on zero inputs; this one must not."""
+    assert _run("check_plot_frame.py") == 1
+
+
 def test_sh007_default_tree_is_clean() -> None:
     import subprocess as _sp
 
     files = _sp.run(
         ["git", "ls-files", "*.py"], cwd=_ROOT, capture_output=True, text=True, check=True
     ).stdout.split()
+    assert files, "an empty file list would pass this gate vacuously"
     assert _run("check_plot_frame.py", *files) == 0
 
 
@@ -733,10 +868,18 @@ def _number_tree(
     results: str | None = None,
     benchmark: str | None = None,
     benchmark_data: str | None = None,
+    producer: str | None = None,
 ) -> Path:
-    """A minimal repo shaped like shunt: the three main result docs."""
+    """A minimal repo shaped like shunt: the three main result docs plus one producer."""
     docs = tmp_path / "docs"
     docs.mkdir(parents=True)
+    # A figure producer is always present: the gate now refuses to report green over an EMPTY
+    # producer set, so a fixture with no producer would prove the guard, not the scan.
+    (tmp_path / "draw.py").write_text(
+        producer
+        if producer is not None
+        else 'from shunt.inspect.plot_frame import FigureSpec\n\nS = FigureSpec("clean")\n'
+    )
     if results is not None:
         (docs / "results.md").write_text(results)
     if benchmark is not None:
@@ -776,10 +919,122 @@ def test_sh012_clean_tree_passes(tmp_path: Path) -> None:
     assert _run("check_number_provenance.py", "--root", str(root)) == 0
 
 
-def test_sh012_negative_control_real_tree_is_clean() -> None:
+def _sh012_real_tree_offenders() -> set[str]:
+    """The files the gate flags on the REAL tree — the path the hook actually runs."""
+    return {
+        line.split(":", 1)[0]
+        for line in _output("check_number_provenance.py").splitlines()
+        if ": [SH012" in line
+    }
+
+
+def test_sh012_negative_control_real_tree_markdown_is_clean() -> None:
     # The committed docs carry a marker on every number-bearing line — the tree the
     # hook scans must pass without a staged-file filter (pass_filenames: false).
-    assert _run("check_number_provenance.py") == 0
+    assert {p for p in _sh012_real_tree_offenders() if p.endswith(".md")} == set()
+
+
+# The producer half is a RATCHET, and it is deliberately keyed on FILE PATHS, never on the
+# numbers inside them: pinning a literal would seed the gate from the state it exists to
+# constrain, which is the defect the markdown half's `167 of 175` alternatives already carry.
+# Each entry is a frozen result number in published figure text that must be DERIVED instead.
+# This list may only shrink; empty is the goal, and then this test becomes a plain `== []`.
+# EMPTY, as intended: `predict_then_cascade_eval.py` derived its six frozen numbers
+# (42 of 45, 142, 184, the cheapest f-point's cost and pass rate, and f=0's cost) from the curve
+# rows and the completed matrix it already computes, so the ratchet has nothing left to hold.
+_SH012_KNOWN_FROZEN_PRODUCERS: tuple[str, ...] = ()
+
+
+def test_sh012_producer_literals_are_only_the_known_open_sites() -> None:
+    offenders = {p for p in _sh012_real_tree_offenders() if p.endswith(".py")}
+    assert offenders == set(_SH012_KNOWN_FROZEN_PRODUCERS), sorted(offenders)
+
+
+def test_sh012_catches_a_frozen_count_in_a_producer_literal(tmp_path: Path) -> None:
+    """The blind spot this closes: the gate read `*.md` only, so a data-bearing literal in a
+    figure producer — a title, a note, a limitation — was published under no enforcement."""
+    root = _number_tree(
+        tmp_path,
+        producer=(
+            "from shunt.inspect.plot_frame import FigureSpec\n\n"
+            'S = FigureSpec("imputation is pass-only (397 of 398 filled cells)")\n'
+        ),
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 1
+
+
+def test_sh012_catches_a_frozen_metric_pair_in_a_producer_title(tmp_path: Path) -> None:
+    root = _number_tree(
+        tmp_path,
+        producer=(
+            "from shunt.inspect.plot_frame import FigureSpec\n\n"
+            'S = FigureSpec("the score decides: AUROC 0.601 vs 0.781")\n'
+        ),
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 1
+
+
+def test_sh012_accepts_a_producer_number_it_derives(tmp_path: Path) -> None:
+    """The negative control that keeps the rule honest: a COMPUTED number cannot go stale,
+    so an f-string over the data needs no marker and must not be flagged."""
+    root = _number_tree(
+        tmp_path,
+        producer=(
+            "from shunt.inspect.plot_frame import FigureSpec\n\n"
+            "def spec(filled: int, total: int) -> FigureSpec:\n"
+            '    return FigureSpec(f"imputation is pass-only ({filled} of {total} cells)")\n'
+        ),
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 0
+
+
+def test_sh012_accepts_a_marked_producer_literal(tmp_path: Path) -> None:
+    root = _number_tree(
+        tmp_path,
+        producer=(
+            "from shunt.inspect.plot_frame import FigureSpec\n\n"
+            'S = FigureSpec("imputation is pass-only (397 of 398 cells)")'
+            "  # frozen-value: n=398, date=2026-08-10, run=49b8362\n"
+        ),
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 0
+
+
+def test_sh012_producer_frozen_marker_without_a_corpus_fails(tmp_path: Path) -> None:
+    root = _number_tree(
+        tmp_path,
+        producer=(
+            "from shunt.inspect.plot_frame import FigureSpec\n\n"
+            'S = FigureSpec("imputation is pass-only (397 of 398 cells)")  # frozen-value: n=398\n'
+        ),
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 1
+
+
+def test_sh012_ignores_a_number_in_a_producer_docstring(tmp_path: Path) -> None:
+    """A docstring describes the code, not the canvas — flagging it would drown the signal."""
+    root = _number_tree(
+        tmp_path,
+        producer=(
+            '"""Draws the 397 of 398 panel."""\n\n'
+            "from shunt.inspect.plot_frame import FigureSpec\n\n"
+            'S = FigureSpec("clean")\n'
+        ),
+    )
+    assert _run("check_number_provenance.py", "--root", str(root)) == 0
+
+
+def test_sh012_ignores_a_module_that_draws_nothing(tmp_path: Path) -> None:
+    """Scope control: an ordinary module's constants are not published figure text."""
+    root = _number_tree(tmp_path)
+    (tmp_path / "helper.py").write_text('X = "42 of 45 rows"\n')
+    assert _run("check_number_provenance.py", "--root", str(root)) == 0
+
+
+def test_sh012_refuses_to_report_green_over_an_empty_subject_set(tmp_path: Path) -> None:
+    """The gate's own vacuity guard: no markdown and no producers is not a clean tree."""
+    (tmp_path / "empty").mkdir()
+    assert _run("check_number_provenance.py", "--root", str(tmp_path / "empty")) == 1
 
 
 def test_sh012_unmarked_rank_shortlist_row_fails(tmp_path: Path) -> None:

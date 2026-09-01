@@ -200,7 +200,7 @@ def replay_costs(
     for tid in matrix["results"]:
         trace = strategy.trace(tid, matrix)
         costs.append(trace.cost)
-        hops.append(trace.hops)
+        hops.append(trace.distinct_rungs)
     return np.asarray(costs, dtype=float), hops
 
 

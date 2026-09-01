@@ -254,3 +254,136 @@ class TestPerModelNoteRowsDeriveFromTheResultsTable:
             if "cache-aware /" in n and n.split(":", 1)[0] in {r["strategy"] for r in rows}
         }
         assert per_strategy_actual == set(derived)
+
+
+class TestSessionColumnsCountTheWait:
+    """`sessions_mean` / `sessions_p95` are sessions burned, and every strategy that bills
+    more than one attempt reports more than one session."""
+
+    @staticmethod
+    def _escalating_matrix() -> dict:
+        """The cheap model fails both tasks, so a price cascade must climb."""
+        return {
+            "models": {
+                "m0": {"input_price": 1.0, "output_price": 1.0},
+                "m1": {"input_price": 9.0, "output_price": 9.0},
+            },
+            "tasks": {"t1": {}, "t2": {}},
+            "results": {
+                "t1": {
+                    "m0": {"pass": False, "cost": 1.0, "calls": 1},
+                    "m1": {"pass": True, "cost": 5.0, "calls": 1},
+                },
+                "t2": {
+                    "m0": {"pass": False, "cost": 1.0, "calls": 1},
+                    "m1": {"pass": True, "cost": 5.0, "calls": 1},
+                },
+            },
+        }
+
+    def test_every_strategy_billing_more_than_one_attempt_reports_more_than_one_session(
+        self,
+    ) -> None:
+        # The regression this pins: `PriceCascade` published no depth attribute at all, the
+        # caller read it with `getattr(..., default=1)`, and a cascade billing four attempts
+        # per task was published as never escalating.
+        from benchmark.routing.strategies.price_cascade import PriceCascade
+        from benchmark.routing.summary import evaluate_billed
+
+        matrix, tasks = self._escalating_matrix(), ["t1", "t2"]
+        strategies: list[Strategy] = [
+            PriceCascade(max_tries=2),
+            _Repeater("m0", 3.0),
+            _CheapShot("m1", 5.0),
+        ]
+        for strategy in strategies:
+            _dec, _uns, attempts, _judge, sessions = evaluate_billed(strategy, matrix, tasks)
+            for tid in tasks:
+                billed = len(attempts[tid])
+                # Every billed attempt IS a session the user waited through; a strategy may
+                # burn more (an unmeasured rung is a wait that bills nothing) but never fewer.
+                assert sessions[tid] >= billed, (strategy.name, tid)
+                if billed > 1:
+                    assert sessions[tid] > 1, (strategy.name, tid)
+
+    def test_the_fixture_actually_makes_a_cascade_climb(self) -> None:
+        # Without a task that escalates, the assertion above holds vacuously.
+        from benchmark.routing.strategies.price_cascade import PriceCascade
+        from benchmark.routing.summary import evaluate_billed
+
+        _dec, _uns, attempts, _judge, sessions = evaluate_billed(
+            PriceCascade(max_tries=2), self._escalating_matrix(), ["t1", "t2"]
+        )
+        assert len(attempts["t1"]) == 2
+        assert sessions["t1"] == 2
+
+    def test_a_strategy_publishing_attempts_reports_them_without_further_wiring(self) -> None:
+        # The contract a NEW cascade inherits: publish the billing list the cost model already
+        # needs, and the depth column is right. Nothing to remember, nothing to default.
+        repeater = _Repeater("m0", 3.0)
+        assert repeater.sessions_burned == 1  # no `select` yet: one decision, none billed
+        repeater.select("t1", {}, self._escalating_matrix())
+        assert repeater.sessions_burned == 2
+        assert _CheapShot("m1", 5.0).sessions_burned == 1
+
+
+class TestCensoringRateDiscriminatesStrategies:
+    """`censoring_rate` is THIS strategy's own unscorable share of the tasks it was offered,
+    not the strategy-or-oracle union, which is a corpus constant identical on every row."""
+
+    @staticmethod
+    def _holed_matrix() -> dict:
+        """`m1` is missing on `t2`, so a strategy that routes there cannot score it."""
+        return {
+            "models": {
+                "m0": {"input_price": 1.0, "output_price": 1.0},
+                "m1": {"input_price": 1.0, "output_price": 1.0},
+            },
+            "tasks": {"t1": {}, "t2": {}},
+            "results": {
+                "t1": {"m0": {"pass": True, "cost": 3.0}, "m1": {"pass": True, "cost": 5.0}},
+                "t2": {"m0": {"pass": True, "cost": 3.0}},
+            },
+        }
+
+    def test_two_strategies_on_one_matrix_report_different_censoring(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config.load("benchmark/benchmark.yaml")
+        monkeypatch.setattr(config, "impute_config", lambda: {"enabled": False})
+        from benchmark.routing.summary import compute_strategy_rows
+
+        rows = compute_strategy_rows(
+            self._holed_matrix(),
+            ["t1", "t2"],
+            [_CheapShot("m0", 3.0), _CheapShot("m1", 5.0)],
+            bootstrap=50,
+            seed=1,
+        )
+        # The union-based version reported the SAME value on both rows; the strategy's own
+        # share separates the one that dropped half the corpus from the one that scored it all.
+        values = sorted(r["censoring_rate"] for r in rows)
+        assert values == [0.0, 0.5]
+
+
+class TestPercentileIndexConvention:
+    """`percentile`'s documented convention is pinned, including where it parts company
+    with the symmetric interval `bootstrap_ci._pct` builds."""
+
+    def test_nearest_rank_index_at_the_shipped_bootstrap_size(self) -> None:
+        from benchmark.routing.metrics import percentile
+
+        values = [float(i) for i in range(1000)]
+        assert percentile(values, 0.025) == 25.0
+        assert percentile(values, 0.95) == 950.0
+        # n = 1000 is one of the 50 sizes below 2000 where 0.025 * n is integral and the two
+        # conventions differ: `_pct` reads `draws[n - 1 - int(0.025 * n)]` = 974.
+        assert percentile(values, 0.975) == 975.0
+        assert values[len(values) - 1 - int(0.025 * len(values))] == 974.0
+
+    def test_empty_and_clamped_ends(self) -> None:
+        from benchmark.routing.metrics import percentile
+
+        assert percentile([], 0.95) == 0.0
+        assert percentile([1.0, 2.0, 3.0], 1.0) == 3.0
+        assert percentile([1.0, 2.0, 3.0], 0.0) == 1.0

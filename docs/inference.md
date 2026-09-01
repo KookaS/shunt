@@ -1,13 +1,13 @@
 ---
 title: The live router, measured
-description: Seven figures that judge the shipped router on its own outcome store — the two strata sharing that store, what live inference actually cost, and the off-policy value of routing and escalation, refused where the logs cannot identify it.
+description: Eight figures that judge the shipped router on its own outcome store — the two strata sharing that store, what live inference actually cost, and the off-policy value of routing and escalation, refused where the logs cannot identify it.
 ---
 
 # The live router, measured
 
 Every other results page on this site measures the router **offline**, against a
 benchmark corpus replayed through a harness. This page measures the router
-**as it runs**: the same seven figures read the outcome store a live Shunt writes
+**as it runs**: the same eight figures read the outcome store a live Shunt writes
 to, so the questions are the operational ones — what did inference cost, is the
 choice distribution collapsing, do near neighbours still predict outcomes, is
 escalation firing and helping.
@@ -44,15 +44,15 @@ the measurement it is:
 - **F1 (strata)** is the one figure this corpus answers in full — it is about the
   corpus itself.
 
-[The same seven figures, on invented data](inference-demo.md) draws this family over a
+[The same eight figures, on invented data](inference-demo.md) draws this family over a
 synthetic corpus, so the panels above that are empty can be read at all. Nothing on that
 page is a measurement and every canvas says so; it is there for the layout, never the
 numbers.
 
-Rendering the same seven against a rig that *has* served traffic fills exactly those
+Rendering the same eight against a rig that *has* served traffic fills exactly those
 gaps and changes nothing else. `make inference-figures` produces the committed set
 above from committed data alone — no network, no rig, no model weights — and the
-wrapper's own target renders the identical seven against a running local rig into
+wrapper's own target renders the identical eight against a running local rig into
 gitignored session output. The producer is shipped code
 (`python -m shunt.inspect.inference --out-dir <dir>`), so the container path and the
 docs path draw the same figures from the same functions.
@@ -194,6 +194,7 @@ Two guards sit in front of every number this figure draws:
 ![Two strata share one corpus, and the router cannot tell them apart](assets/figures/inference/inference_strata.png)
 
 *lifecycle stage counts, arrival times and per-model labels, split seeded vs live · seeded n=384 · live n=0 · ambiguous n=0*
+> **Caveat.** live stratum EMPTY (n=0) — every panel is the seeded import
 **Reading.** Panel A counts sessions at five lifecycle stages per stratum: stored, embedded, labeled, Tier-2 and indexed. They are not a funnel and do not nest: `embedded` and `indexed` are the only two contained in `stored`, while `labeled` is counted off the append-only `outcome_events` log and `tier2` off the materialized `outcomes` view, so a later stage can exceed an earlier one. Read each bar as its own count, and read the red line for any adjacent pair that actually inverts. Panel B places every session on its `timestamp`; the seeded stratum is imported in one burst and so collapses to a single column, which is exactly why any recency-window read over the whole store reports the benchmark matrix rather than router behaviour. Panel C counts labeled sessions per model in each stratum.
 
 **What to look for.** Make the two populations sharing one outcome store visible before any figure quotes a number over them, so that a mixed aggregate is recognisable as mixed.
@@ -202,6 +203,7 @@ Two guards sit in front of every number this figure draws:
 
 **Notes.** Stratum is decided by three signals: the session-id prefix, `decision_provenance.selection_rule_used == "benchmark_seed"`, and the winning outcome event's source. Rows where they disagree are counted as `ambiguous` and surfaced on the canvas rather than assigned to either stratum.
 The seeder writes one deterministic timestamp for the whole corpus, so panel B's seeded column has no width by construction.
+A stratum with no sessions draws NO bars in panels A and C, and its legend key reads `(none in this corpus)` at reduced strength. A zero-height bar and an absent population must not render the same, and the red line names the empty stratum outright.
 There is no Tier-1 bar, and its absence is the point: a Tier-1-only session is kept out of the materialized view and out of the trusted kNN index until a Tier-2 corroborates it, so it cannot influence a routing decision. It is not hidden either — `labeled (any tier)` counts both tiers and `verified (tier-2)` counts only the verified one, so the GAP between those two bars is exactly the Tier-1-only population.
 
 **Limits.** Panel A counts sessions, not requests: a session serving many turns appears once. A session with no outcome event at all is stored and possibly embedded but never labeled. That gap is the store's, not this figure's.
@@ -322,3 +324,24 @@ INSTRUMENT ADMISSIBLE: positive control +3.1908, destroyed-signal null +0.4011, 
 **Limits.** The routing leg covers policy turns only. An escalated turn carries no candidate scores and a cold-start turn carries none either, so both are excluded before the estimator sees them; the excluded count is printed on panel D. An ADMISSIBLE instrument verdict is a gate against breakage — a filter that stopped filtering, an estimator that stopped weighting — not a warrant that these numbers are accurate to within a few points.
 
 <!-- n: escalation_logged=0, escalation_usable=0, routing_logged=0, routing_usable=0 --><!-- generated-by: shunt.inspect.inference:render -->
+
+### Every model in the outcome store: price, size, measured outcome {#fig-inference-model-grid}
+
+![Every model in the outcome store: price, size, measured outcome](assets/figures/inference/inference_model_grid.png)
+
+*the benchmark half's grid, redrawn over the outcome store — both strata, split stated below · 3 models over the outcome store's Tier-2-labeled sessions — 0 live and 384 replayed from the benchmark corpus; 0 of 3 models drawn carry any live session · 0 at $0 (local) · 3 priced · n per model 84–190, unpaired task sets · x = billed spend over labeled sessions, from the store's own cost rows*
+> **Caveat.** Panel A's x axis is what the store was BILLED, so it is not the benchmark half's.
+**Reading.** Panel A: each model the store holds a Tier-2 label for, at its mean billed dollars per labeled session (x, log — with a separate column at the left for locally-served models, whose marginal price is exactly zero and cannot sit on a log axis) against its verified-success rate (y), with Wilson 95% whiskers. Marker area follows the square root of the active parameter count, the marker edge says hosted or local, and hue is the coarse total-size band. Panel B: a hollow mark at total parameters and a filled mark at active parameters, the rule between them being the mixture-of-experts sparsity gap. Panels C and D: per-call latency, hosted and local on separate axes.
+
+**What to look for.** Compare this canvas with the benchmark half's. The two draw the same three panels from different corpora, so a model that sits in one place here and elsewhere there is telling you the benchmark corpus and the served traffic are not the same workload — which is the gap the whole live-versus-benchmark question turns on.
+
+**Terms.** *verified success* — A session whose Tier-2 (test/typecheck) outcome is a pass. Tier-1 rows are excluded: they are never materialized and never become routing neighbours. *$ per labeled session* — Billed spend divided by labeled sessions, read off the store's own cost rows. A model whose sessions are not all priced is left off the axis rather than plotted at a partial total. This is a MEASURED bill, not a list price, so it is not the quantity the benchmark half's panel A plots and the two must not be compared. *active parameters* — What one token decodes through — a COMPUTE claim. All of a mixture's total parameters must still be resident to serve it. *UNDISCLOSED* — The vendor publishes no parameter count. No estimate is substituted, and the row draws at a fixed reference marker that is deliberately off the size ramp.
+
+**Notes.** Panel A's x and the benchmark half's x are different quantities — billed dollars per session here, a blended list price per million tokens there. The two canvases share a shape, not an axis, and a model's horizontal position must never be carried between them.
+deepseek-v4-flash: 68.9% on n=190 · $0.0092 (measured $ per labeled session (log)) · 284B total / 13B active
+kimi-k3: 84.5% on n=110 · $0.5487 (measured $ per labeled session (log)) · 2800B total / 104B active
+zai-glm-5.2: 57.1% on n=84 · $0.3429 (measured $ per labeled session (log)) · 753B total / 40B active
+
+**Limits.** STRATA ARE POOLED ON THIS PANEL, and the subtitle states the split. A row drawn entirely from seeded sessions was REPLAYED from the benchmark corpus: it repeats the benchmark half's finding rather than corroborating it, and nothing on this canvas may be read as live measurement until the subtitle reports live sessions. The x axis is a mean over sessions of very different sizes, so a model that served the longer sessions looks dearer per session without being dearer per token. Rates are not paired: models were not served the same sessions, so a height difference between two rows is not a controlled comparison. Panel A's x axis is a MEASURED BILL — dollars per labeled session, off the store's own cost rows — not a list price, and not the benchmark half's axis. A model whose sessions are not all priced is left off the panel rather than plotted at a partial total. The $0 column and the log region are not one ruler. The gap between them is a break, and no distance across it is meaningful. Hue is a coarse size band, not a capability measurement — panel B carries the exact counts, and a band is not evidence that its members behave alike. Panels C and D are empty: no latency has been instrumented on any row. The column is MISSING, and nothing here should be read as a speed claim.
+
+<!-- n: external=0, latency_hosted=0, latency_local=0, models=3, sized=3, undisclosed=0 --><!-- generated-by: shunt.inspect.inference:render -->

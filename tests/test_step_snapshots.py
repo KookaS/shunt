@@ -146,7 +146,10 @@ def test_captured_files_carry_no_provider_credential() -> None:
     # No provider credential appears in a captured dump. The message-list dump is an
     # UNREDACTED raw transcript (it passes through `redact_secrets` nowhere), so its defences
     # are the gitignore above (never committed ⇒ gitleaks never sees it) plus this explicit
-    # scan over the real captured files — the committed escalation corpus (scrubbed on its own
+    # scan over the real captured files. This scan is FORENSIC — it only sees what a past run
+    # happened to write; the structural half is `benchmark.runner.scaffold_model`, asserted by
+    # tests/test_scaffold_credential_isolation.py, which keeps the credential out of the dump
+    # in the first place — the committed escalation corpus (scrubbed on its own
     # write path via `schema.dump_jsonl`) and any message-list dump already in the scratch.
     files = sorted(_LIVE_DIR.glob("*.jsonl"))
     if MESSAGE_LIST_ROOT.is_dir():

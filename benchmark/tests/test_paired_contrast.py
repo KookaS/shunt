@@ -5,10 +5,11 @@ from __future__ import annotations
 import pytest
 
 from benchmark.routing import run_eval
+from benchmark.routing.strategies import Strategy
 
 
-class _Fake:
-    """Minimal Strategy stub that always routes to one fixed model."""
+class _Fake(Strategy):
+    """Minimal single-shot strategy that always routes to one fixed model."""
 
     def __init__(self, name: str, model: str) -> None:
         self._name = name

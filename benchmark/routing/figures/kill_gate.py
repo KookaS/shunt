@@ -336,30 +336,43 @@ def _annotations(bases: list[Basis], margin: float, banner: str | None) -> Annot
         f"paired Tango score at the pre-registered δ={100 * margin:.0f}pp",
         f"n={'/'.join(str(b.n) for b in bases)}",
         (
-            f"arms disagree on {discordant} of {widest.n}: MDE ±{widest.mde_pp():.1f}pp there, "
+            f"arms disagree on {discordant} of {widest.n} on the widest basis: "
+            f"MDE ±{widest.mde_pp():.1f}pp there, "
             f"±{widest.mde_pp(0.10):.1f}pp at 10% discordance"
         ),
     ]
     undecided = [b for b in bases if b.decision == "inconclusive"]
-    # An INFERIOR verdict outranks both other caveats: a reader who takes the cost panel
-    # home without it has read a saving that was never bought at equal quality.
     inferior = [b for b in bases if b.decision == "inferior"]
-    caveat = None
+    # THE THIN-EVIDENCE CLAUSE IS COMPUTED FROM THE ROWS THAT CLEARED THE BAR, not from the
+    # widest basis. It used to read `widest`'s discordance in an `elif` after the inferior
+    # branch, so in the only state this figure has ever rendered in — three inferior rows plus
+    # one green one carried by b=3, c=0 — the guard written for exactly that green row could
+    # not fire: the `elif` was dead and the number it would have quoted (38) belonged to a
+    # different row. Clauses are now composed rather than ranked away, thin-evidence first: a
+    # red row already carries its own `inferior (b=…, c=…)` text on panel A and its verdict in
+    # the title, while a green row's thinness appears nowhere else on the canvas.
+    cleared = [b for b in bases if b.decision == "non_inferior"]
+    thin = [b for b in cleared if b.b + b.c <= _THIN_DISCORDANCE]
+    parts: list[str] = []
+    if thin:
+        pairs = "/".join(str(b.b + b.c) for b in thin)
+        parts.append(
+            f"{len(thin)} of {len(cleared)} row(s) clearing the bar rest on {pairs} "
+            "discordant pair(s)"
+        )
     if inferior:
-        caveat = (
-            f"{len(inferior)} of {len(bases)} rows: WORSE by more than the margin. Those "
-            "rows' savings are not at equal quality."
-        )
-    elif discordant <= _THIN_DISCORDANCE:
-        caveat = (
-            f"Non-inferiority rests on {discordant} discordant pair(s) — the bar is cleared "
-            "on very little evidence."
-        )
-    elif undecided:
-        caveat = (
-            f"{len(undecided)} of {len(bases)} bases cannot decide — that saving is at "
-            "UNKNOWN, not equal, quality."
-        )
+        parts.append(f"{len(inferior)} of {len(bases)} rows: WORSE by more than the margin")
+    if undecided:
+        parts.append(f"{len(undecided)} of {len(bases)} bases cannot decide — quality UNKNOWN")
+    # `plot_frame` REJECTS an over-long caveat, which would abort the render. Drop the
+    # lowest-ranked clause instead; the full per-row detail is in the notes either way.
+    caveat = None
+    while parts:
+        candidate = "; ".join(parts) + "."
+        if len(candidate) <= plot_frame.MAX_CAVEAT_CHARS:
+            caveat = candidate
+            break
+        parts.pop()
     notes = [
         f"{b.label}: Δ={b.diff_pp:+.1f}pp [{b.lo_pp:+.1f}, {b.hi_pp:+.1f}], {b.decision}, "
         f"b={b.b} c={b.c}, router {usd(b.router_cost)} vs baseline {usd(b.baseline_cost)}, "

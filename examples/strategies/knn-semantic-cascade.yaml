@@ -1,0 +1,77 @@
+# knn_semantic_cascade — the OPT-IN routing strategy. Route smart, then climb.
+#
+# Copy this to ~/.config/shunt/router.yaml (or $SHUNT_CONFIG_DIR/router.yaml), set
+# capture.work_dir if you do not start shunt inside the repo you want verified, and
+# run `shunt start`. No API key goes in this file — providers read theirs from the
+# environment (see ../providers/README.md and ../../docs/configuration.md).
+#
+# WHEN TO PICK THIS ONE: you want a more predictable bill, or you believe model choice
+# changes outcomes on your workload. On the offline corpus it buys predictability, not
+# quality: cost CV 1.894 against the default's 2.416, and a slightly shorter ladder
+# (2.076 sessions per task against 2.217). It resolves the same 178 of 184 scored tasks,
+# and the p95 session tail is IDENTICAL (7 against 7) — the classifier smooths the middle,
+# not the tail. It costs $43.28 of naive corpus cost against the default's $33.56.
+#
+# THE EXTRA DEPENDENCY, AND THE EXTRA FAILURE MODE. This strategy embeds the first turn of
+# every session, in the request path, with a local ONNX model (~600MB, downloaded once to
+# $SHUNT_EMBED_CACHE_DIR and reused). That is memory and startup time the default never
+# spends, and a way for routing to fail that the default does not have: if the weights
+# cannot be fetched or the runtime cannot load them, shunt errors rather than quietly
+# routing on a fallback. `shunt doctor` reports the weights cache as a FAILURE under this
+# strategy and only a warning under the default. Know that before you switch.
+#
+# YOUR FILE REPLACES THE PACKAGED ONE WHOLESALE — nothing is merged key by key. That is
+# why every block that matters is spelled out here, including `escalation:`: an absent
+# escalation block reads as OFF, and a named cascade with the ladder off is a load error.
+router:
+  strategy: knn_semantic_cascade
+
+  # The kNN pick: embed the first turn, look up verified neighbours, take the cheapest
+  # model clearing the success bar. Read ONLY under this strategy.
+  policy:
+    k: 20
+    success_rate_threshold: 0.6   # lower = more cost savings, higher = more reliability
+    min_samples: 3
+
+  # Cost-aware Thompson-sampling exploration perturbs the kNN base pick, so it applies
+  # here and is inert under the default. Set `enabled: false` to route on current
+  # beliefs only.
+  exploration:
+    enabled: true
+    prior_alpha: 1.0
+    prior_beta: 1.0
+    explore_budget_frac: 0.4
+    conservative_alpha: 0.1
+    propensity_mc_samples: 100
+    prior_strength_cap: 20.0
+
+  # The SAME ladder the default climbs — the only difference between the two strategies
+  # is which rung the first session opens on.
+  escalation:
+    enabled: true
+    escalate_after_n: 2
+    stale_window: 10
+    ladder: effort_then_rank
+    rank_shortlist: 3
+    context_transfer: full
+
+  # Where the ladder gets its signal — see the note in session-cascade.yaml. Leaving
+  # `work_dir: null` and starting shunt inside the repo resolves the launch directory.
+  # ARMING ANY work_dir ARMS ARBITRARY CODE EXECUTION.
+  capture:
+    work_dir: null
+
+  # Rebuild the kNN index from the append-only outcome log every N captured outcomes.
+  # Learning is batch-first; the index is a rebuildable projection, not updated per outcome.
+  refit:
+    every_n_outcomes: 50
+
+  # Which registry models this router may pick — the shipped measured-evidence pool.
+  models:
+    - deepseek-v4-flash
+    - zai-glm-5.2
+    - kimi-k3
+    - gemini-3.1-pro
+    - gpt-5.6-sol
+    - claude-fable-5
+    - claude-opus-4-8

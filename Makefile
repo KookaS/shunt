@@ -41,6 +41,11 @@
 DOCS_REQS := docs/requirements.txt
 MKDOCS := uv run --with-requirements $(DOCS_REQS) mkdocs
 BENCH := uv run --extra benchmark python -m
+# The same launcher, behind the runtime plot guard (benchmark/plot_guard.py): the target's
+# producer may write a figure only through the plot frame, whatever the call site is spelled
+# like. Used by the targets that invoke a producer DIRECTLY. `benchmark.pipeline` spawns its
+# producers itself and is deliberately not wrapped here — see the module's note.
+DRAW := uv run --extra benchmark python -m benchmark.plot_guard
 ARGS ?=
 
 help:
@@ -119,7 +124,7 @@ offline-replay:
 	$(BENCH) benchmark.runner.offline_replay $(ARGS)
 
 escalation-eval:
-	SHUNT_PLOT_STRICT=1 $(BENCH) benchmark.escalation.run_eval $(ARGS)
+	SHUNT_PLOT_STRICT=1 $(DRAW) benchmark.escalation.run_eval $(ARGS)
 
 # Reads the committed corpora only. Exits nonzero when a model listed in `models:` has too little
 # collected data to be evaluated — the signal that a live collection is incomplete, not finished.
@@ -160,7 +165,7 @@ replay-inputs:
 	$(BENCH) benchmark.runner.snapshot_archive requirements $(ARGS)
 
 routing-report:
-	SHUNT_PLOT_STRICT=1 $(BENCH) benchmark.routing.report $(ARGS)
+	SHUNT_PLOT_STRICT=1 $(DRAW) benchmark.routing.report $(ARGS)
 
 # The standalone figures under benchmark/routing/scripts/, written to docs/assets/figures/routing/ so
 # the docs can link them relatively. Heavy (real fastembed), so they are
@@ -213,7 +218,7 @@ check-figures:
 # zero here would ship a half-rendered family.
 OUT ?=
 inference-figures:
-	SHUNT_PLOT_STRICT=1 $(BENCH) benchmark.routing.render_inference_figures \
+	SHUNT_PLOT_STRICT=1 $(DRAW) benchmark.routing.render_inference_figures \
 		$(if $(OUT),--out-dir "$(OUT)",) $(ARGS)
 
 # The cheap staleness gate for the inference half — seconds, draws nothing.
@@ -232,7 +237,7 @@ check-inference-figures:
 # SAME STALENESS TRAP as above: this target RENDERS and does not re-record. The demo job's
 # stage is FIGURES, so `--from figures` (make benchmark-figures) is what certifies it.
 demo-figures:
-	SHUNT_PLOT_STRICT=1 $(BENCH) benchmark.demo.render_demo_figures \
+	SHUNT_PLOT_STRICT=1 $(DRAW) benchmark.demo.render_demo_figures \
 		$(if $(OUT),--out-dir "$(OUT)",) $(ARGS)
 
 check-demo-figures:

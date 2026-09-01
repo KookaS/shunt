@@ -51,7 +51,10 @@ class TestLadderSemantics:
         s.select("t", {}, _matrix({"t": {"dear"}}))
         # The recurrence counter needs two verified failures per rung, and every session bills.
         assert s.cascade_tried_models == ["cheap", "cheap", "mid", "mid", "dear"]
-        assert s.session_hops == 3
+        # The two quantities are NOT the same number and must not be reported as one: five
+        # sessions were waited through, on three distinct rungs.
+        assert s.sessions_burned == 5
+        assert s.session_distinct_rungs == 3
 
     def test_a_lower_threshold_climbs_on_the_first_recurrence(self):
         s = _flat(escalate_after_n=1)
@@ -102,7 +105,7 @@ class TestRankShortlist:
         s = _flat(escalate_after_n=2, rank_shortlist=1)
         s.select("t", {}, _matrix({"t": {"dear"}}))
         assert s.cascade_tried_models == ["cheap", "cheap", "dear"]
-        assert s.session_hops == 2
+        assert s.session_distinct_rungs == 2
 
     def test_a_shortlist_wider_than_the_pool_is_the_every_rank_walk(self):
         # `next_rung_rank`'s `max` guard: the target must stay strictly above the current rung even

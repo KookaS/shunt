@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from benchmark import config, plot_frame
+from benchmark.routing import repricing
 
 if TYPE_CHECKING:
     from benchmark.routing.impute import ImputedMatrix
@@ -52,7 +53,7 @@ DEFAULT_STRATEGY: str = "Session-Cascade"
 
 @dataclass(frozen=True)
 class RoutingContext:
-    """Everything the twelve routing figures read, derived once per report run."""
+    """Everything the routing figures read, derived once per report run."""
 
     out_dir: Path
     manifest: Path
@@ -66,10 +67,25 @@ class RoutingContext:
     banner: str | None
     by_strategy: dict[str, tuple[StrategyCells, set[str]]]
     digest: str
+    # strategy -> its scored tasks' billed tokens at TODAY's cheapest listed price, or None
+    # when the sheet does not price every model on the path, or when any billed cell carries
+    # no tokens (an imputed rung). Never partial: a repriced total covers the SAME task set as
+    # the recorded one or it does not exist. See report._repriced_total and repricing.py.
+    # Defaulted because a context built WITHOUT repricing is a valid context, not a broken
+    # one: the sheet is optional, every consumer already handles its absence, and making the
+    # field required would have turned "this figure does not reprice" into a constructor error.
+    repriced_totals: dict[str, float | None] = field(default_factory=dict)
 
-    def provenance(self, generator: str) -> plot_frame.Provenance:
+    def provenance(self, generator: str, *, repriced: bool = False) -> plot_frame.Provenance:
+        """Provenance for one figure; `repriced` stamps the price sheet that drew its cost."""
+        # The stamp is conditional because it is a CLAIM: a figure carrying it says its cost
+        # axis was drawn at that sheet's prices. A figure that fell back to recorded cost, or
+        # has no cost axis at all, must not carry it.
         return plot_frame.Provenance(
-            generator=generator, data_digest=self.digest, manifest=self.manifest
+            generator=generator,
+            data_digest=self.digest,
+            manifest=self.manifest,
+            price_sheet=repricing.provenance_stamp() if repriced else None,
         )
 
     def row(self, name: str) -> dict[str, str] | None:
@@ -128,6 +144,7 @@ def build_context(  # noqa: PLR0913 (one argument per already-computed input; se
     raw: RawResults | None,
     banner: str | None,
     by_strategy: dict[str, tuple[StrategyCells, set[str]]],
+    repriced_totals: dict[str, float | None] | None = None,
     manifest: Path = MANIFEST,
 ) -> RoutingContext:
     """Assemble the shared context; the price order is derived here so it is one order."""
@@ -145,5 +162,6 @@ def build_context(  # noqa: PLR0913 (one argument per already-computed input; se
         models_by_price=models_by_price,
         banner=banner,
         by_strategy=by_strategy,
+        repriced_totals=dict(repriced_totals or {}),
         digest=corpus_digest(completed or matrix, tasks),
     )

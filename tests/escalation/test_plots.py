@@ -502,11 +502,14 @@ def test_the_session_costs_name_their_currency_and_carry_no_mathtext_dollar() ->
     )
     fig, axes = _axes(3)
     ann = plots.session_value(_session(low=0.24, high=0.58, costs=costs), axes)
-    facts = "\n".join(ann.subtitle_facts)
-    assert "naive" in facts and "cache-aware" in facts
-    assert "USD" in facts
-    assert "$" not in facts
-    assert "$" not in "\n".join(ann.notes)
+    # The ledger moved from the subtitle to the notes (it was five canvas lines of dollars), so
+    # the currency-naming and no-mathtext rules are asserted where the ledger now lives. The
+    # "$" rule still covers the subtitle, because that is the string matplotlib renders.
+    notes = "\n".join(ann.notes)
+    assert "naive" in notes and "cache-aware" in notes
+    assert "USD" in notes
+    assert "$" not in notes
+    assert "$" not in "\n".join(ann.subtitle_facts)
     plt.close(fig)
 
 
@@ -731,3 +734,118 @@ def test_every_figure_spec_carries_a_claim_a_reading_and_a_goal() -> None:
 )
 def test_replaced_figures_are_gone(removed: str) -> None:
     assert not hasattr(plots, removed)
+
+
+# ------------------------------------------------- the numbers a canvas states twice
+
+
+def test_the_decision_title_is_measured_rather_than_frozen() -> None:
+    # THE DEFECT THIS PINS. The title carried a hand-typed "AUROC 0.601 vs 0.781" while the
+    # subtitle and panel A's legend — both derived — printed 0.600/0.778 off the same data. A
+    # figure that disagrees with itself about its own headline number is not a rounding nit; the
+    # stale pair was republished as prose in the research log. The title is now computed, so a
+    # data change moves all three together or none.
+    labels = [i % 3 == 0 for i in range(30)]
+    plain = [float(i % 4) for i in range(30)]
+    edit = [float(3 if lab else 0) for lab in labels]
+    spec = plots.escalation_decision_spec(plain, edit, labels)
+    fig, axes = _axes(4)
+    ann = plots.escalation_decision(plain, edit, labels, axes, shipped_n=3, value_verdict="OK")
+    expected = f"AUROC {metrics.auroc(plain, labels):.3f} vs {metrics.auroc(edit, labels):.3f}"
+    assert spec.title.endswith(expected)
+    # The same two numbers, in the same rounding, as the subtitle the reader compares it against.
+    subtitle = next(f for f in ann.subtitle_facts if f.startswith("AUROC as-shipped"))
+    for value in (metrics.auroc(plain, labels), metrics.auroc(edit, labels)):
+        assert f"{value:.3f}" in subtitle
+    # And no frozen pair survives anywhere in the static record.
+    assert "0.601" not in spec.title and "0.781" not in spec.title
+    assert not any("0.728" in note for note in plots.ESCALATION_DECISION_SPEC.notes)
+    plt.close(fig)
+
+
+def test_the_decision_window_note_is_read_off_the_report() -> None:
+    # The window's worth used to be a literal in the static note (0.728 against a measured
+    # 0.725). It is figure input now, so an absent report leaves the note off rather than
+    # printing a remembered number.
+    labels = [i % 3 == 0 for i in range(30)]
+    plain = [float(i % 4) for i in range(30)]
+    edit = [float(3 if lab else 0) for lab in labels]
+    fig, axes = _axes(4)
+    ann = plots.escalation_decision(
+        plain,
+        edit,
+        labels,
+        axes,
+        shipped_n=3,
+        value_verdict="OK",
+        window_sensitivity={
+            "as_shipped_auroc_at_stale_window_10": 0.6003,
+            "as_shipped_auroc_at_stale_window_1000": 0.7248,
+            "edit_gated_auroc_at_stale_window_10": 0.7782,
+            "edit_gated_auroc_at_stale_window_1000": 0.7832,
+        },
+    )
+    note = next(n for n in ann.notes if n.startswith("window sensitivity"))
+    assert "as-shipped 0.600 -> 0.725" in note
+    assert "edit-gated 0.778 -> 0.783" in note
+    fig2, axes2 = _axes(4)
+    bare = plots.escalation_decision(plain, edit, labels, axes2, shipped_n=3, value_verdict="OK")
+    assert not any(n.startswith("window sensitivity") for n in bare.notes)
+    plt.close(fig)
+    plt.close(fig2)
+
+
+def test_the_stratified_panel_anchors_its_axis_at_chance_and_labels_the_anchor() -> None:
+    # THE DEFECT THIS PINS. The axis started at 0.40 — a truncation at a value that means
+    # nothing for an AUROC — so the pooled-to-within-strata drop the panel exists to size read
+    # about twice as large as it is. Chance (0.5) is the statistic's meaningful floor, and an
+    # anchored axis is honest only while it says where it starts.
+    fig, axes = _axes(4)
+    plots.corpus_and_coverage([], [], plots.StratifiedAuroc(0.778, 0.710, 0.717), None, axes)
+    assert axes[2].get_ylim()[0] == 0.5
+    assert "chance 0.5" in axes[2].get_ylabel()
+    plt.close(fig)
+
+
+def test_a_below_chance_stratified_bar_drops_the_axis_back_to_zero() -> None:
+    # An anchored axis must never CLIP a value. A within-strata AUROC below chance is exactly
+    # the falsifying result this panel is for, and it has to stay on the canvas.
+    fig, axes = _axes(4)
+    plots.corpus_and_coverage([], [], plots.StratifiedAuroc(0.778, 0.431, 0.717), None, axes)
+    assert axes[2].get_ylim()[0] == 0.0
+    assert "starts at 0" in axes[2].get_ylabel()
+    plt.close(fig)
+
+
+def test_the_session_cost_ledger_lives_in_the_notes_not_the_subtitle() -> None:
+    # THE DEFECT THIS PINS. Five arms x two currencies is about thirty numbers, and appending
+    # them to `subtitle_facts` grew the canvas subtitle to five lines, so the paired difference
+    # the figure is ABOUT arrived after a wall of dollars. Relocated, not deleted: every number
+    # is still on the record through figures.json and the docs.
+    costs = tuple(
+        ArmCost(
+            name=name,
+            currency=currency,
+            n_sessions=10,
+            n_instances_covered=8,
+            total_cost=1.0,
+            cost_per_instance=0.5,
+            cost_ci=(0.4, 0.6),
+            marginal_cost_per_resolve=1.25,
+            marginal_ci=(1.0, 1.5),
+            marginal_undefined_share=0.0,
+        )
+        for currency in ("naive", "cache_aware")
+        for name in ("escalate", "always_frontier", "retry")
+    )
+    fig, axes = _axes(3)
+    ann = plots.session_value(_session(low=0.24, high=0.58, costs=costs), axes)
+    facts = "\n".join(ann.subtitle_facts)
+    notes = "\n".join(ann.notes)
+    assert "USD per task acted on" not in facts
+    assert facts.count("\n") <= 4
+    assert any("see this figure's notes" in fact for fact in ann.subtitle_facts)
+    assert "USD per task acted on (naive)" in notes
+    assert "USD per task acted on (cache-aware)" in notes
+    assert notes.count("0.500") >= 6
+    plt.close(fig)

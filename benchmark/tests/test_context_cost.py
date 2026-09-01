@@ -61,7 +61,7 @@ class TestAlphaZeroIdentity:
         if not matrix.get("results"):
             pytest.skip("results.csv holds no rows")
         tasks = sorted(matrix["results"])
-        decisions, _unscorable, attempts, _judge = summary.evaluate_billed(
+        decisions, _unscorable, attempts, _judge, _sessions = summary.evaluate_billed(
             AlwaysCheap(), matrix, tasks
         )
         assert decisions
@@ -141,7 +141,9 @@ class TestBracketRestsOnMeasuredCellsOnly:
         if not matrix.get("results"):
             pytest.skip("results.csv holds no rows")
         tasks = sorted(matrix["results"])
-        _dec, _uns, attempts, _judge = summary.evaluate_billed(AlwaysCheap(), matrix, tasks)
+        _dec, _uns, attempts, _judge, _sessions = summary.evaluate_billed(
+            AlwaysCheap(), matrix, tasks
+        )
         bracket = context_cost.context_bracket(attempts, (1.0,), context_cost.input_rates())
         assert 0 < bracket.n_tasks <= len(tasks)
         validate.enforce_bracket_coverage(

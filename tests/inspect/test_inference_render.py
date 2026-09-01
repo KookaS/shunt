@@ -1,7 +1,7 @@
 """The inference package's wiring: render(), the manifest diversion, and the docs emitter."""
 
 # The figures themselves are covered by `test_inference_figures.py`. What is under test here is
-# the integration: that all seven land in one call, that a scratch render can never reach the
+# the integration: that all eight land in one call, that a scratch render can never reach the
 # committed manifest, that an inadmissible instrument costs exactly one figure, and that the
 # markdown the docs page is built from is generated from the manifest rather than retyped.
 
@@ -93,7 +93,7 @@ def _stub_certificate(monkeypatch: pytest.MonkeyPatch, *, admissible: bool) -> N
     monkeypatch.setattr(estimators, "certify", _certify)
 
 
-def test_render_writes_all_seven_figures_and_their_manifest(
+def test_render_writes_all_eight_figures_and_their_manifest(
     seeded_store: OutcomeStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _stub_certificate(monkeypatch, admissible=True)
@@ -201,3 +201,22 @@ def test_emit_docs_section_prints_every_figure_in_family_order(
 def test_the_module_entrypoint_requires_an_out_dir(capsys: pytest.CaptureFixture[str]) -> None:
     assert main([]) == 2
     assert "--out-dir is required" in capsys.readouterr().err
+
+
+def test_docs_section_marker_names_the_rows_own_generator() -> None:
+    # The emitter serves more than one manifest: the routing family's `model_grid.png` is
+    # drawn by `benchmark.routing.figures.model_grid` and only its markdown block is
+    # rendered here. A marker naming this module would point at an entrypoint that cannot
+    # produce that figure — and SH012 would still pass it, because it checks a marker
+    # EXISTS, never that it resolves to the producer.
+    row = {
+        "title": "T",
+        "subtitle": "s",
+        "reading": "r",
+        "goal": "g",
+        "generator": "benchmark.routing.figures.model_grid",
+        "n": {"models": 8},
+    }
+    section = inference.docs_section("model_grid.png", row, half="routing")
+    assert "<!-- generated-by: benchmark.routing.figures.model_grid -->" in section
+    assert inference.GENERATOR not in section

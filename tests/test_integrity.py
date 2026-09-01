@@ -81,11 +81,17 @@ class TestResultsSchema:
         assert fields[:3] == ("challenge_id", "model", "reasoning")
 
     def test_header_matches_expected_order(self):
+        # SCHEMA LOCK. Every column here is APPEND-ONLY: legacy rows must keep parsing, so a
+        # new column goes at the END and this string grows at the end. The nine after
+        # `prompt_hash` are the replicate key plus the optional-column classes; changing this
+        # line is how you notice you moved an existing column instead of appending.
         assert ",".join(integrity.RESULTS_FIELDS) == (
             "challenge_id,model,reasoning,pass,cost,in_tok,out_tok,calls,"
             "version_hash,model_version,arm_hash,real_cost,estimated_cost,timeout_flag,"
             "image_digest,computed_at,stop_reason,step_limit,cost_limit,scaffold_version,"
-            "sampling_hash,prompt_hash"
+            "sampling_hash,prompt_hash,"
+            "rep,wall_clock_s,ttft_s,latency_per_call_s,cached_in_tok,retry_count,"
+            "provider,serving_mode,provider_latency_source"
         )
 
     def test_build_row_defaults_reasoning(self):

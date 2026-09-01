@@ -179,7 +179,7 @@ class TestStrategies:
 
         matrix = {**_matrix(), "tasks": {}}
         tasks = ["t1", "t2", "t3", "t3b", "t4", "t5"]
-        decisions, _uns, _att, judge_by_task = summary.evaluate_billed(
+        decisions, _uns, _att, judge_by_task, _sessions = summary.evaluate_billed(
             knnDifficultyStrategy(k=2), matrix, tasks
         )
         assert judge_by_task == {t: pytest.approx(0.001) for t in tasks}

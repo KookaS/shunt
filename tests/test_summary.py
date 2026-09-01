@@ -7,6 +7,7 @@ from __future__ import annotations
 import pytest
 
 from benchmark import config
+from benchmark.routing.strategies import Strategy
 from benchmark.routing.strategies.fixed import AlwaysFrontier
 from benchmark.routing.summary import compute_strategy_rows
 
@@ -98,7 +99,7 @@ def test_a_never_executed_cell_is_unscorable_under_either_impute_setting(
     assert row["TotalCost"] == 10.0
 
 
-class _CascadeToucherOfAnUnmeasuredCell:
+class _CascadeToucherOfAnUnmeasuredCell(Strategy):
     """A cascade whose PATH crossed an unmeasured cell, though its FINAL cell is measured."""
 
     name = "Fake-Cascade"

@@ -159,6 +159,39 @@ without a date is a number you can't audit.
 Watch for models with no cache-read discount. They resend the full context at
 full price every turn, which shows up as a benchmark bill rather than an error.
 
+### Size and serving mode
+
+Two more optional fields describe the model rather than its price, and the figures
+that plot the ladder read both:
+
+```yaml
+    serving_mode: hosted             # hosted | local — defaults to hosted
+    size:
+      total_params: 284000000000     # an integer, or the literal UNDISCLOSED
+      active_params: 13000000000     # equal to total on a dense model
+      size_source: https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash
+      size_as_of: "2026-08-29"
+      size_note: Optional — the convention used, and anything a reader needs to check it.
+```
+
+`size` mirrors `pricing`'s provenance discipline for the same reason: a parameter
+count on a published figure is a claim, and a claim without a source and a date is
+one nobody can audit. When a vendor publishes no count — every closed API tier does
+this — write the literal `UNDISCLOSED`. It is not `null` and it is not a guess: the
+absence is the finding, and the third-party figures that circulate for closed models
+are speculation, not sources.
+
+`active_params` is a **compute** claim — what one token decodes through — never a
+memory one. A 284B-total / 13B-active mixture-of-experts still needs all 284B
+resident, because the router may pick any expert on any token. Treating the active
+count as a size equivalence is the mistake the two fields exist to prevent.
+
+`serving_mode` says where the weights run. It defaults to `hosted` because every
+shipped row is a provider API; a locally-served model must say `local`, and the cost
+figures split on the field rather than pooling a $0 local run with a paid namesake.
+A local quantised model is also a **different model** from its hosted BF16 namesake —
+give it its own registry id carrying the quant tag.
+
 Once a model is registered, score it with `make benchmark-live` (i.e. `uv run --extra
 benchmark python -m benchmark.runner.run_matrix`; the extra is required — a bare `uv run`
 strips the eval deps). The
@@ -183,6 +216,8 @@ test locks it (`tests/models/test_consumer_config_contract.py`).
 | `supports_streaming` | every used model | wire behaviour; defaults `true` |
 | `supports_cache_control` | every used model | the cache-safety spine — over-claiming earns a 400 mid-request; defaults `false` |
 | `pricing` (`input_cost_per_1m`, `output_cost_per_1m`, `cache_read_cost_per_1m`, `price_provider`, `price_source`, `price_as_of`) | every used model | the price-implied capability-rank prior (input + output), cost scoring, and the imputation ladder; absent pricing = routable but unscored |
+| `size` (`total_params`, `active_params`, `size_source`, `size_as_of`) | optional | the size axis of the model-grid figure; `UNDISCLOSED` where the vendor publishes nothing |
+| `serving_mode` | optional, defaults `hosted` | splits hosted from local rows on the cost axes, and marks which rows a local server's serving configuration governs (there is no latency axis: nothing published here measures latency) |
 | `reasoning` (`default_arm` + rank-ordered `arms`) | every used model | the escalation ladder's first step is a same-model effort raise — it only exists when `default_arm` is not the model's top arm; a model with no bracket would step rank directly and lose that cache-safe rung |
 
 The two consumers each keep their own policy on top of this shared data layer: the
@@ -338,6 +373,11 @@ within-task cascade: Shunt makes one model decision per session and never switch
 a cached turn, so it cannot try a cheap model, read your tests, and retry bigger within one
 task. The offline `price_cascade` / `knn_semantic_cascade_withintask` rows measure that, are rejected
 at boot, and stay that way — [Results](results.md#routing-results) carries what the difference costs.
+
+A complete, runnable `router.yaml` for each of the two — with every block spelled out,
+and a line on when you would pick it — ships in
+[`examples/strategies/`](https://github.com/KookaS/shunt/blob/main/examples/strategies/README.md).
+Copy one to `~/.config/shunt/router.yaml` and start.
 
 ### Choose which models are live-routable
 

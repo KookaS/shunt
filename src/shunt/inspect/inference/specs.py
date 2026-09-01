@@ -133,6 +133,9 @@ STRATA: Final[FigureText] = FigureText(
         "surfaced on the canvas rather than assigned to either stratum.",
         "The seeder writes one deterministic timestamp for the whole corpus, so panel B's seeded "
         "column has no width by construction.",
+        "A stratum with no sessions draws NO bars in panels A and C, and its legend key reads "
+        "`(none in this corpus)` at reduced strength. A zero-height bar and an absent population "
+        "must not render the same, and the red line names the empty stratum outright.",
         "There is no Tier-1 bar, and its absence is the point: a Tier-1-only session is kept out "
         "of the materialized view and out of the trusted kNN index until a Tier-2 corroborates "
         "it, so it cannot influence a routing decision. It is not hidden either — `labeled (any "
@@ -467,6 +470,71 @@ OPE: Final[FigureText] = FigureText(
 )
 
 
+MODEL_GRID: Final[FigureText] = FigureText(
+    name="inference_model_grid",
+    # NOT "the live router used". The store's Tier-2-labeled sessions are BOTH strata, and in
+    # a seed-only store every row here is a replayed benchmark session. The old title asserted
+    # a live measurement over replay; the subject set and its stratum split are now computed
+    # into the subtitle by `data._grid_source`, so an empty live stratum is visible on the
+    # canvas rather than only in a limitations paragraph below it.
+    title="Every model in the outcome store: price, size, measured outcome",
+    subtitle="the benchmark half's grid, redrawn over the outcome store — both strata, split "
+    "stated below",
+    caveat="Panel A's x axis is what the store was BILLED, so it is not the benchmark half's.",
+    reading=(
+        "Panel A: each model the store holds a Tier-2 label for, at its mean billed dollars "
+        "per labeled session (x, log — with a separate column at the left for locally-served "
+        "models, whose marginal price is exactly zero and cannot sit on a log axis) against its "
+        "verified-success rate (y), with Wilson 95% whiskers. Marker area follows the square "
+        "root of the active parameter count, the marker edge says hosted or local, and hue is "
+        "the coarse total-size band. Panel B: a hollow mark at total parameters and a filled "
+        "mark at active parameters, the rule between them being the mixture-of-experts "
+        "sparsity gap. Panels C and D: per-call latency, hosted and local on separate axes."
+    ),
+    goal=(
+        "Compare this canvas with the benchmark half's. The two draw the same three panels "
+        "from different corpora, so a model that sits in one place here and elsewhere there "
+        "is telling you the benchmark corpus and the served traffic are not the same "
+        "workload — which is the gap the whole live-versus-benchmark question turns on."
+    ),
+    definitions=(
+        _VERIFIED_TERM,
+        (
+            "$ per labeled session",
+            "Billed spend divided by labeled sessions, read off the store's own cost rows. A "
+            "model whose sessions are not all priced is left off the axis rather than plotted "
+            "at a partial total. This is a MEASURED bill, not a list price, so it is not the "
+            "quantity the benchmark half's panel A plots and the two must not be compared.",
+        ),
+        (
+            "active parameters",
+            "What one token decodes through — a COMPUTE claim. All of a mixture's total "
+            "parameters must still be resident to serve it.",
+        ),
+        (
+            "UNDISCLOSED",
+            "The vendor publishes no parameter count. No estimate is substituted, and the row "
+            "draws at a fixed reference marker that is deliberately off the size ramp.",
+        ),
+    ),
+    notes=(
+        "Panel A's x and the benchmark half's x are different quantities — billed dollars per "
+        "session here, a blended list price per million tokens there. The two canvases share a "
+        "shape, not an axis, and a model's horizontal position must never be carried between "
+        "them.",
+    ),
+    limitations=(
+        "STRATA ARE POOLED ON THIS PANEL, and the subtitle states the split. A row drawn "
+        "entirely from seeded sessions was REPLAYED from the benchmark corpus: it repeats the "
+        "benchmark half's finding rather than corroborating it, and nothing on this canvas "
+        "may be read as live measurement until the subtitle reports live sessions.",
+        "The x axis is a mean over sessions of very different sizes, so a model that served "
+        "the longer sessions looks dearer per session without being dearer per token.",
+        "Rates are not paired: models were not served the same sessions, so a height "
+        "difference between two rows is not a controlled comparison.",
+    ),
+)
+
 FIGURES: Final[tuple[FigureText, ...]] = (
     STRATA,
     COST,
@@ -474,5 +542,6 @@ FIGURES: Final[tuple[FigureText, ...]] = (
     NEIGHBOURHOOD,
     POLICY,
     ESCALATION,
+    MODEL_GRID,
     OPE,
 )

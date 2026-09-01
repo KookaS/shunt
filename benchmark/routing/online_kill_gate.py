@@ -1,8 +1,22 @@
 """Peeking-safe online kill-gate adjudication over the verified-outcome stream.
 
-Paired non-inferiority (not-worse quality within a margin AND cheaper on cache-aware cost)
-via the anytime-valid confidence sequence in ``frontier_estimate``.
+Paired non-inferiority (quality within a margin AND cheaper) against TWO baselines —
+fixed-frontier-with-caching, and a zero-ML constant policy on the same handoff.
 """
+
+# WHY THERE IS A THIRD ARM. Scrouting (arXiv:2608.04804), 266 SWE-bench Pro tasks: the router
+# scored 59.77% at $0.230/solve, and ALWAYS routing to one cheap strong model with the SAME
+# handoff got 159 solves at $0.227/solve — indistinguishable. "The handoff rather than the
+# routing decision carries the result." A gate that only ever compares the router to an
+# expensive frontier model cannot see that, and it is a cheaper and far more dangerous
+# falsifier than the frontier arm ever was. The router must now clear BOTH, and clearing one
+# while losing the other is a FAIL, not an average.
+#
+# THE OPERATIONAL AXES ARE NOT HERE, AND THAT IS DELIBERATE. The multi-dimensional criterion
+# (sessions waited through, tail, bill variance) lives in `benchmark/routing/gate_dimensions.py`
+# and adjudicates the RECORDED offline table, because the live store measures none of those
+# columns today. Emitting a two-axis verdict here and calling it multi-dimensional would be the
+# same blindness with a better name; the missing instrumentation is named in the ADR instead.
 
 # Decision logic only — this module is not yet wired to a live/served endpoint (it is
 # imported by the benchmark, never by ``src/shunt``); the "served" wiring is future work.
@@ -48,14 +62,23 @@ class PairedOutcome:
     """One paired production observation: same task, router arm vs fixed-frontier arm.
 
     ``*_pass`` are verified pass/fail in {0,1}; ``*_cost`` are realized cache-aware costs;
-    ``cost_known=False`` excludes the pair from the cost ratio (never a real 0.0).
+    ``cost_known=False`` excludes a leg from its cost ratio (never a real 0.0).
     """
+
+    # The constant-policy leg is optional at the type level and MANDATORY for a PASS: see
+    # `decide_online_verdict`, where an absent third arm can only ever produce CONTINUE.
 
     router_pass: int
     baseline_pass: int
     router_cost: float = 0.0
     baseline_cost: float = 0.0
     cost_known: bool = True
+    #: The THIRD arm: the same task run under a zero-ML constant policy with the same handoff.
+    #: ``None`` means the constant leg was not collected for this pair — never a real 0, and
+    #: never silently treated as a router win: an absent constant arm blocks PASS entirely.
+    constant_pass: int | None = None
+    constant_cost: float = 0.0
+    constant_cost_known: bool = True
 
 
 @dataclass(frozen=True)
@@ -68,6 +91,23 @@ class OnlineGateState:
     baseline_cost_sum: float = 0.0
     n: int = 0
     n_cost: int = 0
+    #: The constant-policy arm, folded exactly like the frontier arm — same estimator, same
+    #: alpha, no privileged treatment. A second sequence rather than a merged one, because a
+    #: router may be non-inferior to the frontier and inferior to the constant policy at once,
+    #: and pooling them would average that contradiction away.
+    constant_quality: SeqState | None = None
+    constant_cost_sign: SeqState | None = None
+    constant_cost_sum: float = 0.0
+    router_cost_sum_vs_constant: float = 0.0
+    n_constant: int = 0
+    n_constant_cost: int = 0
+
+    @property
+    def constant_cache_aware_ratio(self) -> float:
+        """Router cost / constant-policy cost over the pairs where BOTH legs were costed."""
+        if self.constant_cost_sum <= 0.0:
+            return float("inf")
+        return self.router_cost_sum_vs_constant / self.constant_cost_sum
 
     @property
     def cache_aware_ratio(self) -> float:
@@ -109,6 +149,31 @@ def update_online_gate(
         router_sum += obs.router_cost
         baseline_sum += obs.baseline_cost
         n_cost += 1
+
+    # The constant-policy leg, folded through the SAME estimator with the SAME alpha. Its
+    # cost sums are kept separately from the frontier ones (`router_cost_sum_vs_constant`)
+    # because the two legs can be costed on different subsets of pairs, and dividing a
+    # router total accumulated over one subset by a constant total over another is a ratio
+    # of two different task sets wearing one name.
+    const_quality = state.constant_quality
+    const_cost_sign = state.constant_cost_sign
+    const_sum = state.constant_cost_sum
+    router_sum_vs_const = state.router_cost_sum_vs_constant
+    n_constant = state.n_constant
+    n_constant_cost = state.n_constant_cost
+    if obs.constant_pass is not None:
+        const_quality = update_confidence_sequence(
+            const_quality, obs.router_pass, obs.constant_pass, margin=margin, alpha=alpha
+        )
+        n_constant += 1
+        if obs.cost_known and obs.constant_cost_known:
+            const_cost_sign = _fold_sign_sequence(
+                const_cost_sign, _sign(obs.constant_cost - obs.router_cost), alpha
+            )
+            router_sum_vs_const += obs.router_cost
+            const_sum += obs.constant_cost
+            n_constant_cost += 1
+
     return OnlineGateState(
         quality=quality,
         cost_sign=cost_sign,
@@ -116,6 +181,12 @@ def update_online_gate(
         baseline_cost_sum=baseline_sum,
         n=state.n + 1,
         n_cost=n_cost,
+        constant_quality=const_quality,
+        constant_cost_sign=const_cost_sign,
+        constant_cost_sum=const_sum,
+        router_cost_sum_vs_constant=router_sum_vs_const,
+        n_constant=n_constant,
+        n_constant_cost=n_constant_cost,
     )
 
 
@@ -140,8 +211,8 @@ def decide_online_verdict(
 ) -> tuple[str, str]:
     """Emit PASS / FAIL / CONTINUE / UNDERPOWERED from the accumulated state.
 
-    Priority: quality-worse FAIL > cost-not-cheaper FAIL > PASS/cost-FAIL on a decided
-    win > UNDERPOWERED (window exhausted and unreachable) > CONTINUE.
+    Priority: quality-worse FAIL (either baseline) > cost-not-cheaper FAIL (either baseline) >
+    PASS/cost-FAIL on a decided win against BOTH > UNDERPOWERED > CONTINUE.
     """
     q = state.quality
     cs = state.cost_sign
@@ -149,6 +220,10 @@ def decide_online_verdict(
 
     if q is not None and q.decided and q.direction == "no_win":
         return (FAIL, "quality credibly worse than the fixed-frontier baseline")
+
+    cq = state.constant_quality
+    if cq is not None and cq.decided and cq.direction == "no_win":
+        return (FAIL, "quality credibly worse than the zero-ML constant policy")
 
     # The authoritative cost criterion is the AGGREGATE cache-aware ratio (Sum d_i < 0,
     # i.e. mean per-pair cost difference below 0) — NOT the per-session saving sign, which
@@ -158,14 +233,46 @@ def decide_online_verdict(
     if cs is not None and cs.decided and cs.direction == "no_win" and ratio >= 1.0:
         return (FAIL, "router credibly not cheaper on cache-aware cost")
 
+    const_ratio = state.constant_cache_aware_ratio
+    ccs = state.constant_cost_sign
+    if ccs is not None and ccs.decided and ccs.direction == "no_win" and const_ratio >= 1.0:
+        return (FAIL, "router credibly not cheaper than the zero-ML constant policy")
+
     if q is not None and q.decided and q.direction == "router_wins":
         if state.n_cost == 0:
             return (CONTINUE, "quality decided; awaiting cache-aware cost evidence")
-        if ratio < 1.0:
-            return (PASS, f"non-inferior quality and cheaper (cache-aware ratio {ratio:.4f})")
+        if ratio >= 1.0:
+            return (
+                FAIL,
+                f"quality non-inferior but not cheaper (cache-aware ratio {ratio:.4f} >= 1.0)",
+            )
+        # THE FRONTIER ARM ALONE NO LONGER PASSES ANYTHING. A router that beats an expensive
+        # frontier model and merely matches a policy that does no routing has demonstrated the
+        # handoff, not the routing decision — which is precisely the result Scrouting reported.
+        # An ABSENT constant arm is therefore CONTINUE, never PASS: the gate is not entitled to
+        # assume the arm it never collected would have lost.
+        if state.n_constant == 0:
+            return (
+                CONTINUE,
+                "beats fixed-frontier; awaiting the zero-ML constant-policy arm before a PASS",
+            )
+        if cq is None or not cq.decided or cq.direction != "router_wins":
+            return (
+                CONTINUE,
+                "beats fixed-frontier; quality vs the constant policy not yet decided",
+            )
+        if state.n_constant_cost == 0:
+            return (CONTINUE, "awaiting cache-aware cost evidence on the constant-policy arm")
+        if const_ratio >= 1.0:
+            return (
+                FAIL,
+                f"beats fixed-frontier but not the zero-ML constant policy "
+                f"(cache-aware ratio {const_ratio:.4f} >= 1.0)",
+            )
         return (
-            FAIL,
-            f"quality non-inferior but not cheaper (cache-aware ratio {ratio:.4f} >= 1.0)",
+            PASS,
+            f"non-inferior quality and cheaper than BOTH baselines "
+            f"(frontier ratio {ratio:.4f}, constant-policy ratio {const_ratio:.4f})",
         )
 
     if available_n is not None and state.n >= available_n and not reachable:
@@ -184,6 +291,18 @@ def confirm_fixed_n(
     router_pass = {f"t{i}": o.router_pass for i, o in enumerate(stream)}
     baseline_pass = {f"t{i}": o.baseline_pass for i, o in enumerate(stream)}
     return mcnemar_noninferiority(router_pass, baseline_pass, margin=margin, alpha=alpha)
+
+
+def confirm_fixed_n_constant(
+    stream: list[PairedOutcome], *, margin: float = DEFAULT_MARGIN, alpha: float = DEFAULT_ALPHA
+) -> McNemarResult | None:
+    """The same fixed-N cross-check against the constant-policy arm; ``None`` when absent."""
+    legs = [o for o in stream if o.constant_pass is not None]
+    if not legs:
+        return None
+    router_pass = {f"t{i}": o.router_pass for i, o in enumerate(legs)}
+    constant_pass = {f"t{i}": int(o.constant_pass or 0) for i, o in enumerate(legs)}
+    return mcnemar_noninferiority(router_pass, constant_pass, margin=margin, alpha=alpha)
 
 
 def final_verdict(
@@ -206,6 +325,18 @@ def final_verdict(
         confirmation = confirm_fixed_n(stream, margin=margin, alpha=alpha)
         if confirmation.decision != "non_inferior":
             return (CONTINUE, "monitor PASS not confirmed by the fixed-N cross-check; hold")
+        # The cross-check runs on BOTH arms or it is not a cross-check on this gate: the
+        # monitor's PASS now rests on two comparisons, and confirming only one of them would
+        # leave the newer, more dangerous one uncorroborated.
+        constant_confirmation = confirm_fixed_n_constant(stream, margin=margin, alpha=alpha)
+        if constant_confirmation is None:
+            return (CONTINUE, "monitor PASS carries no constant-policy arm to cross-check; hold")
+        if constant_confirmation.decision != "non_inferior":
+            return (
+                CONTINUE,
+                "monitor PASS not confirmed against the constant policy by the fixed-N "
+                "cross-check; hold",
+            )
     return (verdict, reason)
 
 
@@ -309,7 +440,7 @@ def read_paired_outcomes(store: _StoreLike) -> list[PairedOutcome]:
         if session is None:
             continue
         arm, pair_key = _arm_and_key(session)
-        if arm not in ("router", "baseline") or pair_key is None:
+        if arm not in _ARMS or pair_key is None:
             continue
         leg = PairedOutcome(
             router_pass=_pass_from_outcome(row.get("tier2_outcome")),
@@ -318,7 +449,7 @@ def read_paired_outcomes(store: _StoreLike) -> list[PairedOutcome]:
             baseline_cost=float(session.get("cost", 0.0)),
             cost_known=bool(session.get("cost_known", 1)),
         )
-        slot = pairs.setdefault(pair_key, {"router": None, "baseline": None})
+        slot = pairs.setdefault(pair_key, dict.fromkeys(_ARMS))
         if pair_key not in order:
             order.append(pair_key)
         slot[arm] = leg
@@ -339,19 +470,32 @@ def _arm_and_key(session: dict[str, Any]) -> tuple[str | None, str | None]:
     return (prov.get("arm"), prov.get("pair_key"))
 
 
+#: Arms a session's provenance may declare. `constant` is the zero-ML constant policy running
+#: the same handoff — collected as a third leg of the same pair_key, never as its own comparison.
+_ARMS: tuple[str, ...] = ("router", "baseline", "constant")
+
+
 def _complete(slot: dict[str, PairedOutcome | None]) -> bool:
+    """A pair needs both compared arms; the constant leg joins when it was captured."""
     return slot["router"] is not None and slot["baseline"] is not None
 
 
 def _merge_legs(slot: dict[str, PairedOutcome | None]) -> PairedOutcome:
-    """Merge the router leg and baseline leg of one dual-run task into one PairedOutcome."""
+    """Merge one task's router, baseline and (optional) constant-policy legs into one record."""
     router = slot["router"]
     baseline = slot["baseline"]
+    constant = slot["constant"]
     assert router is not None and baseline is not None  # guarded by _complete
+    # The constant leg is OPTIONAL here and mandatory for a PASS. A run that never captured it
+    # yields pairs whose `constant_pass` is None, and `decide_online_verdict` answers CONTINUE
+    # rather than passing on the two arms it does have.
     return PairedOutcome(
         router_pass=router.router_pass,
         baseline_pass=baseline.baseline_pass,
         router_cost=router.router_cost,
         baseline_cost=baseline.baseline_cost,
         cost_known=router.cost_known and baseline.cost_known,
+        constant_pass=None if constant is None else constant.baseline_pass,
+        constant_cost=0.0 if constant is None else constant.baseline_cost,
+        constant_cost_known=constant is not None and constant.cost_known,
     )

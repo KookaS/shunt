@@ -15,6 +15,9 @@ routing/
     challenges.json           # Index of swebench_verified specs (500 instances, challenges, tasks)
     challenges_multimodal.json # Index of swebench_multimodal specs (102 instances, challenges, tasks)
     live_split_manifest.json  # The resolved live-eval holdout: salt, fraction, revision, ids, digest
+    price_sheet.json          # Dated canonical prices (cheapest available today) per model and channel
+    price_channels.yaml       # Hand-authored map of which listings are the same product (not auto-deduced)
+    external_rungs.yaml       # Rungs measured OUTSIDE this corpus — model_grid.py's only external input, read by no router, ranker or gate
     seed/                     # LFS-tracked warm-start bundles (one .npz per embedder fingerprint + plain manifest.json)
   strategies/
     __init__.py               # Strategy protocol
@@ -26,9 +29,18 @@ routing/
   exploration_replay.py       # Direct-Method replay of the SHIPPED exploration policy on the dense slice
   run_eval.py                 # Evaluate all strategies
   instrument_control.py       # Positive control + destroyed-signal null (both selection rules)
+  gate_dimensions.py          # THE multi-dimensional kill gate: quality bar, then tolerance-aware
+                              #   Pareto over cost/sessions/tail/variance vs BOTH baselines
+  gate_dimensions_control.py  # That gate's control, entered at its input files: planted positive,
+                              #   destroyed-signal null, blocked-branch + CLI legs, blinded mutants
+  online_kill_gate.py         # The live paired monitor, anytime-valid, three arms
   sensitivity.py              # Minimum detectable effect — how weak a signal the corpus can see
   metrics.py                  # Metric definitions
-  report.py                   # Drives the nine report figures (derived from results.csv)
+  repricing.py                # Reprices naive costs from a dated sheet (input to live_gap.png only)
+  report.py                   # Drives the 13 REPORT figures (derived from results.csv). The
+                              # routing half's manifest holds 18: these 13 plus the 5 standalone
+                              # producers under scripts/ (cost_quality_headline, embedding_signal,
+                              # exploration_cost, knn_calibration, sweep_regimes).
   figures/                    # One module per report figure; `context.py` loads the corpus once
     kill_gate.py              # Pre-registered delta=5pp non-inferiority forest + paired cost
     cost_quality_frontier.py  # The one cost-quality plane (replaced four)
@@ -39,11 +51,16 @@ routing/
     complementarity.py        # Tri-state grid, coverage range, and the routing ceiling
     task_difficulty.py        # Capability bands + what the cascade picked, by difficulty
     arm_manipulation.py       # Manipulation check FIRST, then the reasoning-arm contrast
+    ladder_rungs.py           # What each escalation rung is measured to buy, beside the ladder
+    live_gap.py               # The offline-to-live gap, repriced from the dated sheet
+    pareto_dimensions.py      # One plane per dimension: frontier membership is axis-dependent
+    model_grid.py             # Adapter only — price/size/outcome grid drawn by shunt.inspect.model_grid
   scripts/                    # Analysis + figure producers (read results.csv, write docs/assets/figures/routing/)
     compute_costs.py          # Per-model cost/pass rollup from the outcome cache
     consistency_probe.py      # Benchmark-internal consistency: replay same task/model, measure variance
     consistency_probe_metrics.py # Compute consistency metrics (variance, determinism tests)
     cost_quality_headline.py   # Four-point simplification of cost_quality_frontier.png for the front page
+    refresh_price_sheet.py      # Fetch current prices from OpenRouter / Requesty / HuggingFace, write data/price_sheet.json
     derive_judge_difficulty.py # Generate judge_difficulty.json from judge probe outputs
     judge_probe.py            # Live LLM-as-a-judge difficulty labels on the measured task set (gitignored JSONL)
     judge_probe_metrics.py    # Judge labels vs measured outcomes: AUC/R², agreement, stability, LLM-as-router analysis, human-tag control
@@ -56,7 +73,7 @@ routing/
     threshold_sweep.py        # kNN sweep with real outer-loop CV -> the regime map
     viz_knn.py                # knn_calibration: reliability of the weighted neighbour rate
   artifacts/                  # gitignored — parameterized run_eval outputs + embedding cache
-  reports/                    # derived CSV/JSON only (gitignored); the PNGs live in docs/assets/figures/routing/
+  reports/                    # derived CSV/JSON only (gitignored, except the tracked strategy_summary.csv); the PNGs live in docs/assets/figures/routing/
 benchmark/
   challenges/
     swebench_verified/        # The 500 swebench_verified instance specs (Python-only)
@@ -225,6 +242,16 @@ model (the strategy layer applies its own cache-hit discount). Each entry's
 near-future model-version strings use the provider's closest published rate and
 say so in `price_note`.
 
+**Repricing (plots only).** The registry's `pricing` block means *the price in force when
+the run happened*, and it is never rewritten. What a run would cost at TODAY's cheapest
+listed price is a separate, dated artifact: `data/price_sheet.json`, refreshed by
+`python -m benchmark.routing.scripts.refresh_price_sheet` over
+`data/price_channels.yaml`, and read only by `repricing.py`. It feeds the NAIVE cost axis
+(`live_gap.png`) and nothing else — never `strategy_summary.csv`, never a kill gate. A
+model the sheet does not price has no repriced cost, and a figure that could not reprice
+every row falls back to recorded cost and says so. Rationale, bounds and the drift we are
+not fixing: `docs/benchmark-design.md`, "Temporal drift".
+
 ## Outcome cache schema (`results.csv`)
 
 The file is populated by live matrix runs (`run_matrix.py --live`), which append real outcome rows.
@@ -333,7 +360,9 @@ arm). `run_matrix.py` keeps the cache current:
    *"would run N cells"* and **fabricates nothing**. With `--live` **and** keys,
    it delegates each uncached cell to the orchestrator's real Docker executor.
 5. Writes new/updated rows back (live mode only).
-6. Writes the derived `reports/strategy_summary.csv` (gitignored; unless `--no-summary`)
+6. Writes the derived `reports/strategy_summary.csv` — the one tracked file under
+   `reports/`, so a committed figure can be checked against the numbers it was drawn
+   from (unless `--no-summary`)
    and regenerates plots (unless `--no-plots`).
 
 Per-strategy **coverage** is reported: a strategy whose decision needs an

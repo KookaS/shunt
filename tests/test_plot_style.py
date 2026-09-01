@@ -69,10 +69,33 @@ class TestModelColorMap:
         assert subset_colors["b"] == colors["b"]
         assert subset_colors["d"] == colors["d"]
 
-    def test_cycles_past_eight_models(self):
-        models = [f"m{i}" for i in range(10)]
+    def test_never_assigns_the_reserved_black_to_a_series(self):
+        # OKABE_ITO's last entry is annotation furniture. A modulo over the full
+        # tuple hands it to the 8th model, which then reads as an axis rule.
+        models = [f"m{i}" for i in range(ps.MAX_DISTINCT_MODELS)]
         colors = ps.model_color_map(models)
-        assert colors["m0"] == colors["m8"]
+        assert "#000000" not in {c.lower() for c in colors.values()}
+
+    def test_all_colours_distinct_past_the_base_hues(self):
+        # The ladder spans 0.3B to 284B, so >7 models is the normal case, not an edge
+        # case. Two models sharing a hue reads as "these are the same series".
+        for n in (8, 12, ps.MAX_DISTINCT_MODELS):
+            colors = ps.model_color_map([f"m{i}" for i in range(n)])
+            assert len(set(colors.values())) == n, f"collision at n={n}"
+
+    def test_base_hues_unchanged_when_the_ladder_grows(self):
+        # Adding a 12th model must not repaint the first seven.
+        small = ps.model_color_map([f"m{i}" for i in range(5)])
+        large = ps.model_color_map([f"m{i}" for i in range(12)])
+        for model, colour in small.items():
+            assert large[model] == colour
+
+    def test_refuses_more_models_than_it_can_distinguish(self):
+        import pytest
+
+        models = [f"m{i}" for i in range(ps.MAX_DISTINCT_MODELS + 1)]
+        with pytest.raises(ValueError, match="visually distinct"):
+            ps.model_color_map(models)
 
 
 class TestArmMarkerSize:

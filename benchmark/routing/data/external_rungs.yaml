@@ -1,0 +1,218 @@
+# MEASURED RUNGS THAT ARE NOT IN THE SHIPPED REGISTRY — the model grid's only external input.
+#
+# WHY THIS FILE EXISTS RATHER THAN A REGISTRY ROW. `src/shunt/config/models.yaml` is the rank
+# basis: `benchmark.config.cost_per_1m` orders every cascade by `input + output`, and
+# `shunt.models.config` ranks the shipped ladder by the same sum. Adding a row moves that order
+# for every model priced above it, which is the one thing a published measurement claim's rank
+# basis must not do underneath it. A rung measured on a DIFFERENT scaffold, with zero cells in
+# `results.csv`, would also become routable and rankable on evidence the routing corpus does not
+# contain. So the measurement is committed HERE, read by exactly one figure adapter
+# (`benchmark/routing/figures/model_grid.py`), and by no router, ranker, strategy or gate.
+#
+# WHY IT IS COMMITTED AT ALL, rather than read from the run's artifacts. `artifacts/` is
+# gitignored, so a figure sourced from it could not be redrawn by a third-party clone — the
+# reproducibility contract the pipeline's input digests exist to hold. The numbers below are
+# transcribed from the run's own analysis outputs, each cited by path.
+#
+# WHAT A ROW MAY CLAIM. Every number carries a source and a date, exactly as `pricing` and
+# `size` do in the registry. A row also carries `verdict_ceiling` and `scaffold`, because a
+# rate measured under a different harness is NOT comparable cell-for-cell with the corpus rows
+# it is drawn beside — the figure marks such a row and says so on the canvas.
+#
+# A LOCALLY SERVED RUNG CARRIES NO PRICE. It has no per-token list price to blend, and its
+# dollar cost per solved task is UNDEFINED, never 0.0 — a zero validates cleanly and then
+# trivially dominates every cost comparison it touches, which is the fabrication this file
+# exists to avoid. Such a row sets `pricing.cost_basis: UNDEFINED`, states the real resource
+# consumption in `cost_note` in its own unit (GPU-hours, not dollars), draws in panel A's
+# category column instead of on the price axis, and emits no dollar figure anywhere. Its id
+# carries the quantisation and the serving mode, because a Q8_0 GGUF on llama.cpp is not the
+# vendor's hosted namesake.
+
+schema: 1
+
+rungs:
+  qwen3.5-35b-a3b:
+    provider_channel: requesty
+    provider_model_id: deepinfra/Qwen/Qwen3.5-35B-A3B
+    serving_mode: hosted
+
+    pricing:
+      input_cost_per_1m: 0.14
+      output_cost_per_1m: 1.00
+      cache_read_cost_per_1m: 0.05
+      price_source: https://router.requesty.ai/v1/models
+      price_as_of: "2026-08-29"
+      price_note: >-
+        Requesty catalogue listing fetched live on 2026-08-29 (input_price 1.4e-07,
+        cached_price 5e-08, output_price 1e-06 per token; context_window 262144;
+        supports_tool_calling true). Verified against a billed probe: 304 in + 56 out was
+        reported by the provider as $9.856e-05, exactly 304*0.14/1e6 + 56*1.00/1e6.
+
+    size:
+      total_params: 35000000000
+      active_params: 3000000000
+      size_source: https://router.requesty.ai/v1/models
+      size_as_of: "2026-08-29"
+      size_note: >-
+        The same fetched catalogue entry: "35B total parameters and only 3B activated per
+        token", open_weights true, quantization fp8. A published channel figure for an
+        open-weights model, not a third-party estimate.
+
+    measurement:
+      # The model-attributable denominator, pooled over two DISJOINT seeds. Both arms used the
+      # identical scaffold, the identical censoring convention, and the real SWE-bench docker
+      # harness with gold tests.
+      n: 36
+      passes: 25
+      rate: 0.6944
+      wilson95: [0.5314, 0.8200]
+      # Cells actually RUN, which is not the denominator above: 40 were run, 4 fall out of the
+      # model-attributable denominator (2 gold-unscorable on seed 0, 2 budget-censored on seed
+      # 1). The cost below averages over all 40, so it is stated with that denominator wherever
+      # it is printed — a reader dividing $8.6101 by 36 gets a number nobody measured.
+      cells_run: 40
+      # Per-cell provider-reported cost, pooled: $8.6101 over the 40 cells run
+      # ($4.3635 on seed 0 + $4.2466 on seed 1).
+      measured_cost_per_instance_usd: 0.2153
+      # THE OVERLAP WITH THE CORPUS THIS FIGURE IS DRAWN FROM, stated because a reader
+      # comparing this row's height against a corpus row's needs it and cannot derive it.
+      # These 40 instances are NOT an independent sample of the routing corpus and NOT
+      # disjoint from it: 13 of them are also among the 200 in
+      # `benchmark/routing/results.csv`. Partial overlap is the worst of both — it is not a
+      # paired comparison (a different scaffold produced these cells) and it is not an
+      # independent one either. The prose below is deliberately phrased to keep the two counts
+      # visible without matching SH012's `<N>-task set` result-statistic shape, which the
+      # rendered note cannot carry a provenance marker inside (SH009 byte-locks it).
+      corpus_overlap: "13 of these 40 instances are also among the 200 in results.csv — partial overlap, so neither a paired nor an independent comparison"
+      corpus_overlap_ids:
+        - astropy__astropy-14598
+        - astropy__astropy-8707
+        - django__django-11119
+        - django__django-15268
+        - matplotlib__matplotlib-13989
+        - matplotlib__matplotlib-22865
+        - psf__requests-1724
+        - pydata__xarray-2905
+        - pytest-dev__pytest-5262
+        - sphinx-doc__sphinx-11510
+        - sphinx-doc__sphinx-9711
+        - sympy__sympy-13480
+        - sympy__sympy-16597
+      seeds: [0, 1]
+      seed_arms: "seed 0: 12/18 = 66.7% [43.8%, 83.7%]; seed 1: 13/18 = 72.2% [49.1%, 87.5%]"
+      consistency: "Fisher exact two-sided on [[12,6],[13,5]] -> p = 1.00"
+      censored: 2
+      censoring_note: >-
+        Two seed-1 cells stopped on the per-cell budget cap and are censored, not failed;
+        counting them as fails gives 25/38 = 65.8% and as passes 27/38 = 71.1%, both inside
+        the pooled interval. Zero cells were censored for context on either seed.
+      # THE CEILING. Two seeds license a mean and an interval and never CONFIRMED: one model,
+      # one provider, one scaffold, temperature 0, and a 28.9-point-wide interval. Nothing on
+      # any canvas or in any doc may state this rung's rate as more than SIGNAL.
+      verdict_ceiling: "SIGNAL (2 seeds)"
+      task_population: "SWE-bench Verified, random.Random(seed).sample(sorted(all_specs), 20) over all 500"
+      scaffold: "mini-swe-agent, temperature 0, 262k context, $0.55 per-cell cap"
+      instrument_control: >-
+        Gold patches resolve 18/20 (seed 0) and 20/20 (seed 1) through this exact harness on
+        these exact instances, so the instrument discriminates in both directions on each draw.
+      source_paths:
+        - artifacts/hosted-slm-rung/FINDINGS.md
+        - artifacts/hosted-slm-rung/PREREGISTRATION.md
+        - artifacts/hosted-slm-rung-seed2/FINDINGS.md
+        - artifacts/hosted-slm-rung-seed2/PREREGISTRATION.md
+        - artifacts/hosted-slm-rung-seed2/pooled.json
+
+  granite4.2-8b-q8-local:
+    # THE QUANT TAG AND `-local` ARE PART OF THE ID, deliberately. A Q8_0 GGUF served by
+    # llama-server on one consumer GPU is not the vendor's BF16 hosted namesake: it differs in
+    # numeric precision AND in serving stack, and this run's own history is the proof that the
+    # serving stack changes the measurement (the retracted ollama arm). The bare name
+    # `granite4.2-8b` would silently pool two different things.
+    provider_channel: local-llamacpp
+    provider_model_id: granite4.2:8b-q8_0
+    serving_mode: local
+
+    pricing:
+      # NO PRICE, AND NOT A ZERO EITHER. Nothing is billed per token on a locally served rung,
+      # so there is no list price to put on the x axis and the row lands in panel A's `$0 ·
+      # local` category column rather than anywhere on the log price region. The DOLLAR COST OF
+      # A SOLVED TASK IS UNDEFINED here, not zero: the run spent $0 on hosted APIs but consumed
+      # 17.7 GPU-hours of an RTX 3060, and amortising hardware, power and idle time over this
+      # workload would be an invented number. The project's rule is that a local rung's cost is
+      # declared undefined rather than fabricated, so no cost figure is emitted by this row and
+      # no cost-Pareto, cascade or gate can read it.
+      cost_basis: UNDEFINED
+      cost_note: >-
+        Undefined by construction. $0 hosted spend (no API was called) is not a cost; the
+        measured resource consumption was 17.7 GPU-hours on one RTX 3060 12 GB. No dollar
+        conversion is attempted.
+      cost_as_of: "2026-08-30"
+
+    size:
+      # NOT A VENDOR FIGURE AND NOT AN ESTIMATE — the count is summed from the tensor table of
+      # the exact GGUF blob llama-server loaded for this run
+      # (sha256-fb66ad5750680c77c76b9dc095961375f14fc88ba15fd5fc084ef6e6701bad77): 363 tensors,
+      # `general.architecture=granite`, `general.size_label=8B`, `general.name=Granite 4.2 8b`.
+      total_params: 8791592960
+      active_params: 8791592960
+      size_source: >-
+        the served GGUF's own metadata and tensor table, summed
+        (sha256-fb66ad5750680c77c76b9dc095961375f14fc88ba15fd5fc084ef6e6701bad77)
+      size_as_of: "2026-08-31"
+      size_note: >-
+        Active equals total because the file is DENSE: it contains zero expert tensors, so one
+        token decodes through every parameter. This is the one row on the canvas whose
+        parameter count was read off the weights that were actually served rather than off a
+        vendor page.
+
+    measurement:
+      # THE CONSERVATIVE ALL-RECORDED DENOMINATOR — the same convention every corpus row on
+      # this canvas is drawn with (`plot_style.arm_stats` counts a censored cell in n and not
+      # in passes). 4 of the 20 cells ran to a conclusion and all 4 resolved against the real
+      # SWE-bench docker harness with gold tests; the other 16 never concluded. Drawing the
+      # 4/4 = 100% model-attributable rate instead would be an upward-biased number the run
+      # explicitly forbids quoting.
+      n: 20
+      passes: 4
+      rate: 0.2
+      wilson95: [0.0807, 0.4160]
+      cells_run: 20
+      censored: 16
+      censoring_summary: >-
+        16 of 20 cells were censored (11 wall-limit, 5 context exhaustion at a 32768-token
+        window that is a 12 GB VRAM ceiling, not the model's 131072-token limit), so the
+        plotted height is the CONSERVATIVE all-recorded denominator — the same convention the
+        corpus rows use — and it is a LOWER BOUND, not a measured rate: the assumption-free
+        bounds are [20%, 100%], the censoring is INFORMATIVE (censored cells peaked higher and
+        ran longer than resolved ones), and the model-attributable 4 of 4 is upward-biased and
+        must not be read off this marker
+      measured_cost_per_instance_usd: null
+      cost_note: >-
+        no dollar cost is drawn or stated: nothing is billed per token on a locally served
+        rung, the run spent $0 on hosted APIs, and the real resource cost was 17.7 GPU-hours
+        on one RTX 3060 12 GB — a different quantity in a different unit, deliberately not
+        converted into dollars
+      seeds: null
+      corpus_overlap: "7 of these 20 instances are also among the 200 in results.csv — partial overlap, so neither a paired nor an independent comparison, and all 7 are censored cells here"
+      corpus_overlap_ids:
+        - astropy__astropy-8707
+        - django__django-15268
+        - matplotlib__matplotlib-22865
+        - pydata__xarray-2905
+        - sphinx-doc__sphinx-11510
+        - sphinx-doc__sphinx-9711
+        - sympy__sympy-16597
+      # THE CEILING. One configuration, one seed, one card, and 80% of the sample censored.
+      # Nothing on any canvas or in any doc may state this rung's pass rate at all.
+      verdict_ceiling: "UNPROVEN (pass rate; 16 of 20 cells censored, true rate bounded only to [20%, 100%])"
+      task_population: "SWE-bench Verified, a 20-instance draw fixed before the run"
+      scaffold: "mini-swe-agent, temperature 0, llama-server -c 32768 --no-context-shift --jinja, Q8_0 KV, 3600 s wall"
+      instrument_control: >-
+        Gold patches resolve 18/20 through this exact harness on these exact instances, so the
+        instrument discriminates in both directions on this draw. The 2 unresolvable ones are
+        environment coverage gaps, not model failures.
+      source_paths:
+        - artifacts/granite-8b-boundary-run/run20-clean/REPORT.md
+        - artifacts/granite-8b-boundary-run/run20-clean/PREREGISTRATION.md
+        - artifacts/granite-8b-boundary-run/run20-clean/summary.json
+        - artifacts/granite-8b-boundary-run/run20-clean/serving/SERVING_PROOF.md

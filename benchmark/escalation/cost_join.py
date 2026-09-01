@@ -15,13 +15,12 @@
 
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 from benchmark import config
 from benchmark.escalation import session_eval
-from benchmark.routing import cache_cost
+from benchmark.routing import cache_cost, integrity
 from benchmark.routing.strategies import BilledAttempt
 
 if TYPE_CHECKING:
@@ -84,15 +83,18 @@ def _priced_rows(results_csv: Path) -> tuple[dict[tuple[str, str, str], float], 
     """(challenge, model, reasoning) -> billed real_cost, plus the row counts behind it."""
     if not results_csv.exists():
         raise CostJoinError(f"no routing results at {results_csv}: nothing to price against")
+    # REPLICATE POLICY: rep 0 ONLY. A trajectory joins to THE cost of the cell it came from,
+    # and the join key is (challenge, model, reasoning) with no rep in it — so admitting
+    # replicates would make the last row read silently decide the price. Rep 0 is the
+    # canonical observation the scoring path uses, so the join agrees with the score.
     prices: dict[tuple[str, str, str], float] = {}
     n_rows = 0
-    with results_csv.open(newline="") as handle:
-        for row in csv.DictReader(handle):
-            n_rows += 1
-            raw = row.get("real_cost")
-            if not raw:
-                continue
-            prices[(row["challenge_id"], row["model"], row["reasoning"])] = float(raw)
+    for row in integrity.rep_zero_rows(results_csv):
+        n_rows += 1
+        raw = row.get("real_cost")
+        if not raw:
+            continue
+        prices[(row["challenge_id"], row["model"], row["reasoning"])] = float(raw)
     return (prices, n_rows, len(prices))
 
 

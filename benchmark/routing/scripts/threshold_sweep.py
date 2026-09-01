@@ -68,6 +68,9 @@ _MIN_IN_PER_COL: Final[float] = 0.35
 
 _TRACE_COLOR: Final[str] = "#1F4E79"
 _MIXTURE_COLOR: Final[str] = "#B71C1C"
+# A pass rate is BOUNDED. Panel C's y axis stops here rather than at whatever height its
+# annotations wanted, so no part of the panel stands over a value the quantity cannot take.
+_PASS_RATE_MAX: Final[float] = 100.0
 _SHIPPED_COLOR: Final[str] = "#6A3D9A"
 
 SPEC = FigureSpec(
@@ -115,8 +118,8 @@ SPEC = FigureSpec(
     notes=(
         "Neighbourhoods use the real shipped jina embedder — the same Embedder the router "
         "runs, never a TF-IDF proxy.",
-        "The k grid is log-spaced (2 to 174). A uniform grid spends nearly all of its cells "
-        "inside one regime and reports the same number on half of them.",
+        "The k grid is log-spaced. A uniform grid spends nearly all of its cells inside one "
+        "regime and reports the same number on half of them.",
     ),
     limitations=(
         "Folds split TASKS, not repositories, so an out-of-fold task can still sit next to a "
@@ -849,7 +852,15 @@ def _draw_trace(ax: Axes, res: SweepResult) -> None:
     ax.set_xscale("log")
     # Room at both ends so the two end labels and the frontier marker are not pressed
     # against the spines — a label half off the axes reads as a different number.
-    ax.set_xlim(cheap["TotalCost"] * 0.72, front["TotalCost"] * 2.1)
+    # DERIVED FROM WHAT THE PANEL DRAWS, not from the two fixed policies alone: a trace point
+    # or the shipped star outside [cheap, frontier] would otherwise be clipped off an axis
+    # that still looks complete. Same rule as the y floor in cost_quality_frontier.
+    drawn = [float(cheap["TotalCost"]), float(front["TotalCost"])]
+    drawn += [float(r["TotalCost"]) for r in trace]
+    if res.shipped is not None:
+        drawn.append(float(res.shipped["TotalCost"]))
+    drawn = [c for c in drawn if c > 0]
+    ax.set_xlim(min(drawn) * 0.72, max(drawn) * 2.1)
     ax.set_xlabel("total cost over the suite (USD, log scale)", fontsize=9)
     ax.set_ylabel("out-of-fold pass rate (%)", fontsize=9)
     ax.grid(True, which="both", alpha=0.18, linewidth=0.6)
@@ -918,11 +929,24 @@ def _draw_regimes(ax: Axes, res: SweepResult, panel_width_in: float) -> None:
 def _draw_optimism(ax: Axes, res: SweepResult) -> None:
     """Panel C: the selected configuration in sample, beside the nested out-of-fold score."""
     in_row = res.in_sample_selected
-    oof_passes, oof_scored = res.oof_passes
-    bars = (
-        ("in-sample\n(selected config)", in_row["AvgPerf%"], int(in_row["n_scored"]), "#8C8C8C"),
-        ("out-of-fold\n(nested CV)", res.oof_rate, oof_scored, _TRACE_COLOR),
-    )
+    _oof_passes, oof_scored = res.oof_passes
+    # A BAR IS ONLY DRAWN FOR A NON-EMPTY SUBJECT SET. With no out-of-fold row scored, the
+    # rate is 0.0 over n=0 and the panel drew a zero-height bar with a "0.0% (n=0)" label —
+    # an empty set rendered as a measured failure, and the optimism gap beside it as the
+    # difference against one. An absent measurement is now stated, not plotted.
+    bars = [
+        (label, rate, n, color)
+        for label, rate, n, color in (
+            (
+                "in-sample\n(selected config)",
+                in_row["AvgPerf%"],
+                int(in_row["n_scored"]),
+                "#8C8C8C",
+            ),
+            ("out-of-fold\n(nested CV)", res.oof_rate, oof_scored, _TRACE_COLOR),
+        )
+        if n > 0
+    ]
     for x, (_label, rate, n, color) in enumerate(bars):
         lo, hi = plot_style.wilson_interval(round(rate / 100 * n), n)
         yerr = plot_style.ci_yerr(rate / 100, lo, hi)
@@ -937,21 +961,40 @@ def _draw_optimism(ax: Axes, res: SweepResult) -> None:
         )
         # Never under the bar: the lower whisker is there, and a label inside it reads as
         # a data point. Above the upper whisker is the only free space.
-        ax.text(x, hi * 100 + 1.6, f"{rate:.1f}%  (n={n})", ha="center", fontsize=8)
+        ax.text(
+            x,
+            min(hi * 100 + 1.6, _PASS_RATE_MAX - 1.5),
+            f"{rate:.1f}%  (n={n})",
+            ha="center",
+            fontsize=8,
+        )
     ax.set_xticks(range(len(bars)))
     ax.set_xticklabels([b[0] for b in bars], fontsize=8)
     ax.set_ylabel("pass rate (%)", fontsize=9)
-    ax.set_ylim(0, 124)
+    # A PASS RATE CANNOT EXCEED 100. The axis ran to 124 to park the gap label in empty sky,
+    # which drew a fifth of the panel over impossible values and shrank every real difference
+    # against them. The label moves into the empty COLUMN between the two bars instead — bars
+    # are 0.52 wide at x=0 and x=1, so x=0.5 carries no data at any height.
+    ax.set_ylim(0, _PASS_RATE_MAX)
     ax.tick_params(axis="y", labelsize=8)
     ax.grid(True, axis="y", alpha=0.18, linewidth=0.6)
-    ax.plot([0, 1], [b[1] for b in bars], linestyle=":", color=_MIXTURE_COLOR, linewidth=1.2)
-    # Above both bars and above both value labels: the only band of the panel with no
-    # data in it, and the gap is the panel's whole point.
+    # The connector and the gap need BOTH measurements; with one of them missing there is no
+    # gap to state, and saying so is the panel's honest output.
+    if len(bars) == 2:
+        ax.plot([0, 1], [b[1] for b in bars], linestyle=":", color=_MIXTURE_COLOR, linewidth=1.2)
+        gap = f"optimism gap {res.optimism:+.1f} pp"
+    else:
+        gap = "no optimism gap: one of the two scores has no scored task"
+    # In the empty COLUMN between the bars (0.52 wide at x=0 and x=1), high in the panel —
+    # placed in AXES coordinates so it stays centred and inside the axes whether the panel
+    # drew one bar or two.
     ax.text(
         0.5,
-        116,
-        f"optimism gap {res.optimism:+.1f} pp",
+        0.965,
+        gap,
+        transform=ax.transAxes,
         ha="center",
+        va="top",
         fontsize=8.5,
         fontweight="bold",
         color=_MIXTURE_COLOR,
@@ -1019,6 +1062,12 @@ def _annotations(res: SweepResult) -> Annotations:
         f"({res.frontier_model}) {res.baseline_frontier['AvgPerf%']:.1f}% at "
         f"{plot_style.usd(float(res.baseline_frontier['TotalCost']), 2)}."
     )
+    # The SWEPT ends, derived. The static note used to name "(2 to 174)", which `k_grid`
+    # clips to the corpus — on any corpus under 175 tasks the figure named a k it never swept.
+    notes.append(
+        f"The k grid actually swept runs {min(res.grid.ks)} to {max(res.grid.ks)} "
+        f"({len(res.grid.ks)} values), clipped to a corpus of {res.n_tasks} tasks."
+    )
     notes.append(
         _driver_sentence(
             ("success_rate_thresh", res.sensitivity["success_rate_thresh"]),
@@ -1027,11 +1076,22 @@ def _annotations(res: SweepResult) -> Annotations:
         + f". min_samples: {_eta_phrase(res.sensitivity['min_samples'])}"
     )
     limits.extend(_data_limits(res))
+    _oof_passes, oof_scored = res.oof_passes
     return Annotations(
         subtitle_facts=_subtitle_facts(res),
         caveat=_caveat(res),
         notes=tuple(notes),
         limitations=tuple(limits),
+        # The figure shipped with an EMPTY `n` — the one manifest field a reader checks to see
+        # what a claim is measured on. Every panel's own denominator is named here: A and B are
+        # per-cell over the grid, C is per-task out of fold.
+        counts=(
+            ("tasks", res.n_tasks),
+            ("folds", res.n_folds),
+            ("grid_cells", res.grid.n_cells),
+            ("in_sample_scored", int(res.in_sample_selected["n_scored"])),
+            ("oof_scored", oof_scored),
+        ),
     )
 
 
@@ -1045,12 +1105,19 @@ def _data_limits(res: SweepResult) -> list[str]:
         )
     n_imp, n_cells = res.imputed
     if n_imp:
+        # SCOPED, because this count is NOT the corpus-wide one evidence_basis.png publishes:
+        # the sweep scores its own task set, so the two disagree legitimately and a reader who
+        # meets the bare "in the scored matrix" reads one as a correction of the other. The
+        # second clause also used to read "so it almost never can never add a failure" — two
+        # half-edits of the same sentence left in place.
+        per_task = n_cells // res.n_tasks if res.n_tasks else 0
         limits.append(
-            f"{n_imp}/{n_cells} cells ({n_imp / n_cells:.1%}) in the scored matrix are "
-            f"monotone-IMPUTED rather than measured, and the imputation is near-exclusively "
-            f"pass-filling, so it almost never "
-            f"can never add a failure. The neighbourhood VOTES and the pass rates on this "
-            f"grid both read those synthetic passes — every quality number here is biased up"
+            f"{n_imp}/{n_cells} cells ({n_imp / n_cells:.1%}) in THE MATRIX THIS SWEEP SCORES "
+            f"({res.n_tasks} tasks x {per_task} ranked models — not the corpus-wide count in "
+            f"evidence_basis.png) are monotone-IMPUTED rather than measured, and the "
+            f"imputation is near-exclusively pass-filling, so it can almost never add a "
+            f"failure. The neighbourhood VOTES and the pass rates on this grid both read "
+            f"those synthetic passes — every quality number here is biased up"
         )
     limits.append("Cost is model-price dependent — the selected cell moves when model prices move.")
     return limits
@@ -1066,8 +1133,8 @@ def _caveat(res: SweepResult) -> str | None:
         # The gain is measured THROUGH a pass-only imputation; the reader has to see both
         # numbers together or the small margin reads as clean signal.
         return (
-            f"{n_imp / n_cells:.0%} of scored cells are pass-only imputed; the trace beats the "
-            f"mixture by at most {gain:.1f} pp."
+            f"{n_imp / n_cells:.0%} of scored cells are imputed, near-all pass-filled; the "
+            f"trace beats the mixture by at most {gain:.1f} pp."
         )
     return None
 

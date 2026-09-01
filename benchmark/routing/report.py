@@ -24,6 +24,7 @@ from benchmark.routing import (
     impute,
     metrics,
     plot_style,
+    repricing,
     selection_guard,
     summary,
 )
@@ -36,7 +37,9 @@ from benchmark.routing.figures import evidence_basis as fig_evidence
 from benchmark.routing.figures import kill_gate as fig_kill_gate
 from benchmark.routing.figures import ladder_rungs as fig_ladder
 from benchmark.routing.figures import live_gap as fig_live_gap
+from benchmark.routing.figures import model_grid as fig_model_grid
 from benchmark.routing.figures import oracle_gap as fig_oracle
+from benchmark.routing.figures import pareto_dimensions as fig_pareto_dims
 from benchmark.routing.figures import task_difficulty as fig_difficulty
 from benchmark.routing.impute import ImputedMatrix
 from benchmark.routing.metrics import _reward, compute_cost_decomposition
@@ -413,18 +416,46 @@ class _PathRecorder:
         return getattr(self._inner, item)
 
 
+def _repriced_total(
+    attempts: dict[str, list[summary.Attempt]], scored: Iterable[str]
+) -> float | None:
+    """The scored tasks' billed attempts at TODAY's cheapest listed price, or None."""
+    # All-or-nothing over the SAME task set the recorded total covers, which is what makes the
+    # two interchangeable on one axis. It goes None on two conditions and never fudges either:
+    # an attempt on a model the price sheet does not price, and an attempt with no token counts
+    # (an IMPUTED cell carries none -- `BilledAttempt.in_tok` is 0 there, and repricing that as
+    # $0.00 would publish "this projected rung is free"). A partial total would be a smaller
+    # number wearing the same axis label.
+    rows = [
+        {"model": a.model, "in_tok": a.in_tok, "out_tok": a.out_tok}
+        for tid in scored
+        for a in attempts.get(tid, [])
+    ]
+    if any(a["in_tok"] == 0 and a["out_tok"] == 0 for a in rows):
+        return None
+    return repricing.total_naive_cost(rows, "report.strategy_cells")
+
+
 def strategy_cells(
     matrix: dict, tasks: list[str], strategies: Iterable[object]
-) -> dict[str, tuple[StrategyCells, set[str]]]:
-    """Per strategy: the chosen cell's (pass, cost, imputed) per task, plus its unscorable set."""
+) -> tuple[dict[str, tuple[StrategyCells, set[str]]], dict[str, float | None]]:
+    """Per strategy: (pass, cost, imputed) per task, the unscorable set, and a repriced total."""
     # Cost is read from `real_cost` for a single-shot pick; a cascade keeps
     # summary.evaluate's cascade total so these numbers reconcile with
     # strategy_summary.csv rather than quietly forming a second accounting path.
     # `imputed` is PATH-AWARE: true when ANY cell the decision billed was projected.
+    #
+    # `evaluate_billed` rather than `evaluate` -- the SAME single evaluation pass, but it also
+    # returns each task's billed attempts with their tokens, which is what a repriced total
+    # needs and what the (pass, cost, imputed) triple drops. Nothing about the recorded cost
+    # changes; the repriced total rides beside it (see `_repriced_total`).
     out: dict[str, tuple[StrategyCells, set[str]]] = {}
+    repriced: dict[str, float | None] = {}
     for strategy in strategies:
         recorder = _PathRecorder(strategy)
-        decisions, unscorable = summary.evaluate(recorder, matrix, tasks)
+        decisions, unscorable, attempts, _judge, _sessions = summary.evaluate_billed(
+            recorder, matrix, tasks
+        )
         is_cascade = getattr(strategy, "cascade_total_cost", None) is not None
         cells: StrategyCells = {}
         for tid, model, passed, cost in decisions:
@@ -433,8 +464,10 @@ def strategy_cells(
             path = recorder.paths.get(tid) or [model]
             imputed = any(bool(per_task.get(m, {}).get("imputed", False)) for m in path)
             cells[tid] = (bool(passed), spend, imputed)
-        out[strategy.name] = (cells, unscorable)  # type: ignore[attr-defined]
-    return out
+        name = strategy.name  # type: ignore[attr-defined]
+        out[name] = (cells, unscorable)
+        repriced[name] = _repriced_total(attempts, (t for t in cells if t not in unscorable))
+    return out, repriced
 
 
 def _split_measured(cells: StrategyCells, unscorable: set[str]) -> dict[str, float]:
@@ -896,11 +929,16 @@ def _disclosure_banner(im: ImputedMatrix | None, rows: list[dict] | None) -> str
     # conservative, so a broken axiom only widens the router's lead"; that is not
     # demonstrated — the router takes free imputed passes too, and on the measured-only
     # overlap its lead is zero (kill_gate.png's measured-only row).
+    # The fail-branch count is DERIVED from the matrix being disclosed. It was the frozen
+    # literal "1 of 398", which the corpus had already moved past (5 of 410) while the
+    # percentages either side of it were recomputed on every run.
+    pass_filled, n_filled = fig_evidence.filled_outcomes(im.matrix)
     return (
         head + axiom + " NEARLY every imputed cell is filled pass=True at a median measured "
-        "price (the monotone ladder has a fail branch, and 1 of 398 filled cells took it), "
-        "for the router as well as for the baseline — see evidence_basis.png for how much of "
-        "each strategy's number that is, and kill_gate.png's measured-only row for what "
+        f"price (the monotone ladder has a fail branch, and {n_filled - pass_filled} of "
+        f"{n_filled} filled cells took it), for the router as well as for the baseline — "
+        "see evidence_basis.png for how much of each strategy's number that is, and "
+        "kill_gate.png's measured-only row for what "
         "survives when the projection is removed."
     )
 
@@ -1192,7 +1230,8 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         if problem:
             print(f"Refusing to report: {problem}", file=sys.stderr)
             return
-        # Write a human-readable copy to reports/ (gitignored) — never committed. Every row is
+        # Write a human-readable copy to reports/ — the one tracked file there, so a committed
+        # figure can be checked against the numbers it was drawn from. Every row is
         # stamped with the SHIPPED selection path's instrument verdict; the figures' gate
         # certifies `select_from_rates`, which is a different rule.
         table = summary.certified_table(results)
@@ -1230,9 +1269,10 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     # Per-task selections with the imputed flag, plus the model each strategy chose.
     # ONE evaluation pass feeds every figure below — a second one costs GBs of RSS.
     by_strategy: dict[str, tuple[StrategyCells, set[str]]] = {}
+    repriced_totals: dict[str, float | None] = {}
     chosen: dict[str, dict[str, str]] = {}
     if completed is not None and tasks:
-        by_strategy = strategy_cells(completed, tasks, strategies)
+        by_strategy, repriced_totals = strategy_cells(completed, tasks, strategies)
         chosen = strategy_choices(completed, tasks, strategies)
 
     ctx = figures.build_context(
@@ -1245,11 +1285,14 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         raw=raw_results,
         banner=banner,
         by_strategy=by_strategy,
+        repriced_totals=repriced_totals,
     )
 
     _step("Kill gate", fig_kill_gate.render(ctx) or "skipped (no paired arm)")
     _step("Ladder rungs", fig_ladder.render(ctx) or "skipped (no priced target)")
     _step("Cost/quality", fig_frontier.render(ctx) or "skipped (no cost)")
+    _step("Pareto dimensions", fig_pareto_dims.render(ctx) or "skipped (no live row)")
+    _step("Model grid", fig_model_grid.render(ctx) or "skipped (no measured model)")
     _step("Live gap", fig_live_gap.render(ctx) or "skipped (no bound row)")
     _step("Cache econ", fig_cache.render(ctx) or "skipped (no priced row)")
 

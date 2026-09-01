@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import Final, NoReturn
+from typing import Final, Literal, NoReturn
 
 from benchmark import config
 from benchmark.routing import censoring, coverage, impute, integrity, validate
@@ -53,6 +53,11 @@ class CellStatus:
     missing: list[tuple[str, str, str]] = field(default_factory=list)
     stale: list[tuple[str, str, str]] = field(default_factory=list)
     present: int = 0
+    # Additional OBSERVATIONS of cells that are already correct — one entry per rep 1..R-1
+    # for a model configured with depth R>1. Deliberately NOT part of `to_run`: those cells
+    # are neither missing nor stale, they run under mode="replicate", and folding them in
+    # would let a replicate supersede the paid rep-0 row it is meant to sit beside.
+    replicate: list[tuple[str, str, str]] = field(default_factory=list)
 
     @property
     def to_run(self) -> list[tuple[str, str, str]]:
@@ -137,6 +142,12 @@ def classify_cells(
                     status.stale.append((cid, model, arm))
                 else:
                     status.present += 1
+                # Reps 1..R-1 of every cell in the depth-R models, whatever its status: the
+                # rep-0 observation is the one `to_run` (or the cache) supplies, and these are
+                # the additional ones. `replicate_depth` returns 1 whenever the block is
+                # disabled — the shipped default — so this is a no-op today.
+                for _ in range(config.replicate_depth(model) - 1):
+                    status.replicate.append((cid, model, arm))
     return status
 
 
@@ -205,19 +216,66 @@ def _is_stale(
     # the narrower `is_zero_work` is the correct predicate here.
     if impute.is_zero_work(cell):
         return True
-    if cell.get("version_hash") != hashes.get(cid):
-        return True
-    if cell.get("model_version") != versions.get(model):
-        return True
-    if _arm_stale(cell, model, arm, arm_hash_map):
-        return True
-    if _limit_anchor_stale(cell, step_limit):
-        return True
-    if _anchor_stale(cell, "prompt_hash", prompt_hash):
-        return True
-    if _sampling_anchor_stale(cell, model, arm, sampling_hash_map):
-        return True
-    return _image_stale(cell, cid, digests)
+    # DISPATCH OVER integrity.STALENESS_ANCHORS, not over a list of branches. Each anchor
+    # keeps its own predicate — they are genuinely different rules (strict equality for the
+    # identity hashes; the non-empty-stored grandfather guard for the later-added ones;
+    # censored-cells-only for step_limit) — but WHICH columns are anchors is now declared
+    # once, in the schema module, so `_ANCHOR_CHECKS` can be asserted complete against it and
+    # a new anchor cannot be added without deciding how it stales.
+    return any(
+        _ANCHOR_CHECKS[anchor](
+            cell,
+            _AnchorInputs(
+                cid=cid,
+                model=model,
+                arm=arm,
+                hashes=hashes,
+                versions=versions,
+                digests=digests,
+                arm_hash_map=arm_hash_map,
+                step_limit=step_limit,
+                prompt_hash=prompt_hash,
+                sampling_hash_map=sampling_hash_map,
+            ),
+        )
+        for anchor in integrity.STALENESS_ANCHORS
+    )
+
+
+@dataclass(frozen=True)
+class _AnchorInputs:
+    """Everything the current run knows that an anchor predicate may compare a cell against."""
+
+    cid: str
+    model: str
+    arm: str
+    hashes: dict[str, str]
+    versions: dict[str, str]
+    digests: dict[str, str | None] | None
+    arm_hash_map: dict[str, dict[str, str]] | None
+    step_limit: int | None
+    prompt_hash: str | None
+    sampling_hash_map: dict[str, dict[str, str]] | None
+
+
+# One predicate per staleness anchor. Keys are asserted equal to integrity.STALENESS_ANCHORS
+# below, so the declaration and the behaviour cannot drift apart.
+_ANCHOR_CHECKS: Final[dict[str, Callable[[dict, _AnchorInputs], bool]]] = {
+    # The two identity hashes stale on ANY difference, including a stored empty — a cell with
+    # no recorded spec hash is not a cell whose spec is known to match.
+    "version_hash": lambda cell, ctx: cell.get("version_hash") != ctx.hashes.get(ctx.cid),
+    "model_version": lambda cell, ctx: cell.get("model_version") != ctx.versions.get(ctx.model),
+    "arm_hash": lambda cell, ctx: _arm_stale(cell, ctx.model, ctx.arm, ctx.arm_hash_map),
+    "image_digest": lambda cell, ctx: _image_stale(cell, ctx.cid, ctx.digests),
+    "step_limit": lambda cell, ctx: _limit_anchor_stale(cell, ctx.step_limit),
+    "sampling_hash": lambda cell, ctx: _sampling_anchor_stale(
+        cell, ctx.model, ctx.arm, ctx.sampling_hash_map
+    ),
+    "prompt_hash": lambda cell, ctx: _anchor_stale(cell, "prompt_hash", ctx.prompt_hash),
+}
+assert set(_ANCHOR_CHECKS) == set(integrity.STALENESS_ANCHORS), (
+    "every declared staleness anchor needs a predicate, and nothing else may claim to be one"
+)
 
 
 def _arm_stale(
@@ -314,6 +372,13 @@ def _build_row(
         "sampling_hash": str(outcome.get("sampling_hash") or ""),
         "prompt_hash": str(outcome.get("prompt_hash") or ""),
     }
+    # Optional columns (`integrity.OPTIONAL_COLUMNS`) pass THROUGH from the outcome, and only
+    # from the outcome. BLANK MEANS MISSING, FOREVER: a live cell carries what it actually
+    # measured, and every other outcome path — simulated, legacy, re-derived, errored —
+    # carries nothing and leaves the column blank. There is deliberately no fallback of any
+    # kind here, not even to a configured value like `step_limit`'s: a default on a latency
+    # column would publish "this cell took no time" as an affirmative measured claim.
+    row.update({column: str(outcome.get(column) or "") for column in integrity.OPTIONAL_COLUMNS})
     # Write-time data-integrity wall: never silently persist a poison row. An ERROR
     # invariant (e.g. the $35 fingerprint: paid model ran but real_cost==0) aborts the
     # whole run loudly on the offending cell rather than caching a fabricated outcome.
@@ -707,6 +772,7 @@ def run_live_cells(
     write_lock: threading.Lock | None = None,
     failures: _FailureTracker | None = None,
     step_limit: int = infer._DEFAULT_STEP_LIMIT,
+    mode: Literal["supersede", "replicate"] = "supersede",
 ) -> list[dict]:
     """Delegate each (challenge, model, arm) cell to the real SWE-bench harness executor.
 
@@ -738,7 +804,7 @@ def run_live_cells(
     # Persist each completed cell through merge_rows (history-log supersession +
     # key-upsert + atomic write preserved); None ⇒ old in-memory-only behaviour.
     checkpoint = (
-        partial(_checkpoint_row, path=results_path, lock=write_lock)
+        partial(_checkpoint_row, path=results_path, lock=write_lock, mode=mode)
         if results_path is not None
         else None
     )
@@ -765,13 +831,21 @@ def run_live_cells(
     )
 
 
-def _checkpoint_row(row: dict, path: Path, lock: threading.Lock | None = None) -> None:
+def _checkpoint_row(
+    row: dict,
+    path: Path,
+    lock: threading.Lock | None = None,
+    mode: Literal["supersede", "replicate"] = "supersede",
+) -> None:
     """Persist one completed row through merge_rows; ``lock`` serializes concurrent writers."""
+    # The lock is what makes mode="replicate" safe under concurrency: merge_rows assigns the
+    # replicate index inside its own read-modify-write, so holding the lock across that whole
+    # call is what stops two writers both reading max(rep)==0 and both claiming rep 1.
     if lock is None:
-        merge_rows([row], path)
+        merge_rows([row], path, mode=mode)
         return
     with lock:
-        merge_rows([row], path)
+        merge_rows([row], path, mode=mode)
 
 
 def _run_and_merge(
@@ -791,6 +865,7 @@ def _run_and_merge(
     write_lock: threading.Lock | None = None,
     failures: _FailureTracker | None = None,
     step_limit: int = infer._DEFAULT_STEP_LIMIT,
+    mode: Literal["supersede", "replicate"] = "supersede",
 ) -> int:
     """Run a cell list through the challenge-major executor and upsert results.csv.
 
@@ -816,11 +891,12 @@ def _run_and_merge(
         write_lock=write_lock,
         failures=failures,
         step_limit=step_limit,
+        mode=mode,
     )
     if write_lock is not None:
         with write_lock:
-            return merge_rows(new_rows, results_path)
-    return merge_rows(new_rows, results_path)
+            return merge_rows(new_rows, results_path, mode=mode)
+    return merge_rows(new_rows, results_path, mode=mode)
 
 
 def collect_phase(
@@ -853,39 +929,89 @@ def collect_phase(
     status = classify_cells(
         tasks, models, cache, hashes, versions, digests, selected_arms, arm_hash_map
     )
-    if live and status.to_run and results_path is not None:
-        _run_and_merge(
-            status.to_run,
-            hashes,
-            versions,
-            digests,
-            arm_hash_map,
-            timeout=timeout,
-            workers=workers,
-            max_cost=max_cost,
-            results_path=results_path,
-            max_cost_overshoot=max_cost_overshoot,
-            max_start_failures=max_start_failures,
-            max_consecutive_failures=max_consecutive_failures,
-            write_lock=write_lock,
-            failures=failures,
-            step_limit=step_limit,
-        )
+    if live and results_path is not None:
+        # Two calls, two intents: cells the cache lacks or has staled are SUPERSEDED, extra
+        # observations of correct cells are REPLICATED. merge_rows cannot infer which from
+        # the rows, so the split happens here, at the only place that knows.
+        for cells, mode in ((status.to_run, "supersede"), (status.replicate, "replicate")):
+            if not cells:
+                continue
+            _run_and_merge(
+                cells,
+                hashes,
+                versions,
+                digests,
+                arm_hash_map,
+                timeout=timeout,
+                workers=workers,
+                max_cost=max_cost,
+                results_path=results_path,
+                max_cost_overshoot=max_cost_overshoot,
+                max_start_failures=max_start_failures,
+                max_consecutive_failures=max_consecutive_failures,
+                write_lock=write_lock,
+                failures=failures,
+                step_limit=step_limit,
+                mode=mode,  # type: ignore[arg-type]
+            )
     return status
 
 
-def _row_key(row: dict) -> tuple[str, str, str]:
-    """The results.csv cache key: (challenge_id, model, reasoning)."""
+_RowKey = tuple[str, str, str, int]
+
+
+def _run_replicates(
+    status: CellStatus,
+    hashes: dict[str, str],
+    versions: dict[str, str],
+    digests: dict[str, str | None] | None,
+    arm_hash_map: dict[str, dict[str, str]] | None,
+    args: argparse.Namespace,
+    step_limit: int,
+) -> int:
+    """Collect the extra observations (reps 1..R-1) under mode='replicate'; 0 when disabled."""
+    if not status.replicate:
+        return 0
+    return _run_and_merge(
+        status.replicate,
+        hashes,
+        versions,
+        digests,
+        arm_hash_map,
+        timeout=args.timeout,
+        workers=args.workers,
+        max_cost=args.max_cost,
+        results_path=config.results_csv_path(),
+        max_cost_overshoot=args.max_cost_overshoot,
+        max_start_failures=args.max_start_failures,
+        max_consecutive_failures=args.max_consecutive_failures,
+        step_limit=step_limit,
+        mode="replicate",
+    )
+
+
+def _row_key(row: dict) -> _RowKey:
+    """The results.csv cache key: (challenge_id, model, reasoning, rep)."""
     # Literal string-equality on whatever `reasoning` the row carries (no alias
     # resolution here — that is a read-time concern, config.load_results). Two
     # distinct arm values for the same (challenge, model) are DISTINCT keys, so
     # they never collide or archive one another as history.
+    #
+    # `rep` is NORMALISED INSIDE THE KEY (blank -> 0), and that is load-bearing rather than
+    # tidy: the 1265 committed rows carry a blank rep while a freshly written first
+    # observation carries "0", so keying on the raw spelling would make one cell look like
+    # two rows and `authenticity.check_duplicate_keys` would report the file as fraudulent.
     reasoning = str(row.get("reasoning") or integrity.DEFAULT_REASONING)
-    return (row["challenge_id"], row["model"], reasoning)
+    return (row["challenge_id"], row["model"], reasoning, integrity.rep_index(row))
 
 
-def _read_raw_rows(path: Path) -> dict[tuple[str, str, str], dict]:
-    rows: dict[tuple[str, str, str], dict] = {}
+def _cell_key(row: dict) -> tuple[str, str, str]:
+    """The (challenge, model, arm) CELL a row observes — its key minus the replicate index."""
+    return _row_key(row)[:3]
+
+
+def _read_raw_rows(path: Path) -> dict[_RowKey, dict]:
+    rows: dict[_RowKey, dict] = {}
     if not path.exists():
         return rows
     with path.open(newline="") as f:
@@ -894,7 +1020,7 @@ def _read_raw_rows(path: Path) -> dict[tuple[str, str, str], dict]:
     return rows
 
 
-def _write_raw_rows(rows: dict[tuple[str, str, str], dict], path: Path) -> None:
+def _write_raw_rows(rows: dict[_RowKey, dict], path: Path) -> None:
     """Atomically rewrite results.csv: write a sibling temp, then os.replace onto target."""
     path.parent.mkdir(parents=True, exist_ok=True)
     ordered = sorted(rows.values(), key=lambda r: _row_key(r))
@@ -934,8 +1060,47 @@ def _append_history(rows: list[dict], path: Path) -> None:
             w.writerow(out)
 
 
-def merge_rows(new_rows: list[dict], path: Path, history_path: Path | None = None) -> int:
-    """Upsert cells into results.csv (keyed by challenge×model×reasoning-arm)."""
+def _anchors_differ(old: dict, new: dict) -> bool:
+    """True iff any STALENESS anchor moved between a stored row and its replacement."""
+    # Mirrors the grandfather guard `_anchor_stale`: an EMPTY stored anchor on a legacy row
+    # degrades to a NO-OP rather than licensing an overwrite. A row written before a column
+    # existed proves nothing about that column, and reading its blank as "different" would
+    # turn every legacy cell into a free re-run permit.
+    return any(
+        bool(str(old.get(anchor, ""))) and str(old.get(anchor, "")) != str(new.get(anchor, ""))
+        for anchor in integrity.STALENESS_ANCHORS
+    )
+
+
+def _next_rep(existing: dict[_RowKey, dict], cell: tuple[str, str, str]) -> int:
+    """One past the highest replicate index already recorded for a cell."""
+    reps = [key[3] for key in existing if key[:3] == cell]
+    return 1 + max(reps) if reps else 1
+
+
+def merge_rows(
+    new_rows: list[dict],
+    path: Path,
+    history_path: Path | None = None,
+    mode: Literal["supersede", "replicate"] = "supersede",
+) -> int:
+    """Upsert cells into results.csv (keyed by challenge×model×reasoning-arm×rep)."""
+    # `mode` states the CALLER'S INTENT, because intent cannot be inferred from content.
+    # `_row_differs` compares every field and a re-run always differs on `computed_at` and
+    # `real_cost`, so "the row changed" is true of a legitimate supersession and of an
+    # accidental clobber alike, and content can never tell the two apart.
+    #
+    #   * `supersede` (the default — every existing call site keeps today's behaviour
+    #     byte-for-byte) overwrites only when the cell's identity actually moved
+    #     (`_anchors_differ`) or the stored row records no executed work at all
+    #     (`impute.is_zero_work`). If the anchors are identical and only OUTCOME columns
+    #     moved it RAISES `REPLICATE_MISKEYED` instead of overwriting. That refusal is the
+    #     mechanism protecting paid observations: a second observation of an unchanged cell
+    #     is a replicate, and the caller has to say so.
+    #   * `replicate` appends a new observation at `rep = 1 + max(existing reps)`, assigned
+    #     INSIDE this read-modify-write so two writers holding the caller's lock cannot claim
+    #     the same index. It never supersedes and never calls `_append_history` — nothing is
+    #     being replaced, so there is nothing to archive.
     # A replaced row (same key, changed content) is moved to the append-only
     # history log — nothing is discarded. results.csv keeps only current rows.
     # Two arms of the same (challenge, model) are DISTINCT keys: a
@@ -944,9 +1109,30 @@ def merge_rows(new_rows: list[dict], path: Path, history_path: Path | None = Non
     superseded: list[dict] = []
     for row in new_rows:
         norm = {k: row.get(k, "") for k in integrity.RESULTS_FIELDS}
+        if mode == "replicate":
+            norm[integrity.REPLICATE_COLUMN] = str(_next_rep(existing, _cell_key(norm)))
+            existing[_row_key(norm)] = norm
+            continue
+        # Converge the file on ONE spelling of rep: always emit "0", never a blank.
+        norm[integrity.REPLICATE_COLUMN] = str(integrity.rep_index(norm))
         key = _row_key(norm)
-        if key in existing and _row_differs(existing[key], norm):
-            superseded.append(existing[key])
+        stored = existing.get(key)
+        if stored is not None and _row_differs(stored, norm):
+            if not (_anchors_differ(stored, norm) or impute.is_zero_work(stored)):
+                raise validate.DataIntegrityError(
+                    [
+                        validate.Violation(
+                            validate.Severity.ERROR,
+                            validate.REPLICATE_MISKEYED,
+                            f"refusing to overwrite {key[:3]} rep={key[3]}: its staleness "
+                            "anchors are unchanged, so this is a SECOND OBSERVATION of a "
+                            "cell that was already paid for, not a supersession. Pass "
+                            "mode='replicate' to record it as one.",
+                        )
+                    ],
+                    norm,
+                )
+            superseded.append(stored)
         existing[key] = norm
     if superseded:
         _append_history(superseded, history_path or _history_path(path))
@@ -963,9 +1149,11 @@ def _report_coverage(matrix: dict, tasks: list[str]) -> None:
 
 
 def refresh_summary(matrix: dict, tasks: list[str]) -> None:
-    """Write the per-strategy summary derived from the results.csv cache to the
-    gitignored reports/ dir. It is a regenerable artifact, never committed — the
-    sole committed source of truth is results.csv.
+    """Write the per-strategy summary derived from the results.csv cache to reports/.
+
+    It regenerates from results.csv, which is the sole committed source of truth. The
+    summary is nonetheless the one tracked file under the otherwise-gitignored reports/
+    dir, so a committed figure can be checked against the numbers it was drawn from.
     """
     from benchmark.routing import run_eval, summary
 
@@ -1361,6 +1549,7 @@ def _run_full(args: argparse.Namespace) -> int:
             step_limit=step_limit,
         )
         print(f"  live: wrote {n} cell(s) to {config.results_csv_path()}")
+        n += _run_replicates(status, hashes, versions, digests, arm_hash_map, args, step_limit)
         matrix = config.load_matrix(config.challenges_path())
     elif status.to_run:
         print(f"  simulated: would run {len(status.to_run)} cell(s); leaving them uncached.")

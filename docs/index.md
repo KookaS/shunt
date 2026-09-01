@@ -178,8 +178,8 @@ trust rules: [Feedback](feedback.md).
 - [The escalation claim](escalation-claim.md) — what we do and do not assert about escalation, with its pre-registered falsifiers and their verdicts
 - [Escalation dataset](escalation-data-card.md) — what the escalation corpus is: provenance, census, known defects, access mechanics
 - [Reproducing the escalation eval](escalation-reproduction.md) — run the offline escalation eval from a fresh clone, and the numbers a correct run reproduces
-- [The live router](inference.md) — seven figures measuring the shipped router on its own outcome store
-- [The same seven figures, on invented data](inference-demo.md) — an illustrative render of those seven over a synthetic corpus, so the panels the measured page leaves empty can be read at all
+- [The live router](inference.md) — eight figures measuring the shipped router on its own outcome store
+- [The same eight figures, on invented data](inference-demo.md) — an illustrative render of those eight over a synthetic corpus, so the panels the measured page leaves empty can be read at all
 - [Results](results.md) — every measured routing, escalation, and inference number, with its caveats
 - [Research log](research-log.md) — published ideas we tested, and what held
 - [Benchmark](benchmark.md) — run the offline model-capability and routing evals
@@ -193,9 +193,15 @@ trust rules: [Feedback](feedback.md).
 Pre-alpha. The core hypothesis — cheap-first routing beats always-frontier at
 equal quality on agentic coding — is unproven, and the embedding difficulty
 signal has not cleared the bar on coding work (on an instrument that cannot yet
-resolve it either way — see above). The make-or-break gate has
-been tested offline on SWE-bench Verified; **it has not been passed** (see
-[Results](results.md#why-we-still-do-not-call-the-gate-passed)). The router does not ship unless and until this gate clears on a real workflow.
+resolve it either way — see above). The make-or-break gate is
+multi-dimensional — quality non-inferiority first, then no worse on cost, sessions,
+session tail or bill variance and strictly better on one of them, against both a
+fixed-frontier baseline and a zero-ML cheapest-first policy. It has been run offline on
+SWE-bench Verified and its verdict is **UNTESTED**: the corpus is below the gate's own
+coverage floor, so it is not adjudicable, and the provisional read underneath that
+refusal is a fail rather than a near miss (see
+[Results](results.md#the-gates-current-verdict-is-untested-and-its-provisional-read-is-not-a-pass)).
+**It has not been passed.** The router does not ship unless and until this gate clears on a real workflow.
 
 Apache-2.0. Import as `shunt` (`shunt-router` on PyPI — `shunt` is taken).
 </content>

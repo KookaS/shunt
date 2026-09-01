@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 from benchmark.escalation.normalize.base import build_trajectory, make_step
 from benchmark.escalation.replay import GridPoint
+from benchmark.routing import integrity
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -84,31 +84,34 @@ def results_csv_bootstrap(
     A length-1 stream CANNOT fire the recurrence trigger; this bootstrap validates the
     prefix-labeler, the metrics, and the plots on real (coarse) terminal data — not the trigger.
     """
+    # REPLICATE POLICY: rep 0 ONLY. This is a MEASUREMENT question — each row becomes one
+    # terminal decision in the escalation corpus — so a cell must contribute exactly one
+    # trajectory however many times it was observed, or a re-run cell would silently carry
+    # more weight in every prefix-eval statistic than a cell measured once.
     trajectories: list[Trajectory] = []
-    with results_path.open(encoding="utf-8", newline="") as handle:
-        for i, row in enumerate(csv.DictReader(handle)):
-            resolved = row.get("pass") == _TRUE
-            step = make_step(
-                step_index=0,
-                observation="",
-                action="terminal",
-                tool="terminal",
-                args=None,
-                result=row.get("pass", ""),
-                metadata={
-                    "model": row.get("model", ""),
-                    "challenge_id": row.get("challenge_id", ""),
-                },
-                status="ok" if resolved else "error",
-            )
-            meta = {
-                "trajectory_id": f"{row.get('challenge_id', 'row')}:{row.get('model', '')}:{i}",
-                "dataset": "results_csv_bootstrap",
-                "terminal_resolved": resolved,
-                "instance_id": row.get("challenge_id"),
-                "dataset_revision": dataset_revision,
-            }
-            trajectories.append(build_trajectory([step], meta, "results_bootstrap"))
+    for i, row in enumerate(integrity.rep_zero_rows(results_path)):
+        resolved = row.get("pass") == _TRUE
+        step = make_step(
+            step_index=0,
+            observation="",
+            action="terminal",
+            tool="terminal",
+            args=None,
+            result=row.get("pass", ""),
+            metadata={
+                "model": row.get("model", ""),
+                "challenge_id": row.get("challenge_id", ""),
+            },
+            status="ok" if resolved else "error",
+        )
+        meta = {
+            "trajectory_id": f"{row.get('challenge_id', 'row')}:{row.get('model', '')}:{i}",
+            "dataset": "results_csv_bootstrap",
+            "terminal_resolved": resolved,
+            "instance_id": row.get("challenge_id"),
+            "dataset_revision": dataset_revision,
+        }
+        trajectories.append(build_trajectory([step], meta, "results_bootstrap"))
     return trajectories
 
 

@@ -43,6 +43,8 @@ from benchmark.routing.figures import context as ctxmod  # noqa: E402
 from benchmark.routing.plot_style import usd  # noqa: E402
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from matplotlib.axes import Axes
 
 # `python -m` sets __name__ to "__main__", which would land in the figure manifest
@@ -76,7 +78,12 @@ _GRID: Final = "#e1e0d9"
 
 _LABEL_PT: Final = 9.5
 _RULER_Y: Final = 79.0
-_Y_FLOOR: Final = 72.0
+# The truncated y-axis is deliberate and is stated on the axis label. It is a floor
+# for READABILITY, never a filter: `_y_floor` lowers it whenever a plotted point sits
+# beneath, because a point outside the limits is drawn nowhere and says nothing. A
+# ladder reaching down to sub-1B models routinely lands well below 72%.
+_Y_FLOOR_DEFAULT: Final = 72.0
+_Y_FLOOR_PAD: Final = 3.0
 _Y_CEIL: Final = 101.5
 
 
@@ -233,6 +240,14 @@ def _draw_ruler(ax: Axes, hero: tuple[float, float], baseline: tuple[float, floa
     )
 
 
+def _y_floor(points: Sequence[tuple[float, float]]) -> float:
+    """The lowest y the axis must show: the default, or below every plotted point."""
+    lowest = min(y for _x, y in points)
+    if lowest >= _Y_FLOOR_DEFAULT + _Y_FLOOR_PAD:
+        return _Y_FLOOR_DEFAULT
+    return max(0.0, lowest - _Y_FLOOR_PAD)
+
+
 def _draw(ax: Axes, rows: dict[str, dict[str, str]]) -> None:
     """The whole canvas: four marks, four names, one measuring bar."""
     hero, baseline = _point(rows, HERO), _point(rows, BASELINE)
@@ -289,8 +304,9 @@ def _draw(ax: Axes, rows: dict[str, dict[str, str]]) -> None:
         _CONTEXT_COLOR,
     )
 
+    floor = _y_floor((hero, baseline, cheap, bound))
     ax.set_xlim(-3.0, baseline[0] * 1.10)
-    ax.set_ylim(_Y_FLOOR, _Y_CEIL)
+    ax.set_ylim(floor, _Y_CEIL)
     ax.xaxis.set_major_locator(MultipleLocator(20.0))
     ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"${v:,.0f}"))
     ax.yaxis.set_major_locator(MultipleLocator(5.0))
@@ -301,7 +317,7 @@ def _draw(ax: Axes, rows: dict[str, dict[str, str]]) -> None:
         color=plot_frame.INK,
     )
     ax.set_ylabel(
-        f"tasks passed (%) — axis starts at {_Y_FLOOR:.0f}%, not 0",
+        f"tasks passed (%) — axis starts at {floor:.0f}%, not 0",
         fontsize=10,
         color=plot_frame.INK,
     )

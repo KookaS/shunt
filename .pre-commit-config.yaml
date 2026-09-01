@@ -41,7 +41,7 @@ repos:
         language: system
         types: [python]
       - id: sh002-docstring-length
-        name: SH002 docstrings <= 3 lines
+        name: SH002 docstrings <= 20 lines
         entry: python tools/lint/check_docstring_length.py
         language: system
         types: [python]
@@ -191,6 +191,21 @@ repos:
         # hook sees (AGENTS.md: "run everything through uv"). The gate still bootstraps repo
         # root + src/ so it also works without the editable install.
         entry: uv run python tools/lint/check_model_triage.py
+        language: system
+        pass_filenames: false
+        always_run: true
+      # SH016 makes a tracked kill-gate verdict re-derivable rather than merely tracked. Both
+      # verdict JSONs are committed files no job regenerates, and the suite asserted only the
+      # headline word: falsifying `provisional_verdict` to PASS with a fabricated cost win left
+      # the whole suite green. The gate recomputes `multidim_kill_gate_verdict.json` in full
+      # from the committed corpus, and re-derives the offline verdict's COVERAGE CENSUS (the
+      # block the multi-dimensional gate reads as a precondition — its cost ratios need a live
+      # matrix and are out of scope). Whole-tree scan (the SH011/SH015 shape): the failure is an
+      # edit to a JSON, or a corpus that moved under an unchanged artifact. BLOCKING.
+      - id: sh016-verdict-provenance
+        name: SH016 tracked kill-gate verdicts match their corpus
+        # Imports the benchmark package, so it runs under the project venv (see SH015).
+        entry: uv run python tools/lint/check_verdict_provenance.py
         language: system
         pass_filenames: false
         always_run: true

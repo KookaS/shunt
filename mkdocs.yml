@@ -45,7 +45,7 @@ nav:
   - Escalation dataset: escalation-data-card.md
   - Reproducing the escalation eval: escalation-reproduction.md
   - The live router: inference.md
-  - The same seven figures, on invented data: inference-demo.md
+  - The same eight figures, on invented data: inference-demo.md
   - Results: results.md
   - Research log: research-log.md
   - Benchmark: benchmark.md

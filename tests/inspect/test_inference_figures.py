@@ -424,6 +424,7 @@ def _render_all(store: OutcomeStore, out_dir: Path) -> list[Path]:
         figures.draw_neighbourhood(out_dir, idata.neighbourhood(store, rows, k=3), None),
         figures.draw_policy(out_dir, idata.policy(rows), None),
         figures.draw_escalation(out_dir, idata.escalation(rows), None),
+        figures.draw_model_grid(out_dir, idata.model_grid(rows), None),
         figures.draw_ope(out_dir, idata.ope(store, _certified(store)), None),
     ]
 
@@ -439,7 +440,7 @@ def test_every_figure_renders_on_a_seed_only_corpus(
     seed_only_store: OutcomeStore, tmp_path: Path
 ) -> None:
     # The docs case. Under SHUNT_PLOT_STRICT=1 a panel that drew nothing at all would still
-    # pass; what this proves is that the honest-empty path completes for all six.
+    # pass; what this proves is that the honest-empty path completes for all eight.
     paths = _render_all(seed_only_store, tmp_path / "seed")
     assert [p.name for p in paths] == [text.filename for text in specs.FIGURES]
     assert all(p.stat().st_size > 0 for p in paths)
@@ -1205,3 +1206,84 @@ def test_policy_propensities_are_adjudicated_live_rows_only(tmp_path: Path) -> N
     )
     view = idata.policy(idata.read_sessions(store))
     assert view.propensities == [("cheap", 1, pytest.approx(0.7), pytest.approx(0.7))]
+
+
+# ------------------------------------------- an empty stratum must never look like a result
+
+
+def _legend_labels(fig: Any, panel: int) -> list[str]:
+    legend = fig.axes[panel].get_legend()
+    return [] if legend is None else [t.get_text() for t in legend.get_texts()]
+
+
+def test_strata_names_its_empty_live_stratum_in_red_not_only_in_the_grey_subtitle(
+    seed_only_store: OutcomeStore, tmp_path: Path
+) -> None:
+    # THE DEFECT THIS PINS. `caveat` was None on a store with zero live sessions, so the whole
+    # disclosure was `live n=0` in the grey subtitle — beside five grey bars and a full-strength
+    # blue "live" key. That canvas is indistinguishable from one with a small live stratum, which
+    # is the single failure mode this family exists to prevent.
+    rows = idata.read_sessions(seed_only_store)
+    view = idata.strata(seed_only_store, rows)
+    assert view.n_live == 0
+    fig = _drawn(figures.draw_strata, tmp_path / "s", view)
+    texts = _texts_of(fig)
+    assert any("live stratum EMPTY (n=0)" in text for text in texts)
+    # And the legend says it too, in both bar panels, rather than keying a series with no bars.
+    assert "live (none in this corpus)" in _legend_labels(fig, 0)
+    assert "live (none in this corpus)" in _legend_labels(fig, 2)
+    # One drawn series per panel, not two — a zero-height bar is a bar that rendered.
+    assert len(fig.axes[0].containers) == 1
+    assert len(fig.axes[2].containers) == 1
+
+
+def test_strata_keeps_both_legend_keys_when_both_strata_are_populated(
+    mixed_store: OutcomeStore, tmp_path: Path
+) -> None:
+    # The absence marker is keyed on the count, never on the figure: a corpus that HAS live rows
+    # must get the plain key back, or the panel understates a real population.
+    rows = idata.read_sessions(mixed_store)
+    view = idata.strata(mixed_store, rows)
+    assert view.n_live > 0
+    fig = _drawn(figures.draw_strata, tmp_path / "s", view)
+    assert "live" in _legend_labels(fig, 0)
+    assert not any("none in this corpus" in text for text in _texts_of(fig))
+
+
+def test_unit_economics_labels_the_absent_live_stratum_in_both_panels(
+    seed_only_store: OutcomeStore, tmp_path: Path
+) -> None:
+    # THE DEFECT THIS PINS. Panel A's legend already read "live (none in this corpus)" while
+    # panel B kept a plain "live" swatch beside zero-length bars — the SAME absence, labelled in
+    # one panel and not the other, so the reader had to guess which panel was telling the truth.
+    rows = idata.read_sessions(seed_only_store)
+    fig = _drawn(figures.draw_unit_economics, tmp_path / "u", idata.unit_economics(rows))
+    assert "live (none in this corpus)" in _legend_labels(fig, 0)
+    assert "live (none in this corpus)" in _legend_labels(fig, 1)
+    # Panel B draws the seeded series only; the live bars are absent, not zero-length.
+    assert len(fig.axes[1].containers) == 1
+
+
+def test_the_policy_seed_band_percentages_survive_the_hatch(
+    seed_only_store: OutcomeStore, tmp_path: Path
+) -> None:
+    # THE DEFECT THIS PINS. The in-bar shares were white bold text over a white 45-degree hatch,
+    # so the glyphs broke up into the hatch strokes and the percentages rendered garbled. A dark
+    # stroke around each glyph is what makes them readable whatever colour the segment is.
+    rows = idata.read_sessions(seed_only_store)
+    fig = _drawn(figures.draw_policy, tmp_path / "p", idata.policy(rows))
+    shares = [t for t in fig.axes[0].texts if t.get_text().endswith("%")]
+    assert shares, "panel A drew no share labels"
+    for text in shares:
+        assert text.get_path_effects(), f"{text.get_text()} has no contrast stroke over the hatch"
+
+
+def test_a_long_strata_caveat_is_capped_rather_than_raising_in_the_frame() -> None:
+    # `plot_frame` raises above 120 characters, so a fourth clause could take the whole render
+    # down. The clauses that fit are kept and the rest are COUNTED — never silently dropped.
+    parts = [f"clause number {i} that is quite long indeed" for i in range(4)]
+    capped = figures._fit_caveat(parts)
+    assert capped is not None
+    assert len(capped) <= 120
+    assert "more)" in capped
+    assert figures._fit_caveat([]) is None

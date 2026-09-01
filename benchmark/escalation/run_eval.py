@@ -203,8 +203,9 @@ class EvalReport:
     recurrence_scores: RecurrenceScores | None = None
     # AUROC of both recurrence scores at the shipped stale_window and at an effectively unbounded
     # one. Published because the headline gap is quoted at a FIXED window: as-shipped reaches
-    # 0.728 at stale_window=1000 against 0.601 at the shipped 10, so a figure that let the window
-    # move between its two curves would credit the counting change with a window change.
+    # a materially higher AUROC at stale_window=1000 than at the shipped 10, so a figure that let
+    # the window move between its two curves would credit the counting change with a window
+    # change. The measured cells reach the reader as `escalation_decision.png`'s window note.
     window_sensitivity: dict[str, float] = field(default_factory=dict)
     # Per-model split of the canonical cell's two arms — `corpus_and_coverage.png`'s panel B.
     canonical_model_arms: list[plots.ModelArm] = field(default_factory=list)
@@ -1080,11 +1081,12 @@ def _draw_decision(
         band=report.recurrence_null_band,
         shipped_n=SHIPPED_ESCALATE_AFTER_N,
         value_verdict=value_verdict,
+        window_sensitivity=report.window_sensitivity,
     )
     plot_frame.save(
         fig,
         out_dir / "escalation_decision.png",
-        plots.ESCALATION_DECISION_SPEC,
+        plots.escalation_decision_spec(scores.plain, scores.edit, scores.labels),
         extra=_merge(extra, run),
         provenance=provenance,
         size=size,

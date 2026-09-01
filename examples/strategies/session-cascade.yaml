@@ -1,0 +1,55 @@
+# session_cascade — the SHIPPED DEFAULT. Start cheap, climb on verified failure.
+#
+# Copy this to ~/.config/shunt/router.yaml (or $SHUNT_CONFIG_DIR/router.yaml), set
+# capture.work_dir if you do not start shunt inside the repo you want verified, and
+# run `shunt start`. No API key goes in this file — providers read theirs from the
+# environment (see ../providers/README.md and ../../docs/configuration.md).
+#
+# WHEN TO PICK THIS ONE: you want the cheapest bill and you have no reason to believe
+# the model choice changes the outcome. On the offline corpus it resolves the same 178
+# of 184 scored tasks as the routing model, for $33.56 of naive corpus cost against
+# $43.28 — the classifier costs ~29% more for no measured quality gain. It never embeds,
+# so it has no extra dependency and no extra failure mode.
+#
+# YOUR FILE REPLACES THE PACKAGED ONE WHOLESALE — nothing is merged key by key. That is
+# why every block that matters is spelled out here, including `escalation:`: an absent
+# escalation block reads as OFF, and `session_cascade` with the ladder off is a load error
+# (correctly — with no ladder this strategy is nothing but `always_cheap`).
+router:
+  strategy: session_cascade
+
+  # The ladder. It is the whole content of this strategy: the first session opens on the
+  # cheapest healthy model, and the SAME verified failure seen `escalate_after_n` times
+  # within `stale_window` decisions raises one rung at the NEXT session boundary — never
+  # mid-turn, so the prompt cache is never invalidated by a routing change.
+  escalation:
+    enabled: true
+    escalate_after_n: 2
+    stale_window: 10
+    ladder: effort_then_rank
+    rank_shortlist: 3
+    context_transfer: full
+
+  # Where the ladder gets its signal. A verified failure means shunt re-ran YOUR repo's
+  # test suite off the wire and it went red. With no resolvable repo there is no signal,
+  # nothing ever climbs, and this strategy IS `always_cheap` — shunt warns at boot when
+  # that is the state you are in.
+  #
+  # Leave `work_dir: null` and start shunt from inside the repo (`cd myrepo && shunt start`)
+  # and it resolves the launch directory instead. Set it explicitly if you start shunt
+  # elsewhere. ARMING ANY work_dir ARMS ARBITRARY CODE EXECUTION: re-running a suite runs
+  # that tree's own conftest.py / build.rs / npm scripts.
+  capture:
+    work_dir: null
+
+  # Which registry models this router may pick — the shipped measured-evidence pool.
+  # Keep it in step with your registry: a name here that models.yaml does not define
+  # fails loudly at startup. An empty list routes over every registry model.
+  models:
+    - deepseek-v4-flash
+    - zai-glm-5.2
+    - kimi-k3
+    - gemini-3.1-pro
+    - gpt-5.6-sol
+    - claude-fable-5
+    - claude-opus-4-8

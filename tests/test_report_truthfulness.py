@@ -15,6 +15,7 @@ import pytest
 from benchmark import plot_frame
 from benchmark.routing import metrics, report, strategy_class
 from benchmark.routing.figures import arm_manipulation, context
+from benchmark.routing.strategies import Strategy
 
 
 class TestHindsightIsNeverDeployable:
@@ -178,7 +179,7 @@ class TestStrategyCellsPathAwareImputation:
     # Filtering on the FINAL cell alone put $0.1567 of projected spend inside the panel
     # titled "MEASURED ONLY — no imputed cell on either side".
 
-    class _Cascade:
+    class _Cascade(Strategy):
         """Minimal stand-in for the shipped cascades' evaluate contract."""
 
         name = "Cascade"
@@ -215,9 +216,10 @@ class TestStrategyCellsPathAwareImputation:
     }
 
     def _cells(self):  # noqa: ANN202
-        cells, _unscorable = report.strategy_cells(self._MATRIX, ["t1", "t2"], [self._Cascade()])[
-            "Cascade"
-        ]
+        by_strategy, _repriced = report.strategy_cells(
+            self._MATRIX, ["t1", "t2"], [self._Cascade()]
+        )
+        cells, _unscorable = by_strategy["Cascade"]
         return cells
 
     def test_an_imputed_probe_marks_the_whole_decision(self):
@@ -371,6 +373,7 @@ class TestNoReadingOrGoalStringReachesTheCanvas:
             kill_gate,
             ladder_rungs,
             oracle_gap,
+            pareto_dimensions,
             task_difficulty,
         )
 
@@ -386,6 +389,7 @@ class TestNoReadingOrGoalStringReachesTheCanvas:
                 kill_gate,
                 ladder_rungs,
                 oracle_gap,
+                pareto_dimensions,
                 task_difficulty,
             )
         ]

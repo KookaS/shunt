@@ -6,6 +6,7 @@ import csv
 import random
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import pstdev
 from typing import Final
 
 from benchmark import config
@@ -19,6 +20,7 @@ from benchmark.routing.metrics import (
     compare_to_oracle,
     compute_metrics,
     compute_pareto,
+    percentile,
 )
 from benchmark.routing.strategies import BilledAttempt
 from benchmark.routing.strategies.oracle import OracleRewardAware
@@ -82,6 +84,23 @@ SUMMARY_FIELDS: Final[tuple[str, ...]] = (
     # "kNN scored 78.53% on an instrument never shown to measure anything".
     "instrument_admissible",
     "instrument_verdict",
+    # The non-cost axes. Cost alone cannot separate a strategy that wins by being cheap
+    # from one that wins by burning the user's afternoon: a cheap-first cascade pays in
+    # sessions and wall-clock, and a plain cascade recovers no latency for the rungs it
+    # wasted. These make that visible. All derived from already-measured data.
+    "TotalCalls",
+    "TotalOutTok",
+    # The counted axes a figure may RANK on, plus the size of the subset they are counted
+    # over. The two totals above are measured-only sums whose coverage differs per strategy;
+    # these are the comparable form. See `_counted_tasks`.
+    "CallsPerTask",
+    "OutTokPerTask",
+    "counted_n",
+    "sessions_mean",
+    "sessions_p95",
+    "cost_p95",
+    "cost_cv",
+    "censoring_rate",
 )
 # Columns that are deterministic given the matrix (no bootstrap, no strategy-set
 # dependency) — what the drift check compares.
@@ -95,6 +114,16 @@ DETERMINISTIC_FIELDS: Final[tuple[str, ...]] = (
     "Reward",
     "CumReg",
     "rAcc",
+    "TotalCalls",
+    "TotalOutTok",
+    "CallsPerTask",
+    "OutTokPerTask",
+    "counted_n",
+    "sessions_mean",
+    "sessions_p95",
+    "cost_p95",
+    "cost_cv",
+    "censoring_rate",
 )
 
 Decision = tuple[str, str, bool, float]
@@ -153,20 +182,23 @@ def evaluate(strategy: object, matrix: dict, tasks: list[str]) -> tuple[list[Dec
     """Run one strategy, returning ``(decisions, unscorable)``: ``(task, model, passed,
     cost)`` tuples plus the task ids that cannot be scored — the chosen cell was never
     measured, or a cascade's PATH crossed an unmeasured cell (callers must exclude them)."""
-    decisions, unscorable, _attempts, _judge = evaluate_billed(strategy, matrix, tasks)
+    decisions, unscorable, _attempts, _judge, _sessions = evaluate_billed(strategy, matrix, tasks)
     return decisions, unscorable
 
 
 def evaluate_billed(
     strategy: object, matrix: dict, tasks: list[str]
-) -> tuple[list[Decision], set[str], dict[str, list[Attempt]], dict[str, float]]:
-    """``evaluate`` plus each task's billed attempts AND per-task judge cost, in one pass.
-    The cache-aware model needs attempt ORDER; the judge-bill model needs the per-task cost a
-    difficulty strategy reports on every ``select`` the way a cascade reports its ladder total."""
+) -> tuple[list[Decision], set[str], dict[str, list[Attempt]], dict[str, float], dict[str, int]]:
+    """``evaluate`` plus each task's billed attempts, judge cost AND session count, in one pass."""
+    # Three consumers need what `evaluate` drops: the cache-aware model needs attempt ORDER,
+    # the judge-bill model needs the per-task cost a difficulty strategy reports on every
+    # `select` the way a cascade reports its ladder total, and the step-cost dimension needs
+    # how many sessions the user waited through.
     decisions: list[Decision] = []
     unscorable: set[str] = set()
     attempts: dict[str, list[Attempt]] = {}
     judge_by_task: dict[str, float] = {}
+    sessions_by_task: dict[str, int] = {}
     for tid in tasks:
         task_meta = matrix["tasks"].get(tid, {})
         model = strategy.select(tid, task_meta, matrix)  # type: ignore[attr-defined]
@@ -195,6 +227,15 @@ def evaluate_billed(
         judge = float(getattr(strategy, "judge_cost_total", 0.0) or 0.0)
         judge_by_task[tid] = judge
         decisions.append((tid, model, passed, cost + judge))
+        # How many SESSIONS this task made the user wait through. Read off the declared
+        # `Strategy.sessions_burned` contract rather than probed with `getattr(..., default)`:
+        # a default cannot tell a single-shot strategy apart from a cascade that forgot to
+        # report, and the version that could reported every attempt-billing cascade as
+        # never escalating. The base implementation counts `cascade_attempts`, so a cascade
+        # is right by construction; `SessionCascadeStrategy` overrides it because it bills
+        # unmeasured rungs onto its path outside that list.
+        sessions_by_task[tid] = int(strategy.sessions_burned)  # type: ignore[attr-defined]
+
         # A cascade publishes its per-attempt billing; a single-shot decision IS one attempt.
         # Copied, because the strategy overwrites the attribute on the next `select`.
         billed = getattr(strategy, "cascade_attempts", None)
@@ -214,7 +255,7 @@ def evaluate_billed(
                 )
             ]
         )
-    return decisions, unscorable, attempts, judge_by_task
+    return decisions, unscorable, attempts, judge_by_task, sessions_by_task
 
 
 def compute_strategy_rows(
@@ -272,8 +313,11 @@ def _apply_pareto(rows: list[dict]) -> None:
         # Zero-evidence rows (no scorable task) are kept in the output but NEVER enter the
         # comparison: (cost $0, pass 0%) is un-dominated by construction, so including them
         # certifies "measured nothing" as optimal.
+        # `.get(..., None)`, never `0.0`: an absent column is a non-observation, and a zero
+        # cost or zero pass rate is un-dominated by construction on that axis. `pareto_front`
+        # excludes a None (and a non-finite) row instead of certifying it optimal.
         metrics = {
-            r["strategy"]: {"AvgPerf%": r.get("AvgPerf%", 0.0), "TotalCost": r.get(cost_field, 0.0)}
+            r["strategy"]: {"AvgPerf%": r.get("AvgPerf%"), "TotalCost": r.get(cost_field)}
             for r in rows
             if int(r.get("n_tasks", 0) or 0) > 0
         }
@@ -346,6 +390,101 @@ def _context_columns(
     }
 
 
+def _counted_tasks(
+    decisions: list[Decision], attempts: dict[str, list[Attempt]], matrix: dict
+) -> list[str]:
+    """The tasks whose WHOLE billed path carries real call/token counts."""
+    #
+    # AN IMPUTED CELL HAS NO COUNTS AT ALL. `impute.ImputedCell.to_cell` writes `pass`, `cost`,
+    # `real_cost`, `imputed` and `source_model` -- and no `calls`, `in_tok` or `out_tok`. Both
+    # `BilledAttempt` constructors then read those absent keys through `int(... or 0)`, so an
+    # unrun cell contributes ZERO calls and ZERO output tokens instead of contributing nothing.
+    # `TotalCalls` and `TotalOutTok` are therefore sums over each strategy's MEASURED cells
+    # while reading as sums over the corpus, and the measured share is not the same for two
+    # strategies: on the shipped matrix Always-Frontier's path is counted on 95 of 184 tasks
+    # (51.6%) against Always-Cheap's 174 (94.6%). Ranking two rows against each other on that
+    # is comparing a half-counted total with a nearly-complete one.
+    #
+    # So the counted axes get the same treatment the context bracket already gets
+    # (`context_cost.token_complete_tasks`): identify the subset that really is counted, and
+    # publish a PER-TASK rate over it plus the subset's size. Missing stays MISSING; it is
+    # never a zero, and it is never quietly folded into a total.
+    results = matrix.get("results", {})
+    return [
+        tid
+        for tid, _m, _p, _c in decisions
+        if all("calls" in results.get(tid, {}).get(a.model, {}) for a in attempts.get(tid, ()))
+    ]
+
+
+def _dimension_columns(
+    decisions: list[Decision],
+    attempts: dict[str, list[Attempt]],
+    sessions_by_task: dict[str, int],
+    n_strat_unscorable: int,
+    n_attempted: int,
+    matrix: dict,
+) -> dict:
+    """The non-cost axes: work done, sessions waited through, and how predictable the bill is.
+
+    Every value here is derived from data ``evaluate_billed`` already returned -- no new
+    measurement, and nothing that can be blocked by an unpopulated optional column.
+    """
+    # A cascade's cost is bimodal: most tasks stop at the cheap rung, a tail climbs the
+    # whole ladder. A mean hides exactly that, so the dispersion columns are the point of
+    # this block, not a garnish on the totals.
+    costs = [c for _tid, _m, _p, c in decisions]
+    scored = [tid for tid, _m, _p, _c in decisions]
+    sessions = [sessions_by_task[tid] for tid in scored]
+    calls = sum(a.calls for tid in scored for a in attempts.get(tid, ()))
+    out_tok = sum(a.out_tok for tid in scored for a in attempts.get(tid, ()))
+    mean_cost = (sum(costs) / len(costs)) if costs else 0.0
+    # Population sd, because these ARE all the scored tasks, not a sample of them.
+    cv = (pstdev(costs) / mean_cost) if len(costs) > 1 and mean_cost else 0.0
+    # The counted axes, over the subset that is actually counted. `TotalCalls`/`TotalOutTok`
+    # stay in the row for auditability -- they are the honest MEASURED sums -- but they are no
+    # longer a quantity two strategies may be ranked against each other on, because each row's
+    # sum covers a different share of the corpus. `counted_n` is published beside them so the
+    # share is visible rather than inferred, and the per-task rates are what a figure ranks.
+    counted = _counted_tasks(decisions, attempts, matrix)
+    counted_calls = sum(a.calls for tid in counted for a in attempts.get(tid, ()))
+    counted_out_tok = sum(a.out_tok for tid in counted for a in attempts.get(tid, ()))
+    return {
+        "TotalCalls": calls,
+        "TotalOutTok": out_tok,
+        # An EMPTY counted subset publishes nothing rather than a 0.0 rate: a rate over zero
+        # measured tasks is not "no calls", it is no evidence, and a 0.0 would be un-dominated
+        # by construction on a minimised axis -- the exact failure `pareto_dimensions._num`
+        # refuses for a missing cell. The consumer drops a row without the column.
+        **(
+            {
+                "CallsPerTask": round(counted_calls / len(counted), 4),
+                "OutTokPerTask": round(counted_out_tok / len(counted), 4),
+            }
+            if counted
+            else {}
+        ),
+        "counted_n": len(counted),
+        # Total sessions burned, NOT distinct ladder rungs: a climb that bounces 13 times
+        # across 7 rungs made the user wait 13 times, and the rung-dedup count would report 7.
+        "sessions_mean": round(sum(sessions) / len(sessions), 3) if sessions else 0.0,
+        "sessions_p95": round(float(percentile(sessions, 0.95)), 3),
+        "cost_p95": round(percentile(costs, 0.95), 6),
+        "cost_cv": round(cv, 4),
+        # Share of the offered task set THIS strategy could not score -- a strategy that
+        # reaches its pass rate by dropping tasks is not cheaper, it is less measured.
+        # Deliberately the strategy's OWN unscorable count, not the strategy-or-oracle union
+        # the row's kept subset is filtered on: that union is oracle-dominated and could
+        # never be anything but one number repeated down the column. Read it with two
+        # caveats. The denominator is every task offered, while the cost columns beside it
+        # use the smaller kept subset. And a corpus can still flatten the column honestly:
+        # on the shipped matrix all 12 rows read 0.08, because the 16 incomplete challenges
+        # carry no measured cell for ANY strategy -- that is censoring in the data, and a
+        # strategy that censors on its own would separate from it.
+        "censoring_rate": (round(n_strat_unscorable / n_attempted, 4) if n_attempted else 0.0),
+    }
+
+
 def _strategy_row(  # noqa: PLR0913
     strategy: object,
     matrix: dict,
@@ -358,7 +497,9 @@ def _strategy_row(  # noqa: PLR0913
     probe: dict | None = None,
     seed: int = 42,
 ) -> dict:
-    decisions, strat_unscorable, attempts, judge_by_task = evaluate_billed(strategy, matrix, tasks)
+    decisions, strat_unscorable, attempts, judge_by_task, sessions_by_task = evaluate_billed(
+        strategy, matrix, tasks
+    )
     # A task is comparable only if BOTH the strategy and the oracle landed on a
     # measured cell; otherwise it is a coverage gap, not a real fail@$0, and must
     # not corrupt pass rate / cost. Filtering keeps strategy/oracle position-aligned.
@@ -421,6 +562,9 @@ def _strategy_row(  # noqa: PLR0913
         "subset_selected": selection.is_subset,
         "subset_note": selection.note,
         **_context_columns(decisions, attempts, cache_total, matrix),
+        **_dimension_columns(
+            decisions, attempts, sessions_by_task, len(strat_unscorable), len(tasks), matrix
+        ),
     }
 
 

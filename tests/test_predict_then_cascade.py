@@ -77,7 +77,7 @@ class TestDegeneration:
         s = _flat(FractionalGate(0.0), escalate_after_n=2)
         s.select("t", {}, _matrix({"t": {"dear"}}))
         assert s.cascade_tried_models == ["cheap", "cheap", "mid", "mid", "dear"]
-        assert s.session_hops == 3
+        assert s.session_distinct_rungs == 3
 
     def test_f1_is_always_cheap_single_shot(self):
         # A task the ladder would escalate is served cheap once and never climbs.
@@ -85,7 +85,7 @@ class TestDegeneration:
         s = _flat(FractionalGate(1.0))
         assert s.select("t", {}, m) == "cheap"
         assert s.session_path == [("cheap", "")]
-        assert s.session_hops == 1
+        assert s.session_distinct_rungs == 1
         assert s.cascade_total_cost == pytest.approx(_COSTS["cheap"])
         assert s.cascade_attempts == [
             BilledAttempt(model="cheap", cost=_COSTS["cheap"], in_tok=0, out_tok=0, calls=1)
@@ -184,3 +184,29 @@ class TestScoringConventions:
         gated = _flat(FractionalGate(1.0))
         base = _ladder_baseline()
         assert gated.trace("t", m) == base.trace("t", m) == _flat(FractionalGate(0.0)).trace("t", m)
+
+
+# ------------------------------------------ the figure's censoring counts, derived not frozen
+
+
+def test_censoring_counts_the_cheap_failing_tail_the_ladder_cannot_score() -> None:
+    # THE DEFECT THIS PINS. The eval's figure limitation froze "42 of 45 cheap-failing tasks",
+    # and its sibling notes froze 142, 184 and two dollar figures — all correct when written and
+    # all silently wrong the moment the matrix gains a cell. The counts come off the matrix now,
+    # so the sentence cannot outlive the data it describes.
+    from benchmark.routing.scripts.predict_then_cascade_eval import censoring
+
+    completed = {
+        "results": {
+            "solved": {"deepseek-v4-flash": {"pass": True}},
+            "hard-scored": {"deepseek-v4-flash": {"pass": False}},
+            "hard-censored": {"deepseek-v4-flash": {"pass": False}},
+        }
+    }
+    tasks = ["solved", "hard-scored", "hard-censored"]
+    # `fixed_set` is what Session-Cascade can score; the censored task is outside it.
+    result = censoring(completed, tasks, {"solved", "hard-scored"})
+    assert result.n_cheap_failing == 2
+    assert result.n_censored == 1
+    # A task the sample does not draw is neither, however it sits in the matrix.
+    assert censoring(completed, ["solved"], {"solved"}).n_cheap_failing == 0

@@ -14,8 +14,10 @@ from shunt.inspect.plot_style import (
     _ARM_BASE_SIZE,  # noqa: F401 (re-export: tests pin the arm size ramp)
     _ARM_SIZE_STEP,  # noqa: F401 (re-export: tests pin the arm size ramp)
     ARM_SWEEP_PENDING_NOTE,
+    MAX_DISTINCT_MODELS,
     MIN_N_PROVISIONAL,
     OKABE_ITO,
+    SERIES_HUES,
     TRISTATE_FAIL,
     TRISTATE_PASS,
     TRISTATE_UNSAMPLED,
@@ -44,8 +46,10 @@ from shunt.inspect.plot_style import (
 
 __all__ = [
     "ARM_SWEEP_PENDING_NOTE",
+    "MAX_DISTINCT_MODELS",
     "MIN_N_PROVISIONAL",
     "OKABE_ITO",
+    "SERIES_HUES",
     "TRISTATE_FAIL",
     "TRISTATE_PASS",
     "TRISTATE_UNSAMPLED",

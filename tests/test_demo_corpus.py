@@ -276,7 +276,7 @@ def test_the_measured_sparsity_survives(
     assert any(float(str(r["cost"])) > 0.0 for r in unknown_cost), "unknown cost collapsed to zero"
 
 
-def test_the_seven_figures_render_to_a_scratch_dir(demo_db: Path, tmp_path: Path) -> None:
+def test_the_eight_figures_render_to_a_scratch_dir(demo_db: Path, tmp_path: Path) -> None:
     pytest.importorskip("matplotlib")
     out_dir = tmp_path / "figures" / "demo"
     store = OutcomeStore(db_path=str(demo_db))
@@ -285,7 +285,7 @@ def test_the_seven_figures_render_to_a_scratch_dir(demo_db: Path, tmp_path: Path
     finally:
         store.close()
     assert report.inadmissible is None, report.inadmissible
-    assert len(report.figures) == 7
+    assert len(report.figures) == 8
     assert all(path.stat().st_size > 10_000 for path in report.figures)
     assert INFERENCE.manifest_for(out_dir) == out_dir.parent / "figures.json"
 
@@ -345,7 +345,7 @@ def test_the_demo_family_stamps_every_canvas_and_diverts_its_manifest(
         store.close()
 
     assert report.manifest != DEMO.manifest, "a scratch render dirtied the committed manifest"
-    assert len(report.figures) == 7
+    assert len(report.figures) == 8
     for path in report.figures:
         pixels = set(Image.open(path).convert("RGB").getdata())
         assert any(all(abs(px[i] - want[i]) <= 2 for i in range(3)) for px in pixels), (

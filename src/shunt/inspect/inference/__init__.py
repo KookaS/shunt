@@ -31,10 +31,10 @@ _HALF: Final[str] = "inference"
 
 @dataclass(frozen=True)
 class Family:
-    """One figure family these seven drawings serve: its half, its home, and its stamp."""
+    """One figure family these eight drawings serve: its half, its home, and its stamp."""
 
     # A family is the ONLY thing that varies between the measured `inference` set and an
-    # illustrative one — same store shape, same seven drawings, same specs. Carrying the
+    # illustrative one — same store shape, same eight drawings, same specs. Carrying the
     # watermark here rather than on a per-figure flag is what makes it unforgettable: the
     # renderer opens `plot_frame.watermarked(family.watermark)` around the whole draw, and
     # `plot_frame.save` is the only door a figure can leave by (SH007 denies `savefig`
@@ -113,7 +113,7 @@ def render(
     family: Family = INFERENCE,
     now: datetime | None = None,
 ) -> InferenceReport:
-    """Render the seven inference figures into `out_dir` and record their manifest rows."""
+    """Render the eight inference figures into `out_dir` and record their manifest rows."""
     # `now` reaches exactly one place — `data._in_window`, the family's single windowed
     # predicate — and defaults to the wall clock, so a measured render is unchanged. It is here
     # for a corpus with FROZEN timestamps, whose `7d`/`30d` panels would otherwise decay with
@@ -144,12 +144,13 @@ def render(
             figures.draw_policy(out_dir, idata.policy(rows, pool), provenance),
             figures.draw_escalation(out_dir, idata.escalation(rows, windows, now=now), provenance),
         ]
+        written.append(figures.draw_model_grid(out_dir, idata.model_grid(rows, pool), provenance))
         try:
             estimates = estimators.certify(store)
             written.append(figures.draw_ope(out_dir, idata.ope(store, estimates), provenance))
         except estimators.InstrumentInadmissibleError as exc:
-            # One estimator that failed its control must not take the family down: the six
-            # figures above read the store, not the instrument. F7 leaves no PNG, so SH009 sees
+            # One estimator that failed its control must not take the family down: the seven
+            # figures before it read the store, not the instrument. F7 leaves no PNG, so SH009 sees
             # a section with no file and the commit stops — the intended coupling, not a skip.
             inadmissible = str(exc)
     return InferenceReport(
@@ -177,6 +178,14 @@ def docs_section(png: str, row: dict[str, Any], *, half: str = _HALF) -> str:
     # notes byte-identical between `figures.json` and `docs/inference.md`, and half of those
     # strings are merged at render time from runtime counts. Copying them by hand is the drift
     # this function exists to make impossible.
+    # THE MARKER NAMES THE ROW'S OWN GENERATOR, not this module. `figures.json` records the
+    # entrypoint that drew each canvas, and this emitter serves more than one manifest: the
+    # routing family's `model_grid.png` is drawn by `benchmark.routing.figures.model_grid`
+    # and only its markdown block is rendered here. Hardcoding `GENERATOR` published a
+    # provenance marker pointing at an entrypoint that never produces that figure — SH012
+    # checks a marker EXISTS, never that it RESOLVES TO THE PRODUCER, so it stayed green.
+    # The fallback keeps the inference and demo manifests (whose rows already record this
+    # module) and a manifest-less row emitting exactly what they emitted before.
     slug = png.removesuffix(".png").replace("_", "-")
     title = str(row["title"])
     lines = [
@@ -209,7 +218,7 @@ def docs_section(png: str, row: dict[str, Any], *, half: str = _HALF) -> str:
         lines.append(
             "<!-- n: "
             + ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))
-            + f" --><!-- generated-by: {GENERATOR} -->"
+            + f" --><!-- generated-by: {row.get('generator') or GENERATOR} -->"
         )
     return "\n".join(lines) + "\n"
 

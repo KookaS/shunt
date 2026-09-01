@@ -251,7 +251,13 @@ class TestStepLimitAndBounds:
 
     def test_overlay_carries_step_limit_and_wall(self) -> None:
         overlay = infer._scaffold_config_overlay(
-            "m", {}, timeout=1800, step_limit=70, cost_limit=3.0, trajectory_id="t__m__d"
+            "m",
+            {},
+            timeout=1800,
+            step_limit=70,
+            cost_limit=3.0,
+            trajectory_id="t__m__d",
+            api_key_env_var=None,
         )
         assert overlay["agent"]["step_limit"] == 70  # PRIMARY model-speed-agnostic bound
         assert overlay["agent"]["wall_time_limit_seconds"] == 1800  # internal graceful wall
@@ -265,7 +271,13 @@ class TestStepLimitAndBounds:
 
         trajectory_id = "psf__requests-1142__kimi-k3__default"
         overlay = infer._scaffold_config_overlay(
-            "m", {}, timeout=1800, step_limit=150, cost_limit=4.0, trajectory_id=trajectory_id
+            "m",
+            {},
+            timeout=1800,
+            step_limit=150,
+            cost_limit=4.0,
+            trajectory_id=trajectory_id,
+            api_key_env_var=None,
         )
         out = overlay["agent"]["output_path"]
         assert out == str(message_list_path(trajectory_id))
