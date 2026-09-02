@@ -127,8 +127,12 @@ class _Trace:
     attempts: list[BilledAttempt] = field(default_factory=list)
 
     @property
-    def hops(self) -> int:
-        """Distinct ladder rungs occupied (1 = never escalated)."""
+    def distinct_rungs(self) -> int:
+        """Distinct (model, arm) ladder rungs occupied (1 = never escalated).
+
+        NOT the number of sessions: the ladder re-serves one rung across consecutive
+        sessions, so a 13-session path can occupy 7 rungs. ``len(self.path)`` is the wait.
+        """
         return len(dict.fromkeys(self.path))
 
 
@@ -173,13 +177,25 @@ class SessionCascadeStrategy(Strategy):
         self.cascade_scorable: bool = True
         # Instrumentation — proves the escalation path is actually exercised rather than assumed.
         self.session_path: list[tuple[str, str]] = []
-        self.session_hops: int = 0
+        # Distinct rungs occupied by the last replay -- a LADDER-COVERAGE statistic, not a
+        # wait: `sessions_burned` below is what the user sat through.
+        self.session_distinct_rungs: int = 0
         self.session_unmeasured: int = 0
 
     @property
     def name(self) -> str:
         """Display name shown in eval output and plots."""
         return "Session-Cascade"
+
+    @property
+    def sessions_burned(self) -> int:
+        """Sessions the last replay burned -- every rung on the path, re-serves included."""
+        # Overrides the attempt count because `_bill` appends an UNMEASURED cell to
+        # `trace.path` without appending it to `trace.attempts`: those sessions cost the
+        # user wall-clock all the same, so counting attempts would undercount the wait by
+        # exactly the unmeasured rungs. Zero on the no-rungs degenerate path, which also
+        # marks the trace unscorable and is dropped before it can reach a published column.
+        return len(self.session_path)
 
     def select(self, task_id: str, task_meta: dict, matrix: dict) -> str:
         """Replay the task's sessions and return the model the last session routed to."""
@@ -372,7 +388,7 @@ class SessionCascadeStrategy(Strategy):
         self.cascade_attempts = list(trace.attempts)
         self.cascade_scorable = trace.scorable
         self.session_path = list(trace.path)
-        self.session_hops = trace.hops
+        self.session_distinct_rungs = trace.distinct_rungs
         self.session_unmeasured = trace.unmeasured
 
     # ------------------------------------------------------------------

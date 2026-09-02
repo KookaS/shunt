@@ -46,6 +46,9 @@ _STEP_GLOB: Final[str] = "step_*.diff"
 # (`escalation/data/live/<trajectory_id>.jsonl`), so the three artifacts pair one-to-one. The dump
 # is a RAW, UNREDACTED transcript — the message list passes through `redact_secrets` nowhere — so
 # treat it as untrusted output: never commit it, never publish it, keep it on the collection host.
+# One part of it is NOT left to that rule: the scaffold also serialises its own model config into
+# this file, so the provider credential is kept out of that config structurally rather than
+# scrubbed afterwards (`benchmark.runner.scaffold_model`).
 MESSAGE_LIST_ROOT: Final[Path] = Path(__file__).resolve().parent / "artifacts" / "message_lists"
 
 

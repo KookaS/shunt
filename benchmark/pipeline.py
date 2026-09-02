@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import argparse
-import csv
+import ast
 import hashlib
 import json
 import logging
@@ -31,28 +31,32 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
 from typing import Final
 
 from benchmark import config, corpus_lock
 from benchmark.escalation import features, schema
 from benchmark.escalation.live_capture import LIVE_DIR
+from benchmark.routing import integrity
 from benchmark.runner import replay_admissibility
 
 logger = logging.getLogger(__name__)
 
 COLLECT = "collect"
+COLUMNS = "columns"
 STAMP = "stamp"
 EVALUATE = "evaluate"
 REPORT = "report"
 FIGURES = "figures"
-STAGE_ORDER = (COLLECT, STAMP, EVALUATE, REPORT, FIGURES)
+STAGE_ORDER = (COLLECT, COLUMNS, STAMP, EVALUATE, REPORT, FIGURES)
 
 RUN_MATRIX = "benchmark.runner.run_matrix"
 OFFLINE_REPLAY = "benchmark.runner.offline_replay"
 ESCALATION_EVAL = "benchmark.escalation.run_eval"
 ROUTING_REPORT = "benchmark.routing.report"
 ROUTING_EVAL = "benchmark.routing.run_eval"
+COLUMN_COVERAGE = "benchmark.column_coverage"
 
 # One measured sympy trajectory took 1 271 s to replay, so the old 120 s ceiling silently
 # dropped exactly the slowest (and largest) trajectories — the stage logged `skipping straggler`
@@ -150,6 +154,16 @@ def stage_collect(args: argparse.Namespace, _state: PipelineState) -> None:
     result = run_module(RUN_MATRIX, _collect_argv(args))
     if result.returncode != 0:
         raise StageError(f"{RUN_MATRIX} exited {result.returncode}")
+
+
+def stage_columns(args: argparse.Namespace, _state: PipelineState) -> None:
+    """Regenerate the optional-column coverage report from whatever collect just wrote."""
+    # Cheap and read-only (one pass over results.csv, no containers, no spend), and it never
+    # fails on coverage — a blank optional column is a fact about the corpus, not a defect.
+    # Only an unreadable corpus is an error, which the module reports as a nonzero exit.
+    result = run_module(COLUMN_COVERAGE, ["--config", args.config])
+    if result.returncode != 0:
+        raise StageError(f"{COLUMN_COVERAGE} exited {result.returncode}")
 
 
 def load_stamp_ledger(live_dir: Path = LIVE_DIR) -> dict[str, str]:
@@ -575,8 +589,10 @@ _ROUTING_ANALYSIS: Final[tuple[str, ...]] = (
     "benchmark.routing.figures.context",
     "benchmark.routing.impute",
     "benchmark.routing.instrument_control",
+    "benchmark.routing.integrity",  # the results.csv schema + the raw rep-0/all-rows readers
     "benchmark.routing.metrics",
     "benchmark.routing.plot_style",
+    "benchmark.routing.repricing",  # the price sheet's only reader (naive cost axes)
     "benchmark.routing.scripts",
     "benchmark.routing.scripts.knn_nulls",
     "benchmark.routing.selection_guard",
@@ -608,6 +624,112 @@ _TIMING_ANALYSIS: Final[tuple[str, ...]] = (
 def _figure_inputs(*paths: Path, analysis: tuple[str, ...]) -> tuple[Path, ...]:
     """A figure job's input set: its producing files plus its analysis-layer module sources."""
     return (*paths, *(_module_file(name) for name in analysis))
+
+
+# ---------------------------------------------------------------------------
+# The IMPORT CLOSURE — what a job's digest actually depends on.
+#
+# The hand-written `analysis=` tuples above are a declaration of intent, and a declaration
+# is exactly what goes stale: measured on this tree, the escalation `run_eval` job reached
+# 35 first-party modules its INPUTS never named (`cost_join`, `routing.cache_cost`,
+# `routing.integrity`, `routing.strategies`, …), 8 of which changed in one session while its
+# digest sat still and two of its PNGs moved. So the digest is COMPUTED from the producer's
+# real imports instead of remembered, and the tuples above survive only as extra seeds (data
+# files, sibling scripts a module execs rather than imports).
+#
+# THE RULE, stated once: the closure is FIRST-PARTY ONLY — a module is followed exactly when
+# its dotted name resolves LEXICALLY to a file under `benchmark/`, `src/shunt/` or `tools/`.
+# Everything else (stdlib, site-packages) is out: those are pinned by the lockfile, not by
+# this manifest, and walking them would hash the interpreter. Resolution is lexical on
+# purpose — `find_spec` executes parent packages, and a freshness check must not import the
+# code it is fingerprinting.
+#
+# ACCEPTED RESIDUAL: only STATIC imports are followed. A module pulled in by
+# `importlib.import_module(name_from_config)` is invisible here, exactly as it is to every
+# other static tool. And the closure is deliberately conservative in the other direction: it
+# follows an import even when the imported name cannot change the drawing, so an edit to a
+# collection module a producer merely imports DOES age the figure. A false STALE costs a
+# redraw; a false FRESH is what shipped the defects above.
+# ---------------------------------------------------------------------------
+
+_FIRST_PARTY_ROOTS: Final[tuple[tuple[str, Path], ...]] = (
+    ("benchmark", _REPO_ROOT),
+    ("tools", _REPO_ROOT),
+    ("shunt", _REPO_ROOT / "src"),
+)
+
+
+def _first_party_file(name: str) -> Path | None:
+    """The source file for a dotted first-party module name, or None if it is not ours."""
+    top = name.split(".", 1)[0]
+    for package, root in _FIRST_PARTY_ROOTS:
+        if top != package:
+            continue
+        base = root.joinpath(*name.split("."))
+        for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+            if candidate.is_file():
+                return candidate.resolve()
+    return None
+
+
+def _module_name_of(path: Path) -> str | None:
+    """The dotted name of a first-party source file — the inverse of `_first_party_file`."""
+    for _package, root in _FIRST_PARTY_ROOTS:
+        try:
+            rel = path.resolve().relative_to(root)
+        except ValueError:
+            continue
+        parts = list(rel.with_suffix("").parts)
+        if parts and parts[-1] == "__init__":
+            parts.pop()
+        if parts:
+            return ".".join(parts)
+    return None
+
+
+@cache
+def _imported_names(path: Path) -> tuple[str, ...]:
+    """Every first-party module name one source file imports, relative forms resolved."""
+    try:
+        tree = ast.parse(path.read_bytes())
+    except (OSError, SyntaxError):
+        return ()
+    here = _module_name_of(path)
+    package = here.rsplit(".", 1)[0] if here and path.name != "__init__.py" else here
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level:
+                # `from . import x` / `from ..y import z`: walk up from this file's package.
+                anchor_parts = (package or "").split(".") if package else []
+                anchor_parts = anchor_parts[: len(anchor_parts) - (node.level - 1)]
+                base = ".".join([*anchor_parts, *([base] if base else [])])
+            if not base:
+                continue
+            names.add(base)
+            # `from pkg import module` is an import of `pkg.module` when that resolves.
+            names.update(f"{base}.{alias.name}" for alias in node.names)
+    return tuple(sorted(n for n in names if _first_party_file(n) is not None))
+
+
+@cache
+def _import_closure(seeds: tuple[Path, ...]) -> tuple[Path, ...]:
+    """Every first-party source file reachable from `seeds` by static imports, sorted."""
+    seen: set[Path] = set()
+    queue = [p.resolve() for p in seeds]
+    while queue:
+        current = queue.pop()
+        if current in seen or not current.is_file():
+            continue
+        seen.add(current)
+        for name in _imported_names(current):
+            found = _first_party_file(name)
+            if found is not None and found not in seen:
+                queue.append(found)
+    return tuple(sorted(seen))
 
 
 @dataclass(frozen=True)
@@ -672,6 +794,16 @@ def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
             # moves whenever the corpus does and costs one file read instead of 88MB.
             _ESCALATION / "data" / "live" / "manifest.json",
             _REPO_ROOT / "benchmark" / "benchmark.yaml",
+            # The escalation half draws TWO COST figures, and neither of the files their
+            # dollars come from used to be fingerprinted here — the one job in the set
+            # digesting neither. `cost_join.join()` prices every trajectory off the ROUTING
+            # results.csv (`config.results_csv_path()`), and `cache_cost.cache_prices()`
+            # reads the registry through `config.load_pricing()`, so a re-collected corpus or
+            # a re-priced model silently moved session_value.png and escalation_budget.png
+            # while their digest sat still. The import closure cannot see either: they are
+            # DATA a digested module reads, not modules.
+            config.results_csv_path(),
+            _REPO_ROOT / "src" / "shunt" / "config" / "models.yaml",
             # `_shipped_escalation()` reads the packaged router config, so a knob change
             # (escalate_after_n 2 -> 3) silently invalidates every escalation figure.
             _REPO_ROOT / "src" / "shunt" / "config" / "router.yaml",
@@ -692,6 +824,13 @@ def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
         # re-routes those rows, so it must mark the strategy-comparing figures stale just
         # like any other data input they are scored on.
         _ROUTING / "data" / "judge_difficulty.json",
+        # The dated price sheet the naive cost axes are repriced from. It is a figure input
+        # for the same reason results.csv is: a refresh changes what a plotted dollar means,
+        # with no code edit and no new measurement, and a figure drawn at last month's prices
+        # must go STALE rather than keep its certificate. This is the mechanism that makes
+        # "repricing rewrites past economics" an auditable, dated change instead of a silent
+        # one — see docs/benchmark-design.md, "Temporal drift".
+        _ROUTING / "data" / "price_sheet.json",
         # ladder_rungs.png derives its panel B from router.yaml's `models:` list (the live
         # pool), so a knob change silently invalidates every routing figure that draws the
         # shipped ladder — mirroring the escalation half's fingerprint of the same file.
@@ -752,6 +891,11 @@ _STANDALONE: Final[tuple[FigureJob, ...]] = (
 # are not re-run by `stage_figures` — but they ARE digested, which is new. Until this landed,
 # 22 of the 34 committed PNGs sat outside every freshness and missing-output check, and a
 # report figure could outlive the data it was drawn from with nothing to say so.
+# The shipped drawer the routing and both live halves share. Named once and digested by every
+# job that calls it — see the comment at its use sites.
+_MODEL_GRID_DRAWER: Final[Path] = _REPO_ROOT / "src" / "shunt" / "inspect" / "model_grid.py"
+
+
 _REPORT_JOB: Final[FigureJob] = FigureJob(
     "benchmark.routing.report",
     (
@@ -763,7 +907,9 @@ _REPORT_JOB: Final[FigureJob] = FigureJob(
         "kill_gate.png",
         "ladder_rungs.png",
         "live_gap.png",
+        "model_grid.png",
         "oracle_gap.png",
+        "pareto_dimensions.png",
         # Drawn here, not by viz_knn, because it audits the SHIPPED strategies' picks.
         # viz_knn could only publish its kNN proxy's picks, which is how the report set
         # ended up quoting two different (cost, pass) pairs for one strategy name.
@@ -779,6 +925,13 @@ _REPORT_JOB: Final[FigureJob] = FigureJob(
         # rule or the null must age the figure exactly as a change to its own draw code does.
         _SCRIPTS / "ladder_evidence.py",
         _REPO_ROOT / "benchmark" / "runner" / "kill_gate.py",
+        # model_grid.png is drawn by the shipped drawer, which sits outside `figures/` above.
+        _MODEL_GRID_DRAWER,
+        # The committed out-of-corpus rungs model_grid.png draws beside the corpus rows. A
+        # figure input for the same reason the price sheet is: editing it changes what the
+        # panel asserts with no code edit and no results.csv change, so the certificate must
+        # age. Declared on THIS job alone — no other figure reads the file.
+        _ROUTING / "data" / "external_rungs.yaml",
         _STRATEGIES,
         analysis=_TIMING_ANALYSIS,
     ),
@@ -842,6 +995,7 @@ _INFERENCE_ANALYSIS: Final[tuple[str, ...]] = (
     "benchmark.routing.censoring",
     "benchmark.routing.context_cost",
     "benchmark.routing.docs_corpus",
+    "benchmark.routing.integrity",  # the results.csv schema the seeded rows are built to
     "benchmark.routing.seed_live",
     # The drawing is all SHIPPED code — the same modules the rig container renders from, where
     # no `benchmark/` exists. `shunt.inspect.inference` itself is digested as a directory (see
@@ -863,6 +1017,7 @@ _INFERENCE_FIGURES: Final[FigureJob] = FigureJob(
     (
         "inference_cost.png",
         "inference_escalation.png",
+        "inference_model_grid.png",
         "inference_neighbourhood.png",
         "inference_ope.png",
         "inference_policy.png",
@@ -874,6 +1029,10 @@ _INFERENCE_FIGURES: Final[FigureJob] = FigureJob(
         # A directory, so `_digest` expands it to its sorted *.py: the whole shipped drawing
         # package (data, estimators, figures, specs, the container entrypoint).
         _REPO_ROOT / "src" / "shunt" / "inspect" / "inference",
+        # The model-grid DRAWER ships one level up, shared with the routing half's adapter, so
+        # it is not covered by the package directory above. Without this row an edit to it
+        # leaves every certified model-grid PNG green while the code that drew them moved.
+        _MODEL_GRID_DRAWER,
         _STRATEGIES,
         analysis=_INFERENCE_ANALYSIS,
     ),
@@ -900,6 +1059,7 @@ _DEMO_FIGURES: Final[FigureJob] = FigureJob(
     (
         "inference_cost.png",
         "inference_escalation.png",
+        "inference_model_grid.png",
         "inference_neighbourhood.png",
         "inference_ope.png",
         "inference_policy.png",
@@ -968,29 +1128,75 @@ class _ManifestEntry:
     inputs: str
     # None = the entry predates output digesting: the job's committed bytes were never
     # certified, which is reported as UNCERTIFIED rather than silently accepted as fresh.
-    outputs: dict[str, str] | None
+    # Inside the mapping, a None VALUE means "declared, and this run did not produce it" —
+    # the state an optional output is in when its producer skipped it. It is deliberately not
+    # the same as an absent key (an output whose file is simply not on disk).
+    outputs: dict[str, str | None] | None
+
+
+def _declared_files(paths: tuple[Path, ...]) -> set[Path]:
+    """The declared inputs as FILES — a directory expanded exactly as `_digest` expands it."""
+    out: set[Path] = set()
+    for path in paths:
+        members = sorted(path.rglob("*.py")) if path.is_dir() else [path]
+        out.update(m.resolve() for m in members)
+    return out
+
+
+def _job_digest_paths(job: FigureJob) -> tuple[Path, ...]:
+    """One job's full fingerprint set: declared data + declared code + its import closure."""
+    # Declared first, in declaration order, so the digest of a job whose producer imports
+    # nothing new is unchanged by the closure's ordering. The closure then adds the files the
+    # declaration missed — that difference IS the hole this closes.
+    declared = (*_data_inputs(job.half), *job.inputs)
+    seeds: list[Path] = []
+    module_file = _first_party_file(job.module)
+    if module_file is not None:
+        seeds.append(module_file)
+    seeds.extend(p for p in _declared_files(job.inputs) if p.suffix == ".py")
+    covered = _declared_files(declared)
+    extra = tuple(p for p in _import_closure(tuple(sorted(seeds))) if p not in covered)
+    return (*declared, *extra)
 
 
 def figure_digests(jobs: tuple[FigureJob, ...] = FIGURE_JOBS) -> dict[str, str]:
     """Current input digest per figure job — every committed figure, not only standalone ones."""
-    return {job.name: _digest((*_data_inputs(job.half), *job.inputs)) for job in jobs}
+    return {job.name: _digest(_job_digest_paths(job)) for job in jobs}
 
 
-def figure_output_digests(jobs: tuple[FigureJob, ...] = FIGURE_JOBS) -> dict[str, dict[str, str]]:
-    """Current SHA-256 of each declared output that is on disk, per figure job."""
+def figure_output_digests(
+    jobs: tuple[FigureJob, ...] = FIGURE_JOBS, *, certified_after: float | None = None
+) -> dict[str, dict[str, str | None]]:
+    """Current SHA-256 of each declared output on disk; None where this run produced none."""
     # The INPUT digest answers "were the figures drawn from today's data and code"; it cannot
     # answer "are the committed bytes still what that code draws". Recording the OUTPUT bytes at
     # certification time is what closes that: two figures drifted this session (a PNG whose bytes
     # moved against an unmodified producer, and one that does not reproduce from committed data)
     # and the input-only gate reported both green.
-    return {
-        job.name: {
-            out: _file_digest(job.output_dir(out) / out)
-            for out in job.outputs
-            if (job.output_dir(out) / out).exists()
-        }
-        for job in jobs
-    }
+    #
+    # `certified_after` closes the other half. A producer that SKIPS an optional output leaves
+    # the previous run's file on disk, and hashing it here re-certified a figure nobody drew
+    # under the NEW input digest — session_value.png, declared optional, passed the freshness
+    # gate that way. The last certification's timestamp separates the two cases without asking
+    # the producer to report anything: an output written BEFORE it was not produced by the run
+    # being certified now, and is recorded as None (unproduced) instead of blessed. Only
+    # OPTIONAL outputs are judged this way; a required output that is absent or stale is
+    # already `missing_figures`'/`drifted_figures`' business.
+    out: dict[str, dict[str, str | None]] = {}
+    for job in jobs:
+        recorded: dict[str, str | None] = {}
+        for name in job.outputs:
+            path = job.output_dir(name) / name
+            if not path.exists():
+                continue
+            skipped = (
+                name in job.optional_outputs
+                and certified_after is not None
+                and path.stat().st_mtime < certified_after
+            )
+            recorded[name] = None if skipped else _file_digest(path)
+        out[job.name] = recorded
+    return out
 
 
 def _manifest_entries(path: Path) -> dict[str, _ManifestEntry]:
@@ -1010,7 +1216,7 @@ def _manifest_entries(path: Path) -> dict[str, _ManifestEntry]:
             entries[str(name)] = _ManifestEntry(
                 inputs=str(value.get("inputs", "")),
                 outputs=(
-                    {str(k): str(v) for k, v in outputs.items()}
+                    {str(k): (None if v is None else str(v)) for k, v in outputs.items()}
                     if isinstance(outputs, dict)
                     else None
                 ),
@@ -1034,10 +1240,14 @@ def write_figure_manifest(
     # records what the calling stage produced. The old whole-file overwrite is what let a
     # crashed stage's digest survive as fresh.
     entries = _manifest_entries(path)
+    # Read BEFORE the write below replaces it: the previous certification's timestamp is what
+    # tells an optional output drawn by THIS run from one left over from an earlier one.
+    last_certified = path.stat().st_mtime if path.exists() else None
     for name in drop:
         entries.pop(name, None)
     certified = jobs if jobs is not None else FIGURE_JOBS
-    inputs, outputs = figure_digests(certified), figure_output_digests(certified)
+    inputs = figure_digests(certified)
+    outputs = figure_output_digests(certified, certified_after=last_certified)
     for name, digest in inputs.items():
         entries[name] = _ManifestEntry(inputs=digest, outputs=outputs[name])
     payload = {
@@ -1073,9 +1283,29 @@ def drifted_figures(
         if recorded is None or recorded.outputs is None:
             continue
         for out, digest in recorded.outputs.items():
+            if digest is None:
+                continue  # recorded as unproduced — `unproduced_figures` owns that state
             if current[job.name].get(out) != digest:
                 drifted.append(f"{job.name}:{out}")
     return drifted
+
+
+def unproduced_figures(
+    path: Path = FIGURE_MANIFEST, jobs: tuple[FigureJob, ...] = FIGURE_JOBS
+) -> list[str]:
+    """Committed outputs the certified run never drew — a figure nobody produced, on disk."""
+    # An optional output the producer skipped is fine when it leaves no file: that is what
+    # optional means. It is NOT fine when the file is still committed and still documented,
+    # because then a published figure carries a freshness certificate for a run that did not
+    # draw it. Reported per output for the same reason `uncertified_figures` is.
+    entries = _manifest_entries(path)
+    return [
+        f"{job.name}:{out}"
+        for job in jobs
+        if (entry := entries.get(job.name)) is not None and entry.outputs is not None
+        for out, digest in entry.outputs.items()
+        if digest is None and (job.output_dir(out) / out).exists()
+    ]
 
 
 def uncertified_figures(
@@ -1142,6 +1372,7 @@ def stage_figures(
 _StageFunc = Callable[[argparse.Namespace, "PipelineState"], None]
 _STAGE_FUNCS: Final[dict[str, _StageFunc]] = {
     COLLECT: stage_collect,
+    COLUMNS: stage_columns,
     STAMP: stage_stamp,
     EVALUATE: stage_evaluate,
     REPORT: stage_report,
@@ -1288,14 +1519,14 @@ def _capability_lines() -> tuple[str, int, str]:
 
 def _real_cost() -> float | None:
     """Total measured real_cost (USD) across results.csv — read-only, never written here."""
+    # REPLICATE POLICY: ALL REPS — a SPEND question. Every replicate was actually billed, so
+    # the headline "what did this corpus cost" must include them or it under-reports the bill.
     path = config.results_csv_path()
     if not path.exists():
         return None
-    total = 0.0
-    with path.open(newline="") as handle:
-        for row in csv.DictReader(handle):
-            total += float(row.get("real_cost") or row.get("cost") or 0.0)
-    return total
+    return sum(
+        float(row.get("real_cost") or row.get("cost") or 0.0) for row in integrity.all_rows(path)
+    )
 
 
 def _skill_label(status: str) -> str:
@@ -1400,6 +1631,7 @@ def check_figures(half: str | None = None) -> int:
     jobs = figure_jobs_for(half)
     stale, absent = stale_figures(jobs=jobs), missing_figures(jobs)
     drifted, uncertified = drifted_figures(jobs=jobs), uncertified_figures(jobs=jobs)
+    unproduced = unproduced_figures(jobs=jobs)
     for name in stale:
         print(f"STALE: {name} — its inputs changed since the committed PNGs were drawn")  # noqa: T201
     for name in absent:
@@ -1410,7 +1642,12 @@ def check_figures(half: str | None = None) -> int:
         )
     for name in uncertified:
         print(f"UNCERTIFIED: {name} — no certified bytes on record for this output")  # noqa: T201
-    if not (stale or absent or drifted or uncertified):
+    for name in unproduced:
+        print(  # noqa: T201
+            f"UNPRODUCED: {name} — the certified run skipped this optional output, but its "
+            f"file is still committed; redraw it or delete the figure and its docs section"
+        )
+    if not (stale or absent or drifted or uncertified or unproduced):
         pngs = sum(len(job.outputs) for job in jobs)
         scope = "" if half is None else f" ({half})"
         print(f"Figures current{scope}: {len(jobs)} jobs, {pngs} outputs.")  # noqa: T201

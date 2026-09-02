@@ -100,10 +100,37 @@ OKABE_ITO: Final[tuple[str, ...]] = (
 )
 
 
+def _darken(hex_colour: str, amount: float) -> str:
+    """Blend a hex colour toward black by ``amount`` in [0, 1]."""
+    # Darkening, never lightening: these hues sit on a white surface, and lightening
+    # #F0E442 (yellow) or #56B4E9 (sky blue) walks them into the background. Lightness
+    # is also the one channel every CVD type preserves, so a darkened variant stays
+    # distinguishable from its base under deuteranopia, protanopia and tritanopia alike.
+    raw = hex_colour.lstrip("#")
+    rgb = (int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16))
+    return "#" + "".join(f"{round(c * (1.0 - amount)):02x}" for c in rgb)
+
+
+# The hues assignable to a data series. Deliberately EXCLUDES OKABE_ITO's final
+# entry (#000000), which is reserved for annotation furniture -- axis rules, oracle
+# markers, reference lines. A modulo over the full tuple hands black to the 8th model
+# and silently collides the 9th with the 1st.
+SERIES_HUES: Final[tuple[str, ...]] = OKABE_ITO[:-1]
+
+# Extra shade rings, used only once the base hues are exhausted. Each ring darkens
+# every base hue by a fixed amount, so ring 1 model k is visibly the same family as
+# ring 0 model k while never being the same colour.
+_SHADE_RINGS: Final[tuple[float, ...]] = (0.0, 0.34, 0.58)
+
+MAX_DISTINCT_MODELS: Final[int] = len(SERIES_HUES) * len(_SHADE_RINGS)
+
+
 def model_color_map(models_in_order: Sequence[str]) -> dict[str, str]:
-    """Assign each model its fixed Okabe-Ito hue by POSITION in ``models_in_order``."""
+    """Assign each model a distinct colour by POSITION in ``models_in_order``."""
+    # Raises ValueError past `MAX_DISTINCT_MODELS`, rather than silently reusing a colour:
+    # two models sharing a hue is a misread figure, which is worse than a failed render.
     # Callers must compute this once from the full/stable model list (e.g.
-    # tier-then-price order) and pass the same map to every figure THAT USES IT —
+    # tier-then-price order) and pass the same map to every figure THAT USES IT --
     # never re-derive it from a filtered subset, or a model's color would repaint
     # when the subset changes (the recolor-on-filter anti-pattern).
     #
@@ -113,7 +140,25 @@ def model_color_map(models_in_order: Sequence[str]) -> dict[str, str]:
     # second variable is how a legend ends up contradicting its own bars. Reach for
     # this map where the model has no other channel (a stacked area band); prefer a
     # single hue per series where it does (a grouped or labelled bar).
-    return {m: OKABE_ITO[i % len(OKABE_ITO)] for i, m in enumerate(models_in_order)}
+    #
+    # Beyond the base hues we darken rather than cycle. Cycling returns a colour that
+    # is EXACTLY a previous model's, which reads as "these two series are the same
+    # thing" -- the one error a categorical palette must never make. A ladder spanning
+    # 0.3B to 284B routinely exceeds seven models, so this path is load-bearing, not
+    # theoretical.
+    if len(models_in_order) > MAX_DISTINCT_MODELS:
+        raise ValueError(
+            f"model_color_map: {len(models_in_order)} models exceeds the "
+            f"{MAX_DISTINCT_MODELS} visually distinct colours available "
+            f"({len(SERIES_HUES)} hues x {len(_SHADE_RINGS)} shades). Encode the "
+            "model with a second channel (marker, panel) instead of hue alone."
+        )
+    out: dict[str, str] = {}
+    for i, model in enumerate(models_in_order):
+        hue = SERIES_HUES[i % len(SERIES_HUES)]
+        ring = _SHADE_RINGS[i // len(SERIES_HUES)]
+        out[model] = _darken(hue, ring) if ring else hue
+    return out
 
 
 # ---------------------------------------------------------------------------

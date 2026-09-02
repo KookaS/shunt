@@ -89,7 +89,11 @@ def _key(row: dict[str, str], default_arms: dict[str, str] | None = None) -> str
     reasoning = row.get("reasoning") or integrity.DEFAULT_REASONING
     if reasoning == integrity.DEFAULT_REASONING and default_arms:
         reasoning = default_arms.get(model, integrity.DEFAULT_REASONING)
-    return f"{cid}:{model}:{reasoning}"
+    # The replicate index is PART of the key. A replicate is a second legitimate observation
+    # of the same cell, so without it every replicate would land in one group and
+    # `check_duplicate_keys` would report the file as fraudulent. Normalised through
+    # `integrity.rep_index`, so a legacy blank and a freshly written "0" are ONE key, not two.
+    return f"{cid}:{model}:{reasoning}:{integrity.rep_index(row)}"
 
 
 def _as_int(value: str) -> int | None:

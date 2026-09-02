@@ -5,13 +5,15 @@ Stale detection compares a cell's stored version_hash/model_version to current.
 
 from __future__ import annotations
 
+import csv
 import functools
 import hashlib
 import json
-from typing import Final
+from pathlib import Path
+from typing import Final, get_args
 
 from benchmark import config
-from shunt.models.config import ModelConfig, arm_api_params
+from shunt.models.config import ModelConfig, ServingMode, arm_api_params
 
 # Columns added to results.csv beyond the original 7 (pass/cost/tokens).
 # ``image_digest`` (canonical manifest sha256 of the SWE-bench image the cell was
@@ -42,6 +44,84 @@ CACHE_COLUMNS: Final[tuple[str, ...]] = (
     "sampling_hash",
     "prompt_hash",
 )
+# ---------------------------------------------------------------------------
+# Optional columns — appended AFTER ``prompt_hash`` (the same "appended LAST so legacy rows
+# still parse" discipline ``stop_reason`` already documents). They are deliberately NOT in
+# CACHE_COLUMNS: every member of that tuple is read as a cache/staleness field, and none of
+# these are.
+#
+# THREE DISTINCT CLASSES, and the migration only works if they stay apart.
+#
+# 1. KEY. ``rep`` is the replicate index of an observation of one (challenge, model, arm)
+#    cell. A legacy blank normalises to 0. That is a TAUTOLOGY — the row that exists is the
+#    first observation of its cell — not an imputation, which is why it is the only new
+#    column with a defined legacy value.
+#
+# 2. MEASUREMENT-OPTIONAL. Blank means MISSING, FOREVER, and must never acquire a default
+#    anywhere: reading a blank ``wall_clock_s`` as 0.0 publishes "this cell took no time" as
+#    an affirmative measured claim. Every aggregation over one of these goes through
+#    ``validate.require_measured``; a consumer with nothing to aggregate OMITS the column and
+#    publishes its ``n`` (the shape ``summary._context_columns`` already uses).
+#
+# 3. PROVENANCE-OPTIONAL (strings). Audit-only, exactly like ``computed_at`` — never a
+#    staleness key, never an input to a number.
+# ---------------------------------------------------------------------------
+REPLICATE_COLUMN: Final[str] = "rep"
+MEASUREMENT_OPTIONAL_COLUMNS: Final[tuple[str, ...]] = (
+    "wall_clock_s",
+    "ttft_s",
+    "latency_per_call_s",
+    "cached_in_tok",
+    "retry_count",
+)
+PROVENANCE_OPTIONAL_COLUMNS: Final[tuple[str, ...]] = (
+    "provider",
+    "serving_mode",  # hosted | local
+    "provider_latency_source",
+)
+
+# ---------------------------------------------------------------------------
+# Vocabularies for the two provenance strings that LABEL a timing. Both exist because the
+# label is what stops two incomparable populations from being silently pooled later:
+#
+#   * ``serving_mode`` — a batch-1 request to a local llama-server and a request to a batched
+#     hosted API are different physical experiments. A latency compared across them measures
+#     the serving stack, not the model. Every timing carries the mode it was taken under, and
+#     `runner.infer` refuses to write a timing it cannot label.
+#   * ``provider_latency_source`` — HOW the number was obtained. Client wall-clock includes
+#     the network round trip and any client-side overhead; a provider-reported field does not.
+#     They are different quantities under one column name, so the row says which it is.
+#
+# Only what this repo can actually emit is listed. A provider-reported source is a DELIBERATE
+# schema edit (add the value here, and the code that reads the provider's field), not
+# something a writer may invent — an unlisted value is a MALFORMED_OPTIONAL error.
+# ---------------------------------------------------------------------------
+LATENCY_SOURCE_CLIENT: Final[str] = "client_wall_clock"
+LATENCY_SOURCES: Final[tuple[str, ...]] = (LATENCY_SOURCE_CLIENT,)
+SERVING_MODES: Final[tuple[str, ...]] = get_args(ServingMode)
+
+OPTIONAL_COLUMNS: Final[tuple[str, ...]] = (
+    *MEASUREMENT_OPTIONAL_COLUMNS,
+    *PROVENANCE_OPTIONAL_COLUMNS,
+)
+
+# The columns whose drift STALES a cached cell — the single declaration of that set. It used
+# to exist only as scattered branches in ``run_matrix._is_stale``, so "is this column an
+# anchor?" had no answer a reader (or the coverage report) could consult. ``_is_stale``
+# dispatches over this tuple, and its predicate table is asserted to cover it exactly, so
+# adding an anchor here forces a deliberate decision about how it stales rather than being
+# silently ignored. Everything else on a row — ``computed_at``, ``cost_limit``,
+# ``scaffold_version``, ``stop_reason``, and every OPTIONAL_COLUMN — is audit-only.
+STALENESS_ANCHORS: Final[tuple[str, ...]] = (
+    "version_hash",
+    "model_version",
+    "arm_hash",
+    "image_digest",
+    "step_limit",
+    "sampling_hash",
+    "prompt_hash",
+)
+
 # Full results.csv header, original outcome columns first for backward-compat.
 # ``reasoning`` follows ``model`` and, together with them, forms the cache key:
 # (challenge_id, model, reasoning). Legacy rows carry the literal
@@ -57,10 +137,55 @@ RESULTS_FIELDS: Final[tuple[str, ...]] = (
     "out_tok",
     "calls",
     *CACHE_COLUMNS,
+    REPLICATE_COLUMN,
+    *OPTIONAL_COLUMNS,
 )
 # Default reasoning arm written for every cell until full arm support lands.
 DEFAULT_REASONING: Final[str] = "default"
 UNKNOWN_VERSION: Final[str] = "unknown"
+
+
+def rep_index(row: dict) -> int:
+    """The replicate index of a raw results row; a legacy blank normalises to 0."""
+    # The only defaulting permitted anywhere in the optional-column migration, and it is a
+    # tautology rather than an imputation: a row that exists IS an observation of its cell,
+    # and the first observation is index 0. Normalising HERE rather than at each call site is
+    # what stops a legacy blank and a freshly written "0" from keying as two different cells
+    # (which `authenticity.check_duplicate_keys` would report as file-level fraud).
+    raw = str(row.get(REPLICATE_COLUMN, "") or "").strip()
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# RAW readers. Both live here, together, ON PURPOSE: a consumer that reads results.csv
+# straight off disk bypasses `config.load_results`' replicate reducer, so it MUST state a
+# replicate policy, and offering the two policies side by side makes picking one a decision
+# instead of an accident.
+#
+# THE RULE: spend questions sum every rep; measurement questions take rep 0.
+#   * A replicate really was billed, so anything reconciling against a provider invoice
+#     (`cost_reconcile.load_rows`, `pipeline._real_cost`) reads `all_rows`.
+#   * Anything that reports a per-cell measurement — token mixes feeding the cache-aware
+#     Pareto column, the escalation cost join, the trajectory bootstrap — reads
+#     `rep_zero_rows`, because rep 0 is the canonical observation the scoring path sees and
+#     mixing replicates in would silently reweight cells by how many times they were re-run.
+# ---------------------------------------------------------------------------
+def all_rows(path: Path) -> list[dict[str, str]]:
+    """Every raw row in results.csv, replicates included (the SPEND view)."""
+    if not path.exists():
+        return []
+    with path.open(newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def rep_zero_rows(path: Path) -> list[dict[str, str]]:
+    """Only the canonical rep-0 row of each cell (the MEASUREMENT view)."""
+    return [row for row in all_rows(path) if rep_index(row) == 0]
 
 
 # Keys that are SELECTION metadata, not execution identity — excluded from the content

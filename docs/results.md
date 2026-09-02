@@ -242,7 +242,10 @@ See [the correction](#the-correction-the-saving-is-much-smaller-on-measured-cell
 
 ### Why we still do not call the gate passed
 
-Three reasons, which we would rather state than have you find.
+The gate's own emitted verdict is UNTESTED and its provisional read is a fail — that is
+[stated in full below](#the-gates-current-verdict-is-untested-and-its-provisional-read-is-not-a-pass).
+Three further reasons specific to the comparison on this page, which we would rather
+state than have you find.
 
 1. **The measured subset is opportunistic.** Those 87 tasks are what survived
    after removing every projected cell, not a pre-registered sample. Closing this
@@ -338,8 +341,10 @@ starts at the bottom and has the most rungs to walk. Live, the counter needs **t
 confirmed same-key failures inside a ten-decision window**, and it only ever steps at a
 session boundary, so a real climb is slower and every rung it wastes is a whole failed
 session of your time. That is exactly the cost a better first pick would avoid, and it is
-the part this corpus cannot see: nothing here measures wall-clock, sessions burned, or a
-climb paced by a real recurrence counter. We publish the dominance because it is what we
+the part this corpus cannot see: nothing here measures wall-clock, or a climb paced by a
+real recurrence counter. Sessions themselves *are* counted — `sessions_mean` and
+`sessions_p95` are published per strategy and the kill gate judges on both — but a session
+count is a count of handoffs, not a clock, and it says nothing about how long each one took. We publish the dominance because it is what we
 measured. We do not claim it settles the question in production, and we have not
 quantified the gap — this paragraph is an argument for why the offline number is the
 cheap start's best case, not a correction to it.
@@ -524,13 +529,83 @@ letting a reader discover the other one.
 
 It is strong evidence *toward* it, and it is not it.
 
-The project's kill gate is specific: beat fixed-frontier-with-caching, at equal
-quality, **on the owner's own coding-agent workflow.** Everything above is
+**What the gate actually asks.** It used to ask one thing of one baseline: beat
+fixed-frontier-with-caching on cost, at equal quality. It now asks, in order:
+
+1. **Quality is a gate, not a tradeable axis.** Paired non-inferiority within
+   **5 percentage points**. A router inferior beyond the margin fails whatever
+   else it wins, and a quality *win* buys nothing — the claim under test is "the
+   cheapest model that can do the job", so crediting quality would let any router
+   pass by escalating more.
+2. **Then tolerance-aware Pareto dominance over four operational axes** — the four
+   distinct things a user pays: cache-aware cost, mean sessions, p95 sessions, and
+   the coefficient of variation of per-task cost. All four are minimised. The
+   router must be no worse on any of them and strictly better on at least one, at
+   **one** relative tolerance of **5%** shared by all four. One tolerance rather
+   than a table per axis, because a per-axis knob is a per-axis place to move a
+   result after seeing it; and it cuts both ways, turning wins into ties as
+   readily as losses.
+3. **Against two baselines, independently.** `Always-Frontier`, the
+   fixed-frontier-with-caching arm — and `Price-Cascade`, a zero-ML constant
+   policy: cheapest first, escalate on a verified failure, the same handoff ladder,
+   and no routing decision anywhere in it. Clearing one and losing the other is a
+   failure, not an average.
+
+The second baseline is the one that matters. Published work on agentic-coding
+routers has run the decisive ablation — always sending every task to one cheap
+strong model, with the *same* handoff, matched a learned router at the same cost
+per solved task — and the old single-baseline gate could not express that
+falsifier at all. Adding it made the bar harder in exactly the direction the
+router was winning. The full criterion, and the positive control and null the gate
+itself had to clear before any of its verdicts could be quoted, are in
+[Benchmark design](benchmark-design.md#the-kill-gate-criterion-is-multi-dimensional-against-two-baselines-pre-registered).
+
+**And it is asked of the owner's own coding-agent workflow.** Everything above is
 SWE-bench Verified — a different corpus, a different task distribution, and a
 harness where the pass signal is the task's own test suite rather than a working
 repository's. A result on SWE-bench does not discharge a gate written about
 day-to-day agent traffic, and we are not going to let the two blur together
 because the numbers came out well.
+
+### The gate's current verdict is UNTESTED, and its provisional read is not a pass
+
+The gate has been run on the committed corpus. Its emitted verdict is **UNTESTED**:
+not "no result yet" and not "a weak result", but **not adjudicable**. The coverage
+precondition it inherits from the offline gate is tripped — the baseline arm's cells
+are 51.6% measured and the router arm's 83.7%, against a floor of 90% — and below
+that floor the gate refuses to emit PASS or FAIL at all, because a verdict drawn
+from a corpus that is more than a tenth filled in by assumption would be a statement
+about the imputation, not about the router.
+
+Underneath that refusal the gate still records what the arithmetic *says*, labelled
+`provisional`. On `kNN-semantic-cascade`, at the 5% tolerance:
+
+| Axis | vs `Always-Frontier` | vs `Price-Cascade` |
+|---|---|---|
+| quality (5pp non-inferiority) | passes, +1.63pp | passes, level |
+| cache-aware cost | **better**, $38.49 against $96.02 | worse, $38.49 against $27.11 |
+| mean sessions | **worse**, 2.076 against 1.000 | worse, 2.076 against 1.592 |
+| p95 sessions | **worse**, 7 against 1 | worse, 7 against 4 |
+| cost variability (CV) | **worse**, 1.894 against 0.558 | better, 1.894 against 2.533 |
+| dominance | no | no |
+
+<!-- generated-by: benchmark.routing.gate_dimensions -->
+
+Read plainly: the router clears the quality bar against both baselines and buys its
+money win with round trips. Against the frontier baseline it is cheaper and worse on
+every other axis a user pays. Against the constant policy — the one with no routing
+decision in it — it is worse on cost *and* sessions *and* the session tail, and its
+only win is a steadier bill. The provisional read is therefore a **FAIL against both
+baselines**, and the binding falsifier on today's evidence is not the expensive
+frontier model. It is the policy with no model-choosing in it.
+
+**That provisional read may not be quoted as a result, and we are not quoting it as
+one.** It is what the criterion computes on a corpus the criterion itself says it
+cannot adjudicate; publishing it is how we avoid the alternative, which is holding a
+number back until it improves. What resolves the UNTESTED is coverage — a designed,
+measured run that lifts both arms above the floor — not a better router. Until then
+the honest statement is the narrow one: **the gate is untested, and nothing here is
+evidence that it would pass.**
 
 Three further reasons the gate stays open, unchanged by this measurement:
 
@@ -895,9 +970,9 @@ outcome signal. See [`embedding_signal.png`](routing.md#fig-embedding-signal).
 Each figure is documented individually — how to read its axes, what to look for, and
 what it cannot support — beside the mechanism it illustrates:
 
-- **Routing** (15 figures): [routing.md → Figures](routing.md#figures)
+- **Routing** (18 figures): [routing.md → Figures](routing.md#figures)
 - **Escalation** (6 figures): [escalation.md → Figures](escalation.md#figures)
-- **The live router** (7 figures): [inference.md → Figures](inference.md#figures)
+- **The live router** (8 figures): [inference.md → Figures](inference.md#figures)
 
 The figures live under `docs/assets/figures/`, one subdirectory per half
 (`routing/`, `escalation/`, `inference/`), inside the published docs tree, which is
@@ -910,8 +985,11 @@ behind it, and a documented figure cannot go missing.
 
 ## Where this leaves the project
 
-Routing: the mechanism works, the model does not, and the gate is not passed —
-but the routing null is a null on a suite whose minimum detectable effect sits
+Routing: the mechanism works, the model does not, and the gate is **untested** —
+its coverage floor is tripped, so it is not adjudicable, and the provisional read
+underneath that refusal is a fail against both baselines rather than a near miss
+([the verdict](#the-gates-current-verdict-is-untested-and-its-provisional-read-is-not-a-pass)).
+The routing null is a null on a suite whose minimum detectable effect sits
 far above any plausible routing signal, so it bounds our resolution rather than
 the idea. What changed this cycle is that the mechanism no longer has to be
 quoted from a strategy the router refuses to run: the escalation ladder at

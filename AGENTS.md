@@ -28,6 +28,7 @@ so it stays correct as the codebase grows.
 | How the two models decide (routing · escalation) | `docs/routing.md` · `docs/escalation.md` |
 | Configure providers, models, the router, the embedder | `docs/configuration.md` + `src/shunt/config/{models,router,embedding}.yaml` |
 | Add a provider or model | `examples/providers/README.md` — registry is `src/shunt/config/models.yaml`, **models rank by price (row order not semantic)** |
+| Pick a routing strategy (`session_cascade` / `knn_semantic_cascade`) | `examples/strategies/README.md` — one runnable `router.yaml` per offered strategy |
 | Hook up a tool (Claude Code, opencode, aider, n8n, …) | `examples/integrations/README.md` + the shared handshake harness (`tests/integrations/`) |
 | The benchmark / eval harness | `docs/benchmark.md`, `docs/benchmark-design.md`, `benchmark/` |
 | Add a routing strategy | `benchmark/routing/strategies/_template.py` — copy it, don't invent structure |
@@ -65,7 +66,9 @@ reports pass/fail for code you aren't editing. Check with
 - **No `sys.path` mutation** (ruff `TID251` + `SH003`). Use absolute imports.
 - **No module-level mutable global state** (ruff `PLW0603` + `SH001`). Inject state
   or use a class. Lazy singletons need an explicit opt-out (below).
-- **Docstrings ≤ 3 lines** (`SH002`, advisory). One intent line; put detail in prose near the code.
+- **Docstrings ≤ 20 non-blank lines** (`SH002`, BLOCKING — only SH003 runs `--advisory`).
+  Lead with one intent line; a wall of text belongs in prose near the code. The ceiling is
+  `MAX_LINES` in `tools/lint/check_docstring_length.py`.
 - **No `print` in `src/`** (ruff `T20`) — use `logging`. Benchmark/CLI stdout is fine.
 - Naming (`N`), bug patterns (`B`), no commented-out code (`ERA001`), no `Any` in
   signatures (`ANN401`). Ruff auto-fixes imports/formatting — don't hand-fix those.

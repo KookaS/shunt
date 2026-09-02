@@ -32,6 +32,8 @@ SEED_PREFIX: Final[str] = "bench:"
 _UNKNOWN_MODEL: Final[str] = "(unknown)"
 
 _BAR_COLOR: Final[str] = "#1f77b4"
+# Rows the census bar list can fit before it needs to say what it left out.
+_MAX_MODEL_ROWS: Final[int] = 12
 _EDGE_UNLABELED: Final[str] = "#9e9e9e"
 
 
@@ -422,10 +424,15 @@ def _draw_projection(ax: Axes, data: _ProjectionData) -> None:
 
 def _draw_model_bars(ax: Axes, per_model: tuple[tuple[str, int], ...], *, ceiling: float) -> None:
     """Per-model labeled counts as axes-fraction bars below the stats block."""
-    rows = per_model[:12]
+    # The panel holds ~12 rows. Silently slicing to that count reads as "these are all
+    # the models", which is the one thing a census panel must not imply -- and a router
+    # ladder spanning tiny local models to frontier hosted ones exceeds 12 routinely.
+    # Truncation stays (the space is real); the omission is stated instead of hidden.
+    rows = per_model[:_MAX_MODEL_ROWS]
+    hidden = len(per_model) - len(rows)
     max_count = max(count for _m, count in rows)
     floor = 0.04
-    row_h = min(0.07, (ceiling - floor) / len(rows))
+    row_h = min(0.07, (ceiling - floor) / (len(rows) + (1 if hidden else 0)))
     for i, (model, count) in enumerate(rows):
         y = ceiling - (i + 1) * row_h
         frac = count / max_count
@@ -447,6 +454,18 @@ def _draw_model_bars(ax: Axes, per_model: tuple[tuple[str, int], ...], *, ceilin
             fontsize=7.5,
             family="monospace",
             va="center",
+        )
+    if hidden:
+        ax.text(
+            0.05,
+            ceiling - (len(rows) + 1) * row_h + row_h * 0.3,
+            f"+{hidden} more model{'s' if hidden > 1 else ''} not shown"
+            f" (showing top {len(rows)} by labeled count)",
+            transform=ax.transAxes,
+            fontsize=7.5,
+            family="monospace",
+            va="center",
+            color=plot_frame.CAVEAT_RED,
         )
 
 

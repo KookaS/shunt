@@ -93,7 +93,7 @@ make benchmark ARGS="--live --max-cost 2"   # collect + process everything
 make benchmark ARGS="--from report"         # recompute artifacts from existing data (no spend)
 ```
 
-It composes five existing stages in order and prints one consolidated summary:
+It composes six existing stages in order and prints one consolidated summary:
 
 1. **collect** — `run_matrix` runs the outcome matrix (honours `--strategy`, `--live`,
    `--max-cost`, `--max-cost-overshoot`, `--workers`, `--timeout`, `--step-limit`,
@@ -116,11 +116,43 @@ It composes five existing stages in order and prints one consolidated summary:
    cell. A `--live` launch first runs a **preflight health check** — one minimal real
    completion against the cheapest enabled model — and refuses to start (exit 2) if the key
    is invalid, out of balance, or the provider is down, before any Docker container is
-   created; a transient blip does not refuse. `--check-images` (off by default, NOT implied
+   created; a transient blip does not refuse. That probe covers exactly **one** model — the
+   cheapest enabled one — and so does the serving check below; the other enabled models are not
+   probed. When *that* model's `base_url` is served locally, the preflight additionally asserts
+   its **resolved serving configuration**: the inference server's own command line is read and
+   recorded, matched to the endpoint by the port the process itself binds and identified by its
+   executable name (argv[0]'s basename — a wrapper script, a `grep`, or a path that merely
+   contains `llama-server` is not the server and is never read as one), and the run is
+   refused unless context shift is provably disabled and
+   `n_ctx >= live.serving.prompt_budget + max_tokens`. Local means loopback, a private-range or
+   link-local address, a single-label or `.local`/`.internal`/`.lan` host name, or a unix
+   socket; an endpoint whose locality cannot be decided (carrier-grade NAT, a URL with no
+   scheme) refuses rather than being silently skipped. A local endpoint that **no** visible
+   server process binds is refused as well — notably ollama's topology, where it listens on
+   11434 and spawns `llama-server` on a random high port, so its child's flags cannot be
+   attributed to the endpoint; point the benchmark at the `llama-server` port instead.
+   Both operands come from `benchmark.yaml` `live.serving`; the generation cap prefers whatever
+   the request will actually carry (a reasoning arm's `max_tokens`, then the scaffold overlay's)
+   and falls back to the declared `live.serving.max_tokens`, so the check is satisfiable without
+   editing the model registry, and a missing operand refuses by naming the key to add.
+   Head-eviction during generation deletes the system prompt and tool schema and still returns
+   HTTP 200, so no status-based retry can see it — this check exists because that failure
+   already destroyed one measurement arm here, mutilating 47% of a run's generated tokens
+   behind clean `200`s ([the corruption class, and what it
+   cost](benchmark-data.md#known-defect-a-local-model-can-be-silently-mutilated-behind-a-200-ok)).
+   Hosted providers are unaffected — the check
+   is a deliberate no-op there. The whole check lives in `benchmark/runner/serving_guard.py`,
+   and it has three limits worth knowing: it probes one model per run, it runs only at
+   pre-flight and never re-reads a server that restarts mid-run, and it reads the process table
+   of the machine it runs on — so from inside a container a *host*-side server is invisible and
+   the guard refuses loudly rather than passing. `--check-images` (off by default, NOT implied
    by `--live`) resolves image digests to detect environment drift; it makes a registry query
    per image (~sample_size tasks to Docker Hub), which rate-limits (429) on the swebench
    namespace and can defeat GHCR pre-staging.
-2. **stamp** — `offline_replay` derives real per-step outcomes for the *newly collected*
+2. **columns** — `column_coverage` rewrites the optional-column coverage report from
+   `results.csv`. Read-only, seconds, no spend; it never fails on coverage (a blank optional
+   column is a fact about the corpus, not a defect) — only an unreadable corpus is an error.
+3. **stamp** — `offline_replay` derives real per-step outcomes for the *newly collected*
    trajectories, timeout-bounded per trajectory by `--replay-timeout` (default 3600s) and, inside
    that, per container command (30 min): a step diff can introduce an infinite loop, so an
    expired command is killed, its container reaped, and the step recorded as infra — never a red.
@@ -162,10 +194,10 @@ It composes five existing stages in order and prints one consolidated summary:
     adjudicators into a file that still passes its own hash check. Backfill the counts first
     with `record_snapshot_provenance` on the collection host. Skipped entirely on a simulated
     (non-`--live`) run — there are no new live trajectories.
-3. **evaluate** — `escalation.run_eval` scores the escalation detector (metrics + plots).
-4. **report** — `routing.report` regenerates the routing plots plus
+4. **evaluate** — `escalation.run_eval` scores the escalation detector (metrics + plots).
+5. **report** — `routing.report` regenerates the routing plots plus
    `capability_evidence.json`, `coverage_table.csv`, and `strategy_summary.csv`.
-5. **figures** — the standalone plots under `benchmark/routing/scripts/` that
+6. **figures** — the standalone plots under `benchmark/routing/scripts/` that
    `report` does not draw. They are heavy (several load the real fastembed
    embedder), so they run last and only when their inputs changed.
    `--check-figures` proves the committed PNGs are not stale without regenerating
@@ -177,7 +209,7 @@ check, the band count, and the total real cost, followed by a per-stage ran/fail
 ledger. A stage that fails never corrupts collected data or aborts the rest — the
 ledger records which stages ran.
 
-Flags: `--no-report` runs only collect; `--from {collect,stamp,evaluate,report,figures}`
+Flags: `--no-report` runs only collect; `--from {collect,columns,stamp,evaluate,report,figures}`
 starts at a later stage (so a failed report never forces re-collection); `--replay-timeout`
 bounds each stamp and `--stamp-workers` sets how many replay in parallel; `--restamp`
 re-replays already-stamped trajectories (the full-corpus rebuild — without it the stamp stage
@@ -259,6 +291,23 @@ excluded from completeness crossovers and quality denominators rather than count
 fail (see the "Censored data" section in the design notes). `timeout_flag` is kept for
 back-compat and now means exactly `stop_reason ∈ {wall_limit, abandoned}`; rows written before
 the column derive a `stop_reason` on read.
+
+Rows also carry nine optional columns — the replicate key `rep`, five measurement columns
+(`wall_clock_s`, `ttft_s`, `latency_per_call_s`, `cached_in_tok`, `retry_count`) and three
+provenance strings (`provider`, `serving_mode`, `provider_latency_source`). A blank `rep`
+means 0; every other blank means **MISSING, never zero**, and aggregating one raises rather
+than defaulting.
+
+**None of the optional measurement or provenance columns carries a value today.** The
+schema was widened backward-compatibly so `wall_clock_s`, `latency_per_call_s`, `provider`,
+`serving_mode` and `provider_latency_source` are *collectable* by a live run — but no run
+has yet written one, so on the committed corpus they are blank on every row, and every
+consumer of them raises rather than defaulting. `ttft_s` is a step further out: the
+scaffold does not stream, so nothing can fill it as things stand. Treat the five as a
+plumbed-in capability, not as data. `uv run --extra benchmark python -m benchmark.column_coverage` reports which
+columns are populated and on which cells — run it before assuming any of them is there. Replicate collection is off by default (see
+`replicates:` in `benchmark/benchmark.yaml`); when on, `rep 0` stays canonical and no metric
+sees a replicate. Details: the design notes' "Optional columns and replicates".
 
 ### Result integrity
 
@@ -364,8 +413,8 @@ the per-half `figures.json`. The figure targets:
 | `make escalation-eval` | redraws the **escalation** half |
 | `make routing-report` | redraws the **routing** half |
 | `make benchmark-figures` | runs the pipeline's `figures` stage (`--from figures`) — redraws the standalone routing figures **and the inference half**, and is the only target that **re-records** the freshness manifest |
-| `make inference-figures` | redraws the seven **inference** PNGs only (`OUT=/tmp/x` for a scratch copy). It renders but does **not** re-record the manifest — certify with `make benchmark-figures` |
-| `make demo-figures` | redraws the seven **demo** PNGs (synthetic, watermarked, evidence of nothing) only (`OUT=/tmp/x` for a scratch copy). It renders but does **not** re-record the manifest — certify with `make benchmark-figures` |
+| `make inference-figures` | redraws the eight **inference** PNGs only (`OUT=/tmp/x` for a scratch copy). It renders but does **not** re-record the manifest — certify with `make benchmark-figures` |
+| `make demo-figures` | redraws the eight **demo** PNGs (synthetic, watermarked, evidence of nothing) only (`OUT=/tmp/x` for a scratch copy). It renders but does **not** re-record the manifest — certify with `make benchmark-figures` |
 | `make check-figures` | `benchmark.pipeline --check-figures` — proves every committed figure is current without regenerating anything |
 | `make check-inference-figures` | the same gate narrowed to one half (`--check-figures --half inference`) |
 | `make check-demo-figures` | the same gate narrowed to one half (`--check-figures --half demo`) |
@@ -373,7 +422,12 @@ the per-half `figures.json`. The figure targets:
 `--check-figures` accepts `--half {demo,escalation,inference,routing}`, so one half's staleness
 never decides another half's exit code; `--half` is a check-only flag and is a hard `parser.error`
 anywhere else. `make check-figures` is the gate to run after a code change before trusting an
-old PNG.
+old PNG. The same gate also runs at **commit time** as the `SH017` pre-commit hook (whole-tree,
+`always_run`), so a code or data edit that re-stales a committed figure — without the manifest
+being re-recorded for it — is refused on the commit that would ship it, not surfaced later as a
+red `benchmark-integrity` job. Fix a red `SH017` by re-running the certifying pipeline stage(s),
+e.g. `uv run --extra benchmark python -m benchmark.pipeline --from evaluate`; never by hand-editing
+`benchmark/routing/figure_inputs.json`.
 
 Re-replaying is what `--restamp` does, and you only need it when the *instrument* changes —
 the classifier, the grader, the admissibility adjudicator. Old stamps came from a different
@@ -554,8 +608,10 @@ footer that was, on some plots, taller than the plot, and on the sweep table it 
 with the data.
 
 The full record is not prose someone has to remember to keep. `src/shunt/inspect/plot_frame.py`
-is the one legal figure writer in the repo — a lint gate (SH007) blocks anything that tries
-to skip it, and `benchmark/plot_frame.py` is a re-export shim over the same implementation,
+is the one legal figure writer in the repo — a lint gate (SH007) blocks the spellings that
+try to skip it and a runtime guard (`benchmark/plot_guard.py`, active under the test suite and
+the figure targets) refuses the write itself from any other caller, whatever it is spelled
+like. `benchmark/plot_frame.py` is a re-export shim over the same implementation,
 so the benchmark figures and the ephemeral `shunt inspect` diagnostics share one contract
 rather than a copy that drifts. The frame records each figure's reading, goal, terms, notes,
 limitations, sample counts and input digest into a committed `figures.json` beside the code
@@ -563,8 +619,8 @@ that writes it — `benchmark/<half>/figures.json` for the three benchmark halve
 `src/shunt/inspect/inference/figures.json` for the inference half, whose producer ships inside
 the package (the diagnostics pass no `Provenance` and so write no row). A second
 gate (SH009) then holds that manifest in a bijection with the docs: every figure has a
-section, every section has a figure, and the three on-canvas strings must match in both
-places. So a retired figure cannot leave a stale explanation behind it, which is the way
+section, every section has a figure, and every rendered string the manifest carries — title,
+subtitle, caveat, notes and limitations — must match byte-for-byte in both places. So a retired figure cannot leave a stale explanation behind it, which is the way
 this kind of documentation normally rots.
 
 Anything that depends on the data (how many tasks were dropped as coverage gaps, whether
@@ -836,11 +892,30 @@ run, or the interval is mis-sized.
   LLM-judged tasks. This rules out judge noise but limits task types.
 - **Pricing** is taken from the Requesty router listing (2026-07-15); each model
   records its rate, cache-read/write rate, and source in a `price_note` in
-  the model registry.
+  the model registry. That registry rate means *the price in force when the run
+  happened*, and it never changes retroactively.
+- **Historical cost vs repriced cost.** Provider prices move, so a cell measured in
+  July and one measured in August are not automatically comparable. Two costs are
+  therefore recorded on every row, forever, and they are used for different things.
+  `real_cost` — what the provider actually billed, cache included — is the immutable
+  audit record, and it is what the **cache-aware cost axis and the kill gate use**. A
+  price refresh can never flip a recorded verdict. The **naive cost axis** on
+  `live_gap.png` is instead **repriced** from a dated sheet of today's cheapest listed
+  price across OpenRouter, Requesty and HuggingFace Inference Providers, so it answers
+  what the same work would cost a user shopping around now. That figure's subtitle
+  always says which of the two drew it, and its manifest row records the sheet's date
+  and digest. A model no channel prices has no repriced cost — it is reported missing,
+  never estimated. On the corpus published here the figure **falls back to recorded
+  cost** and says so, because 406 of 1104 cells carry no token counts and repricing
+  them at $0 would be a fabrication. Full treatment, including the drift we are *not* fixing (latency,
+  and model identity under a fixed name): [Benchmark design](benchmark-design.md).
 - **Benchmark ≠ production**: the benchmark can reject bad routing strategies but
-  can't prove a good one works in production. The kill gate — beat a fixed-frontier
-  baseline (the most expensive enabled model, currently kimi-k3) with caching at
-  equal quality — must be measured on a real workflow, not in the benchmark.
+  can't prove a good one works in production. The kill gate — non-inferior quality,
+  then no worse on cost, sessions, session tail or bill variance and strictly better on
+  one of them, against **both** a fixed-frontier-with-caching baseline (the most
+  expensive enabled model, currently kimi-k3) **and** a zero-ML cheapest-first policy
+  running the same handoff — must be measured on a real workflow, not in the
+  benchmark. See [the criterion](benchmark-design.md#the-kill-gate-criterion-is-multi-dimensional-against-two-baselines-pre-registered).
 - **Small measured sample, single run**: the suite is 500 tasks but live results
   cover only a nested partial subset so far (all Python), with one stochastic run
   per cell (pass@1), and only ~15–20% of tasks carry routing headroom. See the

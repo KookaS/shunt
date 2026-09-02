@@ -8,6 +8,11 @@ build/
 dist/
 *.egg-info/
 .eggs/
+# Loose wheels/sdists anywhere in the tree. `dist/` only covers `python -m build`; a
+# `pip wheel` or `pip download` run from the repo root drops its whole dependency closure
+# beside pyproject.toml, where a `git add -A` would commit binaries into the public repo.
+*.whl
+*.tar.gz
 
 # Environments
 .venv/

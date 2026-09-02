@@ -141,12 +141,14 @@ def test_stages_dispatch_in_order_when_live(
     )
     result = pipeline.run_pipeline(_args(live=True))
     mods = stub.modules
-    assert mods.index(pipeline.RUN_MATRIX) < mods.index(pipeline.OFFLINE_REPLAY)
+    assert mods.index(pipeline.RUN_MATRIX) < mods.index(pipeline.COLUMN_COVERAGE)
+    assert mods.index(pipeline.COLUMN_COVERAGE) < mods.index(pipeline.OFFLINE_REPLAY)
     assert mods.index(pipeline.OFFLINE_REPLAY) < mods.index(pipeline.ESCALATION_EVAL)
     assert mods.index(pipeline.ESCALATION_EVAL) < mods.index(pipeline.ROUTING_REPORT)
     assert mods.index(pipeline.ROUTING_REPORT) < mods.index(pipeline.STANDALONE_FIGURES[0].module)
     assert result.outcomes == {
         pipeline.COLLECT: "ran",
+        pipeline.COLUMNS: "ran",
         pipeline.STAMP: "ran",
         pipeline.EVALUATE: "ran",
         pipeline.REPORT: "ran",
@@ -164,6 +166,7 @@ def test_no_report_runs_only_collect(stub: _Recorder, capsys: pytest.CaptureFixt
 def test_from_report_skips_collect_stamp_evaluate(stub: _Recorder) -> None:
     result = pipeline.run_pipeline(_args(start_from=pipeline.REPORT))
     assert result.outcomes[pipeline.COLLECT] == "skipped"
+    assert result.outcomes[pipeline.COLUMNS] == "skipped"
     assert result.outcomes[pipeline.STAMP] == "skipped"
     assert result.outcomes[pipeline.EVALUATE] == "skipped"
     assert result.outcomes[pipeline.REPORT] == "ran"
@@ -854,6 +857,133 @@ class TestFigureAnalysisClosure:
             )
 
 
+class TestFigureImportClosure:
+    """A job's digest must cover what its producer actually imports, not what a tuple says."""
+
+    # Measured before this landed: the escalation `run_eval` job reached 35 first-party modules
+    # its `inputs` never named — `cost_join` (which prices every trajectory), `cache_cost`,
+    # `routing.integrity`, `routing.strategies` — and 8 of them changed in one session while its
+    # digest sat still and two of its PNGs moved.
+
+    def test_every_first_party_import_of_every_producer_is_fingerprinted(self) -> None:
+        for job in pipeline.FIGURE_JOBS:
+            fingerprinted = pipeline._declared_files(pipeline._job_digest_paths(job))
+            reached = pipeline._import_closure(
+                (pipeline._first_party_file(job.module) or Path("/nonexistent"),)
+            )
+            missing = sorted(str(p) for p in reached if p not in fingerprinted)
+            assert not missing, f"{job.name} imports files its digest omits: {missing}"
+
+    def test_the_escalation_job_now_fingerprints_its_pricing_closure(self) -> None:
+        """The named regression: these three are reachable ONLY through the closure."""
+        job = next(j for j in pipeline.FIGURE_JOBS if j.name == "run_eval")
+        names = {p.name for p in pipeline._job_digest_paths(job)}
+        assert {"cost_join.py", "cache_cost.py", "integrity.py"} <= names
+        # …and the two data files its cost figures are priced from, which no import can reach.
+        assert {"results.csv", "models.yaml"} <= names
+
+    def test_the_closure_stops_at_the_repo_boundary(self) -> None:
+        """Third-party and stdlib are pinned by the lockfile, not by this manifest."""
+        assert pipeline._first_party_file("json") is None
+        assert pipeline._first_party_file("matplotlib.pyplot") is None
+        assert pipeline._first_party_file("benchmark.routing.cache_cost") is not None
+        assert pipeline._first_party_file("shunt.router.policy") is not None
+        for job in pipeline.FIGURE_JOBS:
+            for path in pipeline._job_digest_paths(job):
+                assert pipeline._REPO_ROOT in path.parents, path
+
+    def test_the_closure_does_not_drag_inference_into_the_measurement_halves(self) -> None:
+        """A widened closure must not re-stale all 22 benchmark PNGs on every inference edit."""
+        pkg = pipeline._REPO_ROOT / "src" / "shunt" / "inspect" / "inference"
+        for job in pipeline.FIGURE_JOBS:
+            if job.half in ("inference", "demo"):
+                continue
+            assert not any(pkg in p.parents for p in pipeline._job_digest_paths(job)), job.name
+
+    def test_an_edit_to_a_closure_only_module_moves_the_digest(self) -> None:
+        """The positive control: without it every assertion above could hold vacuously.
+
+        The probe file lives INSIDE the repo because `_digest` names each member relative to
+        the root — a machine-independent digest is the whole reason it does that.
+        """
+        job = next(j for j in pipeline.FIGURE_JOBS if j.name == "run_eval")
+        reached = pipeline._job_digest_paths(job)
+        declared = pipeline._declared_files((*pipeline._data_inputs(job.half), *job.inputs))
+        closure_only = next(p for p in reached if p not in declared and p.suffix == ".py")
+        probe = closure_only.with_name(f"_digest_probe_{os.getpid()}.py")
+        probed = tuple(probe if p == closure_only else p for p in reached)
+        try:
+            probe.write_bytes(closure_only.read_bytes())
+            before = pipeline._digest(probed)
+            probe.write_bytes(closure_only.read_bytes() + b"\n# one edit\n")
+            assert pipeline._digest(probed) != before
+        finally:
+            probe.unlink(missing_ok=True)
+
+
+class TestOptionalOutputCertification:
+    """A skipped optional figure must be distinguishable from a current one."""
+
+    # `figure_output_digests` used to hash whatever was on disk, so a producer that SKIPPED an
+    # optional output had the previous run's file re-certified under the NEW input digest:
+    # session_value.png, declared optional, passed the freshness gate without being drawn.
+
+    def _job(self, tmp_path: Path) -> pipeline.FigureJob:
+        return dataclasses.replace(
+            next(j for j in pipeline.FIGURE_JOBS if j.name == "run_eval"),
+            outputs=("required.png", "optional.png"),
+            optional_outputs=("optional.png",),
+            figures_dir=tmp_path,
+            reports_dir=tmp_path,
+        )
+
+    def test_a_skipped_optional_output_is_recorded_as_unproduced(self, tmp_path: Path) -> None:
+        job = self._job(tmp_path)
+        (tmp_path / "optional.png").write_bytes(b"stale")
+        os.utime(tmp_path / "optional.png", (1000, 1000))
+        (tmp_path / "required.png").write_bytes(b"fresh")
+        digests = pipeline.figure_output_digests((job,), certified_after=2000.0)
+        assert digests[job.name]["optional.png"] is None
+        assert digests[job.name]["required.png"] is not None
+
+    def test_an_output_drawn_by_this_run_is_certified(self, tmp_path: Path) -> None:
+        """The negative control: a genuinely redrawn optional figure must still certify."""
+        job = self._job(tmp_path)
+        for name in ("required.png", "optional.png"):
+            (tmp_path / name).write_bytes(b"fresh")
+        digests = pipeline.figure_output_digests((job,), certified_after=1000.0)
+        assert digests[job.name]["optional.png"] is not None
+
+    def test_the_gate_reports_a_committed_figure_nobody_drew(self, tmp_path: Path) -> None:
+        job = self._job(tmp_path)
+        for name in ("required.png", "optional.png"):
+            (tmp_path / name).write_bytes(b"x")
+        manifest = tmp_path / "figure_inputs.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    job.name: {
+                        "inputs": pipeline.figure_digests((job,))[job.name],
+                        "outputs": {"required.png": "abc", "optional.png": None},
+                    }
+                }
+            )
+        )
+        assert pipeline.unproduced_figures(manifest, (job,)) == [f"{job.name}:optional.png"]
+        # …and it is NOT double-reported as drifted, which would hide what actually happened.
+        assert f"{job.name}:optional.png" not in pipeline.drifted_figures(manifest, (job,))
+
+    def test_an_unproduced_output_that_left_no_file_is_silent(self, tmp_path: Path) -> None:
+        """That is what optional MEANS — the finding is the committed file, not the skip."""
+        job = self._job(tmp_path)
+        (tmp_path / "required.png").write_bytes(b"x")
+        manifest = tmp_path / "figure_inputs.json"
+        manifest.write_text(
+            json.dumps({job.name: {"inputs": "d", "outputs": {"optional.png": None}}})
+        )
+        assert pipeline.unproduced_figures(manifest, (job,)) == []
+
+
 class TestFigureHalfFilter:
     """`--half` exists so one half's freshness can be reported without another half's state
     deciding the exit code — `make check-inference-figures` asks about the inference figures,
@@ -924,9 +1054,9 @@ class TestInferenceFigureJob:
                 continue
             assert not any(pkg == p or pkg in p.parents for p in job.inputs), job.name
 
-    def test_its_outputs_are_the_seven_committed_pngs(self) -> None:
+    def test_its_outputs_are_the_eight_committed_pngs(self) -> None:
         assert self._job.outputs == tuple(sorted(self._job.outputs))
-        assert len(self._job.outputs) == 7
+        assert len(self._job.outputs) == 8
         assert all(o.startswith("inference_") and o.endswith(".png") for o in self._job.outputs)
         assert self._job.figures_dir.name == "inference"
         assert self._job.stage == pipeline.FIGURES

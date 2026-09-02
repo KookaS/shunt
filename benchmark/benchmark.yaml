@@ -118,6 +118,22 @@ arm_sampling:
   # Their default arm is already the high-reasoning one; other models still explore.
   default_only_models: [zai-glm-5.2, kimi-k3]
 
+# Per-model REPLICATE depth: how many independent observations of each of a model's cells to
+# collect. Rep 0 is the canonical observation the scoring path reads; reps 1..R-1 are audit
+# data (see `config.reduce_reps`), so raising R never moves a published number — it only
+# measures the run-to-run variance behind one.
+#
+# `enabled: false` IS A SPEND SAFETY, not a stylistic default. R>1 multiplies live collection
+# cost linearly, and the owner's total new-measurement budget is under $5, so depth is opt-in
+# per run. Consumed at exactly two sites — `run_matrix.classify_cells` (which emits the extra
+# cells) and the column-coverage report. The SCORING path must never read it.
+replicates:
+  enabled: false
+  default_r: 1
+  by_model:
+    deepseek-v4-flash: 3
+    kimi-k3: 1
+
 # Adaptive frontier collection (see docs/benchmark.md).
 # This is the DEFAULT runner strategy: `python -m benchmark.runner.run_matrix`
 # (--strategy cost_optimal) runs the two-phase protocol — observe cheap+mid on all
@@ -181,6 +197,20 @@ live:
   # LimitsExceeded for BOTH limits and the censoring layer maps it to stop_reason=step_limit, so
   # raising the step cap alone converts step censors into cost censors under a label that lies.
   cost_limit: 4.0
+  # LOCAL-endpoint serving contract (benchmark/runner/serving_guard.py). Only read when a model's
+  # base_url resolves to this host; hosted providers ignore it. The largest prompt one cell may
+  # present to the server: the pre-flight refuses unless the server serves
+  # n_ctx >= prompt_budget + max_tokens, so a turn can never be asked to generate past the end of
+  # its own window. Declared rather than defaulted because the number IS the safety margin — an
+  # undeclared one silently became 16384-6000 on the run that motivated this key, putting the
+  # hazard boundary at a 10384-token prompt the scaffold crossed by turn ~10 of every cell.
+  serving:
+    prompt_budget: 26000
+    # Fallback generation cap for the same arithmetic, used ONLY when neither the model
+    # registry's reasoning arm nor the mini-swe-agent overlay sends an explicit `max_tokens`
+    # (which is the case today for every registered model). Without it the guard could never be
+    # satisfied by any local endpoint. 6000 is the cap the motivating run actually used.
+    max_tokens: 6000
 
 paths:
   challenges: routing/data/challenges.json        # curated input, relative to config.py dir

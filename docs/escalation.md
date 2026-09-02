@@ -1024,17 +1024,19 @@ a reader could be actively misled — one red line. The rest is here.
 
 **What to look for.** In C the within-strata bars must stay well above chance: if the pooled edge disappears once ranking happens inside a model or inside a challenge, the score is reading which model or which task the run belongs to. In D read the two base rates against each other — an admitted population failing far more often than the corpus is a different population, and a null measured on it is a coverage gap, not a falsification.
 
-**Terms.** *stamped* — the offline container replay wrote per-step verified outcomes for this run. *canonical cell* — the eval-only edit-gated counter at the shipped knobs (panels B, C). *within-model AUROC* — ranked only against runs of the same model, pooled by pair count. *admission margin* — runs that reached the depth but leave too few steps unread after it.
+**Terms.** *stamped* — the offline container replay wrote per-step verified outcomes for this run *canonical cell* — the eval-only edit-gated counter at the shipped knobs (panels B, C) *within-model AUROC* — ranked only against runs of the same model, pooled by pair count *admission margin* — runs that reached the depth but leave too few steps unread after it
 
-**Notes.** Stamping coverage tracks capture DATE, and capture date correlates with model, so model and coverage are confounded on this corpus and cannot be separated from it.
+**Notes.** Panel C's y axis is anchored at chance (0.5), not at zero, and its label says so: a bar's HEIGHT is the score's skill above chance, and a bar at chance has none. The half of the AUROC range below 0.5 is not a quantity the score can report, so charting it would make every bar look alike; anchoring anywhere between 0 and 0.5 — the old 0.4 — would instead inflate the drop the panel exists to size. A below-chance value drops the axis back to zero and relabels it.
+Stamping coverage tracks capture DATE, and capture date correlates with model, so model and coverage are confounded on this corpus and cannot be separated from it.
 A single-class stratum contributes no comparable pairs and is DROPPED from the within-strata AUROCs rather than scored at chance.
 AUROC pooled 0.778 · within-model 0.746 · within-challenge 0.709
 723 scored trajectories, status=OK_OFFLINE_ONLY
 OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
 canonical cell: OFFLINE-ONLY UPPER BOUND — the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
-**Limits.** Panel D's population is length-selected by construction: the anti-leak margin excludes every short run, and short runs resolve more often, so the admitted base rate is higher than the corpus's by design rather than by accident. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
 
-<!-- n: models=6, stamped=723, trajectories=822 -->
+**Limits.** Panel D's population is length-selected by construction: the anti-leak margin excludes every short run, and short runs resolve more often, so the admitted base rate is higher than the corpus's by design rather than by accident. 99/822 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
+
+<!-- n: models=6, stamped=723, trajectories=822 --><!-- generated-by: benchmark.escalation.run_eval -->
 
 ### What firing costs: the eval-only edit-gated trigger pre-empts more than it interrupts {#fig-escalation-budget}
 
@@ -1054,13 +1056,13 @@ median fire position 0.442 of the run on failed runs, 0.419 on resolved ones
 723 scored trajectories, status=OK_OFFLINE_ONLY
 OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
 canonical cell: OFFLINE-ONLY UPPER BOUND — the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
-**Limits.** COUNTERFACTUAL BY ARITHMETIC, not by measurement: no logged trajectory escalated, so 'pre-empted' is what firing would have cut short assuming the run would otherwise have continued unchanged. See the scope strip. The ledger's ratio is driven mostly by ARM SIZE, not by timing: most of it is simply that more of the fired runs failed. Read it beside the fire-position panel, which is where a timing claim would have to come from — and where the two curves nearly coincide. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
+**Limits.** COUNTERFACTUAL BY ARITHMETIC, not by measurement: no logged trajectory escalated, so 'pre-empted' is what firing would have cut short assuming the run would otherwise have continued unchanged. See the scope strip. The ledger's ratio is driven mostly by ARM SIZE, not by timing: most of it is simply that more of the fired runs failed. Read it beside the fire-position panel, which is where a timing claim would have to come from — and where the two curves nearly coincide. 99/822 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
 
 <!-- n: fired_positioned=431 -->
 
-### Counting the reproduction phase is what decides the answer: AUROC 0.601 vs 0.781 {#fig-escalation-decision}
+### Counting the reproduction phase is what decides the answer: AUROC 0.600 vs 0.778 {#fig-escalation-decision}
 
-![Counting the reproduction phase is what decides the answer: AUROC 0.601 vs 0.781](assets/figures/escalation/escalation_decision.png)
+![Counting the reproduction phase is what decides the answer: AUROC 0.600 vs 0.778](assets/figures/escalation/escalation_decision.png)
 
 *base rate 0.418 · AUROC as-shipped 0.600 · edit-gated 0.778 · 723/822 runs scored*
 > **Caveat.** 99 of 822 runs carry no per-step outcomes and are excluded; the drop rate is model-correlated.
@@ -1068,16 +1070,18 @@ canonical cell: OFFLINE-ONLY UPPER BOUND — the 'edit_gated' counter reads step
 
 **What to look for.** The two curves must differ. If they do, the reproduction phase — not the recurrence mechanism — is what the as-shipped counter is measuring, and the gap between them is its size. Read the middle panel at the shipped threshold: the edit-gated precision there is the operating point every other figure in this set uses.
 
-**Terms.** *recurrence score* — max same-key verified-failure count a run reaches in the window. *edit-gated* — failures before the agent's first edit-like action are not counted. *null band* — central 95% of ROC curves under challenge-block label shuffles.
+**Terms.** *recurrence score* — max same-key verified-failure count a run reaches in the window *edit-gated* — failures before the agent's first edit-like action are not counted *null band* — central 95% of ROC curves under challenge-block label shuffles
 
-**Notes.** stale_window is held FIXED at the shipped value for BOTH curves. It is a knob in its own right — the as-shipped score reaches 0.728 at stale_window=1000 — so letting it vary between the two curves would have credited the counting change with a window change.
+**Notes.** stale_window is held FIXED at the shipped value for BOTH curves. It is a knob in its own right — the window-sensitivity note below carries what each family reaches at the wide window — so letting it vary between the two curves would have credited the counting change with a window change.
 The AUROC of the score bounds what ANY single escalate_after_n can reach.
 score null 95% [0.474, 0.550], p=0.0005 over 2000 challenge-block shuffles
+window sensitivity, AUROC at the shipped stale_window vs stale_window=1000: as-shipped 0.600 -> 0.725 · edit-gated 0.778 -> 0.783
 723 scored trajectories, status=OK_OFFLINE_ONLY
 OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
-**Limits.** Per-step cadence and eval-only: the live router has no per-step action stream to gate on, so the edit-gated family measures what a per-step detector could do, not what ships. Association only — no stored trajectory contains an escalation that actually happened. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure.
 
-<!-- n: stamped_runs=723 -->
+**Limits.** Per-step cadence and eval-only: the live router has no per-step action stream to gate on, so the edit-gated family measures what a per-step detector could do, not what ships. Association only — no stored trajectory contains an escalation that actually happened. 99/822 trajectories have no per-step verified outcomes and are excluded from this figure.
+
+<!-- n: stamped_runs=723 --><!-- generated-by: benchmark.escalation.run_eval -->
 
 ### The shipped counter sits at the base rate; edit-gated counting separates outcomes {#fig-operating-point}
 
@@ -1098,7 +1102,7 @@ edit-gated at escalate_after_n=2, stale_window=10; fired on 431/723; P(fail|fire
 723 scored trajectories, status=OK_OFFLINE_ONLY
 OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
 canonical cell: OFFLINE-ONLY UPPER BOUND — the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
-**Limits.** Association, not causation — see the scope strip: no logged trajectory escalated. Two operating points; the sweep figure shows every other configuration. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
+**Limits.** Association, not causation — see the scope strip: no logged trajectory escalated. Two operating points; the sweep figure shows every other configuration. 99/822 trajectories have no per-step verified outcomes and are excluded from this figure. EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action — a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate.
 
 <!-- n: fired=431, quiet=292 -->
 
@@ -1119,7 +1123,7 @@ The interval is the CHALLENGE-level bootstrap, not a Wilson interval over rows: 
 30 configurations per family; highest P(fail|fired) is 0.947 at edit-gated escalate_after_n=50 (stale_window=1000) against a base rate of 0.418
 723 scored trajectories, status=OK_OFFLINE_ONLY
 OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'
-**Limits.** Every number here is unadjusted for the 60 configurations compared side by side; the family-wise correction lives in each cell's null, not in this table. A configuration that never fires has no P(fail|fired) at all and prints n/a. 30 of 60 configurations across both families clear the base failure rate; every other cell in this table does not. 95/822 trajectories have no per-step verified outcomes and are excluded from this figure.
+**Limits.** Every number here is unadjusted for the 60 configurations compared side by side; the family-wise correction lives in each cell's null, not in this table. A configuration that never fires has no P(fail|fired) at all and prints n/a. 30 of 60 configurations across both families clear the base failure rate; every other cell in this table does not. 99/822 trajectories have no per-step verified outcomes and are excluded from this figure.
 
 <!-- n: configurations=30 -->
 
@@ -1127,7 +1131,8 @@ OFFLINE-ONLY UPPER BOUND — 2 feature(s) read fields absent from the production
 
 ![Escalating to the top-two models beats a cheap retry, but not always-frontier or random](assets/figures/escalation/session_value.png)
 
-*escalate arm = the top-2 models by price (zai-glm-5.2, kimi-k3) · 48 overlap tasks · escalate 28/45 vs retry 7/34 · lift 3.02x · paired difference +0.416 [+0.239, +0.581] · baselines not beaten: always_frontier, random_escalate · USD per task acted on (naive): escalate 0.554 (0.91/marginal) · retry 0.022 (0.05/marginal) · frontier 0.566 (1.49/marginal) · cheap 0.009 · random 0.367 (1.37/marginal) · USD per task acted on (cache-aware): escalate 0.554 (0.91/marginal) · retry 0.011 (0.01/marginal) · frontier 0.566 (1.49/marginal) · cheap 0.009 · random 0.363 (1.36/marginal) · 822/822 runs read*
+*escalate arm = the top-2 models by price (zai-glm-5.2, kimi-k3) · 48 overlap tasks · escalate 28/45 vs retry 7/34 · lift 3.02x · paired difference +0.416 [+0.239, +0.581] · baselines not beaten: always_frontier, random_escalate · per-arm cost per task acted on: see this figure's notes · 822/822 runs read*
+
 *Produced by `benchmark/escalation/session_eval.py` (`session_cadence`) and
 `benchmark/escalation/plots.py` (`session_value`) over the committed corpus — the caption is
 generated from the data, so its counts and lift are re-derivable, not editorial.*
@@ -1135,7 +1140,7 @@ generated from the data, so its counts and lift are re-derivable, not editorial.
 > **Caveat.** Observational, and the escalate arm does not beat always-frontier, random-escalate — read panel C.
 **Reading.** Read on EVERY trajectory in the corpus, not the per-step-stamped subset the other escalation figures score: a session outcome comes off the run header, so a run without per-step stamps still counts here. Measured on the overlap subset — tasks carrying BOTH a second cheap session and a frontier session, so every arm is read on the same tasks. Left: after a cheap session failed a task, the share of FRONTIER sessions on that task that resolved it (escalate) against the share of a SECOND cheap session that resolved it (retry). Both intervals resample whole INSTANCES, because several frontier sessions on one task are not independent draws. Middle: the PAIRED difference, escalate minus retry, on those same instance resamples, with its 95% interval and zero marked. Right: the same paired difference against the three trivial competitors — never being cheap (always frontier), never escalating (always cheap), and firing at random at the escalate arm's own rate.
 
-**What to look for.** The middle panel decides escalate-vs-retry; the right panel decides whether the ladder is worth having at all. A point left of zero there is a competitor the escalate arm does not beat. Neither panel is about the shipped ladder's rungs — the arm drawn here is the corpus's most expensive models, of which the ladder now reaches the cheaper (zai-glm-5.2) as its first rank step and never the pricier (kimi-k3).
+**What to look for.** The middle panel decides escalate-vs-retry; the right panel decides whether the ladder is worth having at all. A point left of zero there is a competitor the escalate arm does not beat. Neither panel is about the shipped ladder's rungs — the arm drawn here is the corpus's most expensive models, which the ladder reaches last, if at all.
 
 **Terms.** *cheap* — the cheapest model present — the base pick and the retry counterfactual *overlap subset* — tasks with >=2 cheap sessions AND a frontier session *always frontier* — the frontier session's outcome, whatever the cheap sessions did *always cheap* — the first cheap session's outcome, unconditionally *random escalate* — escalation fired on a seeded subset sized to the real fire rate *rung* — a model the ladder can step to; the shipped shortlist walks the cheapest ranks one at a time and then jumps to the top rank *frontier* — the 2 most expensive models present in the corpus: zai-glm-5.2, kimi-k3
 
@@ -1143,8 +1148,11 @@ generated from the data, so its counts and lift are re-derivable, not editorial.
 The dashed line is the cheap model's UNCONDITIONAL base rate. The bars condition on a cheap failure on the same task, so the line is not a ceiling for them.
 instance-level bootstrap over 48 overlap tasks, not Wilson over sessions: several frontier sessions on one task are one draw, not several
 the shipped ladder (rank_shortlist=3) walks zai-glm-5.2 -> gemini-3.1-pro -> claude-fable-5 over the shipped pool's price order: of the escalate arm it reaches zai-glm-5.2, and never reaches kimi-k3
+USD per task acted on (naive): escalate 0.554 (0.91/marginal) · retry 0.022 (0.05/marginal) · frontier 0.566 (1.49/marginal) · cheap 0.009 · random 0.367 (1.37/marginal)
+USD per task acted on (cache-aware): escalate 0.554 (0.91/marginal) · retry 0.011 (0.01/marginal) · frontier 0.566 (1.49/marginal) · cheap 0.009 · random 0.363 (1.36/marginal)
 cost is the provider's billed real_cost joined per (task, model, reasoning); an arm pays for the sessions it had to run first, so the escalate arm carries its failed cheap session. 'naive' is CACHE-BLIND — it charges a repeated model as if its prefix were cold; 'cache-aware' applies the shared cache model, whose hit rate is assumed, not measured. USD per marginal resolve is against the always-cheap floor, on that arm's own tasks — and the escalate arm's tasks are the fired subset, not the whole overlap set.
 822 trajectories read at session cadence (per-step stamping not required), status=OK_OFFLINE_ONLY
-**Limits.** Observational: the arms ran in parallel and which tasks got frontier coverage was adaptive. Small n — read the interval, not the point estimate. THE ESCALATE ARM IS NOT THE SHIPPED LADDER. It is the most expensive models in the corpus, and the shipped ladder does not step straight to them: since the pool change it reaches one arm member (zai-glm-5.2) as its first rank step and never reaches the other (kimi-k3, price-slotted inside the shortlist jump). Read this as the value of escalating TO THIS ARM, never as what the shipped default achieves. The escalate arm conditions on a cheap failure; the always-frontier and always-cheap arms do not, so they also cover tasks the cheap model already resolved. Scored on ALL 822 trajectories, not the 723-run per-step-stamped subset the other escalation figures use: a session outcome is read from the run header, so an unstamped run is still scorable here.
 
-<!-- n: escalate_sessions=45, overlap_instances=48, retry_sessions=34 -->
+**Limits.** Observational: the arms ran in parallel and which tasks got frontier coverage was adaptive. Small n — read the interval, not the point estimate. THE ESCALATE ARM IS NOT THE SHIPPED LADDER. It is the most expensive models in the corpus, and the shipped ladder does not step straight to them: it buys the cheapest ranks first and only then jumps, and those intermediate rungs are measured separately on the routing corpus as null or net-harmful. Read this as the value of escalating TO THIS ARM, never as what the shipped default achieves. The escalate arm conditions on a cheap failure; the always-frontier and always-cheap arms do not, so they also cover tasks the cheap model already resolved. Scored on ALL 822 trajectories, not the 723-run per-step-stamped subset the other escalation figures use: a session outcome is read from the run header, so an unstamped run is still scorable here.
+
+<!-- n: escalate_sessions=45, overlap_instances=48, retry_sessions=34 --><!-- generated-by: benchmark.escalation.run_eval -->

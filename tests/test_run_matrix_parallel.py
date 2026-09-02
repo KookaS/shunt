@@ -15,6 +15,7 @@ from typing import Any, Final
 import pytest
 
 from benchmark import config
+from benchmark.routing import validate
 from benchmark.runner import infer, run_matrix
 
 _HASHES: Final[dict[str, str]] = {f"repo__task-{i}": "h" for i in range(1, 9)}
@@ -424,6 +425,22 @@ class TestIncrementalCheckpoint:
         assert not history.exists()  # no spurious history growth
 
     def test_supersession_archives_changed_row_once(self, tmp_path):
+        # Supersession requires the cell's IDENTITY to have moved — here the spec hash. A
+        # changed cost on unchanged anchors is refused instead (see the test below).
+        out = tmp_path / "results.csv"
+        base = run_matrix._build_row(
+            "repo__task-1", "m", _outcome(cost=0.01), _HASHES, _VERSIONS, {}
+        )
+        run_matrix.merge_rows([base], out)
+        changed = run_matrix._build_row(
+            "repo__task-1", "m", _outcome(cost=0.99), {"repo__task-1": "h2"}, _VERSIONS, {}
+        )
+        run_matrix.merge_rows([changed], out)
+        history = out.parent / "artifacts" / "results_history.csv"
+        assert len(_read_csv_rows(history)) == 1  # old row archived exactly once
+        assert len(_read_csv_rows(out)) == 1  # results.csv keeps only current
+
+    def test_a_changed_cost_on_unchanged_anchors_is_refused(self, tmp_path):
         out = tmp_path / "results.csv"
         base = run_matrix._build_row(
             "repo__task-1", "m", _outcome(cost=0.01), _HASHES, _VERSIONS, {}
@@ -432,10 +449,11 @@ class TestIncrementalCheckpoint:
         changed = run_matrix._build_row(
             "repo__task-1", "m", _outcome(cost=0.99), _HASHES, _VERSIONS, {}
         )
-        run_matrix.merge_rows([changed], out)
-        history = out.parent / "artifacts" / "results_history.csv"
-        assert len(_read_csv_rows(history)) == 1  # old row archived exactly once
-        assert len(_read_csv_rows(out)) == 1  # results.csv keeps only current
+        with pytest.raises(validate.DataIntegrityError) as excinfo:
+            run_matrix.merge_rows([changed], out)
+        assert excinfo.value.violations[0].code == validate.REPLICATE_MISKEYED
+        assert not (out.parent / "artifacts" / "results_history.csv").exists()
+        assert float(_read_csv_rows(out)[0]["real_cost"]) == 0.01  # the paid row survived
 
 
 class TestCheckpointDeterminism:
@@ -739,13 +757,15 @@ class TestCheckpointResumability:
             workers=1,
             results_path=out,
         )
-        # Re-run with a CHANGED outcome (different cost) → each of the 4 rows is
-        # superseded exactly once; results.csv still holds only the 4 current rows.
+        # Re-run with a CHANGED outcome (different cost) AND a moved spec hash — the anchor
+        # move is what makes it a supersession rather than a second observation. Each of the 4
+        # rows is superseded exactly once; results.csv still holds only the 4 current rows.
+        moved = {cid: "h2" for cid in _HASHES}
         self._patch(monkeypatch, lambda cid, model, **kw: _fixed_outcome(cost=0.99))
         run_matrix.run_live_cells(
             cells,
             {},
-            _HASHES,
+            moved,
             _VERSIONS,
             timeout=10,
             verbose=False,
@@ -759,7 +779,7 @@ class TestCheckpointResumability:
         run_matrix.run_live_cells(
             cells,
             {},
-            _HASHES,
+            moved,
             _VERSIONS,
             timeout=10,
             verbose=False,

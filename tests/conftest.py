@@ -12,6 +12,7 @@ from types import ModuleType
 import matplotlib
 import pytest
 
+from benchmark import plot_guard
 from tests.mock_openai_server import MockOpenAIServer, MockSignature
 
 # Every figure rendered anywhere in the suite is layout-audited (benchmark/plot_contract.py),
@@ -21,6 +22,12 @@ from tests.mock_openai_server import MockOpenAIServer, MockSignature
 matplotlib.use("Agg")
 matplotlib.rcParams["font.family"] = "DejaVu Sans"
 os.environ.setdefault("SHUNT_PLOT_STRICT", "1")
+
+# ...and only the frame may write one at all. SH007 is an AST denylist, so it sees only the
+# spellings enumerated in it; the guard watches the write itself, whatever the call site looks
+# like. Installed for the whole suite, here rather than in a fixture so a module-scope save
+# during collection is covered too.
+plot_guard.install()
 
 
 @pytest.fixture(autouse=True)

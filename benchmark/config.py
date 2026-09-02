@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -64,6 +65,11 @@ def _flatten(model: ModelConfig, pricing: Pricing) -> dict:
         # `version` is a model-identity attribute (a sibling of tier/provider), no
         # longer a pricing field; a priced model always carries one (schema-enforced).
         "version": model.version,
+        # Where the weights actually run. Carried here so the live runner can LABEL every
+        # latency it records without re-parsing the registry per cell: a local batch-1
+        # second and a hosted batched second are not the same measurement, and an
+        # unlabelled timing is one that could later be pooled with its opposite.
+        "serving_mode": model.serving_mode,
         **pricing.model_dump(exclude_none=True),
     }
 
@@ -611,6 +617,31 @@ def _arm_key(model: str, stored: str, defaults: dict[str, str]) -> str:
     return defaults.get(model, _LEGACY_DEFAULT_REASONING)
 
 
+# The sentinel a MISSING optional measurement reads as. Explicitly not 0.0: the whole point
+# of the optional-column class is that "no record" and "measured zero" are different facts,
+# and the older `float(row.get("estimated_cost") or 0.0)` idiom below — kept for the columns
+# that predate the distinction and are written on every row — is the anti-pattern this
+# replaces for anything new.
+MISSING: Final = None
+
+
+def _optional_num(
+    row: dict[str, str], field: str, cast: Callable[[str], Any] = float
+) -> Any:  # float | int | None
+    """A MEASUREMENT-OPTIONAL column's value, or ``MISSING`` when the cell is blank.
+
+    Never returns 0 for a blank. Aggregate the results only through
+    `benchmark.routing.validate.require_measured`.
+    """
+    raw = str(row.get(field, "") or "").strip()
+    if not raw:
+        return MISSING
+    try:
+        return cast(raw)
+    except ValueError:
+        return MISSING
+
+
 def row_precedence(row: dict[str, str]) -> tuple[int, str, str]:
     """Rank two committed rows that resolve to the SAME cache cell. Higher wins.
 
@@ -634,6 +665,64 @@ def row_precedence(row: dict[str, str]) -> tuple[int, str, str]:
     )
 
 
+def reduce_reps(group: list[dict[str, str]]) -> tuple[dict[str, str], int, float]:
+    """One cell's observations -> ``(canonical_row, n_reps, rep_pass_rate)`` for the scorer."""
+    # REP 0 IS CANONICAL AND THE SCORING PATH NEVER SEES A REPLICATE. That is a deliberate
+    # refusal to average, for two reasons that are structural rather than stylistic:
+    #
+    #   * `pass` is a VALIDATED BOOLEAN INVARIANT, not a rate. `validate._check_schema`
+    #     enforces `pass <=> stop_reason == solved` on every row, so a cell whose `pass`
+    #     became 0.67 would carry a stop_reason contradicting it and could never be written
+    #     back or re-validated.
+    #   * The bootstrap's RESAMPLING UNIT IS THE TASK (`metrics.bootstrap_cis` groups
+    #     decisions by task id and resamples task GROUPS). Averaging reps inside a task would
+    #     silently convert every published CI from a task bootstrap into a task-rep bootstrap
+    #     — a different estimator, with narrower intervals — without touching a single
+    #     CI-emitting line of code.
+    #
+    # With R=1 (the shipped default) every group is a single rep-0 row and this is the
+    # IDENTITY, so today's numbers are bit-identical BY CONSTRUCTION rather than by
+    # inspection. When more than one row claims rep 0 — the arm-hash migration left seven
+    # such pairs — the pre-existing `row_precedence` still decides, exactly as before.
+    from benchmark.routing import integrity
+
+    zero = [r for r in group if integrity.rep_index(r) == 0]
+    canonical = max(zero or group, key=row_precedence)
+    n_reps = len({integrity.rep_index(r) for r in group})
+    rep_pass_rate = sum(1 for r in group if _bool_field(r.get("pass", ""))) / len(group)
+    return canonical, n_reps, rep_pass_rate
+
+
+def replicate_config() -> dict:
+    """The `replicates:` block — per-model observation depth for LIVE collection only."""
+    # SPEND SAFETY: `enabled: false` is the shipped default because R>1 multiplies live cost
+    # linearly, against a total new-measurement budget under $5. Read at exactly two sites
+    # (`run_matrix.classify_cells` and the column-coverage report); the SCORING path must
+    # never read it — depth is a collection decision, and letting an analysis consult it
+    # would make a published number depend on a config knob no CSV row records.
+    cfg = get()
+    return dict(cfg.get("replicates", {}))
+
+
+def replicate_enabled() -> bool:
+    """Gate for replicate collection — default False (one observation per cell)."""
+    return bool(replicate_config().get("enabled", False))
+
+
+def replicate_depth(model: str) -> int:
+    """How many observations of each of ``model``'s cells to collect (>= 1).
+
+    Mirrors `arm_sampling.default_only_models`' per-model-override precedent: a `by_model`
+    entry wins, else `default_r`, and the whole block collapses to 1 when disabled.
+    """
+    cfg = replicate_config()
+    if not cfg.get("enabled", False):
+        return 1
+    by_model = cfg.get("by_model") or {}
+    raw = by_model.get(model, cfg.get("default_r", 1))
+    return max(1, int(raw))
+
+
 def load_results(path: str | Path | None = None) -> dict:
     """Reconstruct the outcome cache from results.csv, keyed challenge x model x arm."""
     # A legacy reasoning="default" row aliases to its model's declared default_arm
@@ -649,49 +738,52 @@ def load_results(path: str | Path | None = None) -> dict:
     if not p.exists():
         return results
     defaults = default_arm_ids()
-    kept: dict[tuple[str, str, str], tuple[int, str, str]] = {}
+    groups: dict[tuple[str, str, str], list[dict[str, str]]] = {}
     with open(p, newline="") as f:
-        for row in csv.DictReader(f):
-            cid = row["challenge_id"]
-            model = row["model"]
-            stored = str(row.get("reasoning") or _LEGACY_DEFAULT_REASONING)
+        for raw in csv.DictReader(f):
+            model = raw["model"]
+            stored = str(raw.get("reasoning") or _LEGACY_DEFAULT_REASONING)
             arm = _arm_key(model, stored, defaults)
-            rank = row_precedence(row)
-            if rank < kept.get((cid, model, arm), rank):
-                continue  # a row already read for this cell has stronger provenance
-            kept[(cid, model, arm)] = rank
-            results.setdefault(cid, {}).setdefault(model, {})[arm] = {
-                "reasoning": arm,
-                "pass": _bool_field(row.get("pass", "")),
-                "cost": float(row.get("cost") or 0.0),
-                "in_tok": int(row.get("in_tok") or 0),
-                "out_tok": int(row.get("out_tok") or 0),
-                "calls": int(row.get("calls") or 0),
-                "version_hash": str(row.get("version_hash") or ""),
-                "model_version": str(row.get("model_version") or ""),
-                "arm_hash": str(row.get("arm_hash") or ""),
-                "real_cost": float(row.get("real_cost") or row.get("cost") or 0.0),
-                "estimated_cost": float(row.get("estimated_cost") or 0.0),
-                "timeout_flag": _bool_field(row.get("timeout_flag", "")),
-                "image_digest": str(row.get("image_digest") or ""),
-                "computed_at": str(row.get("computed_at") or ""),
-                # Always carry a resolved stop_reason: an explicit stored value, or a
-                # derivation for legacy rows written before the column existed.
-                "stop_reason": censoring.derive_stop_reason(
-                    passed=_bool_field(row.get("pass", "")),
-                    timeout_flag=_bool_field(row.get("timeout_flag", "")),
-                    stop_reason=str(row.get("stop_reason") or ""),
-                ),
-                # Collection-param provenance: the regime the cell was
-                # collected under. Carried through so ``_is_stale`` can anchor on
-                # step_limit/sampling_hash/prompt_hash; legacy rows backfilled before
-                # the columns existed carry "" (grandfathered to a staleness no-op).
-                "step_limit": str(row.get("step_limit") or ""),
-                "cost_limit": str(row.get("cost_limit") or ""),
-                "scaffold_version": str(row.get("scaffold_version") or ""),
-                "sampling_hash": str(row.get("sampling_hash") or ""),
-                "prompt_hash": str(row.get("prompt_hash") or ""),
-            }
+            groups.setdefault((raw["challenge_id"], model, arm), []).append(raw)
+    for (cid, model, arm), group in groups.items():
+        row, n_reps, rep_pass_rate = reduce_reps(group)
+        results.setdefault(cid, {}).setdefault(model, {})[arm] = {
+            "reasoning": arm,
+            "pass": _bool_field(row.get("pass", "")),
+            "cost": float(row.get("cost") or 0.0),
+            "in_tok": int(row.get("in_tok") or 0),
+            "out_tok": int(row.get("out_tok") or 0),
+            "calls": int(row.get("calls") or 0),
+            "version_hash": str(row.get("version_hash") or ""),
+            "model_version": str(row.get("model_version") or ""),
+            "arm_hash": str(row.get("arm_hash") or ""),
+            "real_cost": float(row.get("real_cost") or row.get("cost") or 0.0),
+            "estimated_cost": float(row.get("estimated_cost") or 0.0),
+            "timeout_flag": _bool_field(row.get("timeout_flag", "")),
+            "image_digest": str(row.get("image_digest") or ""),
+            "computed_at": str(row.get("computed_at") or ""),
+            # Always carry a resolved stop_reason: an explicit stored value, or a
+            # derivation for legacy rows written before the column existed.
+            "stop_reason": censoring.derive_stop_reason(
+                passed=_bool_field(row.get("pass", "")),
+                timeout_flag=_bool_field(row.get("timeout_flag", "")),
+                stop_reason=str(row.get("stop_reason") or ""),
+            ),
+            # Collection-param provenance: the regime the cell was
+            # collected under. Carried through so ``_is_stale`` can anchor on
+            # step_limit/sampling_hash/prompt_hash; legacy rows backfilled before
+            # the columns existed carry "" (grandfathered to a staleness no-op).
+            "step_limit": str(row.get("step_limit") or ""),
+            "cost_limit": str(row.get("cost_limit") or ""),
+            "scaffold_version": str(row.get("scaffold_version") or ""),
+            "sampling_hash": str(row.get("sampling_hash") or ""),
+            "prompt_hash": str(row.get("prompt_hash") or ""),
+            # AUDIT-ONLY, and no metric reads either. They record how many observations
+            # stood behind this cell and how they split, so a reader can see replicate
+            # depth without re-reading the CSV — never so a scorer can average over it.
+            "n_reps": n_reps,
+            "rep_pass_rate": rep_pass_rate,
+        }
     return results
 
 

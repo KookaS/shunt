@@ -493,7 +493,8 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     # Parameterized per-run CSVs are temporary artifacts — default to the
     # gitignored artifacts/ dir so they never pollute the tracked tree. The sole
     # committed source of truth is results.csv; the per-strategy summary is
-    # regenerable (report.py / run_matrix write it to the gitignored reports/ dir).
+    # regenerable (report.py / run_matrix write it to reports/, where it is the one
+    # tracked file).
     output_dir = (
         Path(args.output_dir) if args.output_dir else Path(__file__).resolve().parent / "artifacts"
     )

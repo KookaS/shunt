@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from statistics import mean
+from typing import Literal
 
 from benchmark.routing.cache_cost import CachePrice, cache_aware_total
 from benchmark.routing.strategies import BilledAttempt
@@ -308,6 +309,23 @@ def bootstrap_ci(
     )
 
 
+def percentile(values: Sequence[float], q: float) -> float:
+    """The ``q``-quantile by nearest-rank: ``sorted(values)[clamp(int(q * n), 0, n - 1)]``,
+    or ``0.0`` on an empty sample."""
+    # NOT interchangeable with `bootstrap_ci`'s internal `_pct`, which builds a SYMMETRIC
+    # two-sided interval from one floor index -- `(draws[a], draws[n - 1 - a])` at
+    # `a = int(0.025 * n)`. The lower ends always agree; the upper ends differ by one index
+    # for every `n` where `0.025 * n` is an integer, `n = 1000` (the shipped
+    # `bootstrap_iterations`) included: `_pct` takes index 974, this takes 975. The two are
+    # applied to different quantities -- this one to the per-task p95 columns, `_pct` only
+    # to bootstrap CIs -- so do not quote one as the other.
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    idx = min(len(ordered) - 1, max(0, int(q * len(ordered))))
+    return ordered[idx]
+
+
 def _scorable_pair(
     control: tuple[str, str, bool, float, int, int, int, bool],
     test: tuple[str, str, bool, float, int, int, int, bool],
@@ -463,22 +481,80 @@ def arm_manipulation(
     return rows
 
 
+@dataclass(frozen=True)
+class Axis:
+    """One objective of a Pareto comparison: a column, and which direction is better."""
+
+    column: str
+    direction: Literal["max", "min"]
+
+
+@dataclass(frozen=True)
+class ParetoResult:
+    members: dict[str, bool]
+    excluded: tuple[str, ...]
+    axes: tuple[Axis, ...]
+
+
+def _dominates(
+    better: Mapping[str, float], worse: Mapping[str, float], axes: tuple[Axis, ...]
+) -> bool:
+    """``better`` is at least as good on EVERY axis and strictly better on AT LEAST ONE."""
+    # NON-FINITE DOMINATES NOTHING. Every comparison against NaN is False, so a bare
+    # `if b < w: return False` guard WAVES NaN THROUGH as "at least as good" on that axis and
+    # lets an unmeasured row evict a real one. `pareto_front` already excludes such a row
+    # before it gets here; this is the second wall, so the predicate is total on its own.
+    strict = False
+    for axis in axes:
+        b, w = better[axis.column], worse[axis.column]
+        if not (math.isfinite(b) and math.isfinite(w)):
+            return False
+        if axis.direction == "max":
+            if b < w:
+                return False
+            strict = strict or b > w
+        else:
+            if b > w:
+                return False
+            strict = strict or b < w
+    return strict
+
+
+def pareto_front(
+    rows: Mapping[str, Mapping[str, float | None]], axes: Sequence[Axis]
+) -> ParetoResult:
+    """Non-dominated members of ``rows`` over an arbitrary number of ``axes``."""
+    # A row missing (`None`) OR NON-FINITE (NaN / +-inf) on any axis is EXCLUDED: it neither
+    # dominates nor is dominated, and it is absent from `members`. Coercing such a value to 0
+    # would make it un-dominated by construction on that axis — the same reason
+    # `summary._apply_pareto` keeps zero-evidence rows out of the comparison: certifying
+    # "measured nothing" as optimal. NaN is the same non-observation as `None` wearing a
+    # float: `float("nan")` parses out of a CSV cell, and every comparison against it is
+    # False, so an un-excluded NaN passes a "at least as good" guard on EVERY axis at once.
+    axes = tuple(axes)
+    comparable: dict[str, Mapping[str, float]] = {}
+    excluded: list[str] = []
+    for name, row in rows.items():
+        values = {axis.column: row.get(axis.column) for axis in axes}
+        if any(v is None or not math.isfinite(v) for v in values.values()):
+            excluded.append(name)
+        else:
+            comparable[name] = {k: float(v) for k, v in values.items() if v is not None}
+
+    members = {
+        name: not any(
+            _dominates(other, row, axes)
+            for other_name, other in comparable.items()
+            if other_name != name
+        )
+        for name, row in comparable.items()
+    }
+    return ParetoResult(members=members, excluded=tuple(excluded), axes=axes)
+
+
+_LEGACY_AXES = (Axis("AvgPerf%", "max"), Axis("TotalCost", "min"))
+
+
 def compute_pareto(strategies_metrics: dict[str, dict]) -> dict[str, bool]:
-    names = list(strategies_metrics.keys())
-    pareto = {name: True for name in names}
-
-    for i, name_i in enumerate(names):
-        mi = strategies_metrics[name_i]
-        for j, name_j in enumerate(names):
-            if i == j:
-                continue
-            mj = strategies_metrics[name_j]
-            if (
-                mj["AvgPerf%"] >= mi["AvgPerf%"]
-                and mj["TotalCost"] <= mi["TotalCost"]
-                and (mj["AvgPerf%"] > mi["AvgPerf%"] or mj["TotalCost"] < mi["TotalCost"])
-            ):
-                pareto[name_i] = False
-                break
-
-    return pareto
+    """The published 2-D frontier (AvgPerf% up, TotalCost down) — a shim over `pareto_front`."""
+    return pareto_front(strategies_metrics, _LEGACY_AXES).members

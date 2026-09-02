@@ -9,14 +9,13 @@
 
 from __future__ import annotations
 
-import csv
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from benchmark import config, plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
-from benchmark.routing import cache_cost, plot_style
+from benchmark.routing import cache_cost, integrity, plot_style
 from benchmark.routing.figures import context as ctxmod
 
 if TYPE_CHECKING:
@@ -126,21 +125,25 @@ class ModelCache:
 
 
 def billed_shares(results_csv: Path) -> dict[str, tuple[float, int]]:
-    """model -> (sum(real_cost)/sum(estimated_cost), n rows) over every priced row."""
+    """model -> (sum(real_cost)/sum(estimated_cost), n rows) over the rep-0 priced rows."""
+    # The MEASUREMENT view, not every row on disk. Summing raw rows counts a replicate of a
+    # cell as a second observation, so the day a second rep is run the `n.priced_rows` count
+    # this figure publishes silently doubles — and that count is byte-locked into the docs by
+    # SH009, which would then fail on a re-render nobody changed the code for. `rep_zero_rows`
+    # is the same canonical-row predicate the rest of the harness prices with.
     totals: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])
-    with results_csv.open(newline="") as handle:
-        for row in csv.DictReader(handle):
-            try:
-                real = float(row.get("real_cost") or 0.0)
-                estimated = float(row.get("estimated_cost") or 0.0)
-            except ValueError:
-                continue
-            if estimated <= 0:
-                continue
-            bucket = totals[row["model"]]
-            bucket[0] += real
-            bucket[1] += estimated
-            bucket[2] += 1
+    for row in integrity.rep_zero_rows(results_csv):
+        try:
+            real = float(row.get("real_cost") or 0.0)
+            estimated = float(row.get("estimated_cost") or 0.0)
+        except ValueError:
+            continue
+        if estimated <= 0:
+            continue
+        bucket = totals[row["model"]]
+        bucket[0] += real
+        bucket[1] += estimated
+        bucket[2] += 1
     return {m: (r / e, int(n)) for m, (r, e, n) in totals.items() if e > 0}
 
 

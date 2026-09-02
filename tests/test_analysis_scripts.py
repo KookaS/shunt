@@ -20,6 +20,7 @@ from benchmark.routing.scripts import (
     threshold_sweep,
     viz_knn,
 )
+from benchmark.routing.strategies import Strategy
 
 # Absolute config path so the test is independent of the process CWD.
 CONFIG_PATH = str(Path(config.__file__).resolve().parent / "benchmark.yaml")
@@ -76,7 +77,7 @@ class TestRegretExcludesUnscorable:
     def test_evaluate_strategies_flags_unmeasured_cell(self):
         from benchmark.routing.report import _evaluate_strategies
 
-        class _Fake:
+        class _Fake(Strategy):
             name = "Fake"
 
             def select(self, tid, meta, matrix):  # noqa: ANN001, ANN201, ARG002

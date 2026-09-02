@@ -5,7 +5,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Final
+from typing import Any, ClassVar, Final, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -98,6 +98,48 @@ class Pricing(BaseModel):
     price_note: str | None = None
 
 
+UNDISCLOSED: Final[str] = "UNDISCLOSED"
+
+# Where the weights run. `local` rows are $0 by construction and are never pooled with a
+# hosted namesake on a cost axis — the figures split on this field.
+ServingMode = Literal["hosted", "local"]
+
+# A parameter count is either a vendor-published integer or the honest absence of one. The
+# literal exists so the two are never confused with a MISSING field: `total_params: null`
+# would read as "nobody filled this in", while UNDISCLOSED records that we looked and the
+# vendor publishes nothing. Estimating a closed model's size into committed data is banned —
+# the third-party figures that circulate for the closed tiers are speculation, not sources.
+ParamCount = int | Literal["UNDISCLOSED"]
+
+
+class Size(BaseModel):
+    """Model size + its provenance — the sibling of `pricing` on the size axis."""
+
+    # MoE-aware on purpose: `active_params` is a COMPUTE claim (what a token decodes through),
+    # never a memory one — a 284B/13B model still needs all 284B resident, so the two numbers
+    # answer different questions and the figures encode them separately.
+    model_config = ConfigDict(extra="forbid")
+
+    total_params: ParamCount
+    # Equal to `total_params` for a dense model; strictly smaller for MoE.
+    active_params: ParamCount
+    size_source: str
+    size_as_of: str
+    size_note: str | None = None
+
+    @model_validator(mode="after")
+    def _active_within_total(self) -> Size:
+        if isinstance(self.total_params, int) and isinstance(self.active_params, int):
+            if self.active_params > self.total_params:
+                raise ValueError(
+                    f"active_params ({self.active_params}) exceeds "
+                    f"total_params ({self.total_params})"
+                )
+            if self.total_params <= 0 or self.active_params <= 0:
+                raise ValueError("a parameter count is positive; use UNDISCLOSED for no figure")
+        return self
+
+
 class ReasoningArm(BaseModel):
     """One native reasoning setting for a model: id, within-model rank, raw API params."""
 
@@ -158,7 +200,13 @@ class ModelEntry(BaseModel):
     version: str | None = None
     supports_streaming: bool = True
     supports_cache_control: bool = False
+    # How the weights are served. Defaults to `hosted` because every shipped row is a
+    # provider API; a local rung must SAY so, and the default is the safe direction —
+    # mislabelling a local run as hosted would pool it with a paid namesake on the cost
+    # axis, which the real-only rule forbids.
+    serving_mode: ServingMode = "hosted"
     pricing: Pricing | None = None
+    size: Size | None = None
     reasoning: ReasoningConfig | None = None
 
     @model_validator(mode="after")
@@ -194,7 +242,9 @@ class ModelConfig(BaseModel):
     litellm_prefix: str = "openai"
     supports_streaming: bool = True
     supports_cache_control: bool = False
+    serving_mode: ServingMode = "hosted"
     pricing: Pricing | None = None
+    size: Size | None = None
     reasoning: ReasoningConfig | None = None
 
     @property
@@ -230,7 +280,9 @@ def resolve_models(registry: Registry) -> dict[str, ModelConfig]:
             litellm_prefix=provider.litellm_prefix,
             supports_streaming=entry.supports_streaming,
             supports_cache_control=entry.supports_cache_control,
+            serving_mode=entry.serving_mode,
             pricing=entry.pricing,
+            size=entry.size,
             reasoning=entry.reasoning,
         )
     return resolved

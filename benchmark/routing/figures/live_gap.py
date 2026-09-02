@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Final
 
 from benchmark import plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
+from benchmark.routing import repricing
 from benchmark.routing.figures import context as ctxmod
 from benchmark.routing.plot_style import usd
 from benchmark.routing.strategy_class import StrategyClass, classify, shipped_mechanism
@@ -72,7 +73,7 @@ _NO_LIVE_IN_BAND: Final[str] = (
 
 
 def _rows(ctx: ctxmod.RoutingContext) -> list[tuple[str, StrategyClass, float, float]]:
-    """(name, class, total cost, pass rate) for every scored, priced strategy row."""
+    """(name, class, recorded total cost, pass rate) for every scored, priced strategy row."""
     out = []
     for row in ctx.rows:
         name = str(row["strategy"])
@@ -80,6 +81,28 @@ def _rows(ctx: ctxmod.RoutingContext) -> list[tuple[str, StrategyClass, float, f
         if cost > 0 and int(float(row.get("n_tasks", 0) or 0)) > 0:
             out.append((name, classify(name).cls, cost, perf))
     return out
+
+
+def _repriced(
+    ctx: ctxmod.RoutingContext, rows: list[tuple[str, StrategyClass, float, float]]
+) -> tuple[list[tuple[str, StrategyClass, float, float]], bool]:
+    """`rows` re-costed at today's cheapest listed price, or unchanged with False."""
+    # THIS IS THE HALF'S NAIVE-COST AXIS, so it is the one that gets repriced: `TotalCost` is
+    # the raw sum the run was billed at, and the question this figure asks -- what does the
+    # bound's quality cost -- is about what a user would pay TODAY, not what we paid in July.
+    # The cache-aware axis (cost_quality_frontier.png) deliberately keeps historical cost: the
+    # legacy rows carry no `cached_in_tok`, so a cache-aware repricing would be invented rather
+    # than merely unavailable.
+    #
+    # ALL OR NOTHING. Every plotted row is repriced or none is, because the panel compares
+    # strategies to each other -- one row at August prices beside one at July prices is a
+    # comparison of two price sheets wearing the label of a comparison of two strategies. When
+    # any row cannot be repriced (see `report._repriced_total`) the whole panel falls back to
+    # recorded cost and the subtitle says so.
+    totals = {name: ctx.repriced_totals.get(name) for name, _c, _co, _p in rows}
+    if not rows or any(value is None or value <= 0 for value in totals.values()):
+        return rows, False
+    return [(name, cls, float(totals[name] or 0.0), perf) for name, cls, _cost, perf in rows], True
 
 
 def _at_bound_quality(
@@ -155,8 +178,17 @@ SPEC = FigureSpec(
         ),
     ),
     notes=(
-        "Costs are the same naive per-task totals every other routing figure uses, so the "
-        "brackets are comparable with cost_quality_frontier.png.",
+        # NOT COMPARABLE, AND SAID SO. This note used to assert the brackets were comparable
+        # with cost_quality_frontier.png. They are not: that figure moved its ranking axis to
+        # `TotalCost_cacheaware` while this one stays on the naive `TotalCost` sum, so the same
+        # strategy carries two different prices under one name and a reader lining the two
+        # figures up was silently comparing cost models rather than strategies.
+        "This axis is the NAIVE per-task cost — the raw sum of what each attempt was billed, "
+        "repriced only when the subtitle says so. cost_quality_frontier.png ranks on the "
+        "CACHE-AWARE total instead, which prices a repeat-model discount the naive sum does "
+        "not. The two are different cost models, so a span read off this figure is NOT "
+        "comparable with one read off that one: a cascade that re-hits one model is cheaper "
+        "there than it is here, and the gap is the discount, not a different strategy.",
     ),
     limitations=(
         "The blue bracket is what the BLOCKED strategies measured here would buy IF their "
@@ -299,6 +331,8 @@ def _annotations(
     rows: list[tuple[str, StrategyClass, float, float]],
     band: list[tuple[str, StrategyClass, float, float]],
     ceiling: float,
+    *,
+    repriced: bool,
 ) -> Annotations:
     live = _cheapest(band, StrategyClass.LIVE)
     blocked = _cheapest(band, StrategyClass.BLOCKED)
@@ -330,6 +364,10 @@ def _annotations(
                 f"{share:.0%} of the headroom sits behind a blocker, so it is a to-do, not a "
                 "measured saving."
             )
+    # Which prices drew this axis, LAST in the subtitle so it reads as the qualifier it is: a
+    # reader comparing this figure to an older copy needs to know whether a moved dot is a
+    # moved strategy or a moved price.
+    facts.append(repricing.axis_basis(repriced=repriced))
     notes = [f"{name}: {usd(cost)}, {perf:.2f}% ({cls.value})" for name, cls, cost, perf in band]
     return Annotations(
         subtitle_facts=tuple(facts),
@@ -341,7 +379,7 @@ def _annotations(
 
 def render(ctx: ctxmod.RoutingContext) -> Path | None:
     """Draw live_gap.png, or None when no bound row prices the headroom."""
-    rows = _rows(ctx)
+    rows, repriced = _repriced(ctx, _rows(ctx))
     ceiling, band = _at_bound_quality(rows)
     if len(band) < 2:
         return None
@@ -354,7 +392,7 @@ def render(ctx: ctxmod.RoutingContext) -> Path | None:
         fig,
         ctx.out_dir / "live_gap.png",
         SPEC,
-        extra=_annotations(rows, band, ceiling),
-        provenance=ctx.provenance(__name__),
+        extra=_annotations(rows, band, ceiling, repriced=repriced),
+        provenance=ctx.provenance(__name__, repriced=repriced),
         size=size,
     )

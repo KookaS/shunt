@@ -9,7 +9,9 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import math
 import os
+import time
 import types
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
@@ -19,7 +21,7 @@ from typing import Any, Final, NoReturn
 
 from benchmark import config
 from benchmark.routing import censoring, integrity
-from benchmark.runner import image_version, swebench_harness, swebench_specs
+from benchmark.runner import image_version, scaffold_model, swebench_harness, swebench_specs
 from shunt.proxy.redaction import redact_secrets
 
 _LOG = logging.getLogger(__name__)
@@ -201,6 +203,15 @@ class AgentPatch:
     # starting fresh. Carried so the trajectory capture can record the total per-step snapshot
     # count across the resumed run, which the offline replay pairs against the scratch.
     resumed: bool = False
+    # CLIENT-side wall clock of the agent loop for THIS invocation: the seconds between the
+    # scaffold being handed the task and it returning, so inference plus in-container tool
+    # execution, and NOT the SWE-bench grading harness (which is not model work). None means
+    # NOT MEASURED — never zero — and it is None on every non-real path and on a RESUMED run,
+    # whose earlier process's seconds this process never saw and may not invent.
+    wall_clock_s: float | None = None
+    # Client-side duration of each SUCCESSFUL provider call, in call order, as measured at the
+    # scaffold model seam (`scaffold_model.EnvKeyLitellmModel`). Empty means NOT MEASURED.
+    call_latencies_s: tuple[float, ...] = ()
 
 
 def generate_patch_live(
@@ -227,21 +238,38 @@ def generate_patch_live(
     )
 
 
-def litellm_model_target(model: str) -> tuple[str, dict[str, Any]]:
-    """Map an internal model alias to a litellm ``(model_string, model_kwargs)`` pair.
-
-    Route, base_url, and key env var all come from the registry's provider row.
-    """
+def _registry_row(model: str) -> dict[str, Any]:
+    """The model registry's provider row for *model*."""
     info = config.load_pricing().get(model)
     if not isinstance(info, dict):
         raise KeyError(f"model {model!r} not in the model registry")
+    return info
+
+
+def _model_key_env_var(model: str) -> str | None:
+    """The env var holding *model*'s credential, or None when litellm resolves it itself."""
+    # A provider with its own litellm prefix (e.g. `deepseek/`) is dialled by litellm directly,
+    # which reads that provider's key from the env by its canonical name; a generic `openai/`
+    # surface needs base_url + key supplied by us. Deliberately tolerant of an unregistered
+    # alias: this looks up a NAME, and the loud failure for an unknown model already happened in
+    # `litellm_model_target`. Returning None cannot open a hole — `credential_free_model_block`
+    # refuses a config that carries a credential with no env var named to re-supply it.
+    info = config.load_pricing().get(model)
+    if not isinstance(info, dict) or not str(info["route"]).startswith("openai/"):
+        return None
+    return str(info["api_key_env_var"])
+
+
+def litellm_model_target(model: str) -> tuple[str, dict[str, Any]]:
+    """Map an internal model alias to a litellm ``(model_string, model_kwargs)`` pair."""
+    # Route, base_url and key env var all come from the registry's provider row. The returned
+    # kwargs carry the RESOLVED key and are for a direct in-process `litellm.completion` only —
+    # never hand them to the scaffold, which serialises its config to disk (scaffold_model.py).
+    info = _registry_row(model)
     route = str(info["route"])
-    # A provider with its own litellm prefix (e.g. `deepseek/`) is dialled by
-    # litellm directly, which reads that provider's key from the env by its
-    # canonical name. A generic `openai/` surface needs base_url + key passed.
-    if not route.startswith("openai/"):
+    key_env = _model_key_env_var(model)
+    if key_env is None:
         return route, {}
-    key_env = str(info["api_key_env_var"])
     key = os.environ.get(key_env)
     if not key:
         raise MissingApiKeysError(f"routing {model!r} via {info['provider']} needs {key_env}")
@@ -256,16 +284,65 @@ def _cheapest_enabled_model() -> str:
     return models[0]
 
 
+def _scaffold_default_max_tokens() -> int | None:
+    """The generation cap mini-swe-agent's own swebench overlay sends, if it declares one."""
+    # The scaffold config is the ONLY place a cap the run actually sends can come from besides
+    # the registry arm; read it rather than assuming. The extra is optional, so a missing
+    # import is "no cap declared here", never a failure.
+    try:
+        from minisweagent.config import builtin_config_dir, get_config_from_spec  # noqa: PLC0415
+    except ImportError:
+        return None
+    spec = str(builtin_config_dir / "benchmarks" / "swebench.yaml")
+    kwargs = get_config_from_spec(spec).get("model", {}).get("model_kwargs", {})
+    cap = kwargs.get("max_tokens")
+    return int(cap) if cap is not None else None
+
+
+def _effective_max_tokens(model: str) -> int | None:
+    """The generation cap in force for *model*: what the run SENDS, else the declared fallback."""
+    # Precedence mirrors _scaffold_model_kwargs (scaffold base <- registry arm), so this is the
+    # number the request will actually carry. `live.serving.max_tokens` is the last resort: today
+    # neither source declares a cap, and a guard that can only ever refuse is a wall, not a guard.
+    arm = config.default_arm_ids([model]).get(model, integrity.DEFAULT_REASONING)
+    arm_cap = config.arm_api_params(model, arm).get("max_tokens")
+    if arm_cap is not None:
+        return int(arm_cap)
+    from benchmark.runner import serving_guard  # noqa: PLC0415
+
+    return _scaffold_default_max_tokens() or serving_guard.serving_max_tokens()
+
+
+def _preflight_serving_check(target: str, model_kwargs: dict[str, Any]) -> None:
+    """Assert a LOCAL serving endpoint's resolved flags; no-op for hosted providers."""
+    # A self-hosted server can silently delete the system prompt and tool schema mid-generation
+    # and still answer HTTP 200 (ollama's `--context-shift --keep 4`), which no status-based
+    # retry can see — so the flags are read and recorded here, before any container starts.
+    from benchmark.runner import serving_guard  # noqa: PLC0415
+
+    base_url = model_kwargs.get("api_base")
+    try:
+        # Inside the try: classification itself refuses on an endpoint it cannot decide
+        # (`UndecidableEndpointError`), and that must abort the run, not escape as a crash.
+        if not serving_guard.is_local_endpoint(base_url):
+            return
+        serving_guard.assert_serving_safe(base_url, max_tokens=_effective_max_tokens(target))
+    except serving_guard.UnsafeServingError as exc:
+        raise ApiUnusableError(f"unsafe local serving config for {target}: {exc}") from exc
+
+
 def preflight_api_check(model: str | None = None) -> bool:
     """Prove the API key works with ONE minimal real completion, before any container spins up.
 
     A dead/empty key or no-balance error raises ``ApiUnusableError`` (refuse the run); a
     transient blip (rate-limit / 5xx) is inconclusive and returns True — never refuse over one.
     """
+    # A local endpoint additionally has its resolved serving flags asserted (`serving_guard`).
     import litellm  # noqa: PLC0415
 
     target = model or _cheapest_enabled_model()
     model_string, model_kwargs = litellm_model_target(target)
+    _preflight_serving_check(target, model_kwargs)
     try:
         litellm.completion(
             model=model_string,
@@ -493,6 +570,7 @@ def _scaffold_config_overlay(
     step_limit: int,
     cost_limit: float,
     trajectory_id: str,
+    api_key_env_var: str | None,
 ) -> dict[str, Any]:
     """The mini-swe-agent config overlay for one live cell (merged over the swebench default)."""
     # step_limit is the PRIMARY model-speed-agnostic bound; wall_time_limit_seconds is a generous
@@ -512,11 +590,13 @@ def _scaffold_config_overlay(
             "cost_limit": cost_limit,
             "output_path": str(message_list_path(trajectory_id)),
         },
-        "model": {
-            "model_name": model_string,
-            "model_kwargs": model_kwargs,
-            "cost_tracking": "ignore_errors",
-        },
+        # The model block is built credential-free ON PURPOSE: `output_path` above makes the
+        # scaffold persist its own config verbatim, so a key inside `model_kwargs` would be
+        # written to disk in plaintext once per cell. It carries the env var's NAME and the
+        # value is injected per request. See `benchmark.runner.scaffold_model`.
+        "model": scaffold_model.credential_free_model_block(
+            model_string, model_kwargs, api_key_env_var=api_key_env_var
+        ),
         "environment": {"environment_class": "docker"},
     }
 
@@ -857,8 +937,13 @@ def _invoke_scaffold_attempt(
         step_limit=effective_step_limit,
         cost_limit=effective_cost_limit,
         trajectory_id=trajectory_id,
+        api_key_env_var=_model_key_env_var(model),
     )
     merged = recursive_merge(default_config, overlay)
+    # The overlay was built credential-free, but `recursive_merge` merges the scaffold's own
+    # default `model_kwargs` UNDER it key-by-key — so the config the scaffold will serialise is
+    # re-checked here, after the merge, rather than only before it.
+    scaffold_model.assert_credential_free(merged.get("model", {}), what="merged scaffold config")
     env = get_sb_environment(merged, instance)
     # Reconstruct the filesystem to match the saved conversation BEFORE the agent is created, so a
     # wrong or missing tree aborts the resume (falling back to fresh) instead of running against it.
@@ -878,6 +963,7 @@ def _invoke_scaffold_attempt(
     recorder = _attach_snapshot_recorder(agent, env)
     if resume is not None:
         _seed_resume(agent, resume, format_error_cls=FormatError, interrupt_cls=InterruptAgentFlow)
+    started = time.perf_counter()
     try:
         info = _run_agent_bounded(
             agent, instance["problem_statement"], env, _external_watchdog_s(timeout)
@@ -890,6 +976,7 @@ def _invoke_scaffold_attempt(
     # Cost/token accounting covers the WHOLE cell: agent.messages holds the seeded history plus the
     # new turns, and _sum_usage walks every assistant message's real usage — the row reflects the
     # entire cell, not just the resumed tail.
+    wall_clock_s = time.perf_counter() - started
     messages: list[dict[str, Any]] = getattr(agent, "messages", [])
     in_tok, out_tok, calls, cost = _sum_usage(messages)
     return AgentPatch(
@@ -902,6 +989,12 @@ def _invoke_scaffold_attempt(
         messages=messages,
         snapshots=recorder.snapshots if recorder is not None else {},
         resumed=resume is not None,
+        # A RESUMED cell's total wall clock is unmeasurable here — the prior process's seconds
+        # were never recorded — so it stays MISSING rather than being reported as the tail's
+        # duration. The per-call latencies are unaffected: each is a complete, real
+        # measurement of one round trip whether or not the conversation was resumed.
+        wall_clock_s=None if resume is not None else wall_clock_s,
+        call_latencies_s=tuple(getattr(model_obj, "call_latencies_s", ()) or ()),
     )
 
 
@@ -1024,6 +1117,51 @@ def _collection_provenance(
         "sampling_hash": integrity.sampling_hash(model, arm),
         "prompt_hash": integrity.scaffold_prompt_hash(),
     }
+
+
+def _latency_provenance(model: str, patch: AgentPatch) -> dict[str, str]:
+    """The measured-latency and serving-provenance columns for one live results row."""
+    # ONLY what this process actually measured. Every key here is a MEASUREMENT-OPTIONAL or
+    # PROVENANCE-OPTIONAL column (`routing.integrity`), where a blank means MISSING FOREVER and
+    # is NEVER read as zero — so an unmeasured field is omitted, never defaulted, and never
+    # derived from a neighbouring quantity.
+    #
+    # Three deliberate omissions:
+    #
+    #   * `ttft_s` is ALWAYS absent. The scaffold calls `litellm.completion` non-streaming, so
+    #     no first-token event exists to time; writing time-to-full-response under the TTFT
+    #     name would publish a different quantity. Obtaining it needs a streaming scaffold.
+    #   * an UNLABELLABLE timing is dropped rather than written. A latency whose `serving_mode`
+    #     is unknown could later be pooled with its opposite (local batch-1 against a batched
+    #     hosted API), which is exactly the defect the column exists to prevent, and the data
+    #     would carry no trace of the mistake.
+    #   * an ERRORED or ABANDONED cell records no timing at all (`_errored_outcome`): its wall
+    #     clock is the watchdog's ceiling, a property of the limit rather than of the model.
+    info = config.load_pricing().get(model)
+    row: dict[str, str] = {}
+    if isinstance(info, dict):
+        row["provider"] = str(info.get("provider") or "")
+        row["serving_mode"] = str(info.get("serving_mode") or "")
+    timings: dict[str, str] = {}
+    if patch.wall_clock_s is not None:
+        timings["wall_clock_s"] = f"{patch.wall_clock_s:.6f}"
+    if patch.call_latencies_s:
+        mean_s = math.fsum(patch.call_latencies_s) / len(patch.call_latencies_s)
+        timings["latency_per_call_s"] = f"{mean_s:.6f}"
+    if timings and not row.get("serving_mode"):
+        _LOG.warning(
+            "no serving_mode for %r in the registry; dropping this cell's latency rather than "
+            "writing a timing nothing can attribute to a serving stack",
+            model,
+        )
+        timings = {}
+    if timings:
+        # Both numbers above are the client's own clock around the call, not a field the
+        # provider reported. The two are different measurements and pooling them would be a
+        # defect, so the row states which one it is.
+        row["provider_latency_source"] = integrity.LATENCY_SOURCE_CLIENT
+    row.update(timings)
+    return {key: value for key, value in row.items() if value}
 
 
 def _errored_outcome(
@@ -1150,4 +1288,5 @@ def run_live_cell(
         # Record the digest the harness ACTUALLY used so stored == produced.
         "image_digest": image_version.used_image_digest(spec.image_ref) or "",
         **_collection_provenance(model, arm, step_limit=step_limit, cost_limit=actual_cost_limit),
+        **_latency_provenance(model, patch),
     }

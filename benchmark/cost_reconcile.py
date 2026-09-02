@@ -31,7 +31,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import sys
 from dataclasses import dataclass
@@ -40,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmark import config
-from benchmark.routing import censoring, validate
+from benchmark.routing import censoring, integrity, validate
 
 _EPS = 1e-12
 DEFAULT_TOLERANCE = 0.15
@@ -154,15 +153,16 @@ def load_rows(
     path: str | Path, start: datetime | None = None, end: datetime | None = None
 ) -> list[ResultRow]:
     """Read results.csv rows, optionally filtered to a computed_at [start, end] window."""
+    # REPLICATE POLICY: ALL REPS. This is a SPEND question — it reconciles the corpus against
+    # the provider's invoice — and a replicate really was billed. Taking rep 0 only would
+    # under-report the tracked total by exactly the replicates' cost and manufacture a
+    # reconciliation gap that no accounting hole caused.
     p = Path(path)
-    if not p.exists():
-        return []
     rows: list[ResultRow] = []
-    with p.open(newline="") as fh:
-        for raw in csv.DictReader(fh):
-            row = _parse_row(raw)
-            if _within(row.computed_at, start, end):
-                rows.append(row)
+    for raw in integrity.all_rows(p):
+        row = _parse_row(raw)
+        if _within(row.computed_at, start, end):
+            rows.append(row)
     return rows
 
 

@@ -51,6 +51,7 @@ from shunt.router.inspection import top_capability_cluster
 
 if TYPE_CHECKING:
     from shunt.db.store import OutcomeStore
+    from shunt.inspect.model_grid import GridData, GridRow
     from shunt.models.config import ModelPool
 
 SEEDED: Final[str] = "seeded"
@@ -434,6 +435,103 @@ def _economics(rows: Iterable[SessionRow]) -> list[ModelEconomics]:
             )
         )
     return out
+
+
+# ---------------------------------------------------------------- F8 model grid
+
+
+def model_grid(rows: list[SessionRow], model_pool: ModelPool | None = None) -> GridData:
+    """F8's inputs: the benchmark half's grid, over the live store's own measured spend."""
+    # THE X AXIS IS MEASURED HERE, NOT LISTED. The benchmark half prices its x from the
+    # registry because it has token counts; this half has neither tokens nor permission —
+    # SH005 forbids shipped router code outside `models/config.py` from reading benchmark
+    # pricing, and it is right to: the live store already records what was BILLED, which is a
+    # better number than any list price. So panel A plots dollars per labeled session, and
+    # `GridData.x_label` is what keeps the two canvases from claiming to share an axis.
+    #
+    # A model whose spend is not fully known is dropped from the axis rather than plotted at a
+    # partial total: `cost_known_total` sums only the rows that carried a price, so a mixed
+    # model would land left of where it belongs and read as cheaper than it was.
+    from shunt.inspect.model_grid import GridData, GridRow
+    from shunt.models.config import ModelPool
+
+    pool = model_pool if model_pool is not None else ModelPool.load()
+    grid: list[GridRow] = []
+    known = _known_spend(rows)
+    for econ in _economics(rows):
+        entry = pool.get_model(econ.model)
+        size = entry.size if entry is not None else None
+        local = entry is not None and entry.serving_mode == "local"
+        spend = known.get(econ.model)
+        grid.append(
+            GridRow(
+                name=econ.model,
+                # Local serving is $0 by construction and enters the category column; a hosted
+                # model with no known spend is left off the axis entirely (None would put it
+                # in the $0 column, claiming it was free).
+                x=None if local else spend,
+                serving_mode=entry.serving_mode if entry is not None else "hosted",
+                n=econ.n_labeled,
+                passes=econ.n_success,
+                total_params=_param(size.total_params) if size else None,
+                active_params=_param(size.active_params) if size else None,
+                latency_s=(),
+            )
+        )
+    drawn = tuple(g for g in grid if g.n and (g.x is not None or g.is_local))
+    return GridData(
+        rows=drawn,
+        x_label="measured $ per labeled session (log)",
+        price_basis="x = billed spend over labeled sessions, from the store's own cost rows",
+        # THE STRATUM IS PART OF THE PROVENANCE, not a footnote. This builder pools both
+        # strata deliberately — the panel's whole purpose is to sit beside the benchmark
+        # half's — but a canvas that says "the live router" over replayed seed rows asserts a
+        # measurement the store does not hold, and with zero live sessions an empty subject
+        # set would otherwise be indistinguishable from a real result. So the counts are
+        # COMPUTED into the subtitle, where they cannot be read past.
+        source=_grid_source(rows, drawn),
+        # THIS HALF PLOTS A MEASURED BILL. The benchmark half's list-price sentence is simply
+        # false here, which is why the limitation is per-half rather than hardcoded.
+        x_limitation=(
+            "Panel A's x axis is a MEASURED BILL — dollars per labeled session, off the "
+            "store's own cost rows — not a list price, and not the benchmark half's axis. A "
+            "model whose sessions are not all priced is left off the panel rather than "
+            "plotted at a partial total."
+        ),
+    )
+
+
+def _grid_source(rows: list[SessionRow], drawn: tuple[GridRow, ...]) -> str:
+    """The grid's subject set, with its stratum split — so replay can never read as live."""
+    labeled = [r for r in rows if r.tier2_success is not None]
+    per_stratum = Counter(r.stratum for r in labeled)
+    n_live, n_seeded = per_stratum[LIVE], per_stratum[SEEDED]
+    drawn_names = {g.name for g in drawn}
+    live_models = len({r.model_chosen for r in labeled if r.stratum == LIVE} & drawn_names)
+    return (
+        f"the outcome store's Tier-2-labeled sessions — {n_live} live and {n_seeded} replayed "
+        f"from the benchmark corpus; {live_models} of {len(drawn)} models drawn carry any "
+        f"live session"
+    )
+
+
+def _known_spend(rows: list[SessionRow]) -> dict[str, float]:
+    """Mean billed dollars per labeled session, per model — only where every row priced."""
+    per: dict[str, list[SessionRow]] = {}
+    for row in rows:
+        per.setdefault(row.model_chosen, []).append(row)
+    out: dict[str, float] = {}
+    for model, members in per.items():
+        labeled = [r for r in members if r.tier2_success is not None]
+        if not labeled or not all(r.cost_known for r in labeled):
+            continue
+        out[model] = sum(r.cost for r in labeled) / len(labeled)
+    return out
+
+
+def _param(value: object) -> int | None:
+    """A published parameter count, or None for the literal UNDISCLOSED — never a guess."""
+    return None if not isinstance(value, int) else value
 
 
 # ------------------------------------------------------------- F4 neighbourhood

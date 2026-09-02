@@ -1,0 +1,81 @@
+# WHICH LISTINGS ARE THE SAME PRODUCT — the hand-authored input to the price refresh.
+#
+# `refresh_price_sheet.py` resolves current prices for exactly the ids named here and for
+# nothing else. It is a map rather than a fuzzy match because every channel's catalogue
+# carries near-namesakes that are DIFFERENT products, and a substring match silently joins
+# them: `deepseek/deepseek-v4-flash-vision-exp`, `openai/gpt-5.6-sol-pro`,
+# `anthropic/claude-opus-4.8-fast`, and the dated snapshot `...-0731` are each a different
+# model from the registry entry they resemble. Joining a snapshot to its unpinned namesake is
+# exactly the model-identity drift documented in docs/benchmark-design.md; the map exists so
+# that join can only ever be a deliberate edit.
+#
+# DELIBERATELY EXCLUDED, and the bound this puts on "cheapest available today":
+#   - `:free` tiers — a $0 rate-limited tier is not the same product, and a $0 price would
+#     dominate every cost axis it touched (the same reason benchmark/config.py refuses a
+#     free model a benchmark cell).
+#   - `:batch` — asynchronous, a different SLA at a different price.
+#   - `:flex` / `:priority` — SLA tiers of the same placement.
+#   - `@region` pins — the same product under a placement suffix; the unsuffixed base id is
+#     listed instead. If a region ever prices below its base, this map will not see it.
+#   - Native-provider price pages (api.deepseek.com, platform.openai.com, ...) — no
+#     machine-readable price endpoint, and this file admits only prices a script can fetch.
+#     A native list price that undercuts every aggregator is therefore invisible here.
+#
+# An id that has disappeared from its channel's catalogue at refresh time is recorded as an
+# unresolved quote, never carried forward from the previous sheet.
+schema: 1
+models:
+  qwen3.7-plus:
+    openrouter: [qwen/qwen3.7-plus]
+    requesty: [alibaba/qwen3.7-plus, fireworks/qwen3.7-plus]
+  deepseek-v4-flash:
+    openrouter: [deepseek/deepseek-v4-flash]
+    requesty:
+      - deepinfra/deepseek-ai/DeepSeek-V4-Flash
+      - doubleword/deepseek-v4-flash
+      - novita/deepseek/deepseek-v4-flash
+      - parasail/parasail-deepseek-v4-flash
+    huggingface: [deepseek-ai/DeepSeek-V4-Flash]
+  gpt-5-mini:
+    openrouter: [openai/gpt-5-mini]
+    requesty: [openai/gpt-5-mini, openai-responses/gpt-5-mini, azure/gpt-5-mini]
+  zai-glm-5.2:
+    openrouter: [z-ai/glm-5.2]
+    requesty: [zai/glm-5.2]
+  kimi-k2.5:
+    openrouter: [moonshotai/kimi-k2.5]
+    requesty: [moonshot/kimi-k2.5, "deepinfra/Kimi K2.5"]
+    huggingface: [moonshotai/Kimi-K2.5]
+  kimi-k3:
+    openrouter: [moonshotai/kimi-k3]
+    requesty:
+      - moonshot/kimi-k3
+      - fireworks/kimi-k3
+      - nebius/kimi-k3
+      - sference/kimi-k3
+      - tensorx/kimi-k3
+    huggingface: [moonshotai/Kimi-K3]
+  gemini-3.1-pro:
+    openrouter: [google/gemini-3.1-pro-preview]
+    requesty: [google/gemini-3.1-pro-preview, vertex/gemini-3.1-pro-preview]
+  gpt-5.6-sol:
+    openrouter: [openai/gpt-5.6-sol]
+    requesty: [openai/gpt-5.6-sol, openai-responses/gpt-5.6-sol]
+  gpt-5.6-terra:
+    openrouter: [openai/gpt-5.6-terra]
+    requesty: [openai/gpt-5.6-terra, openai-responses/gpt-5.6-terra]
+  claude-fable-5:
+    openrouter: [anthropic/claude-fable-5]
+    requesty: [anthropic/claude-fable-5, vertex/claude-fable-5]
+  claude-opus-4-8:
+    openrouter: [anthropic/claude-opus-4.8]
+    requesty: [anthropic/claude-opus-4-8, bedrock/claude-opus-4-8, vertex/claude-opus-4-8]
+  claude-opus-4-6:
+    openrouter: [anthropic/claude-opus-4.6]
+    requesty: [anthropic/claude-opus-4-6, bedrock/claude-opus-4-6, vertex/claude-opus-4-6]
+  claude-sonnet-5:
+    openrouter: [anthropic/claude-sonnet-5]
+    requesty: [anthropic/claude-sonnet-5, bedrock/claude-sonnet-5, vertex/claude-sonnet-5]
+  zai-glm-5.3-flash:
+    openrouter: [z-ai/glm-5.3-flash]
+    requesty: [zai/glm-5.3-flash]

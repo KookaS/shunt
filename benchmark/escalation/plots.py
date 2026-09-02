@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 
 import numpy as np
@@ -27,7 +27,7 @@ from benchmark.escalation.policies import ARM_ESCALATE
 from benchmark.plot_frame import MUTED, Annotations, FigureSpec, panel_label
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from matplotlib.axes import Axes
     from matplotlib.table import Table
@@ -49,6 +49,8 @@ _LENGTH_NULL = "#1565C0"
 _SHIPPED_ROW = "#FFF3CD"
 _GATED_COL = "#EEF4FA"
 _UNDEFINED = "#9E9E9E"
+
+_CHANCE = 0.5
 
 _TICK_PT = 8.5
 _LEGEND_PT = 8.0
@@ -131,8 +133,14 @@ def scope_strip(ax: Axes, value_verdict: str) -> None:
 # ------------------------------------------------------------- 1. escalation_decision
 
 
+# The claim half of the title. The two AUROCs are NOT frozen into it: they were, and the pair
+# drifted to 0.601/0.781 while the figure's own subtitle and panel-A legend — both derived —
+# printed 0.600/0.778. A number a canvas states twice must be computed once, so
+# `escalation_decision_spec()` appends the measured pair at draw time.
+_DECISION_CLAIM: Final[str] = "Counting the reproduction phase is what decides the answer"
+
 ESCALATION_DECISION_SPEC = FigureSpec(
-    title="Counting the reproduction phase is what decides the answer: AUROC 0.601 vs 0.781",
+    title=_DECISION_CLAIM,
     reading=(
         "Left: the COMPLETE ROC of the recurrence score as a continuous statistic — each run is "
         "scored by the largest number of times one failing-check id recurred inside the shipped "
@@ -157,8 +165,9 @@ ESCALATION_DECISION_SPEC = FigureSpec(
     ),
     notes=(
         "stale_window is held FIXED at the shipped value for BOTH curves. It is a knob in its own "
-        "right — the as-shipped score reaches 0.728 at stale_window=1000 — so letting it vary "
-        "between the two curves would have credited the counting change with a window change.",
+        "right — the window-sensitivity note below carries what each family reaches at the wide "
+        "window — so letting it vary between the two curves would have credited the counting "
+        "change with a window change.",
         "The AUROC of the score bounds what ANY single escalate_after_n can reach.",
     ),
     limitations=(
@@ -167,6 +176,20 @@ ESCALATION_DECISION_SPEC = FigureSpec(
         "Association only — no stored trajectory contains an escalation that actually happened.",
     ),
 )
+
+
+def escalation_decision_spec(
+    scores_plain: Sequence[float], scores_edit: Sequence[float], labels: Sequence[bool]
+) -> FigureSpec:
+    """`ESCALATION_DECISION_SPEC` with the two AUROCs it names MEASURED, never retyped."""
+    # The title, the subtitle and panel A's legend all state this pair. Two of the three were
+    # already derived; the third was a literal and went stale by a thousandth in each direction.
+    auroc_plain = metrics.auroc(scores_plain, labels)
+    auroc_edit = metrics.auroc(scores_edit, labels)
+    return replace(
+        ESCALATION_DECISION_SPEC,
+        title=f"{_DECISION_CLAIM}: AUROC {auroc_plain:.3f} vs {auroc_edit:.3f}",
+    )
 
 
 def escalation_decision(
@@ -179,6 +202,7 @@ def escalation_decision(
     band: tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]] | None = None,
     shipped_n: int,
     value_verdict: str,
+    window_sensitivity: Mapping[str, float] | None = None,
 ) -> Annotations:
     """ROC + null band, precision-vs-threshold and fire rate — the detection claim, in one."""
     ax_roc, ax_precision, ax_rate, ax_scope = axes
@@ -206,8 +230,33 @@ def escalation_decision(
                 if null is not None
                 else ()
             ),
+            *_window_notes(window_sensitivity),
         ),
         counts=(("stamped_runs", len(labels)),),
+    )
+
+
+def _window_notes(sensitivity: Mapping[str, float] | None) -> tuple[str, ...]:
+    """What each counting family reaches at the WIDE window, measured rather than retyped."""
+    # stale_window is the knob the figure holds fixed, so how much it is worth belongs on the
+    # record. It was a literal in the static note and had drifted (0.728 against a measured
+    # 0.725); the report already publishes the four cells, so read them.
+    if not sensitivity:
+        return ()
+    families = (("as-shipped", "as_shipped"), ("edit-gated", "edit_gated"))
+    parts = [
+        f"{name} {sensitivity[shipped]:.3f} -> {sensitivity[wide]:.3f}"
+        for name, stem in families
+        for shipped, wide in (
+            (f"{stem}_auroc_at_stale_window_10", f"{stem}_auroc_at_stale_window_1000"),
+        )
+        if shipped in sensitivity and wide in sensitivity
+    ]
+    if not parts:
+        return ()
+    return (
+        "window sensitivity, AUROC at the shipped stale_window vs stale_window=1000: "
+        + " · ".join(parts),
     )
 
 
@@ -848,7 +897,12 @@ def session_value(sc: SessionCadenceReport, axes: Sequence[Axes]) -> Annotations
                 if _unbeaten_baselines(sc)
                 else ()
             ),
-            *_cost_facts(sc),
+            # The five-arm x two-currency cost ledger — about thirty numbers — used to be
+            # appended here and pushed the subtitle to five lines, so the paired difference the
+            # figure is ABOUT arrived after a wall of dollars nobody reads at a glance. It is not
+            # dropped: `_cost_facts` now goes to the notes, which reach the reader through
+            # figures.json and docs/escalation.md, and the subtitle points at it.
+            *(("per-arm cost per task acted on: see this figure's notes",) if sc.costs else ()),
         ),
         # ALWAYS non-None, and that is load-bearing: `_merge` keeps the first caveat, so a
         # figure that leaves it None inherits the run-level one — and the run-level line is about
@@ -863,6 +917,7 @@ def session_value(sc: SessionCadenceReport, axes: Sequence[Axes]) -> Annotations
             f"instance-level bootstrap over {sc.n_instances_resampled} overlap tasks, not Wilson "
             "over sessions: several frontier sessions on one task are one draw, not several",
             *_ladder_notes(sc),
+            *_cost_facts(sc),
             *_cost_notes(sc),
         ),
         counts=(
@@ -934,7 +989,7 @@ _SHORT_ARM: Final[dict[str, str]] = {
 
 
 def _cost_facts(sc: SessionCadenceReport) -> tuple[str, ...]:
-    """One subtitle line per currency, and the currency is NAMED in it — never a bare dollar."""
+    """One NOTE line per currency, and the currency is NAMED in it — never a bare dollar."""
     # A cache-blind total and a cache-aware one are different quantities, and the cheap arms are
     # exactly where they diverge, so a figure that prints a price without saying which is a defect.
     # No "$" anywhere in the string: matplotlib reads a pair of them as mathtext delimiters and
@@ -1177,6 +1232,12 @@ CORPUS_COVERAGE_SPEC = FigureSpec(
         ("admission margin", "runs that reached the depth but leave too few steps unread after it"),
     ),
     notes=(
+        "Panel C's y axis is anchored at chance (0.5), not at zero, and its label says so: a bar's "
+        "HEIGHT is the score's skill above chance, and a bar at chance has none. The half of the "
+        "AUROC range below 0.5 is not a quantity the score can report, so charting it would make "
+        "every bar look alike; anchoring anywhere between 0 and 0.5 — the old 0.4 — would instead "
+        "inflate the drop the panel exists to size. A below-chance value drops the axis back to "
+        "zero and relabels it.",
         "Stamping coverage tracks capture DATE, and capture date correlates with model, so model "
         "and coverage are confounded on this corpus and cannot be separated from it.",
         "A single-class stratum contributes no comparable pairs and is DROPPED from the "
@@ -1289,12 +1350,27 @@ def _draw_stratified(ax: Axes, strat: StratifiedAuroc) -> None:
     )
     for index, (_name, value) in enumerate(drawn):
         ax.text(index, value + 0.012, f"{value:.3f}", ha="center", fontsize=9.5)
-    ax.axhline(0.5, linestyle="--", color=_NULL_CENTRE, label="chance")
-    ax.set_ylabel("AUROC of the recurrence score")
-    ax.set_ylim(0.4, 1.0)
+    ax.axhline(_CHANCE, linestyle="--", color=_NULL_CENTRE, label="chance")
+    # The axis floor was 0.4 — a truncation at a value that means nothing, which roughly doubled
+    # the apparent size of the very confound drop this panel exists to size. An AUROC's floor is
+    # not 0 either: 0.5 is chance, the half of the range below it is unreachable by a score that
+    # is merely mis-signed, and the panel's question is how much SKILL ABOVE CHANCE survives the
+    # strata. So the axis is anchored at chance and SAYS SO on the y label, which is what makes it
+    # honest rather than merely tidier. A bar at chance then has zero height, which is the
+    # correct reading of "no separation". A below-chance value would be clipped by that anchor,
+    # so the floor drops to zero whenever one appears, and the label follows it.
+    floor = _CHANCE if all(value >= _CHANCE for _name, value in drawn) else 0.0
+    anchored = floor == _CHANCE
+    ax.set_ylim(floor, 1.0)
+    ax.set_ylabel(
+        "AUROC of the recurrence score — axis starts at chance 0.5"
+        if anchored
+        else "AUROC of the recurrence score — axis starts at 0",
+        fontsize=8.5,
+    )
     ax.tick_params(labelsize=_TICK_PT)
     ax.legend(fontsize=_LEGEND_PT, loc="upper right")
-    panel_label(ax, "C · does the edge survive the strata")
+    panel_label(ax, "C · does the edge survive the strata; bar height is skill above chance")
 
 
 # Axes-fraction centre of the waterfall's second column ("too short"), which is the one region
@@ -1505,6 +1581,7 @@ __all__ = [
     "corpus_and_coverage",
     "escalation_budget",
     "escalation_decision",
+    "escalation_decision_spec",
     "operating_point",
     "policy_sweep",
     "scope_strip",

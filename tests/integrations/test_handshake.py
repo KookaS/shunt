@@ -7,62 +7,21 @@ routing, `_acompletion` not mocked) against a live FakeUpstream over both wires.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-import shunt.proxy.server as server
+from tests.integrations.conftest import FAKE_ROUTER_YAML, HandshakeFactory
 from tests.integrations.fake_upstream import FakeUpstream
-
-_REGISTRY = Path(__file__).parent / "fake_registry.yaml"
-_DOCKER_BASE_URL = "http://fake-upstream:9099/v1"
-
-
-class _FakeEmbedder:
-    """A fixed-vector embedder so the in-process handshake never loads real ONNX."""
-
-    def embed(self, text: str) -> object:
-        import numpy as np
-
-        return np.full(768, 0.1, dtype=np.float32)
-
-    def fingerprint(self) -> dict[str, object]:
-        return {"repo": "fake", "dim": 768, "max_chars": 4000, "revision": None}
-
-    @property
-    def model_name(self) -> str:
-        return "fake"
-
-    @property
-    def max_chars(self) -> int:
-        return 4000
-
-    def warm(self) -> None:
-        return None
 
 
 @pytest.fixture
 def handshake_client(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    handshake_factory: HandshakeFactory,
 ) -> Iterator[tuple[TestClient, FakeUpstream]]:
     """Shunt (TestClient) wired to a live FakeUpstream via a port-rewritten registry."""
-    # Real ONNX loading is (correctly) blocked in the unit suite; inject a fake so the
-    # routing path stays hermetic and never downloads the ~600MB model.
-    monkeypatch.setattr(server, "Embedder", _FakeEmbedder)
-    with FakeUpstream() as upstream:
-        registry = _REGISTRY.read_text().replace(_DOCKER_BASE_URL, f"{upstream.base_url}/v1")
-        registry_path = tmp_path / "fake_registry.yaml"
-        registry_path.write_text(registry)
-        monkeypatch.setattr(server, "_MODEL_CONFIG_PATH", str(registry_path))
-        # The packaged router.yaml enumerates the SHIPPED registry's models; against
-        # this fake registry those names don't exist, so restrict_to_live would (rightly)
-        # refuse to boot. An empty `models:` list is the escape hatch — route over the
-        # whole active registry — which is what a custom-registry deployment wants.
-        monkeypatch.setenv("SHUNT_CONFIG_DIR", str(tmp_path))
-        (tmp_path / "router.yaml").write_text("router:\n  models: []\n")
-        with TestClient(server.app) as client:
-            yield client, upstream
+    with handshake_factory(FAKE_ROUTER_YAML) as (client, upstream, _embedder):
+        yield client, upstream
 
 
 def test_models_endpoint_lists_fake_registry(

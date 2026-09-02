@@ -26,9 +26,9 @@ def test_specs_module_does_not_import_matplotlib() -> None:
     assert subprocess.run([sys.executable, "-c", probe], check=False).returncode == 0
 
 
-def test_seven_figures_with_unique_names_and_slugs() -> None:
-    assert len(specs.FIGURES) == 7
-    assert len({text.name for text in specs.FIGURES}) == 7
+def test_eight_figures_with_unique_names_and_slugs() -> None:
+    assert len(specs.FIGURES) == 8
+    assert len({text.name for text in specs.FIGURES}) == 8
     assert [text.slug for text in specs.FIGURES] == [
         "inference-strata",
         "inference-cost",
@@ -36,6 +36,7 @@ def test_seven_figures_with_unique_names_and_slugs() -> None:
         "inference-neighbourhood",
         "inference-policy",
         "inference-escalation",
+        "inference-model-grid",
         "inference-ope",
     ]
     assert all(text.filename == f"{text.name}.png" for text in specs.FIGURES)

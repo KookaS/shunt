@@ -10,12 +10,16 @@ import pytest
 import yaml
 
 from shunt.models.config import (
+    UNDISCLOSED,
     ModelConfig,
     ModelEntry,
     ModelPool,
     ReasoningArm,
     ReasoningConfig,
+    Size,
     arm_api_params,
+    load_registry,
+    resolve_models,
     strict_yaml_load,
 )
 
@@ -494,3 +498,78 @@ class TestArmApiParams:
         mc = ModelConfig(name="m", provider="p", base_url="https://x/v1", api_key_env_var="X")
         with pytest.raises(ValueError, match="unknown reasoning arm"):
             arm_api_params(mc, "high")
+
+
+class TestSizeMetadata:
+    """The size axis is data with provenance, or it is not committed."""
+
+    def test_moe_model_declares_active_below_total(self) -> None:
+        size = Size(
+            total_params=284_000_000_000,
+            active_params=13_000_000_000,
+            size_source="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash",
+            size_as_of="2026-08-29",
+        )
+        assert size.active_params < size.total_params
+
+    def test_active_above_total_is_rejected(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="exceeds"):
+            Size(
+                total_params=8_000_000_000,
+                active_params=9_000_000_000,
+                size_source="https://example.invalid",
+                size_as_of="2026-08-29",
+            )
+
+    def test_zero_is_not_a_parameter_count(self) -> None:
+        # A blank column is MISSING, never zero — the same rule the benchmark applies to
+        # measured columns. `UNDISCLOSED` is the way to say "no vendor figure".
+        with pytest.raises(pydantic.ValidationError, match="positive"):
+            Size(
+                total_params=0,
+                active_params=0,
+                size_source="https://example.invalid",
+                size_as_of="2026-08-29",
+            )
+
+    def test_undisclosed_is_a_first_class_value(self) -> None:
+        size = Size(
+            total_params=UNDISCLOSED,
+            active_params=UNDISCLOSED,
+            size_source="https://platform.openai.com/docs/models",
+            size_as_of="2026-08-29",
+            size_note="OpenAI publishes no parameter count for any GPT-5 tier.",
+        )
+        assert size.total_params == "UNDISCLOSED"
+
+    def test_a_bare_estimate_string_is_not_accepted(self) -> None:
+        # Only the exact literal passes, so "~30B" or "probably 8B" cannot reach the figures.
+        with pytest.raises(pydantic.ValidationError):
+            Size(
+                total_params="~30B",  # type: ignore[arg-type]
+                active_params=UNDISCLOSED,
+                size_source="https://example.invalid",
+                size_as_of="2026-08-29",
+            )
+
+    def test_unsourced_size_is_rejected(self) -> None:
+        with pytest.raises(pydantic.ValidationError):
+            Size(total_params=8_000_000_000, active_params=8_000_000_000)  # type: ignore[call-arg]
+
+    def test_serving_mode_defaults_to_hosted(self) -> None:
+        entry = ModelEntry(model_id="x", provider="p")
+        assert entry.serving_mode == "hosted"
+
+    def test_serving_mode_rejects_an_unknown_value(self) -> None:
+        with pytest.raises(pydantic.ValidationError):
+            ModelEntry(model_id="x", provider="p", serving_mode="on-prem")  # type: ignore[arg-type]
+
+    def test_every_shipped_model_carries_sourced_size_and_serving_mode(self) -> None:
+        # The registry is the figure's only size source; a row without provenance would put an
+        # unsourced number on a published axis.
+        registry = load_registry()
+        for name, model in resolve_models(registry).items():
+            assert model.size is not None, f"{name} declares no size"
+            assert model.size.size_source.startswith("http"), name
+            assert model.size.size_as_of, name
+            assert model.serving_mode in ("hosted", "local"), name

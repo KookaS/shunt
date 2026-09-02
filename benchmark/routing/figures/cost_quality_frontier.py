@@ -232,9 +232,11 @@ SPEC = FigureSpec(
         ),
     ),
     notes=(
-        "The y axis is clipped to the data range, not to 0-100, and each panel is clipped to "
-        "its own window. Every axis label carries the range it shows; the alternative was a "
-        "figure on which every strategy is the same flat line.",
+        "The y axis is clipped to the data range AND the intervals drawn on it — the floor "
+        "clears the lowest Wilson cap on the panel, never only the lowest marker, so no "
+        "whisker is cropped — not to 0-100, and each panel is clipped to its own window. "
+        "Every axis label carries the range it shows; the alternative was a figure on which "
+        "every strategy is the same flat line.",
         "Each panel below the first shows one REGION of the panel above it, and the region is "
         "derived rather than chosen: the layout note records the windows it landed on, and "
         "the panel above always carries every strategy the window leaves out — named there, "
@@ -868,13 +870,19 @@ def _panel_limits(
         ax.set_xlim(window[0], window[1])
         ax.set_ylim(window[2], window[3])
         return (window[2], window[3])
-    perfs = [float(r["AvgPerf%"]) for r in rows if _cost(r) > 0]
-    # The extent must cover the CI caps too, or a strategy whose cost interval runs off the
-    # right edge is silently clipped — which is precisely the strategy the reader needs.
+    # The extent must cover the CI caps too, or a strategy whose interval runs off the edge is
+    # silently clipped — which is precisely the strategy the reader needs. That rule was
+    # written for x and left unapplied on y: a `min(perfs) - 3.0` floor is a POINT-ESTIMATE
+    # floor, and it cut the lower whisker off the least precise row on the canvas
+    # (kNN-semantic-tier, 65.8% with a Wilson interval reaching 58.7), which then read as the
+    # most precise. Both axes now bound the INTERVALS.
     costs = [x for r in rows if _cost(r) > 0 for x in _extent_xs(r)]
+    perfs = [y for r in rows if _cost(r) > 0 for y in _perf_extent(r)]
     ax.set_xlim(min(costs) * 0.55, max(costs) * 2.6)
-    ax.set_ylim(min(perfs) - 3.0, 100.0)
-    return (min(perfs) - 3.0, 100.0)
+    # 100 is the CEILING because a pass rate is bounded there; only the floor is a window.
+    floor = max(0.0, min(perfs) - 3.0)
+    ax.set_ylim(floor, 100.0)
+    return (floor, 100.0)
 
 
 def _style_panel(ax: Axes, span: tuple[float, float], *, flat_at: float | None) -> None:

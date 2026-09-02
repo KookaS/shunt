@@ -18,12 +18,12 @@ in one table and cache-blind in the other.
 
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from benchmark import config
+from benchmark.routing import integrity
 from benchmark.routing.strategies import BilledAttempt
 
 if TYPE_CHECKING:
@@ -65,14 +65,15 @@ class CachePrice:
 
 def _token_totals(results_csv: Path) -> dict[str, tuple[int, int]]:
     """Per model, ``(total in_tok, total out_tok)`` over every measured row."""
+    # REPLICATE POLICY: rep 0 ONLY. This is a MEASUREMENT question — the per-model input share
+    # it derives feeds `TotalCost_cacheaware`, i.e. the published Pareto column — so it must
+    # see the same canonical observation of each cell that the scoring path sees. Summing
+    # replicates would reweight the share by how many times a cell happened to be re-run.
     totals: dict[str, list[int]] = {}
-    if not results_csv.exists():
-        return {}
-    with results_csv.open(newline="") as handle:
-        for row in csv.DictReader(handle):
-            bucket = totals.setdefault(row["model"], [0, 0])
-            bucket[0] += int(row.get("in_tok") or 0)
-            bucket[1] += int(row.get("out_tok") or 0)
+    for row in integrity.rep_zero_rows(results_csv):
+        bucket = totals.setdefault(row["model"], [0, 0])
+        bucket[0] += int(row.get("in_tok") or 0)
+        bucket[1] += int(row.get("out_tok") or 0)
     return {m: (i, o) for m, (i, o) in totals.items()}
 
 

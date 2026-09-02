@@ -20,9 +20,20 @@ _NORMAL = NormalDist()
 # ---------------------------------------------------------------------------
 
 
-def _paired(r: int, b: int, rc: float = 0.5, bc: float = 1.0, known: bool = True):
+def _paired(r: int, b: int, rc: float = 0.5, bc: float = 1.0, known: bool = True, **legs):
+    # The constant-policy arm defaults to a CLONE of the fixed-frontier arm, so every
+    # pre-existing scenario keeps meaning what it meant: whatever the frontier leg says about
+    # this stream, the constant leg says too. Pass `cp=None` to model the arm being absent,
+    # or (cp, cc) explicitly to separate the two baselines.
     return gate.PairedOutcome(
-        router_pass=r, baseline_pass=b, router_cost=rc, baseline_cost=bc, cost_known=known
+        router_pass=r,
+        baseline_pass=b,
+        router_cost=rc,
+        baseline_cost=bc,
+        cost_known=known,
+        constant_pass=legs.get("cp", b),
+        constant_cost=legs.get("cc", bc),
+        constant_cost_known=known,
     )
 
 
@@ -278,3 +289,57 @@ class TestConfirmationAndAdapter:
                 return {"decision_provenance": None, "cost": 1.0, "cost_known": 1}
 
         assert gate.read_paired_outcomes(UntaggedStore()) == []
+
+
+# ---------------------------------------------------------------------------
+# The zero-ML constant-policy arm (the Scrouting falsifier)
+# ---------------------------------------------------------------------------
+
+
+class TestConstantPolicyArm:
+    def test_pass_is_impossible_without_the_constant_arm(self):
+        # A stream that PASSES the two-arm gate must only CONTINUE when the third arm was
+        # never collected — the gate may not assume the arm it did not run would have lost.
+        stream = [_paired(1, 0, rc=0.5, bc=1.0, cp=None) for _ in range(60)]
+        verdict, msg = gate.decide_online_verdict(gate.run_online_gate(stream))
+        assert verdict == gate.CONTINUE
+        assert "constant-policy" in msg
+
+    def test_fail_when_it_beats_the_frontier_but_not_the_constant_policy(self):
+        # Scrouting in miniature: the router crushes an expensive frontier model and is
+        # 2x the price of a policy that does no routing at all, at identical quality.
+        stream = [_paired(1, 0, rc=0.5, bc=10.0, cp=1, cc=0.25) for _ in range(60)]
+        state = gate.run_online_gate(stream)
+        assert state.cache_aware_ratio < 1.0
+        assert state.constant_cache_aware_ratio >= 1.0
+        verdict, msg = gate.decide_online_verdict(state)
+        assert verdict == gate.FAIL
+        assert "constant policy" in msg
+
+    def test_fail_when_quality_is_credibly_worse_than_the_constant_policy(self):
+        stream = [_paired(0, 0, rc=0.1, bc=10.0, cp=1, cc=0.25) for _ in range(60)]
+        verdict, msg = gate.decide_online_verdict(gate.run_online_gate(stream))
+        assert verdict == gate.FAIL
+        assert "constant policy" in msg
+
+    def test_passes_when_it_beats_both(self):
+        stream = [_paired(1, 0, rc=0.2, bc=1.0, cp=0, cc=0.5) for _ in range(60)]
+        verdict, _ = gate.decide_online_verdict(gate.run_online_gate(stream))
+        assert verdict == gate.PASS
+        assert gate.final_verdict(stream)[0] == gate.PASS
+
+    def test_final_verdict_holds_a_pass_the_constant_cross_check_cannot_confirm(self):
+        # Monitor PASS, but the fixed-N Tango test against the constant arm does not confirm.
+        stream = [_paired(1, 0, rc=0.2, bc=1.0, cp=0, cc=0.5) for _ in range(60)]
+        assert gate.decide_online_verdict(gate.run_online_gate(stream))[0] == gate.PASS
+        stripped = [
+            gate.PairedOutcome(
+                router_pass=o.router_pass,
+                baseline_pass=o.baseline_pass,
+                router_cost=o.router_cost,
+                baseline_cost=o.baseline_cost,
+                constant_pass=None,
+            )
+            for o in stream
+        ]
+        assert gate.confirm_fixed_n_constant(stripped) is None

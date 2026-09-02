@@ -7,7 +7,7 @@
 # measured better than it. Until now that answer lived only in a gitignored JSON report.
 #
 # The figure recomputes the rows through `ladder_evidence.build_evidence` rather than reading
-# `reports/ladder_evidence.json`: `reports/` is gitignored, and a figure whose input is not
+# `reports/ladder_evidence.json`: that report is gitignored, and a figure whose input is not
 # committed cannot be regenerated from a fresh clone.
 #
 # The ladder walk in panel B is DERIVED — the shortlist AND the live pool are read from the

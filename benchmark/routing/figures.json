@@ -29,6 +29,7 @@
         "deepseek-v4-flash nothink\u2192high: output-token ratio 0.92x on n=113 pairs \u2014 never fired \u2014 not a null; paired \u0394 +2.7pp [-3.6, +8.9], cost \u0394 \\$-0.0012",
         "deepseek-v4-flash nothink\u2192max: output-token ratio 0.78x on n=27 pairs \u2014 never fired \u2014 not a null; paired \u0394 +3.7pp [-12.5, +19.9], cost \u0394 \\$-0.0034"
       ],
+      "price_sheet": null,
       "reading": "Left: the manipulation check. For each (model, low arm, high arm) pair, the ratio of mean output tokens on the tasks where BOTH arms ran. A knob that was turned moves this well above 1; the red line is where nothing changed. Right: the paired pass-rate difference for the same pairs, with a 95% paired interval. A row whose knob did not fire is greyed and carries the label \u2014 its flat difference measures nothing.",
       "size": "wide",
       "subtitle": "2 of 9 reasoning knobs demonstrably fired (ratio \u2265 1.15\u00d7 output tokens) \u00b7 over the fired knobs only: +8.54pp on 82 co-measured pairs (exact McNemar p=0.143) \u00b7 all nine pooled, including the seven that never fired: +1.68pp on 475 pairs",
@@ -72,6 +73,7 @@
         "zai-glm-5.2: billed 0.189 (n=87), registry predicts 0.233 [discount measured, input share 0.946 measured], hit-rate band 0.148\u20130.574",
         "kimi-k3: billed 0.217 (n=103), registry predicts 0.262 [discount measured, input share 0.911 measured], hit-rate band 0.180\u20130.590"
       ],
+      "price_sheet": null,
       "reading": "Left: per model, the share of the list-price bill that was actually charged. The blue bar is MEASURED \u2014 every row's real_cost over its estimated_cost in results.csv, which is the whole gap between list price and the invoice. The green diamond is the share the registry's cache-read price predicts would survive, priced at the corpus's measured input/output token mix; the faint grey rule beneath each bar sweeps the one input nothing here measures, the cache hit rate, from 100% (left cap) to 50% (right cap). The right-hand column repeats each row as billed \u2192 modelled with its row count. Lower is cheaper. Right: the switch tax \u2014 how much of the MODELLED cache saving survives as the router changes model inside one session.",
       "size": "wide",
       "subtitle": "6 models, 1209 priced rows \u00b7 cache-read price measured for 6/6 models and input share for 6/6; hit rate assumed at 90% \u00b7 mean billed share 0.21 of list price vs a modelled 0.24 \u2014 residual -0.01 to +0.08 per model",
@@ -124,6 +126,7 @@
         "all 90 of 90 solved-by-all tasks still have unsampled columns (3 to 12 of 13, median 9) \u2014 any one of them becomes contestable if an unsampled column fails",
         "the 14 solved-by-none tasks are under-sampled too (3 to 8 columns), but could join only by an unsampled column PASSING, so they are excluded from the interval"
       ],
+      "price_sheet": null,
       "reading": "Left: every task (row) against every measured (model, arm) column. Green is a pass, red a fail, grey never sampled \u2014 grey is NOT a failure. Middle: how many tasks each column was actually run on, so the uneven denominators are visible. Right: the task census. A split task \u2014 at least one pass and at least one fail \u2014 can already be won or lost by a routing decision. A task solved by every SAMPLED column has not been shown uncontestable, only untested: each one still has unsampled columns, and one failing column is enough to move it into the split slice.",
       "size": "wide_tall",
       "subtitle": "200 tasks x 13 columns, 1217 of 2600 cells sampled (46.8%) \u00b7 coverage 21/200 (zai-glm-5.2) to 198/200 (gpt-5-mini) \u00b7 contestable tasks in [96, 186] of 200 \u2014 96 split is a FLOOR, not a ceiling",
@@ -172,7 +175,7 @@
         "tasks": 184
       },
       "notes": [
-        "The y axis is clipped to the data range, not to 0-100, and each panel is clipped to its own window. Every axis label carries the range it shows; the alternative was a figure on which every strategy is the same flat line.",
+        "The y axis is clipped to the data range AND the intervals drawn on it \u2014 the floor clears the lowest Wilson cap on the panel, never only the lowest marker, so no whisker is cropped \u2014 not to 0-100, and each panel is clipped to its own window. Every axis label carries the range it shows; the alternative was a figure on which every strategy is the same flat line.",
         "Each panel below the first shows one REGION of the panel above it, and the region is derived rather than chosen: the layout note records the windows it landed on, and the panel above always carries every strategy the window leaves out \u2014 named there, on the plane. A strategy is never dropped; the worst that happens is that it is compared at a coarser scale than the crowd below it.",
         "The marker and the hull use the same cache-aware cost column strategy_summary.csv decides Pareto on, so the plane and the table cannot rank strategies differently.",
         "Oracle: \\$18.33 cache-aware / \\$18.33 naive, 96.74% (n=184, bound \u2014 unreachable by design)",
@@ -191,12 +194,13 @@
         "context transfer on kNN-semantic-cascade: \\$38.49 as the benchmark measures it (a fresh context per rung \u2014 not a config value), \\$38.93\u2013\\$39.82 at context_transfer: summary, \\$42.90 at context_transfer: full (the shipped default) \u2014 a cost model over measured tokens and registry input prices, computed on the token-complete subset (n=145), asserting no pass rate",
         "frontier vs strategy_summary.csv Pareto: drawn-only Session-Cascade (both on cache-aware cost; a difference here is the live-only filter)",
         "selection: scored on 184/200 tasks selected by coverage; deepseek-v4-flash passes 74.1% here vs 12.5% on the 16 dropped (+61.6pp) \u2014 difficulty-biased, not a random sample",
-        "equal-coverage via monotone imputation \u2014 47% of frontier cells imputed (every strategy scored on n=184). Monotonicity holds on 92% of 190 multi-observed task(s) (measured, not assumed). NEARLY every imputed cell is filled pass=True at a median measured price (the monotone ladder has a fail branch, and 1 of 398 filled cells took it), for the router as well as for the baseline \u2014 see evidence_basis.png for how much of each strategy's number that is, and kill_gate.png's measured-only row for what survives when the projection is removed.",
+        "equal-coverage via monotone imputation \u2014 47% of frontier cells imputed (every strategy scored on n=184). Monotonicity holds on 92% of 190 multi-observed task(s) (measured, not assumed). NEARLY every imputed cell is filled pass=True at a median measured price (the monotone ladder has a fail branch, and 5 of 410 filled cells took it), for the router as well as for the baseline \u2014 see evidence_basis.png for how much of each strategy's number that is, and kill_gate.png's measured-only row for what survives when the projection is removed.",
         "layout: THREE levels of magnification, stacked full width \u2014 panel A carries every strategy over the full cost range. panel B redraws panel A's box at full width (\\$8.69\u2013\\$132.56 at 89.5\u2013100.0%), which is the detail window \u2014 every strategy whose pass rate clears the best measured row's own Wilson lower bound, plus the fixed-frontier baseline and the oracle bound, never written down. panel C redraws panel B's box at full width (\\$27.90\u2013\\$33.76 at 96.5\u201396.9%), which is the group whose markers overlap in the panel above, measured on the rendered canvas, never written down. the pass-rate Wilson interval and the two cost marks are drawn in panel(s) A, B, and panel C carries neither \u2014 at that scale they run off the panel \u2014 carrying the context-transfer brackets instead. every panel names every strategy its own window holds, so a name repeats down the stack at each scale; the exception is the group panel C magnifies, whose markers are one blob above it and which is therefore named only there.",
         "layout: 2 strategies within \\$27.11\u2013\\$38.49 at 96.7\u201396.7% have separable markers but names too wide to print beside them, so the names are stacked on levels, each on a vertical leader to its own marker \u2014 no second copy of the points is drawn",
         "layout: 2 strategies within \\$1.50\u2013\\$1.80 at 75.5\u201375.5% have separable markers but names too wide to print beside them, so the names are stacked on levels, each on a vertical leader to its own marker \u2014 no second copy of the points is drawn",
         "layout: the context-transfer bracket is drawn only where the markers are magnified, so kNN-semantic-cascade carries none on the canvas; its numbers are in the context-transfer note rows above"
       ],
+      "price_sheet": null,
       "reading": "THREE PANELS, THREE MAGNIFICATIONS, ONE PLANE. Panel A is the whole set \u2014 every strategy that carries a cost, over the full cost range, at full label, interval and hull treatment. Panel B redraws the outlined box on A at the same full width; panel C redraws the outlined box on B. Each box is joined to the panel that magnifies it by two dashed lines running from its lower corners to that panel's upper corners, so the A-to-B-to-C descent is drawn rather than asserted. The three x axes are three DIFFERENT scales, each ticked in round dollars across its own window, and only the bottom panel carries the axis label. In all three, x is total dollars spent over the scored task set on a log axis, because the strategies span two decades, and y is pass rate in percent. NEITHER BOX IS WRITTEN DOWN. B's is the DETAIL WINDOW, derived from the rows every time the figure is drawn: every strategy whose pass rate clears the best measured row's own Wilson lower bound, plus the fixed-frontier baseline and the oracle bound, widened by the room the names need. C's is the group whose MARKERS overlap inside B \u2014 measured on the rendered canvas, not chosen \u2014 widened to contain the full length of every context bracket it draws. EVERY PANEL NAMES EVERY STRATEGY ITS OWN WINDOW HOLDS, so a name repeats down the stack at each scale \u2014 that is what a magnification is, one point named twice, not two measurements. A strategy outside the detail window is therefore named on A, on the plane, at its own cost and pass rate: it is not part of the comparison B is for, and it is not a footnote either. The ONE exception is the group panel C magnifies. Above C its markers are a single blob, so a name printed there would land on a mark nobody can resolve, and those names appear only on C. Any name that could be placed on no panel at all would be listed in the notes; today there is none. THE FIGURE DEGRADES ON BOTH AXES, and says which case it is in. With nothing outside the detail window there is nothing for B to add, and the figure is A plus the magnified panel. With no overlapping markers there is nothing to magnify, and the figure is A plus the detail panel. With neither, it is the single plane it has always been. The layout note states how many levels the figure has. WHERE THE INTERVALS LIVE. Panels A and B carry them; panel C carries none. The vertical rule through each marker is its 95% Wilson interval on the pass rate, drawn BEHIND the markers and faintly: several strategies share one pass rate here, so their intervals are literally the same rule drawn several times, and at full weight they read as a picket fence of separate measurements. The thin horizontal line running from a marker ends at an open tick at the NAIVE per-call sum, so the gap between the two cost models is a drawn distance; the capped bar at that tick is the 95% bootstrap interval on the naive total, drawn on the naive statistic because that is the one it was computed for. Both cost marks appear on LIVE strategies only. At C's scale every one of these runs off the panel, so C leaves them behind and the panel caption says so. IN EVERY PANEL the marker sits at CACHE-AWARE cost \u2014 what a deployment is billed once a repeat of the same model banks its cached prefix. Marker SHAPE carries what a strategy is: circles and the orange diamond can run in production today, blue squares are blocked \u2014 no router.strategy value names them \u2014 an X is a control that must never ship, and a star is a bound that is unreachable by design. Marker FILL splits the blue squares: a SOLID square is blocked and nothing equivalent runs today, while a HOLLOW one would mark a mechanism that ships under another config surface with only its NAME blocked. NO ROW IS HOLLOW TODAY \u2014 the one that was, Session-Cascade, is now live as router.strategy: session_cascade, and every remaining blue square is solid, i.e. genuinely unrunnable. Only the live points enter the Pareto test and the shaded mixture region \u2014 a frontier anchored on a strategy the router rejects at boot describes an operating point nobody can buy. HOW A NAME IS PLACED SAYS WHAT WAS CROWDED. A name printed beside its marker had room there. A name lifted onto a level above or below the plane, on a vertical leader down to its own marker, belongs to a group whose NAMES could not all be printed where they sit \u2014 the leader is vertical and lands on the marker it names, so it cannot be misread onto a neighbour. Panel C labels its whole crowd that way, because at that scale nothing else can. Inside panel C, a DEPLOYABLE escalating strategy carries a context-transfer cost model, drawn as a dashed rule hanging under the marker it belongs to and joined to it by a thin line: the MARKER is what the benchmark measures, a fresh context on every rung, which is not a setting anyone can select; the shaded segment is `context_transfer: summary`, a band rather than a tick because how far a summariser compresses is not a constant; and the tick at the right end is `context_transfer: full`, which is what ships today. That rule asserts NO pass rate \u2014 it is horizontal, and its height carries no meaning at all. A deployable escalating row panel C does not contain carries no bracket on the canvas, and the notes name it and publish its numbers. The key is drawn ONCE for the whole figure, below the bottom panel, from every class the figure actually carries.",
       "size": "wide_tall",
       "subtitle": "12 strategies over 184 scored tasks \u00b7 Session-Cascade \\$28.71 at 96.7% vs baseline \\$96.02 at 95.1% (30% of the bill, cache-aware) \u00b7 cost is the wide axis: Session-Cascade's naive total spans \\$22.53\u2013\\$46.14 (95% bootstrap) \u00b7 area under the live frontier 0.929",
@@ -269,6 +273,7 @@
         "The four rows are read from the derived strategy summary at render time, so this figure and cost_quality_frontier.png cannot quote different numbers for one strategy.",
         "No interval is drawn. This figure states an ordering, not a precision \u2014 the intervals, the mixture region and the eight strategies left out are in cost_quality_frontier.png."
       ],
+      "price_sheet": null,
       "reading": "One plane, four points, no legend \u2014 each point is named where it sits. Left to right is the total dollars a strategy spent over the whole scored task set, on a LINEAR axis; bottom to top is the share of tasks it passed. Cheap is left, good is up, so the best place to be is the top-left corner. The blue point is what Shunt routes with by default. The orange point is the baseline it has to beat: send everything to the strongest enabled frontier model. The grey circle at the far left is the opposite extreme \u2014 send everything to the cheapest model. The grey STAR is a bound, not a product: it is what a router that already knew each task's outcome would have paid, and no configuration reproduces it. The measuring bar across the bottom is the figure's whole point: it spans the horizontal distance between the blue point and the orange one, which is the money the router does not spend.",
       "size": "single",
       "subtitle": "4 of 12 scored strategies, 184 scored tasks \u00b7 Session-Cascade \\$28.71 at 96.7% vs Always-Frontier \\$96.02 at 95.1% \u2014 30% of the bill \u00b7 cache-aware cost on a LINEAR axis; the full twelve-strategy plane is cost_quality_frontier.png",
@@ -316,6 +321,7 @@
         "NULL RESULT: the diagonal advantage over 10 repos with \u22658 tasks is 0.0215, INSIDE the shuffled-outcome null band [-0.0125, 0.0264] (null mean 0.0006, z=+2.42, 200 permutations)",
         "NULL RESULT: the diagonal advantage over 8 repos with \u226516 tasks is 0.0000, INSIDE the shuffled-outcome null band [-0.0132, 0.0105] (null mean -0.0006, z=+0.12, 200 permutations)"
       ],
+      "price_sheet": null,
       "reading": "Left: routing pass-rate against k. The solid blue line holds each task OUT of its own neighbour index (what a deployed router can do), the dashed orange line lets the task see itself (pure memorisation), the green line is the best single always-one-model policy that needs no router at all, and the grey band is the same rule on outcome-shuffled data. Middle: leave-one-out R-squared predicting each task's solve rate, for the embedded problem statement and for the human difficulty tag, each against its own shuffled null, with the task-identity variance ceiling marked. Right: same-repo minus cross-repo routing advantage, at both repo-size cutoffs.",
       "size": "wide",
       "subtitle": "184 tasks, 200 permutations per null, k=20 \u00b7 embedding R\u00b2 -0.040 vs control +0.130, null 95% [-0.119, -0.006] \u00b7 task-identity ceiling \u03b7\u00b2=0.564",
@@ -380,13 +386,14 @@
         "band 3: 156 real / 230 imputed / 14 unknown",
         "band 4: 102 real / 89 imputed / 9 unknown"
       ],
+      "price_sheet": null,
       "reading": "Left: per strategy, the share of scored DOLLARS billed to measured cells against projected ones. Middle: the same split on PASSES \u2014 the channel that decides every quality claim in this set. Right: per capability band, real against imputed against still-unknown cells; the bands are ordered weakest to strongest.",
       "size": "wide_tall",
-      "subtitle": "410 of 1175 completed cells (35%) are imputed, 25 unknown \u00b7 worst band 3: 60% imputed \u00b7 imputation is overwhelmingly pass-only (397 of 398 filled cells)",
+      "subtitle": "410 of 1175 completed cells (35%) are imputed, 25 unknown \u00b7 worst band 3: 60% imputed \u00b7 imputation is overwhelmingly pass-only (405 of 410 filled cells)",
       "terms": [
         [
           "imputed cell",
-          "filled by the monotone ladder: a model at least as strong as one that passed is credited with a pass. It can only ever ADD a pass, never a failure."
+          "filled by the monotone ladder: a model at least as strong as one that passed is credited with a pass, and a model no stronger than one that failed with a fail. The pass branch dominates; the subtitle counts how far."
         ],
         [
           "capability band",
@@ -397,7 +404,7 @@
           "a cell neither measured nor safely fillable \u2014 excluded from scoring."
         ]
       ],
-      "title": "A third of the evidence is filled in, and every filled cell is a pass"
+      "title": "A third of the evidence is filled in, and nearly every filled cell is a pass"
     },
     "exploration_cost.png": {
       "caveat": "Static matrix: an exploratory pull can never inform a later decision \u2014 cost only, learning benefit pinned to zero.",
@@ -413,9 +420,9 @@
         "The outcome matrix is static, so an exploratory pull can never improve a later decision: this measures exploration's COST with its learning benefit set to zero, the pessimistic half of the ledger \u2014 not a verdict on whether exploration pays.",
         "The dense slice is found greedily, not optimally, and comes from a single workload.",
         "How much of the corpus exploration left un-probed is NOT drawn: the replay report carries aggregate decisions, not the per-(task, model) probe record that question needs.",
-        "The two marginal pass-rate CIs overlap ([66%, 80%] vs [62%, 77%]) \u2014 at 143 paired tasks only the paired difference separates the arms",
-        "NO FRONTIER ARM IN THIS SLICE: the dense sub-grid covers only deepseek-v4-flash, gpt-5-mini \u2014 the priciest model here is \\$2.25/Mtok against \\$18.00 across all enabled models (kimi-k3, zai-glm-5.2, kimi-k2.5, qwen3.7-plus are absent). The exploration overhead measured here is between CHEAP models and is a LOWER BOUND on the shipped policy's, where an exploratory pull can land on the frontier model",
-        "THE DROPPED BASELINE CELLS ARE NOT A RANDOM SAMPLE: all 31 unscorable exploit-only cells are zai-glm-5.3-flash, a model outside the dense slice \u2014 so the exploit-only arm is systematically missing that model's tasks, not a random subset. The overhead is therefore reported PAIRED, over only the tasks both arms scored"
+        "The two marginal pass-rate CIs overlap ([66%, 80%] vs [62%, 77%]) \u2014 at 143 paired tasks only the paired difference separates the arms.",
+        "NO FRONTIER ARM IN THIS SLICE: the dense sub-grid covers only deepseek-v4-flash, gpt-5-mini \u2014 the priciest model here is \\$2.25/Mtok against \\$18.00 across all enabled models (kimi-k3, zai-glm-5.2, kimi-k2.5, qwen3.7-plus are absent). The exploration overhead measured here is between CHEAP models and is a LOWER BOUND on the shipped policy's, where an exploratory pull can land on the frontier model.",
+        "THE DROPPED BASELINE CELLS ARE NOT A RANDOM SAMPLE: all 31 unscorable exploit-only cells are zai-glm-5.3-flash, a model outside the dense slice \u2014 so the exploit-only arm is systematically missing that model's tasks, not a random subset. The overhead is therefore reported PAIRED, over only the tasks both arms scored."
       ],
       "n": {
         "paired tasks": 143,
@@ -432,6 +439,7 @@
         "Cells skipped as unscorable: 31 baseline, 4.0/seed exploration",
         "Realized explore/exploit SPEND 0.690 (worst seed 0.992); the router's own counter reached 0.363 of its 0.4 cap"
       ],
+      "price_sheet": null,
       "reading": "A: the cost/quality plane. Each arm is one point \u2014 mean cost per task on x, pass rate on y \u2014 with 95% bootstrap intervals on both axes; the arrow runs from the exploit-only arm to the exploring one, and the box states the PAIRED difference, which is what this slice has the power to resolve. B: where the budget went. The orange curve is the running share of decisions that were exploratory as the replay proceeds, the dotted line is the router's own confidence-weighted explore counter at the end of the run, and the dashed line is the configured cap it is measured against.",
       "size": "wide",
       "subtitle": "offline Direct-Method replay of the shipped policy \u2014 recorded outcomes, no live calls \u00b7 dense slice 174 tasks \u00d7 2 models (deepseek-v4-flash, gpt-5-mini), 143 scored by both arms, 20 seeds \u00b7 exploration bills 1.41\u00d7 the exploit-only run (worst seed 1.59\u00d7) \u00b7 95% percentile-bootstrap CIs over tasks",
@@ -456,7 +464,7 @@
       "title": "Exploration costs more, buys no pass rate, and its learning benefit is unmeasurable"
     },
     "kill_gate.png": {
-      "caveat": "3 of 4 rows: WORSE by more than the margin. Those rows' savings are not at equal quality.",
+      "caveat": "1 of 1 row(s) clearing the bar rest on 3 discordant pair(s); 3 of 4 rows: WORSE by more than the margin.",
       "data_digest": "cc040e8f6d6021db",
       "dpi": 150,
       "figsize": [
@@ -481,11 +489,12 @@
         "measured only: \u0394=-19.1pp [-28.6, -9.7], inferior, b=3 c=21, router \\$6.80 vs baseline \\$51.71, MDE \u00b113.0pp (\u00b18.1pp at 10% discordance)",
         "gate sample (N=20): \u0394=-20.0pp [-37.5, -2.5], inferior, b=0 c=4, router \\$1.48 vs baseline \\$9.13, MDE \u00b124.9pp (\u00b117.6pp at 10% discordance)",
         "Session-Cascade \u2014 shipped default, NOT pre-registered: \u0394=+1.6pp [-0.2, +3.5], non_inferior, b=3 c=0, router \\$33.56 vs baseline \\$96.02, MDE \u00b12.3pp (\u00b15.8pp at 10% discordance)",
-        "equal-coverage via monotone imputation \u2014 47% of frontier cells imputed (every strategy scored on n=184). Monotonicity holds on 92% of 190 multi-observed task(s) (measured, not assumed). NEARLY every imputed cell is filled pass=True at a median measured price (the monotone ladder has a fail branch, and 1 of 398 filled cells took it), for the router as well as for the baseline \u2014 see evidence_basis.png for how much of each strategy's number that is, and kill_gate.png's measured-only row for what survives when the projection is removed."
+        "equal-coverage via monotone imputation \u2014 47% of frontier cells imputed (every strategy scored on n=184). Monotonicity holds on 92% of 190 multi-observed task(s) (measured, not assumed). NEARLY every imputed cell is filled pass=True at a median measured price (the monotone ladder has a fail branch, and 5 of 410 filled cells took it), for the router as well as for the baseline \u2014 see evidence_basis.png for how much of each strategy's number that is, and kill_gate.png's measured-only row for what survives when the projection is removed."
       ],
+      "price_sheet": null,
       "reading": "Left: one row per evidence basis. The dot is the paired pass-rate difference (the kNN selection rule minus fixed-frontier) in percentage points, the whisker its 95% paired interval, and the dashed red line the pre-registered non-inferiority margin of -5pp. A row is green only when the Tango score test rejects H0 at that margin, red when the router is proven WORSE by more than the margin, grey when the data cannot tell. Right: the same tasks' total spend, baseline dot to router dot; a leftward arrow is a saving.",
       "size": "wide",
-      "subtitle": "paired Tango score at the pre-registered \u03b4=5pp \u00b7 n=184/94/20/184 \u00b7 arms disagree on 38 of 184: MDE \u00b18.3pp there, \u00b15.8pp at 10% discordance",
+      "subtitle": "paired Tango score at the pre-registered \u03b4=5pp \u00b7 n=184/94/20/184 \u00b7 arms disagree on 38 of 184 on the widest basis: MDE \u00b18.3pp there, \u00b15.8pp at 10% discordance",
       "terms": [
         [
           "the two router rows",
@@ -533,6 +542,7 @@
         "bin [0.6,0.8): predicted 0.710, observed 0.729 (n=421)",
         "bin [0.8,1.0): predicted 0.900, observed 0.874 (n=517)"
       ],
+      "price_sheet": null,
       "reading": "Left: the reliability diagram. x is the weighted neighbourhood success rate the shipped rule computes for a (task, model) pair; y is how often that pair actually passed. A calibrated predictor tracks the dashed diagonal. Bars carry 95% Wilson intervals and the count in each bin. The red line is the shipped 0.6 eligibility threshold. Middle: how those scores are distributed, so the threshold's position is visible geometry rather than a claim. Right: Brier skill score against the marginal pass rate \u2014 above zero means the neighbourhood rate beats simply knowing how often each model passes \u2014 with the shuffled-outcome null band and the human-difficulty-tag positive control on the same axis.",
       "size": "wide",
       "subtitle": "184 tasks x 6 models, k=20, leave-one-out \u00b7 Brier skill -0.039 vs null 95% [-0.099, -0.015] \u00b7 human-tag positive control +0.065",
@@ -583,6 +593,7 @@
         "kimi-k3 at 42.9x base: n=110, helps 29, hurts 3, delta +0.2364 [+0.1455, +0.3273], exact null [-0.1091, +0.1091], p 2.6e-06, NET-HELPFUL",
         "the shortlist jumps over kimi-k3, a target whose interval clears zero on this corpus"
       ],
+      "price_sheet": null,
       "reading": "Left: for each candidate escalation target, the paired difference in resolve rate against the cheap base model, computed only on challenges where BOTH models have a scored default-arm outcome. The dot is the point estimate, the dark whisker the paired percentile bootstrap over challenges, and the pale whisker behind it the exact paired-exchangeability null band, so a dot inside the pale band is indistinguishable from chance. Rows are ordered by list price, cheapest at the bottom, which is the same order the ladder ranks by. Right: the same rows against the SHIPPED LIVE POOL (read from src/shunt/config/router.yaml's models list) \u2014 a filled marker is a rung the ladder actually visits, a hollow one a live rung the shortlist jump skips, and a hollow square is a benchmark target the shipped router no longer routes to (it stays measured, never served). The visit sequence is drawn as a stepped path and the shortlist's jump as a single long arrow.",
       "size": "wide",
       "subtitle": "paired on the overlap of scored default-arm runs \u00b7 exact paired-exchangeability null \u00b7 base deepseek-v4-flash \u00b7 rank_shortlist=3 visits 1 of 2 live targets \u00b7 visited: zai-glm-5.2 (+0.155) \u00b7 skipped: kimi-k3 (+0.236) \u00b7 not live (registry only): qwen3.7-plus, gpt-5-mini, kimi-k2.5",
@@ -634,7 +645,7 @@
         "strategies": 12
       },
       "notes": [
-        "Costs are the same naive per-task totals every other routing figure uses, so the brackets are comparable with cost_quality_frontier.png.",
+        "This axis is the NAIVE per-task cost \u2014 the raw sum of what each attempt was billed, repriced only when the subtitle says so. cost_quality_frontier.png ranks on the CACHE-AWARE total instead, which prices a repeat-model discount the naive sum does not. The two are different cost models, so a span read off this figure is NOT comparable with one read off that one: a cascade that re-hits one model is cheaper there than it is here, and the gap is the discount, not a different strategy.",
         "Oracle: \\$18.33, 96.74% (bound)",
         "Price-Cascade: \\$27.11, 96.74% (blocked)",
         "kNN-semantic-cascade (within-task): \\$30.44, 96.74% (blocked)",
@@ -643,9 +654,10 @@
         "Difficulty-Band-cascade: \\$34.77, 96.74% (blocked)",
         "kNN-semantic-cascade: \\$43.28, 96.74% (live)"
       ],
+      "price_sheet": null,
       "reading": "Left: every strategy that reaches the bound's pass rate within one percentage point, as a DOT at its total spend on a log axis, cheapest at the bottom, coloured by class. The axis is logarithmic, so only the dot's POSITION carries the price; the grey rule behind it is a reading guide and its length means nothing. A GREEN dot is a price you can pay today \u2014 `router.strategy` names it. The blue bracket is the span between the cheapest LIVE way to buy that quality and the cheapest BLOCKED one \u2014 engineering work, not physics. The red bracket is the span from there down to the bound, which no strategy of any class can cross. The subtitle carries how the two divide, because that split moves with the data and this title deliberately does not claim it. Right: how many strategies each class contributes and the best pass rate it reaches, with the reason that class is kept in the corpus.",
       "size": "wide",
-      "subtitle": "7 of 12 strategies reach 96.74% \u00b1 1pp \u00b7 cheapest live \\$33.56 \u00b7 cheapest blocked \\$27.11 \u00b7 bound \\$18.33 \u00b7 blocked strategies hold 42% of the live-to-bound headroom",
+      "subtitle": "7 of 12 strategies reach 96.74% \u00b1 1pp \u00b7 cheapest live \\$33.56 \u00b7 cheapest blocked \\$27.11 \u00b7 bound \\$18.33 \u00b7 blocked strategies hold 42% of the live-to-bound headroom \u00b7 cost as billed when each run happened",
       "terms": [
         [
           "bound",
@@ -665,6 +677,70 @@
         ]
       ],
       "title": "What the bound's quality costs, and which of those prices you may actually pay"
+    },
+    "model_grid.png": {
+      "caveat": "Panel A's x axis is a list price per TOKEN, never a bill per solved task.",
+      "data_digest": "cc040e8f6d6021db",
+      "dpi": 150,
+      "figsize": [
+        13.0,
+        8.0
+      ],
+      "generator": "benchmark.routing.figures.model_grid",
+      "goal": "Look for a rung that sits high and left in panel A \u2014 cheap per token and measured to resolve tasks. Then check panel B: if the high-and-left rungs are all long rules (very sparse), the ladder's cheap end is buying compute efficiency rather than size, and a small DENSE rung is not a substitute for one.",
+      "limitations": [
+        "Pass rates come from an uneven sample: models were not run on identical task sets, so a rate difference across two rungs is not a paired comparison.",
+        "Every row counts a censored cell in its denominator and not in its passes, so a row whose run censored heavily is a LOWER BOUND on that rung's rate, not an estimate of it. Where that matters the row's own note gives the censored count and the assumption-free bounds; read the marker as the floor it is.",
+        "Panel A's x axis is a LIST PRICE at one token mix, not a measured bill: it answers what a token costs, never what a solved task costs. A locally served rung has no such price at all and sits in the category column, which is not a claim that running it is free \u2014 its cost is UNDEFINED and its note says so.",
+        "The $0 column and the log region are not one ruler. The gap between them is a break, and no distance across it is meaningful.",
+        "Hue is a coarse size band, not a capability measurement \u2014 panel B carries the exact counts, and a band is not evidence that its members behave alike.",
+        "A DAGGERED row (\u2020) was measured outside this corpus, under a different harness. Its height is not comparable cell-for-cell with the rest of the panel \u2014 read it as a separate measurement plotted on the same axes, never as one more corpus row. Its note below states the harness, the sample, how far that sample overlaps this corpus, and the verdict ceiling.",
+        "Panels C and D are empty: no latency has been instrumented on any row. The column is MISSING, and nothing here should be read as a speed claim."
+      ],
+      "n": {
+        "external": 2,
+        "latency_hosted": 0,
+        "latency_local": 0,
+        "models": 8,
+        "sized": 6,
+        "undisclosed": 2
+      },
+      "notes": [
+        "deepseek-v4-flash: 68.9% on n=190 \u00b7 $0.1421 (blended $ per 1M tokens (log) \u2014 mix stated above) \u00b7 284B total / 13B active",
+        "gpt-5-mini: 54.0% on n=198 \u00b7 $0.2766 (blended $ per 1M tokens (log) \u2014 mix stated above) \u00b7 size UNDISCLOSED",
+        "granite4.2-8b-q8-local \u2020: 20.0% on n=20 \u00b7 $0 (local) \u00b7 9B total / 9B active",
+        "kimi-k2.5: 55.4% on n=74 \u00b7 $0.6365 (blended $ per 1M tokens (log) \u2014 mix stated above) \u00b7 1000B total / 32B active",
+        "kimi-k3: 84.5% on n=110 \u00b7 $3.1826 (blended $ per 1M tokens (log) \u2014 mix stated above) \u00b7 2800B total / 104B active",
+        "qwen3.5-35b-a3b \u2020: 69.4% on n=36 \u00b7 $0.1531 (blended $ per 1M tokens (log) \u2014 mix stated above) \u00b7 35B total / 3B active",
+        "qwen3.7-plus: 41.1% on n=56 \u00b7 $0.3346 (blended $ per 1M tokens (log) \u2014 mix stated above) \u00b7 size UNDISCLOSED",
+        "zai-glm-5.2: 76.2% on n=21 \u00b7 $1.4457 (blended $ per 1M tokens (log) \u2014 mix stated above) \u00b7 753B total / 40B active",
+        "drawn at a fixed reference marker because no parameter count is published: gpt-5-mini, qwen3.7-plus",
+        "\u2020 granite4.2-8b-q8-local: measured on mini-swe-agent, temperature 0, llama-server -c 32768 --no-context-shift --jinja, Q8_0 KV, 3600 s wall over SWE-bench Verified, a 20-instance draw fixed before the run; 7 of these 20 instances are also among the 200 in results.csv \u2014 partial overlap, so neither a paired nor an independent comparison, and all 7 are censored cells here; no dollar cost is drawn or stated: nothing is billed per token on a locally served rung, the run spent $0 on hosted APIs, and the real resource cost was 17.7 GPU-hours on one RTX 3060 12 GB \u2014 a different quantity in a different unit, deliberately not converted into dollars; 16 of 20 cells were censored (11 wall-limit, 5 context exhaustion at a 32768-token window that is a 12 GB VRAM ceiling, not the model's 131072-token limit), so the plotted height is the CONSERVATIVE all-recorded denominator \u2014 the same convention the corpus rows use \u2014 and it is a LOWER BOUND, not a measured rate: the assumption-free bounds are [20%, 100%], the censoring is INFORMATIVE (censored cells peaked higher and ran longer than resolved ones), and the model-attributable 4 of 4 is upward-biased and must not be read off this marker; verdict ceiling UNPROVEN (pass rate; 16 of 20 cells censored, true rate bounded only to [20%, 100%]) \u2014 NOT a corpus row, and not comparable cell-for-cell with the rows beside it",
+        "\u2020 qwen3.5-35b-a3b: measured on mini-swe-agent, temperature 0, 262k context, $0.55 per-cell cap over SWE-bench Verified, random.Random(seed).sample(sorted(all_specs), 20) over all 500, seeds [0, 1] pooled; 13 of these 40 instances are also among the 200 in results.csv \u2014 partial overlap, so neither a paired nor an independent comparison; $0.2153 per instance as billed, averaged over all 40 cells run (the n here is the model-attributable subset of those); 2 cell(s) censored; verdict ceiling SIGNAL (2 seeds) \u2014 NOT a corpus row, and not comparable cell-for-cell with the rows beside it"
+      ],
+      "price_sheet": null,
+      "reading": "Panel A: each model at its blended token price (x, log \u2014 with a separate column at the left for locally-served rungs, which have no per-token list price at all and so cannot sit on a log axis; that column says nothing about what such a rung costs to run, which is UNDEFINED here and stated in the row's note) against its measured pass rate (y), with Wilson 95% whiskers. Marker area follows the square root of the active parameter count, the marker edge says whether the weights are hosted or local, and hue is the coarse total-size band. Panel B: one row per model, a hollow mark at total parameters and a filled mark at active parameters \u2014 the rule joining them IS the mixture-of-experts sparsity gap. A row whose name carries a dagger was measured outside this corpus under a different harness; its note below states which, and its height is not comparable cell-for-cell with the rows beside it. Panels C and D: per-call latency, hosted and local in separate axes because the two populations are not comparable.",
+      "size": "wide_tall",
+      "subtitle": "one measured arm per model, nothing imputed \u00b7 Wilson 95% intervals \u00b7 8 models over the measured default-arm cells of results.csv, plus any \u2020 out-of-corpus rung \u00b7 results.csv also holds zai-glm-5.3-flash (41 cells, not enabled in benchmark.yaml) \u2014 not drawn \u00b7 1 at $0 (local) \u00b7 7 priced \u00b7 n per model 20\u2013198, unpaired task sets \u00b7 blend = 98% input / 2% output, the corpus's own 473,753,911:7,320,640 token split",
+      "terms": [
+        [
+          "blended $/Mtok",
+          "list input and output prices mixed at the corpus's own measured input:output token ratio, the same ratio for every model"
+        ],
+        [
+          "active parameters",
+          "what one token decodes through \u2014 a COMPUTE claim. All of a mixture's total parameters must still be resident to serve it"
+        ],
+        [
+          "UNDISCLOSED",
+          "the vendor publishes no parameter count. No estimate is substituted"
+        ],
+        [
+          "\u2020 (dagger)",
+          "measured outside this corpus, on a different harness and a task draw that is neither paired with this corpus nor independent of it \u2014 the row's own note states the overlap. Plotted on the same axes, never pooled with the corpus rows"
+        ]
+      ],
+      "title": "Every rung: what it costs, what it weighs, what it delivers"
     },
     "oracle_gap.png": {
       "caveat": "Arm-bandit, kNN-difficulty, kNN-semantic-tier carry MORE regret than always-cheapest.",
@@ -703,6 +779,7 @@
         "kNN-semantic-tier: regret 56.3201",
         "Every strategy holds the same rank at every gamma on the grid, so the ladder's ordering is a statement about quality-at-cost and not about the exchange rate."
       ],
+      "price_sheet": null,
       "reading": "Left: the cost saving of the router against fixed-frontier, split by Oaxaca-Blinder into a price effect (cheaper tokens), a volume effect (fewer tokens) and their interaction, over the tasks where BOTH arms passed. Middle: cumulative regret against the hindsight oracle, lower is better, with 95% bootstrap intervals where the summary carries them; bar colour is the strategy's class \u2014 green runs live today, blue is blocked, orange is a control that must never ship, grey is a bound no router can reach \u2014 and a red outline marks a bar a fixed always-cheapest policy already beats. Right: the same ranking recomputed across three orders of magnitude of the cost/quality exchange rate, coloured the same way.",
       "size": "wide_tall",
       "subtitle": "price 138.0% + interaction -36.1% = 101.9% mechanism, volume -1.9% (64 both-pass tasks) \u00b7 regret quoted at gamma=0.1; ordering IDENTICAL across gamma 0.001-0.33",
@@ -725,6 +802,82 @@
         ]
       ],
       "title": "The saving is a cheaper tariff, not a better prediction"
+    },
+    "pareto_dimensions.png": {
+      "caveat": "Only configurable strategies enter a frontier; bounds, controls and blocked rows are drawn, never ranked.",
+      "data_digest": "cc040e8f6d6021db",
+      "dpi": 150,
+      "figsize": [
+        13.0,
+        8.0
+      ],
+      "generator": "benchmark.routing.figures.pareto_dimensions",
+      "goal": "Look for a row of panel F that is filled all the way across \u2014 a strategy that is optimal whatever you are buying. There is none. Then read the row of whichever column you actually pay in, because that, and not the cost panel alone, is the frontier your deployment sits on.",
+      "limitations": [
+        "TWO COST MODELS SHARE THIS CANVAS. Panel A's dollars are the cache-aware total (`TotalCost_cacheaware`, the column cost_quality_frontier.png ranks on); panel E's CV is the dispersion of the NAIVE per-task cost (`TotalCost`), because the cache-aware discount is published as a row total and there is no per-task cache-aware series to take a CV of. The panel labels carry the difference; a reader must not read A and E as two views of one bill.",
+        "The y axis is the same imputation-biased pass rate every figure in this set uses: every filled cell is a pass, so all five frontiers sit on quality numbers biased upward by the share evidence_basis.png publishes.",
+        "The dollar axis rests on an ASSUMED cache hit rate, as cost_quality_frontier.png's does. THE OTHER FOUR ARE COUNTED, NOT MODELLED \u2014 but two of them are counted over a SUBSET, not over the corpus: an imputed cell records no calls and no tokens at all, so panels B and D are per-task rates over each row's counted paths only, and the note below gives how much of each row that is. Panel C is counted on every scored task, because a session count comes from the strategy's own ladder rather than from a cell. Nothing here is scaled up to a corpus total: an unrun cell contributes nothing, never a zero.",
+        "The five dimensions are NOT independent, and this is the size of it \u2014 strongest Spearman rho over the 12 drawn rows: provider calls/output tokens +0.923; provider calls/session tail (p95) +0.919; session tail (p95)/output tokens +0.919. A cascade that re-attempts spends more calls, more output tokens and more sessions at once, so those axes move together. provider calls, cost CV select the IDENTICAL front (Always-Frontier, kNN-semantic-cascade). The figure claims only that MEMBERSHIP differs across them, which is a statement about the ordering, not a claim that the axes measure five separate things."
+      ],
+      "n": {
+        "configurable_strategies": 4,
+        "dimensions": 5,
+        "excluded_pairs": 0
+      },
+      "notes": [
+        "Every panel ranks the CONFIGURABLE rows only. Bounds, controls and blocked rows are drawn at their measured position and never enter a frontier, because a frontier anchored on a point no operator can select describes an operating point nobody can buy.",
+        "Calls, output tokens and the session tail are the countable quantities latency is made of, not a measured latency. Nothing in this corpus times a request.",
+        "Rows can land on EXACTLY the same point on these axes \u2014 a blocked cascade shares the shipped default's call count, session tail and output-token total \u2014 so a marker may carry more than one strategy. Every name is lifted onto a level above its own marker on a vertical leader, which is what keeps a shared point from being read as one row.",
+        "TIE: 7 of the 12 drawn rows sit at exactly 96.74% (178 passes of 184) \u2014 the hindsight bound stops here too, so the misses are tasks no model in the matrix solved. Along this line the panels RANK on x; they do not trade quality for it.",
+        "billed cost: frontier = Always-Cheap, Session-Cascade",
+        "provider calls: frontier = Always-Frontier, kNN-semantic-cascade",
+        "session tail (p95): frontier = Always-Frontier, Session-Cascade, kNN-semantic-cascade",
+        "output tokens: frontier = Always-Cheap, Always-Frontier, kNN-semantic-cascade",
+        "cost CV: frontier = Always-Frontier, kNN-semantic-cascade",
+        "Always-Frontier: on 4 of 5 frontiers",
+        "kNN-semantic-cascade: on 4 of 5 frontiers",
+        "Always-Cheap: on 2 of 5 frontiers",
+        "Session-Cascade: on 2 of 5 frontiers",
+        "counted paths for panels B and D \u2014 Always-Cheap: 174 of 184 scored task(s)",
+        "counted paths for panels B and D \u2014 Always-Frontier: 95 of 184 scored task(s)",
+        "counted paths for panels B and D \u2014 Difficulty-Band-cascade: 151 of 184 scored task(s)",
+        "counted paths for panels B and D \u2014 Oracle: 170 of 184 scored task(s)",
+        "counted paths for panels B and D \u2014 Price-Cascade: 159 of 184 scored task(s)",
+        "counted paths for panels B and D \u2014 Session-Cascade: 159 of 184 scored task(s)",
+        "counted paths for panels B and D \u2014 kNN-difficulty: 174 of 184 scored task(s)",
+        "counted paths for panels B and D \u2014 kNN-difficulty-cascade: 159 of 184 scored task(s)",
+        "counted paths for panels B and D \u2014 kNN-semantic: 159 of 184 scored task(s)",
+        "counted paths for panels B and D \u2014 kNN-semantic-cascade: 145 of 184 scored task(s)",
+        "counted paths for panels B and D \u2014 kNN-semantic-cascade (within-task): 153 of 184 scored task(s)",
+        "counted paths for panels B and D \u2014 kNN-semantic-tier: 148 of 184 scored task(s)"
+      ],
+      "price_sheet": null,
+      "reading": "FIVE PANELS, ONE PLANE EACH, AND A MATRIX. Panels A-E share the same y axis \u2014 pass rate over the scored corpus \u2014 and differ only in what x costs: dollars (log, because the strategies span two decades), provider calls, the p95 session tail, output tokens, and the coefficient of variation of per-task cost. Panels B and D are PER TASK and are counted only over the paths that carry real counts, because an imputed cell records no calls and no tokens; panel C is counted on every scored task. THE TWO DOLLAR AXES ARE NOT ONE COST MODEL: panel A is the cache-aware total, panel E is the dispersion of the NAIVE per-task cost, and the panel labels say which is which. The green line in each panel joins that panel's Pareto frontier, computed on that panel's own two axes. MARKER SHAPE CARRIES CLASS, never colour alone: a circle can be configured today, a blue square is blocked, an X is a control that must never ship, a star is a bound unreachable by design. Only circles enter a frontier, so a hindsight oracle is drawn beside the strategies it bounds without ever being ranked as one of them. Only the configurable rows are named on the plane; the rest are read off their shape and the key. FILL, not hue, carries membership: a marker is filled only when it is on that panel's frontier, and only a circle can be \u2014 every other mark is an outline, which is also what keeps a frontier circle visible where two rows land on the same point. PANEL F IS THE FINDING. One row per configurable strategy, one column per dimension, and a filled cell where that strategy is on that dimension's frontier. Read a ROW to see how much of a strategy's optimality survives changing the currency; read a COLUMN to see who you would buy if that column were the only thing you cared about. The count at the right of each row is how many of the five it holds. THE DOTTED RULE across A-E is the pass rate most of the drawn rows share EXACTLY; it is named in panel C's right margin and explained in the notes, and along it the panels rank on x rather than trading quality for it.",
+      "size": "wide_tall",
+      "subtitle": "4 configurable strategies over 5 dimensions, 12 rows drawn \u00b7 best row holds 4 of 5 \u2014 no strategy holds all five \u00b7 the shipped default (Session-Cascade) holds 2 of 5 \u00b7 no row excluded for a missing value",
+      "terms": [
+        [
+          "frontier (per dimension)",
+          "no other LIVE strategy is at least as good on BOTH that panel's axes and strictly better on one. Computed per panel by the same routine the summary's Pareto column uses, over that panel's axis pair rather than a fixed one."
+        ],
+        [
+          "live",
+          "the router may be configured with this strategy today \u2014 derived from the product's own LIVE_STRATEGIES, never restated in the benchmark."
+        ],
+        [
+          "session tail (p95)",
+          "the 95th percentile of sessions spent per task. A cascade buys its pass rate by re-attempting, and this is what the worst tasks pay for that."
+        ],
+        [
+          "cost CV",
+          "standard deviation of per-task cost divided by the mean. Low means a predictable bill; high means the total is carried by a few expensive tasks."
+        ],
+        [
+          "excluded",
+          "a row missing a value on a panel's axis is dropped from THAT panel's frontier rather than read as zero \u2014 a missing value coerced to zero is un-dominated by construction, which certifies 'measured nothing' as optimal."
+        ]
+      ],
+      "title": "The frontier is not one set \u2014 it changes with the axis you buy on"
     },
     "routing_decision_audit.png": {
       "caveat": "32 task(s) were lost to under-provisioning \u2014 those are quality, not cost.",
@@ -749,6 +902,7 @@
         "Both axes are in price order and rows are the CHOSEN model, so a cell below the diagonal is over-provisioning by construction rather than by convention.",
         "exact-hit rate 60.1% over the decidable set; over-provisioning is 21.9%"
       ],
+      "price_sheet": null,
       "reading": "Left: rows are the model the router chose, columns the cheapest model that actually solved the task. The diagonal is an exact hit. BELOW it the router paid for a model it did not need; above it the router under-provisioned and the task was lost. Right: the same decisions as an error budget \u2014 exact, over-provisioned, under-provisioned, and the tasks no model solved, which no decision could have won.",
       "size": "wide",
       "subtitle": "178 decidable decisions, 6 tasks no model solved \u00b7 107 exact / 39 over-provisioned / 32 under-provisioned",
@@ -769,7 +923,7 @@
       "title": "The kNN selection rule's errors go both ways \u2014 it loses tasks, not just money"
     },
     "sweep_regimes.png": {
-      "caveat": "37% of scored cells are pass-only imputed; the trace beats the mixture by at most 4.3 pp.",
+      "caveat": "37% of scored cells are imputed, near-all pass-filled; the trace beats the mixture by at most 4.3 pp.",
       "data_digest": "f8283b7a59f0ef61",
       "dpi": 150,
       "figsize": [
@@ -781,17 +935,25 @@
       "limitations": [
         "Folds split TASKS, not repositories, so an out-of-fold task can still sit next to a sibling task from the same repo \u2014 this is a lower bound on optimism, not an estimate of transfer to a new codebase (see embedding_signal.png's cross-repo panel).",
         "REWARD-ARGMAX IS DEGENERATE: maximising reward (passes - gamma x cost, gamma=0.1) picks k=174, thresh=0.9, which routes 100% of tasks to kimi-k3 using 1 distinct model(s). At this gamma one extra pass is worth 10 USD against a suite costing a few dollars, so cost is nearly a no-op and the argmax escalates everything.",
-        "406/1104 cells (36.8%) in the scored matrix are monotone-IMPUTED rather than measured, and the imputation is near-exclusively pass-filling, so it almost never can never add a failure. The neighbourhood VOTES and the pass rates on this grid both read those synthetic passes \u2014 every quality number here is biased up",
+        "406/1104 cells (36.8%) in THE MATRIX THIS SWEEP SCORES (184 tasks x 6 ranked models \u2014 not the corpus-wide count in evidence_basis.png) are monotone-IMPUTED rather than measured, and the imputation is near-exclusively pass-filling, so it can almost never add a failure. The neighbourhood VOTES and the pass rates on this grid both read those synthetic passes \u2014 every quality number here is biased up",
         "Cost is model-price dependent \u2014 the selected cell moves when model prices move."
       ],
-      "n": {},
+      "n": {
+        "folds": 5,
+        "grid_cells": 275,
+        "in_sample_scored": 184,
+        "oof_scored": 184,
+        "tasks": 184
+      },
       "notes": [
         "Neighbourhoods use the real shipped jina embedder \u2014 the same Embedder the router runs, never a TF-IDF proxy.",
-        "The k grid is log-spaced (2 to 174). A uniform grid spends nearly all of its cells inside one regime and reports the same number on half of them.",
+        "The k grid is log-spaced. A uniform grid spends nearly all of its cells inside one regime and reports the same number on half of them.",
         "OUTER-LOOP CV: for each of 5 folds the configuration is chosen on the other folds \u2014 which are also the only tasks its neighbour index may hold \u2014 and scored on the fold left out. The per-fold picks were fold 0: k=20/t=0.9/m=1, fold 1: k=32/t=0.9/m=1, fold 2: k=20/t=0.9/m=1, fold 3: k=32/t=0.9/m=1, fold 4: k=20/t=0.9/m=1.",
         "Panel A's trace takes, per k, the cheapest cell whose out-of-fold pass rate clears the best cell's 95% Wilson lower bound. The two fixed policies are scored on the same corpus: always-cheapest (deepseek-v4-flash) 75.5% at \\$1.50, always-frontier (kimi-k3) 95.1% at \\$96.02.",
+        "The k grid actually swept runs 2 to 174 (11 values), clipped to a corpus of 184 tasks.",
         "Reward is driven by success_rate_thresh (\u03b7\u00b2=0.68); k also matters (\u03b7\u00b2=0.07) \u2014 neither can be picked freely. min_samples: \u03b7\u00b2=0.00 \u2014 negligible effect"
       ],
+      "price_sheet": null,
       "reading": "Three panels over ONE sweep. A: each point is one k on the log-spaced grid, placed at the total cost and pass rate its best threshold achieves out of fold; the dashed line is the straight mixture of the two fixed policies (send a fraction of tasks to the cheapest model and the rest to the frontier one). B: the same grid coloured by WHAT each (k, threshold) combination allocates \u2014 categorical, because the interesting fact is the regime, not the share. C: the selected configuration scored in sample beside the nested out-of-fold score of the same selection procedure.",
       "size": "wide",
       "subtitle": "n=184 tasks \u00b7 5-fold outer CV \u00b7 275 cells (11 log-spaced k) \u00b7 selected k=32, thresh=0.9, min_samples=1 -> 91.3% at \\$75.08 out of fold \u00b7 best gain over the mixture line +4.3 pp at k=12, thresh=0.9 \u00b7 shipped k=20, thresh=0.6 -> 75.5% at \\$3.50 (96% on deepseek-v4-flash)",
@@ -857,6 +1019,7 @@
         "5 solvers: {'deepseek-v4-flash': 18, 'kimi-k2.5': 4, 'kimi-k3': 3, 'zai-glm-5.2': 1}",
         "6 solvers: {'deepseek-v4-flash': 80, 'gpt-5-mini': 4, 'kimi-k2.5': 9, 'kimi-k3': 9, 'qwen3.7-plus': 1, 'zai-glm-5.2': 1}"
       ],
+      "price_sheet": null,
       "reading": "Left: how many tasks each capability band is the cheapest sufficient answer for, weakest band on the left, plus the tasks no enabled model solved. Right: for each count of solving models \u2014 the corpus's own difficulty measure \u2014 the share of tasks the kNN selection rule sent to each model, as stacked bars with the task count above.",
       "size": "wide",
       "subtitle": "184 scored tasks (16 incomplete challenges excluded); 6 solved by no enabled model \u00b7 4 capability bands populated \u00b7 hardest bucket (0 solvers) mostly deepseek-v4-flash, easiest (6 solvers) mostly deepseek-v4-flash",

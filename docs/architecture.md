@@ -151,13 +151,14 @@ verified outcomes build a neighbourhood for kNN to search.
 │   ├── session/           Session lifecycle, inactivity timeout, model lock
 │   ├── models/            Provider config, price-derived capability rank, fallback chain
 │   ├── inspect/           Figure frame, layout contract and diagnostics over the live outcome store (`shunt inspect`, [inspect] extra)
-│   │   └── inference/     Seven-figure inference family over the live store, driven by a figures.json manifest (`python -m shunt.inspect.inference`)
+│   │   └── inference/     Eight-figure inference family over the live store, driven by a figures.json manifest (`python -m shunt.inspect.inference`)
 │   ├── analysis/          Off-policy evaluation (ope.py) and instrument admissibility (admissibility.py) over logged decisions
 │   │                      (shipped rather than benchmark-side: src/shunt/ may not import benchmark/ — SH006 — and the rig image carries no benchmark/ tree)
 │   └── config/            Shipped defaults: models.yaml registry, router.yaml policy
 ├── benchmark/             Offline model-capability and routing evaluation
 ├── docs/                  User documentation (MkDocs)
 ├── examples/providers/    Copy-paste registry config, one file per provider
+├── examples/strategies/   Copy-paste router.yaml, one file per offered routing strategy
 ├── examples/integrations/ Tool integration examples (CLI agents, frameworks, gateways)
 └── tests/                 Test suite
 ```

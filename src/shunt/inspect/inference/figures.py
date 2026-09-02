@@ -17,13 +17,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from matplotlib import dates as mdates
+from matplotlib import patheffects
 from matplotlib.patches import Patch, Rectangle
 
-from shunt.inspect import plot_frame
+from shunt.inspect import model_grid, plot_frame
 from shunt.inspect.inference import data as idata
 from shunt.inspect.inference import specs
 from shunt.inspect.inference.estimators import ESTIMATORS, InstrumentInadmissibleError
-from shunt.inspect.plot_frame import Annotations, FigureSize, FigureSpec, Provenance
+from shunt.inspect.plot_frame import (
+    MAX_CAVEAT_CHARS,
+    Annotations,
+    FigureSize,
+    FigureSpec,
+    Provenance,
+)
 from shunt.inspect.plot_style import (
     MIN_N_PROVISIONAL,
     OKABE_ITO,
@@ -99,6 +106,21 @@ def _empty(ax: Axes, message: str) -> None:
     )
 
 
+def _stratum_handle(colour: str, label: str, *, hatched: bool, drawn: bool) -> Patch:
+    """One legend key per stratum — an ABSENT one is named, never silently dropped."""
+    # A legend that loses its "live" key reads as a figure that only ever had one series, and a
+    # key kept at full strength beside no bars reads as a series that rendered wrong. Naming the
+    # absence and greying the swatch is the same move `operating_point` makes with its hatched
+    # "undefined (n=0)" box: the empty set is drawn as an empty set.
+    return Patch(
+        facecolor=colour,
+        hatch=_PROVISIONAL_HATCH if hatched else None,
+        edgecolor="white",
+        label=label if drawn else f"{label} (none in this corpus)",
+        alpha=1.0 if drawn else 0.35,
+    )
+
+
 # `matplotlib.dates` ships no annotations, so every call below is untyped in a --strict
 # context. The alternative — plotting POSIX seconds against a numeric axis — puts an epoch
 # integer under a time series, which is unreadable. Coded ignores on three known-good calls.
@@ -169,6 +191,12 @@ def _strata_caveat(view: idata.StrataData) -> str | None:
     # caveat cut at the limit ships half a sentence. The nesting clause names only the first
     # inverting pair and counts the rest; the full list is the panel-A stage note in the docs.
     parts: list[str] = []
+    # THE ABSENCE FIRST. `caveat` was None on a store holding zero live sessions, so the only
+    # disclosure was `live n=0` in the grey subtitle, beside five grey bars and a full-strength
+    # blue "live" key — the same canvas a corpus with a small live stratum would produce. The
+    # other figures in this family carry the empty-stratum line in red; this one now does too.
+    if view.n_live == 0:
+        parts.append("live stratum EMPTY (n=0) — every panel is the seeded import")
     if view.ambiguous:
         parts.append(f"{len(view.ambiguous)} sessions in neither stratum")
     if view.n_prefix_disagree:
@@ -177,23 +205,52 @@ def _strata_caveat(view: idata.StrataData) -> str | None:
         first, rest = view.nesting_breaks[0], len(view.nesting_breaks) - 1
         more = f" +{rest} more" if rest else ""
         parts.append(f"stages are not nested — {first}{more}")
-    return "; ".join(parts) if parts else None
+    return _fit_caveat(parts)
+
+
+def _fit_caveat(parts: list[str]) -> str | None:
+    """Join the clauses that fit the frame's hard cap and COUNT the ones that do not."""
+    # `plot_frame` raises on an over-long caveat, so a fourth clause could take the whole figure
+    # down rather than shorten its red line. Dropping a clause silently is not acceptable either:
+    # the count says how many defects are named only in the docs.
+    if not parts:
+        return None
+    kept: list[str] = []
+    for part in parts:
+        candidate = "; ".join([*kept, part])
+        more = len(parts) - len(kept) - 1
+        suffix = f" (+{more} more)" if more else ""
+        if len(candidate) + len(suffix) > MAX_CAVEAT_CHARS:
+            break
+        kept.append(part)
+    if not kept:
+        return parts[0][: MAX_CAVEAT_CHARS - 1].rstrip() + "…"
+    dropped = len(parts) - len(kept)
+    return "; ".join(kept) + (f" (+{dropped} more)" if dropped else "")
 
 
 def _strata_stages(ax: Axes, view: idata.StrataData) -> None:
     stages = idata.CENSUS_STAGES
+    handles: list[Patch] = []
     for offset, (funnel, colour) in enumerate(
         ((view.census.seeded, _SEED_GREY), (view.census.live, OKABE_ITO[1]))
     ):
         values = [getattr(funnel, stage) for stage in stages]
-        ax.bar(
-            [i + (offset - 0.5) * _BAR for i in range(len(stages))],
-            values,
-            width=_BAR,
-            color=colour,
-            label=funnel.stratum,
-            hatch=_PROVISIONAL_HATCH if offset == 0 else None,
-            edgecolor="white",
+        # A stratum with nothing at any stage draws NO bars — a zero-height bar is a bar that
+        # rendered, and five of them beside a full-strength legend key is how "we measured zero"
+        # and "there is nothing here" become indistinguishable. The key below says which.
+        if any(values):
+            ax.bar(
+                [i + (offset - 0.5) * _BAR for i in range(len(stages))],
+                values,
+                width=_BAR,
+                color=colour,
+                label=funnel.stratum,
+                hatch=_PROVISIONAL_HATCH if offset == 0 else None,
+                edgecolor="white",
+            )
+        handles.append(
+            _stratum_handle(colour, funnel.stratum, hatched=offset == 0, drawn=any(values))
         )
     # Labelled from the DISPLAY map, not from the attribute names: `labeled` and `tier2` are
     # indistinguishable as bare nouns, and the difference between them is the figure's point.
@@ -208,7 +265,7 @@ def _strata_stages(ax: Axes, view: idata.StrataData) -> None:
     )
     ax.set_ylabel("sessions")
     _headroom(ax)
-    ax.legend(fontsize=8, frameon=False, loc="upper right")
+    ax.legend(handles=handles, fontsize=8, frameon=False, loc="upper right")
     # NOT "funnel": `embedded` and `indexed` are the only stages structurally contained in
     # `stored`. `labeled` is counted off `outcome_events` and `tier2` off the `outcomes`
     # view, so the five are five counts over one population, not a chain of survivors.
@@ -255,27 +312,28 @@ def _strata_models(ax: Axes, view: idata.StrataData) -> None:
     else:
         names = [model for model, _s, _l in view.per_model]
         positions = range(len(names))
-        ax.barh(
-            [p + _BAR / 2 for p in positions],
-            [s for _m, s, _l in view.per_model],
-            height=_BAR,
-            color=_SEED_GREY,
-            hatch=_PROVISIONAL_HATCH,
-            edgecolor="white",
-            label="seeded",
-        )
-        ax.barh(
-            [p - _BAR / 2 for p in positions],
-            [live for _m, _s, live in view.per_model],
-            height=_BAR,
-            color=OKABE_ITO[1],
-            edgecolor="white",
-            label="live",
-        )
+        seeded_counts = [s for _m, s, _l in view.per_model]
+        live_counts = [live for _m, _s, live in view.per_model]
+        handles = []
+        for sign, counts, colour, label, hatched in (
+            (1, seeded_counts, _SEED_GREY, "seeded", True),
+            (-1, live_counts, OKABE_ITO[1], "live", False),
+        ):
+            if any(counts):
+                ax.barh(
+                    [p + sign * _BAR / 2 for p in positions],
+                    counts,
+                    height=_BAR,
+                    color=colour,
+                    hatch=_PROVISIONAL_HATCH if hatched else None,
+                    edgecolor="white",
+                    label=label,
+                )
+            handles.append(_stratum_handle(colour, label, hatched=hatched, drawn=any(counts)))
         ax.set_yticks(list(positions))
         ax.set_yticklabels(names, fontsize=7)
         ax.set_xlabel("labeled sessions")
-        ax.legend(fontsize=8, frameon=False)
+        ax.legend(handles=handles, fontsize=8, frameon=False)
     plot_frame.panel_label(ax, "C · labeled sessions per model")
 
 
@@ -439,16 +497,8 @@ def _economics_rate(ax: Axes, view: idata.UnitEconomicsData) -> None:
         ((seeded, _SEED_GREY, "seeded (replayed)"), (live, None, "live"))
     ):
         drawn = _rate_series(ax, models, source, colour, label, offset)
-        # An absent stratum is named in the legend rather than dropped from it: a panel whose
-        # legend silently loses "live" reads as a figure that only ever had one series.
         handles.append(
-            Patch(
-                facecolor=colour or OKABE_ITO[0],
-                hatch=_PROVISIONAL_HATCH if colour else None,
-                edgecolor="white",
-                label=label if drawn else f"{label} (none in this corpus)",
-                alpha=1.0 if drawn else 0.35,
-            )
+            _stratum_handle(colour or OKABE_ITO[0], label, hatched=colour is not None, drawn=drawn)
         )
     # Hatching already means "replayed seeded row" on every figure in this family, so it
     # cannot also mean "provisional" here — one channel, one meaning. Provisionality goes on
@@ -518,28 +568,33 @@ def _economics_cost(ax: Axes, view: idata.UnitEconomicsData) -> None:
     else:
         # Same stratum-not-model hue rule as panel A: the y axis names every model, and the
         # legend here explains the stratum, so a per-model palette would contradict its own key.
-        ax.barh(
-            [i + _BAR / 2 for i in range(len(drawn))],
-            [seeded.get(m) or 0.0 for m in drawn],
-            height=_BAR,
-            color=_SEED_GREY,
-            hatch=_PROVISIONAL_HATCH,
-            edgecolor="white",
-            label="seeded (replayed)",
-        )
-        ax.barh(
-            [i - _BAR / 2 for i in range(len(drawn))],
-            [live.get(m) or 0.0 for m in drawn],
-            height=_BAR,
-            color=OKABE_ITO[0],
-            edgecolor="white",
-            label="live",
-        )
+        # Panel A already names an absent stratum in its legend; this panel kept a plain "live"
+        # swatch beside `live.get(m) or 0.0` — zero-length bars — so ONE figure labelled the same
+        # absence in one panel and not the other, and the reader had to guess which was true.
+        handles = []
+        for sign, source, colour, label, hatched in (
+            (1, seeded, _SEED_GREY, "seeded (replayed)", True),
+            (-1, live, OKABE_ITO[0], "live", False),
+        ):
+            present = [
+                (i, value) for i, m in enumerate(drawn) if (value := source.get(m)) is not None
+            ]
+            if present:
+                ax.barh(
+                    [i + sign * _BAR / 2 for i, _v in present],
+                    [value for _i, value in present],
+                    height=_BAR,
+                    color=colour,
+                    hatch=_PROVISIONAL_HATCH if hatched else None,
+                    edgecolor="white",
+                    label=label,
+                )
+            handles.append(_stratum_handle(colour, label, hatched=hatched, drawn=bool(present)))
         ax.set_yticks(range(len(drawn)))
         ax.set_yticklabels(drawn, fontsize=7)
         ax.set_ylim(-1.0, len(drawn) - 0.2)
         ax.set_xlabel("cost per verified success (USD)")
-        ax.legend(fontsize=8, frameon=False, loc="lower right")
+        ax.legend(handles=handles, fontsize=8, frameon=False, loc="lower right")
     live_n = sum(1 for m in models if live.get(m) is not None)
     plot_frame.panel_label(ax, f"B · cost per verified success (live models: {live_n})")
 
@@ -649,9 +704,10 @@ def draw_policy(out_dir: Path, view: idata.PolicyData, provenance: Provenance | 
     """F5 — live model share and the collapse alarms; the seed band is never a decision."""
     size = plot_frame.WIDE
     fig, axes = plot_frame.subplots(size, 1, 3)
-    _policy_share(axes[0], view)
+    palette = _policy_palette(view)
+    _policy_share(axes[0], view, palette)
     _policy_alarms(axes[1], view)
-    _policy_propensity(axes[2], view)
+    _policy_propensity(axes[2], view, palette)
     extra = Annotations(
         subtitle_facts=(
             f"live sessions n={view.n_live}",
@@ -675,10 +731,25 @@ def draw_policy(out_dir: Path, view: idata.PolicyData, provenance: Provenance | 
     )
 
 
-def _policy_share(ax: Axes, view: idata.PolicyData) -> None:
+def _policy_palette(view: idata.PolicyData) -> dict[str, str]:
+    """One colour per model for the WHOLE F5 drawer, not per panel."""
+    # Panels A and C draw overlapping but unequal model sets: a model can carry live
+    # share while carrying no selection propensity. Deriving the map inside each panel
+    # is the recolor-on-filter anti-pattern `model_color_map` explicitly warns against,
+    # and here it paints one model two different colours inside a single figure.
+    models: list[str] = []
+    for _when, counts in view.live_series:
+        models.extend(counts)
+    models.extend(model for model, _n in view.seed_mix)
+    models.extend(model for model, _n, _mean, _min in view.propensities)
+    # Sorted, so the map depends on WHICH models exist and never on the order a
+    # particular panel happened to encounter them.
+    return model_color_map(sorted(dict.fromkeys(models)))
+
+
+def _policy_share(ax: Axes, view: idata.PolicyData, palette: dict[str, str]) -> None:
     if view.live_series:
         models = sorted({m for _when, counts in view.live_series for m in counts})
-        palette = model_color_map(models)
         times = _dates([when for when, _counts in view.live_series])
         series = [[counts.get(m, 0.0) for _w, counts in view.live_series] for m in models]
         ax.stackplot(times, *series, labels=models, colors=[palette[m] for m in models])
@@ -688,10 +759,10 @@ def _policy_share(ax: Axes, view: idata.PolicyData) -> None:
         ax.legend(fontsize=7, frameon=False, loc="upper left")
         plot_frame.panel_label(ax, "A · live model share over time")
         return
-    _policy_seed_band(ax, view)
+    _policy_seed_band(ax, view, palette)
 
 
-def _policy_seed_band(ax: Axes, view: idata.PolicyData) -> None:
+def _policy_seed_band(ax: Axes, view: idata.PolicyData, palette: dict[str, str]) -> None:
     if not view.seed_mix:
         _empty(ax, "no sessions in this corpus")
         plot_frame.panel_label(ax, "A · model share over time")
@@ -699,7 +770,6 @@ def _policy_seed_band(ax: Axes, view: idata.PolicyData) -> None:
     names = [model for model, _n in view.seed_mix]
     total = sum(n for _m, n in view.seed_mix) or 1
     left = 0.0
-    palette = model_color_map(names)
     for model, count in view.seed_mix:
         share = count / total
         ax.barh(
@@ -716,9 +786,14 @@ def _policy_seed_band(ax: Axes, view: idata.PolicyData) -> None:
             (left + share / 2, 0.0),
             ha="center",
             va="center",
-            fontsize=7,
+            fontsize=7.5,
             color="white",
             fontweight="bold",
+            # THE BAR IS HATCHED IN WHITE. White bold glyphs over white 45-degree hatch strokes
+            # broke up into fragments — the percentages were unreadable at render size. A dark
+            # stroke around each glyph restores the contrast the hatch destroyed, and works
+            # whatever colour the palette gives the segment, which a fixed ink colour would not.
+            path_effects=[patheffects.withStroke(linewidth=2.0, foreground=plot_frame.INK)],
         )
         left += share
     ax.set_yticks([0.0])
@@ -776,12 +851,11 @@ def _policy_alarms(ax: Axes, view: idata.PolicyData) -> None:
     )
 
 
-def _policy_propensity(ax: Axes, view: idata.PolicyData) -> None:
+def _policy_propensity(ax: Axes, view: idata.PolicyData, palette: dict[str, str]) -> None:
     if not view.propensities:
         _empty(ax, "no policy decision carries a selection propensity in this corpus")
     else:
         names = [model for model, _n, _mean, _min in view.propensities]
-        palette = model_color_map(names)
         ax.barh(
             range(len(names)),
             [mean for _m, _n, mean, _min in view.propensities],
@@ -935,6 +1009,7 @@ def sizes() -> dict[str, FigureSize]:
         specs.NEIGHBOURHOOD.name: plot_frame.WIDE,
         specs.POLICY.name: plot_frame.WIDE,
         specs.ESCALATION.name: plot_frame.WIDE_TALL,
+        specs.MODEL_GRID.name: plot_frame.WIDE_TALL,
         specs.OPE.name: plot_frame.WIDE_TALL,
     }
 
@@ -1277,3 +1352,18 @@ def _ope_floors(ax: Axes, view: idata.OpeData) -> None:
 def _number(value: float) -> str:
     """Counts print as counts and a propensity prints as a propensity, on one shared ledger."""
     return f"{value:.0f}" if value == 0.0 or value >= 1.0 else f"{value:g}"
+
+
+# --------------------------------------------------------------- F8 model grid
+
+
+def draw_model_grid(
+    out_dir: Path, view: model_grid.GridData, provenance: Provenance | None
+) -> Path:
+    """F8 — the benchmark half's three-panel model grid, redrawn from the live store."""
+    # No geometry here on purpose: the drawing lives once in `shunt.inspect.model_grid`, and
+    # this family and the benchmark half both call it. A second implementation is how the two
+    # canvases would come to disagree about what "active parameters" or "$0" mean.
+    return model_grid.render(
+        out_dir / specs.MODEL_GRID.filename, view, _spec(specs.MODEL_GRID), provenance
+    )

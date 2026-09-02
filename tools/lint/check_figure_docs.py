@@ -11,8 +11,9 @@
 # <package>/figures.json <-> section in the half's doc. One-way presence would miss the failure
 # that actually bites — a RETIRED figure whose docs section survives it, describing a plot nobody
 # can look at. It also checks
-# the four rendered strings are byte-identical between the manifest and the prose — title,
-# subtitle, caveat and NOTES — so the doc quotes the figure rather than an older draft of it.
+# the five rendered strings are byte-identical between the manifest and the prose — title,
+# subtitle, caveat, NOTES and LIMITS — so the doc quotes the figure rather than an older draft
+# of it.
 # The per-model/per-strategy note rows carry every data-adjacent claim the canvas does not, so
 # they are the strings most likely to be hand-corrected in one place and left stale in the
 # other; byte-locking them is what makes a hand-written correction a gate failure instead of a
@@ -78,6 +79,11 @@ _BLOCK = re.compile(r"^\*\*(?P<label>Reading|What to look for|Terms|Notes|Limits
 # A Notes block runs from its label to the next `**Label.**` block (or the section end); it may
 # legitimately span lines, because every note is joined onto its own line.
 _NOTES_TEXT = re.compile(r"^\*\*Notes\.\*\*\s*(?P<text>.*?)(?=^\*\*|\Z)", re.M | re.S)
+# The Limits block, same shape. It is normally the LAST block of a section, so it runs to the
+# section end and swallows the trailing `<!-- n: … -->` provenance comment the renderer emits;
+# `_HTML_COMMENT` is stripped before the comparison so the byte-lock compares prose to prose.
+_LIMITS_TEXT = re.compile(r"^\*\*Limits\.\*\*\s*(?P<text>.*?)(?=^\*\*|\Z)", re.M | re.S)
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
 
 _REQUIRED_BLOCKS = ("Reading", "What to look for")
 _BLOCK_ORDER = ("Reading", "What to look for", "Terms", "Notes", "Limits")
@@ -165,6 +171,7 @@ def _check_section(
 
     out.extend(_check_caveat(doc, section, row))
     out.extend(_check_notes(doc, section, row))
+    out.extend(_check_limits(doc, section, row))
     out.extend(_check_blocks(doc, section, row))
     return out
 
@@ -208,6 +215,55 @@ def _check_notes(doc: str, section: Section, row: dict[str, Any]) -> list[Findin
                 0,
                 f"section {{#fig-{section.slug}}} documents notes the figure does not render "
                 f"— delete the Notes block or add the notes to the FigureSpec",
+            )
+        )
+    return out
+
+
+def _check_limits(doc: str, section: Section, row: dict[str, Any]) -> list[Finding]:
+    """The docs '**Limits.**' block must quote the manifest's limitations, space-joined."""
+    # Byte-locked for the same reason the notes are, and it is the field where the drift was
+    # actually found: the gate used to check only that a Limits block EXISTED when the manifest
+    # carried limitations, so every WORD inside it was unenforced. Two stale-in-production
+    # defects lived in exactly that gap — a docs page publishing an imputed-cell count and a
+    # sweep argmax the manifests no longer say. The join is a single space because that is what
+    # `shunt.inspect.inference.docs_section` renders ("**Limits.** " + " ".join(...)); the notes
+    # join on a newline, and the two must not be conflated.
+    out: list[Finding] = []
+    limitations = row.get("limitations") or []
+    expected = " ".join(str(item) for item in limitations) if limitations else None
+    block = _LIMITS_TEXT.search(section.body)
+    found = _HTML_COMMENT.sub("", block.group("text")).strip() if block else None
+    if expected and block is None:
+        out.append(
+            Finding(
+                doc,
+                section.line,
+                0,
+                f"section {{#fig-{section.slug}}} is missing '**Limits.**' but the figure "
+                f"records {len(limitations)} limitation(s)",
+            )
+        )
+    elif expected and found != expected:
+        out.append(
+            Finding(
+                doc,
+                section.line,
+                0,
+                f"section {{#fig-{section.slug}}} Limits block does not quote the canvas "
+                f"limitations.\n"
+                f"    canvas: {expected!r}\n"
+                f"    docs:   {found!r}",
+            )
+        )
+    elif expected is None and block is not None:
+        out.append(
+            Finding(
+                doc,
+                section.line,
+                0,
+                f"section {{#fig-{section.slug}}} documents limitations the figure does not "
+                f"record — delete the Limits block or add them to the FigureSpec",
             )
         )
     return out
@@ -275,16 +331,8 @@ def _check_blocks(doc: str, section: Section, row: dict[str, Any]) -> list[Findi
                     f"'**{required}.**' block",
                 )
             )
-    if row.get("limitations") and "Limits" not in present:
-        out.append(
-            Finding(
-                doc,
-                section.line,
-                0,
-                f"section {{#fig-{section.slug}}} is missing '**Limits.**' but the figure "
-                f"records {len(row['limitations'])} limitation(s)",
-            )
-        )
+    # The Limits block's presence AND its bytes are `_check_limits`'s: an existence-only check
+    # here would report the same finding twice and lock nothing the byte-lock does not.
     ranks = [_BLOCK_ORDER.index(label) for label in present if label in _BLOCK_ORDER]
     if ranks != sorted(ranks):
         out.append(

@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
-from benchmark.routing import censoring
+from benchmark.routing import censoring, integrity
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -30,6 +30,9 @@ MALFORMED_NUMERIC: Final[str] = "MALFORMED_NUMERIC"
 MALFORMED_TIMESTAMP: Final[str] = "MALFORMED_TIMESTAMP"
 SUSPICIOUS_ZERO: Final[str] = "SUSPICIOUS_ZERO"
 MISSING_COLLECTION_FIELD: Final[str] = "MISSING_COLLECTION_FIELD"
+MALFORMED_OPTIONAL: Final[str] = "MALFORMED_OPTIONAL"
+MISSING_MEASUREMENT: Final[str] = "MISSING_MEASUREMENT"
+REPLICATE_MISKEYED: Final[str] = "REPLICATE_MISKEYED"
 BRACKET_OVER_COVERAGE: Final[str] = "BRACKET_OVER_COVERAGE"
 
 # Promotional $0 windows: (model, first UTC date, last UTC date), both inclusive.
@@ -52,6 +55,10 @@ _PRICE_KEYS: Final[tuple[str, ...]] = (
     "output",
 )
 # Numeric columns that must parse as a finite value >= 0.
+# DO NOT ADD AN OPTIONAL COLUMN HERE. `enforce_row` is fail-closed and runs on every write
+# (run_matrix._build_row), so requiring a column that 1265 committed rows leave blank would
+# ERROR on all of them and abort every future write. Optional columns are checked
+# presence-tolerantly by `_check_optional_measurements` instead.
 _NUMERIC_FIELDS: Final[tuple[str, ...]] = ("real_cost", "in_tok", "out_tok", "calls")
 # Collection-param provenance columns: every row MUST carry these keys so a
 # reader can tell the regime a cell was collected under (step_limit/cost_limit/scaffold
@@ -65,6 +72,12 @@ _REQUIRED_COLLECTION_FIELDS: Final[tuple[str, ...]] = (
     "sampling_hash",
     "prompt_hash",
 )
+# The MEASUREMENT-OPTIONAL columns that are a TIMING, and so must carry the two provenance
+# labels that make them poolable. Deliberately a subset of MEASUREMENT_OPTIONAL_COLUMNS:
+# `cached_in_tok` and `retry_count` are counts, not seconds, and neither serving mode nor
+# latency source says anything about them.
+_LATENCY_COLUMNS: Final[tuple[str, ...]] = ("wall_clock_s", "ttft_s", "latency_per_call_s")
+
 # A stop_reason marking a row whose API was unusable (never a real run); exempt from
 # the SUSPICIOUS_ZERO warn like a censored row is (it neither ran nor is a clean fail).
 _API_UNUSABLE_REASON: Final[str] = "api_unusable"
@@ -206,6 +219,87 @@ def _check_collection_fields(row: dict) -> list[Violation]:
     return out
 
 
+def _check_optional_measurements(row: dict) -> list[Violation]:
+    """Optional columns are PRESENCE-TOLERANT: blank is legal, a present value must be sane."""
+    # Blank means MISSING, forever — never 0. So this can use neither
+    # `_REQUIRED_COLLECTION_FIELDS`' "the key must exist" rule nor `_NUMERIC_FIELDS`' "it must
+    # parse" rule; it checks only the rows that actually carry a value. `rep` rides the same
+    # code because it is well-formedness of a new column, not a measurement claim: a
+    # non-negative integer, or blank meaning 0.
+    out: list[Violation] = []
+    for field_name in integrity.MEASUREMENT_OPTIONAL_COLUMNS:
+        raw = str(row.get(field_name, "") or "").strip()
+        if not raw:
+            continue
+        if _num(raw) is None:
+            out.append(
+                Violation(
+                    Severity.ERROR,
+                    MALFORMED_OPTIONAL,
+                    f"{field_name}={row.get(field_name)!r} is present but not a finite "
+                    "number >= 0 (blank is legal and means MISSING)",
+                )
+            )
+    raw_rep = str(row.get(integrity.REPLICATE_COLUMN, "") or "").strip()
+    if raw_rep and not raw_rep.isdigit():
+        out.append(
+            Violation(
+                Severity.ERROR,
+                MALFORMED_OPTIONAL,
+                f"rep={row.get(integrity.REPLICATE_COLUMN)!r} is not a non-negative integer "
+                "(blank is legal and normalises to 0)",
+            )
+        )
+    return out
+
+
+def _check_latency_labels(row: dict) -> list[Violation]:
+    """A timing must be LABELLED, and its labels must be in vocabulary. Presence-tolerant."""
+    # Two distinct failures, both silent without this:
+    #
+    #   * an out-of-vocabulary label. `serving_mode` and `provider_latency_source` exist to
+    #     keep incomparable latency populations apart (local batch-1 vs a batched hosted API;
+    #     client wall-clock vs a provider-reported field). A free-text value defeats that, so
+    #     anything outside `integrity.SERVING_MODES` / `integrity.LATENCY_SOURCES` is refused.
+    #   * an UNLABELLED timing. A row carrying a latency but no `serving_mode` or no
+    #     `provider_latency_source` is a number that cannot be pooled safely by anyone,
+    #     because nothing says which population or which measurement it belongs to.
+    #
+    # Blank stays legal throughout: the 1265 committed rows carry no timing and no label, and
+    # that is the correct permanent state for them.
+    out: list[Violation] = []
+    vocabularies = (
+        ("serving_mode", integrity.SERVING_MODES),
+        ("provider_latency_source", integrity.LATENCY_SOURCES),
+    )
+    for field_name, allowed in vocabularies:
+        raw = str(row.get(field_name, "") or "").strip()
+        if raw and raw not in allowed:
+            out.append(
+                Violation(
+                    Severity.ERROR,
+                    MALFORMED_OPTIONAL,
+                    f"{field_name}={raw!r} is not in the declared vocabulary {list(allowed)} "
+                    "(blank is legal and means MISSING)",
+                )
+            )
+    has_timing = any(str(row.get(field_name, "") or "").strip() for field_name in _LATENCY_COLUMNS)
+    if has_timing:
+        for field_name, _ in vocabularies:
+            if not str(row.get(field_name, "") or "").strip():
+                out.append(
+                    Violation(
+                        Severity.ERROR,
+                        MALFORMED_OPTIONAL,
+                        f"row carries a latency measurement but no {field_name!r}. An "
+                        "unlabelled timing cannot be pooled with any other timing — a local "
+                        "batch-1 second and a hosted batched second are different quantities, "
+                        "as are a client wall-clock second and a provider-reported one.",
+                    )
+                )
+    return out
+
+
 def _check_schema(row: dict, derived: str) -> list[Violation]:
     """stop_reason in-vocabulary, pass<=>solved, timeout_flag<=>wall/abandon stop."""
     out: list[Violation] = []
@@ -302,6 +396,8 @@ def validate_row(row: dict, pricing: dict) -> list[Violation]:
     out: list[Violation] = []
     out.extend(_check_wellformed(row))
     out.extend(_check_collection_fields(row))
+    out.extend(_check_optional_measurements(row))
+    out.extend(_check_latency_labels(row))
     out.extend(_check_schema(row, derived))
     for maybe in (
         _check_accounting(row, derived, pricing),
@@ -340,6 +436,37 @@ class DataIntegrityError(RuntimeError):
         self.row = row
         detail = "; ".join(f"[{v.code}] {v.message}" for v in violations)
         super().__init__(f"row failed data-integrity invariants: {detail}")
+
+
+def require_measured(
+    values: Sequence[float | int | None], field: str, consumer: str
+) -> list[float]:
+    """Every value is a real measurement, or raise — never aggregate over a missing one."""
+    # THE READ-SIDE HALF of the optional-column contract, and the one the codebase already
+    # gets wrong for the columns that predate it: `config.load_results` reads
+    # `float(row.get("estimated_cost") or 0.0)`, which turns "I have no record" into "it cost
+    # nothing". Copying that idiom for an optional column is exactly the failure this exists
+    # to stop, because an optional column is blank on ~1265 committed rows by construction.
+    #
+    # So a consumer aggregating an optional column calls this FIRST. When it raises, the
+    # consumer's correct response is to OMIT the column and publish its `n` — the same shape
+    # `summary._context_columns` uses for the context-cost bracket, and for the same reason: a
+    # default is an affirmative claim, and publishing one with n=0 behind it is a fabrication,
+    # not a conservative choice.
+    n_missing = sum(1 for v in values if v is None)
+    if n_missing:
+        raise DataIntegrityError(
+            [
+                Violation(
+                    Severity.ERROR,
+                    MISSING_MEASUREMENT,
+                    f"{consumer} tried to aggregate {field!r} over {len(values)} value(s) of "
+                    f"which {n_missing} are MISSING (blank). A blank optional column is not "
+                    "zero — omit the column and publish its n instead.",
+                )
+            ]
+        )
+    return [float(v) for v in values if v is not None]
 
 
 def enforce_row(row: dict, pricing: dict) -> None:

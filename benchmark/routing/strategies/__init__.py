@@ -18,15 +18,6 @@ def routing_text(task_id: str, task_meta: dict) -> str:
     return str(task_meta.get("description") or task_id)
 
 
-class Strategy(ABC):
-    @property
-    @abstractmethod
-    def name(self) -> str: ...
-
-    @abstractmethod
-    def select(self, task_id: str, task_meta: dict, matrix: dict) -> str: ...
-
-
 @dataclass(frozen=True)
 class BilledAttempt:
     """One billed attempt: which model served it, what it cost, and the tokens it moved."""
@@ -46,3 +37,35 @@ class BilledAttempt:
     in_tok: int = 0
     out_tok: int = 0
     calls: int = 0
+
+
+class Strategy(ABC):
+    #: Per-attempt billing published by the most recent :meth:`select`, in billing order.
+    #: ``None`` on a single-shot strategy, which never bills anything but the one cell it
+    #: returns; a cascade REPLACES the list on every ``select``. Declared here rather than
+    #: discovered by the caller with ``getattr``, so :attr:`sessions_burned` has one
+    #: definition for every strategy instead of a default that hides a missing attribute.
+    cascade_attempts: list[BilledAttempt] | None = None
+
+    @property
+    @abstractmethod
+    def name(self) -> str: ...
+
+    @abstractmethod
+    def select(self, task_id: str, task_meta: dict, matrix: dict) -> str: ...
+
+    @property
+    def sessions_burned(self) -> int:
+        """How many sessions the most recent :meth:`select` made the user sit through."""
+        # One billed attempt is one session waited through, so the default IS
+        # `len(cascade_attempts)`; a single-shot strategy publishes none and reports the
+        # single decision it made. A cascade therefore reports its real depth by
+        # construction — the same list the cost model already requires is the one counted
+        # here, so a new cascade cannot bill several attempts and still report 1.
+        #
+        # Override only where the session count is genuinely NOT the attempt count:
+        # `SessionCascadeStrategy` bills unmeasured rungs onto its path without appending
+        # them to `cascade_attempts`, and does override.
+        if self.cascade_attempts is None:
+            return 1
+        return len(self.cascade_attempts)

@@ -144,13 +144,22 @@ code change is the derived artifacts committed beside the results — `metrics.j
 `figures.json` — which those two targets regenerate, and `make check-figures`
 (`benchmark.pipeline --check-figures`) proves current without regenerating anything. It checks
 both halves of each job's freshness record — the digest of its **inputs** and the SHA-256 of
-each **committed output** certified alongside them — and so reports four conditions: `STALE`
+each **committed output** certified alongside them — and so reports five conditions: `STALE`
 (inputs moved since the draw), `MISSING` (no PNG on disk), `DRIFTED` (the committed bytes are
-not the bytes certified for that job, i.e. a figure changed outside the certifying stage) and
+not the bytes certified for that job, i.e. a figure changed outside the certifying stage),
 `UNCERTIFIED` (a manifest entry that predates output digesting, so no output bytes are on
-record). The input-only gate reported two genuinely drifted figures as current; the last two
-conditions are what closed that. All four repair with `--from evaluate` — never by hand-editing
-`benchmark/routing/figure_inputs.json`.
+record) and `UNPRODUCED` (the certified run SKIPPED an optional output, yet its file is still
+committed — a published figure nobody drew). The input-only gate reported two genuinely drifted
+figures as current, and hashing whatever sat on disk re-certified a skipped optional figure
+under the new inputs; the last three conditions are what closed those. All five repair with
+`--from evaluate` — never by hand-editing `benchmark/routing/figure_inputs.json`.
+
+A job's **input digest covers its real import closure**, not a hand-written list: every
+first-party module (under `benchmark/`, `src/shunt/`, `tools/`) the producer statically
+imports, transitively, plus the declared data files. The declared `analysis=` tuples remain as
+extra seeds. Measured before that landed: the escalation job reached 35 first-party modules its
+inputs never named — including the two that price its cost figures — and two of its PNGs moved
+while its digest sat still.
 `--check-figures --half {demo,escalation,inference,routing}` narrows the report to one half, so
 one half's staleness never decides another half's exit code (`make check-inference-figures`);
 `--half` is check-only and a hard `parser.error` on any other subcommand.
@@ -177,6 +186,7 @@ benchmark/
   runner/
     swebench_specs.py          # Spec load/materialise (repos pulled on demand, not vendored)
     infer.py                   # predictions.jsonl: gold (keyless) | live (key-gated)
+    scaffold_model.py          # Credential-free model config; injects API keys at request time, never serialises them
     swebench_harness.py        # Thin wrapper over `python -m swebench.harness.run_evaluation`
     swebench_smoke.py          # $0 gold-patch smoke driver
     select_swebench.py         # Rank Verified instances from SWE-bench/experiments
@@ -208,13 +218,14 @@ benchmark/
       plot_timing.py           # API calls per task, per model and per routed strategy
       threshold_sweep.py       # kNN hyperparameter held-out sweep + allocation panel
       viz_knn.py               # kNN neighbourhood / routing-map visualisations
-    reports/                   # Derived strategy_summary.csv etc. (gitignored); PNGs live in docs/assets/figures/routing/
+    reports/                   # Derived intermediates (gitignored) except the tracked strategy_summary.csv; PNGs live in docs/assets/figures/routing/
   .gitignore
   README.md                    # This file
 ```
 
 Everything except `results.csv` is derived: the per-strategy summary and parameter
-sweeps regenerate from it into `reports/` (gitignored), and the plots into
+sweeps regenerate from it into `reports/` (gitignored, except `strategy_summary.csv`, which is
+tracked so a committed figure can be checked against the numbers it was drawn from), and the plots into
 `docs/assets/figures/<half>/` (tracked, because the docs link them) — there is a **single
 committed source of truth**.
 
@@ -383,6 +394,12 @@ a real environment variable always wins over a value in it. Each model in
 the registry (`src/shunt/config/models.yaml`) names a `provider`, and that provider's row carries the
 `base_url` and `api_key_env_var` used to reach it. The litellm route is derived as
 `<litellm_prefix>/<model_id>`. No credentials file is ever committed.
+
+A resolved key is **never** placed in the scaffold's `model_kwargs`. mini-swe-agent serialises
+its model config verbatim into the trajectory dump it writes at `output_path`, so a key passed
+there would be written to disk in plaintext once per cell. The config carries the env var's
+*name* and `benchmark/runner/scaffold_model.py` reads the value at request time; a config that
+still carries a credential-shaped or live-env value is refused before the run starts.
 
 ### Container / image lifecycle
 

@@ -156,8 +156,8 @@ fires on 354 of 723 at **0.638** [0.554, 0.703] against **0.210**
 [0.151, 0.270], an AUROC of **0.722** against 0.576, and clears both a
 family-wise null of [0.500, 0.549] and a length-stratified null of
 [0.498, 0.565] at p = 0.0005 over 2000 challenge-block shuffles. Read as a
-continuous score rather than a threshold, the same contrast is AUROC 0.601
-as-shipped against 0.781 edit-gated. The sweep covers `escalate_after_n` ∈
+continuous score rather than a threshold, the same contrast is AUROC 0.600
+as-shipped against 0.778 edit-gated. The sweep covers `escalate_after_n` ∈
 {1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50} crossed with
 `stale_window` ∈ {10, 1000}; the best cell in that grid, taken across both
 counting families and corrected for the maximum, is n=3 — at the wider window,

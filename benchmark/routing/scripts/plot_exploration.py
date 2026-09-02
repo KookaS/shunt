@@ -255,7 +255,7 @@ def _missing_concentration_limit(report: ReplayReport) -> list[str]:
         f"unscorable exploit-only cells are {top_model}, a model {where} — so the "
         "exploit-only arm is systematically missing that model's tasks, not a random "
         "subset. The overhead is therefore reported PAIRED, over only the tasks both "
-        "arms scored"
+        "arms scored."
     ]
 
 
@@ -280,7 +280,7 @@ def _frontier_limit(report: ReplayReport) -> list[str]:
         f"{plot_style.usd(top_slice)}/Mtok against {plot_style.usd(top_enabled)} across all "
         f"enabled models ({', '.join(absent)} are absent). The exploration overhead measured "
         f"here is between CHEAP models and is a LOWER BOUND on the shipped policy's, where "
-        f"an exploratory pull can land on the frontier model"
+        f"an exploratory pull can land on the frontier model."
     ]
 
 
@@ -294,7 +294,7 @@ def _annotations(report: ReplayReport, budget_frac: float) -> Annotations:
         limits.append(
             f"The two marginal pass-rate CIs overlap ([{base.lo:.0%}, {base.hi:.0%}] vs "
             f"[{expl.lo:.0%}, {expl.hi:.0%}]) — at {n_paired} paired tasks only the paired "
-            "difference separates the arms"
+            "difference separates the arms."
         )
     limits.extend(_frontier_limit(report))
     limits.extend(_missing_concentration_limit(report))

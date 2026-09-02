@@ -92,7 +92,7 @@ up.
 ![What each approach costs against how many tasks it finishes](docs/assets/figures/routing/cost_quality_headline.png)
 
 The orange dot is what most setups do today. The blue dot is Shunt's default:
-same height, a third of the way along. The other eight strategies we measured,
+same height, a third of the way along. The other seven strategies we measured,
 and the uncertainty on every point, are in
 [docs/routing.md](docs/routing.md#fig-cost-quality-frontier).
 
@@ -112,6 +112,21 @@ Read the default against always-frontier: **$29 against $96, at the same pass
 rate.** The two quality figures carry 95% confidence intervals of 94.0–98.9% and
 91.9–97.8%, which overlap — and that overlap *is* the claim. Same quality, a
 third of the bill.
+
+Dollars are not the only currency. Rank the same twelve strategies by provider
+calls, by the slowest sessions, by output tokens, or by how spiky the bill is,
+and the winner changes. Nothing is best on all five. Always-frontier and the
+opt-in routing model each top four of them; our default tops two — money, and
+the slow-session tail.
+
+![Twelve routing strategies plotted against five different cost axes, with a matrix showing which strategy is on which frontier](docs/assets/figures/routing/pareto_dimensions.png)
+
+Read it with two things in hand. Seven of the twelve strategies sit at exactly
+the same pass rate, so four of those five panels are rankings along one axis
+rather than trade-offs. And that pass rate is flattered everywhere: about a
+third of the underlying cells are filled in rather than run, and a filled cell
+always counts as a pass. Both are unpacked at
+[docs/routing.md](docs/routing.md#fig-pareto-dimensions).
 
 Four things qualify that number, and they are in
 [what doesn't work yet](#what-doesnt-work-yet) rather than buried here.
@@ -153,6 +168,11 @@ base_url = http://127.0.0.1:8080/v1
 Copy-paste config for each tool — plus a dry-run handshake that proves the wiring
 without spending a cent — lives in
 [`examples/integrations/`](examples/integrations/README.md).
+
+Which model answers is set by one line, `router.strategy`, and two strategies are
+offered: `session_cascade` (the default — start cheap, climb on verified failure) and
+`knn_semantic_cascade` (opt-in — route on the neighbourhood, then climb). A runnable
+template for each is in [`examples/strategies/`](examples/strategies/README.md).
 
 ## How it works
 

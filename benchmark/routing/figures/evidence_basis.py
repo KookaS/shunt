@@ -1,9 +1,11 @@
 """evidence_basis.png — how much of every number in this set is measured, and how much is filled."""
 
-# EVERY IMPUTED CELL IS pass=True BY CONSTRUCTION (`impute.py`: the monotone ladder can only
-# ever say "a pricier model would also have passed"). So imputation cannot add a failure,
-# only a success, and every pass rate in this figure set is biased upward by exactly the
-# share drawn here. Two channels, not one: the DOLLARS a strategy billed on projected cells
+# NEARLY every imputed cell is pass=True (`impute.py`: the ladder's dominant branch says "a
+# pricier model would also have passed"; it also has a fail branch, for a model at or below an
+# observed failure, which fires rarely). So imputation almost only ever adds a success, and
+# every pass rate in this figure set is biased upward by close to the share drawn here — the
+# subtitle carries the measured pass/fail split of the filled cells rather than asserting it.
+# Two channels, not one: the DOLLARS a strategy billed on projected cells
 # and the PASSES it was credited with on them. A figure that discloses only the dollars
 # leaves the quality claim undisclosed, which is the half that matters.
 #
@@ -33,7 +35,7 @@ _IMPUTED = "#E69F00"
 _UNKNOWN = "#BDBDBD"
 
 SPEC = FigureSpec(
-    title="A third of the evidence is filled in, and every filled cell is a pass",
+    title="A third of the evidence is filled in, and nearly every filled cell is a pass",
     reading=(
         "Left: per strategy, the share of scored DOLLARS billed to measured cells against "
         "projected ones. Middle: the same split on PASSES — the channel that decides every "
@@ -50,7 +52,8 @@ SPEC = FigureSpec(
         (
             "imputed cell",
             "filled by the monotone ladder: a model at least as strong as one that passed is "
-            "credited with a pass. It can only ever ADD a pass, never a failure.",
+            "credited with a pass, and a model no stronger than one that failed with a fail. "
+            "The pass branch dominates; the subtitle counts how far.",
         ),
         (
             "capability band",
@@ -162,7 +165,7 @@ def _draw_bands(ax: Axes, rows: list[dict]) -> None:
     ax.legend(
         handles=[
             Patch(color=_MEASURED, label="real"),
-            Patch(color=_IMPUTED, label="imputed (always a pass)"),
+            Patch(color=_IMPUTED, label="imputed (nearly always a pass)"),
             Patch(color=_UNKNOWN, label="unknown (unscored)"),
         ],
         fontsize=7,
@@ -179,7 +182,27 @@ def _draw_bands(ax: Axes, rows: list[dict]) -> None:
     plot_frame.panel_label(ax, "C · per band — where the fill concentrates")
 
 
-def _annotations(splits: dict[str, dict[str, float]], bands: list[dict]) -> Annotations:
+def filled_outcomes(completed: dict) -> tuple[int, int]:
+    """(imputed cells filled pass=True, imputed cells in total) over the completed matrix.
+
+    ``completed`` is the FLAT ``{task: {model: cell}}`` form — `ImputedMatrix.matrix`, the
+    same population `report.coverage_rows` counts the bands over.
+    """
+    # DERIVED, never written down. This fact used to be the frozen string "397 of 398 filled
+    # cells" sitting on the same subtitle line as a derived imputed-cell count — two numbers
+    # about the same cells that no longer agreed (the derived count is 410), and no gate can
+    # catch it: SH012's number-provenance scan reads `*.md` lines, never a producer literal.
+    # ONE POPULATION, NOT TWO. The wrapped `{"results": ...}` matrix the report also carries is
+    # COMPLETE-ONLY (184 of 200 challenges), so counting this over it reintroduced exactly the
+    # disagreement above in derived form — 406 filled cells beside 410 imputed ones on one
+    # subtitle line. The bands and this count now walk the same matrix.
+    filled = [c for cells in completed.values() for c in cells.values() if c.get("imputed")]
+    return (sum(1 for c in filled if c.get("pass")), len(filled))
+
+
+def _annotations(
+    splits: dict[str, dict[str, float]], bands: list[dict], completed_matrix: dict
+) -> Annotations:
     total_real = sum(int(r["real"]) for r in bands)
     total_imp = sum(int(r["imputed"]) for r in bands)
     total_unk = sum(int(r["unknown"]) for r in bands)
@@ -196,7 +219,11 @@ def _annotations(splits: dict[str, dict[str, float]], bands: list[dict]) -> Anno
     if worst is not None:
         share = int(worst["imputed"]) / max(int(worst["real"]) + int(worst["imputed"]), 1)
         facts.append(f"worst band {worst['band']}: {share:.0%} imputed")
-    facts.append("imputation is overwhelmingly pass-only (397 of 398 filled cells)")
+    pass_filled, n_filled = filled_outcomes(completed_matrix)
+    if n_filled:
+        facts.append(
+            f"imputation is overwhelmingly pass-only ({pass_filled} of {n_filled} filled cells)"
+        )
     caveat = None
     if worst is not None and int(worst["imputed"]) > int(worst["real"]):
         caveat = (
@@ -234,7 +261,7 @@ def render(ctx: ctxmod.RoutingContext, band_rows: list[dict]) -> Path | None:
     _draw_split(axes[0], splits, "cost", "scored dollars", True, order)
     plot_frame.panel_label(axes[0], "A · dollars: measured vs projected")
     _draw_split(axes[1], splits, "pass", "scored passes", False, order)
-    plot_frame.panel_label(axes[1], "B · passes: every projected one is a pass")
+    plot_frame.panel_label(axes[1], "B · passes: nearly all projected are passes")
     _draw_bands(axes[2], band_rows)
     for ax in axes:
         plot_style.fit_end_labels(ax)
@@ -242,7 +269,7 @@ def render(ctx: ctxmod.RoutingContext, band_rows: list[dict]) -> Path | None:
         fig,
         ctx.out_dir / "evidence_basis.png",
         SPEC,
-        extra=_annotations(splits, band_rows),
+        extra=_annotations(splits, band_rows, ctx.imputed.matrix if ctx.imputed else {}),
         provenance=ctx.provenance(__name__),
         size=size,
     )

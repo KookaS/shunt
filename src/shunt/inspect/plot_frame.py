@@ -132,11 +132,19 @@ class Annotations:
 
 @dataclass(frozen=True)
 class Provenance:
-    """Which module drew this figure, and over what data."""
+    """Which module drew this figure, over what data, and at whose prices."""
 
     generator: str
     data_digest: str
     manifest: Path
+    # WHICH PRICE SHEET DREW THE COST AXIS. A cost axis is not a property of the measurement
+    # alone: the same tokens are a different number of dollars in July and in August. A figure
+    # whose cost was repriced from a dated sheet stamps that sheet's `as_of` and digest here,
+    # so the manifest says which prices it was drawn at instead of leaving the reader to
+    # assume they are still current. None means no repricing was involved -- the axis is at
+    # the prices recorded when the run happened. Kept as an opaque mapping so this module,
+    # which ships in the wheel, never learns what a price is.
+    price_sheet: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -458,6 +466,7 @@ def manifest_row(
         "figsize": list(size.figsize) if size is not None else None,
         "dpi": DPI,
         "data_digest": provenance.data_digest,
+        "price_sheet": provenance.price_sheet,
     }
 
 

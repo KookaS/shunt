@@ -1,0 +1,114 @@
+{
+  "axes": [
+    {
+      "column": "TotalCost_cacheaware",
+      "direction": "min",
+      "why": "money, as recorded at collection time"
+    },
+    {
+      "column": "sessions_mean",
+      "direction": "min",
+      "why": "sessions the user waits through, on average"
+    },
+    {
+      "column": "sessions_p95",
+      "direction": "min",
+      "why": "the tail of that wait \u2014 the afternoon it can burn"
+    },
+    {
+      "column": "cost_cv",
+      "direction": "min",
+      "why": "how predictable the bill is"
+    }
+  ],
+  "blockers": [
+    "coverage floor tripped in the offline gate (floor 0.9, control 0.5163043478260869, router 0.8369565217391305)"
+  ],
+  "comparisons": [
+    {
+      "axes": [
+        {
+          "baseline": 96.0201,
+          "column": "TotalCost_cacheaware",
+          "relative_delta": -0.599125,
+          "result": "better",
+          "router": 38.4921
+        },
+        {
+          "baseline": 1.0,
+          "column": "sessions_mean",
+          "relative_delta": 1.076,
+          "result": "worse",
+          "router": 2.076
+        },
+        {
+          "baseline": 1.0,
+          "column": "sessions_p95",
+          "relative_delta": 6.0,
+          "result": "worse",
+          "router": 7.0
+        },
+        {
+          "baseline": 0.5579,
+          "column": "cost_cv",
+          "relative_delta": 2.394874,
+          "result": "worse",
+          "router": 1.894
+        }
+      ],
+      "baseline": "Always-Frontier",
+      "dominates": false,
+      "passes": false,
+      "quality_baseline": 95.11,
+      "quality_delta_pp": 1.63,
+      "quality_non_inferior": true,
+      "quality_router": 96.74
+    },
+    {
+      "axes": [
+        {
+          "baseline": 27.1107,
+          "column": "TotalCost_cacheaware",
+          "relative_delta": 0.419812,
+          "result": "worse",
+          "router": 38.4921
+        },
+        {
+          "baseline": 1.592,
+          "column": "sessions_mean",
+          "relative_delta": 0.30402,
+          "result": "worse",
+          "router": 2.076
+        },
+        {
+          "baseline": 4.0,
+          "column": "sessions_p95",
+          "relative_delta": 0.75,
+          "result": "worse",
+          "router": 7.0
+        },
+        {
+          "baseline": 2.5326,
+          "column": "cost_cv",
+          "relative_delta": -0.252152,
+          "result": "better",
+          "router": 1.894
+        }
+      ],
+      "baseline": "Price-Cascade",
+      "dominates": false,
+      "passes": false,
+      "quality_baseline": 96.74,
+      "quality_delta_pp": 0.0,
+      "quality_non_inferior": true,
+      "quality_router": 96.74
+    }
+  ],
+  "operational_tolerance": 0.05,
+  "provisional_reason": "vs Always-Frontier: worse on sessions_mean, sessions_p95, cost_cv; vs Price-Cascade: worse on TotalCost_cacheaware, sessions_mean, sessions_p95",
+  "provisional_verdict": "FAIL",
+  "quality_margin_pp": 5.0,
+  "reason": "not adjudicable: coverage floor tripped in the offline gate (floor 0.9, control 0.5163043478260869, router 0.8369565217391305)",
+  "router_arm": "kNN-semantic-cascade",
+  "verdict": "UNTESTED"
+}
