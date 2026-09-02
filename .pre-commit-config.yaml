@@ -209,6 +209,26 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      # SH017 closes the loop that let a stale figure certification keep committing. A figure
+      # job's freshness digest covers its producer's whole transitive first-party import
+      # closure plus its data inputs, so an edit to almost any module under benchmark/ or the
+      # pricing/registry data re-stales it — and until this gate NOTHING ran at commit time:
+      # the stale figure_inputs.json sailed to a red `benchmark-integrity` job and a red
+      # figure-freshness pytest, repeatedly. The gate is the same `--check-figures` CI's
+      # benchmark-integrity job runs (seconds — it hashes files, it draws nothing), brought to
+      # where the drift is born. Whole-tree scan (the SH015/SH016 shape): the failure is an
+      # EDIT to code/data that outlives the manifest, and no staged-file list sees the file it
+      # invalidated. BLOCKING. Repair by re-running the certifying pipeline stage(s)
+      # (`uv run --extra benchmark python -m benchmark.pipeline --from evaluate`) — never by
+      # hand-editing benchmark/routing/figure_inputs.json.
+      - id: sh017-figures-fresh
+        name: SH017 committed figures are fresh (figure_inputs.json matches the tree)
+        # Imports the benchmark package, so it runs under the project venv (see SH015/SH016);
+        # the gate bootstraps repo root + src/ and delegates to pipeline.check_figures.
+        entry: uv run python tools/lint/check_figure_freshness.py
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: sh013-workflow-timeouts
         name: SH013 every workflow job declares timeout-minutes
         entry: python tools/lint/check_workflow_timeouts.py

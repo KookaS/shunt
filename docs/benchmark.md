@@ -422,7 +422,12 @@ the per-half `figures.json`. The figure targets:
 `--check-figures` accepts `--half {demo,escalation,inference,routing}`, so one half's staleness
 never decides another half's exit code; `--half` is a check-only flag and is a hard `parser.error`
 anywhere else. `make check-figures` is the gate to run after a code change before trusting an
-old PNG.
+old PNG. The same gate also runs at **commit time** as the `SH017` pre-commit hook (whole-tree,
+`always_run`), so a code or data edit that re-stales a committed figure — without the manifest
+being re-recorded for it — is refused on the commit that would ship it, not surfaced later as a
+red `benchmark-integrity` job. Fix a red `SH017` by re-running the certifying pipeline stage(s),
+e.g. `uv run --extra benchmark python -m benchmark.pipeline --from evaluate`; never by hand-editing
+`benchmark/routing/figure_inputs.json`.
 
 Re-replaying is what `--restamp` does, and you only need it when the *instrument* changes —
 the classifier, the grader, the admissibility adjudicator. Old stamps came from a different
