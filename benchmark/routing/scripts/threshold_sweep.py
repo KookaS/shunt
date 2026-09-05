@@ -49,15 +49,28 @@ K_GRID: Final[tuple[int, ...]] = (2, 3, 5, 8, 12, 20, 32, 50, 80, 128, 174)
 CHEAP_REGIME: Final[int] = 0
 MIXED_REGIME: Final[int] = 1
 FRONTIER_REGIME: Final[int] = 2
+# THE FOURTH REGIME EXISTS BECAUSE THE FIRST THREE COULD NOT SEE THE SELECTED CELL.
+# `_regime` used to test only the cheapest and frontier shares, so a cell that sent EVERY task
+# to one model in the middle of the ladder fell through to "mixed allocation" — the panel that
+# exists to expose degenerate allocation drew the most degenerate cell it had in the colour
+# meaning "this one actually routes". That cell was not a curiosity: at k=174 (n=181 tasks, so
+# the neighbourhood is the whole corpus and every task sees the same neighbours) the kNN pick
+# collapses to one constant model, and it is the configuration the sweep SELECTS. Reporting a
+# constant policy as mixed allocation is the Scrouting falsifier hidden by a colour.
+SINGLE_REGIME: Final[int] = 3
 _REGIME_LABELS: Final[tuple[str, ...]] = (
     "always-cheapest / degenerate",
     "mixed allocation",
     "always-frontier / degenerate",
+    "one model, neither end / degenerate",
 )
-# Both degenerate labels begin with "a", so the in-cell key is spelled out rather than
-# taken from the first letter.
-_REGIME_KEYS: Final[tuple[str, ...]] = ("C", "M", "F")
-_REGIME_COLORS: Final[tuple[str, ...]] = ("#BFD8E8", "#2E7D32", "#E8A33D")
+# The three degenerate labels begin with "a" or "o", so the in-cell key is spelled out rather
+# than taken from the first letter.
+_REGIME_KEYS: Final[tuple[str, ...]] = ("C", "M", "F", "S")
+# Okabe-Ito reddish-purple for the fourth: it must not read as a shade of the green "mixed"
+# band it was previously hidden inside, and it stays separable from the light blue and the
+# orange under red-green colour blindness.
+_REGIME_COLORS: Final[tuple[str, ...]] = ("#BFD8E8", "#2E7D32", "#E8A33D", "#CC79A7")
 # A share this high means every task but a rounding-error handful went to one model.
 _DEGENERATE_SHARE: Final[float] = 0.99
 
@@ -120,11 +133,19 @@ SPEC = FigureSpec(
         "runs, never a TF-IDF proxy.",
         "The k grid is log-spaced. A uniform grid spends nearly all of its cells inside one "
         "regime and reports the same number on half of them.",
+        "READ PANEL B BEFORE PANEL A's WINNER. The selected cell sits at k=174 against n=181 "
+        "tasks, so the neighbourhood is the whole corpus: every task sees the same neighbours, "
+        "the kNN pick collapses to one constant model, and panel B marks it S — one model, "
+        "neither the cheapest nor the frontier. The configuration this sweep selects therefore "
+        "does no routing at all, which is the constant-policy falsifier, not a routing result.",
     ),
     limitations=(
         "Folds split TASKS, not repositories, so an out-of-fold task can still sit next to a "
         "sibling task from the same repo — this is a lower bound on optimism, not an "
         "estimate of transfer to a new codebase (see embedding_signal.png's cross-repo panel).",
+        "The S regime was added on 2026-09-05 and is not a new measurement: those cells were "
+        "always single-model, and `_regime` simply could not see it. Every earlier render of "
+        "this panel drew them green, as mixed allocation.",
     ),
 )
 
@@ -511,11 +532,18 @@ def pool_folds(
 
 
 def _regime(row: dict) -> int:
-    """Which of the three allocation regimes a cell sits in."""
+    """Which of the four allocation regimes a cell sits in."""
+    # ORDER MATTERS, most specific first. The cheapest and frontier cases are themselves
+    # single-model degenerate; naming WHICH model they collapsed to is more informative than
+    # "one model", so they are tested before the general case.
     if row["cheapest_share"] >= _DEGENERATE_SHARE:
         return CHEAP_REGIME
     if row["frontier_share"] >= _DEGENERATE_SHARE:
         return FRONTIER_REGIME
+    # Neither end, but still exactly one model on every task: a constant policy that does no
+    # routing at all. This is a DEGENERATE cell and must never be reported as mixed.
+    if int(row["n_models_used"]) <= 1:
+        return SINGLE_REGIME
     return MIXED_REGIME
 
 
@@ -827,6 +855,24 @@ def _draw_trace(ax: Axes, res: SweepResult) -> None:
         linewidth=1.5,
         label="sweep, best threshold per k",
     )
+    # THE POINT THAT LOOKS WRONG IS THE POINT THAT IS DEGENERATE. A trace point whose cell
+    # sends every task to one model is not a step on a routing trade-off curve — it is a
+    # constant policy sitting on the same axes — which is why it can land off the trend the
+    # other k values trace and make the line double back. Ringing it here means panel A and
+    # panel B agree on the canvas instead of only in the data.
+    degenerate = [r for r in trace if _regime(r) != MIXED_REGIME]
+    if degenerate:
+        ax.scatter(
+            [r["TotalCost"] for r in degenerate],
+            [r["AvgPerf%"] for r in degenerate],
+            marker="o",
+            s=132,
+            facecolors="none",
+            edgecolors=_REGIME_COLORS[SINGLE_REGIME],
+            linewidths=1.8,
+            zorder=4,
+            label="degenerate: one model on every task",
+        )
     ax.scatter(
         [cheap["TotalCost"], front["TotalCost"]],
         [cheap["AvgPerf%"], front["AvgPerf%"]],
@@ -902,7 +948,7 @@ def _draw_regimes(ax: Axes, res: SweepResult, panel_width_in: float) -> None:
         codes,
         aspect="auto",
         cmap=cmap,
-        norm=BoundaryNorm([-0.5, 0.5, 1.5, 2.5], cmap.N),
+        norm=BoundaryNorm([-0.5, 0.5, 1.5, 2.5, 3.5], cmap.N),
         interpolation="nearest",
     )
     if cells_may_carry_numbers(panel_width_in, len(ks)):
@@ -922,6 +968,9 @@ def _draw_regimes(ax: Axes, res: SweepResult, panel_width_in: float) -> None:
         loc="upper center",
         bbox_to_anchor=(0.5, -0.16),
         frameon=False,
+        # Two columns since the fourth regime landed: stacked, the four labels push the legend
+        # into the caption band under the panel.
+        ncol=2,
     )
     plot_frame.panel_label(ax, f"B · allocation regime (min_samples={res.selected['min_samples']})")
 
@@ -947,6 +996,7 @@ def _draw_optimism(ax: Axes, res: SweepResult) -> None:
         )
         if n > 0
     ]
+    label_ys: list[float] = []
     for x, (_label, rate, n, color) in enumerate(bars):
         lo, hi = plot_style.wilson_interval(round(rate / 100 * n), n)
         yerr = plot_style.ci_yerr(rate / 100, lo, hi)
@@ -961,9 +1011,11 @@ def _draw_optimism(ax: Axes, res: SweepResult) -> None:
         )
         # Never under the bar: the lower whisker is there, and a label inside it reads as
         # a data point. Above the upper whisker is the only free space.
+        label_y = min(hi * 100 + 1.6, _PASS_RATE_MAX - 1.5)
+        label_ys.append(label_y)
         ax.text(
             x,
-            min(hi * 100 + 1.6, _PASS_RATE_MAX - 1.5),
+            label_y,
             f"{rate:.1f}%  (n={n})",
             ha="center",
             fontsize=8,
@@ -985,19 +1037,25 @@ def _draw_optimism(ax: Axes, res: SweepResult) -> None:
         gap = f"optimism gap {res.optimism:+.1f} pp"
     else:
         gap = "no optimism gap: one of the two scores has no scored task"
-    # In the empty COLUMN between the bars (0.52 wide at x=0 and x=1), high in the panel —
-    # placed in AXES coordinates so it stays centred and inside the axes whether the panel
-    # drew one bar or two.
+    # THE COLUMN IS EMPTY OF BARS, NOT OF TEXT — which is how this label came to sit on top of
+    # the two bar labels. The bars are 0.52 wide at x=0 and x=1, so x=0.5 carries no BAR at any
+    # height; but each bar's "NN.N%  (n=NNN)" label is centred on its bar and runs horizontally
+    # into that column, and this label was parked at a FIXED y=0.965 that happened to be the
+    # same band. Pinning any constant y re-creates the collision as soon as the rates move, so
+    # the y is now DERIVED: sit below the lowest bar label rather than beside it. The opaque
+    # bbox is the second guard — it keeps the text legible where the dotted connector crosses.
+    gap_y = (min(label_ys) if label_ys else _PASS_RATE_MAX) - 5.0
     ax.text(
         0.5,
-        0.965,
+        gap_y,
         gap,
-        transform=ax.transAxes,
         ha="center",
         va="top",
         fontsize=8.5,
         fontweight="bold",
         color=_MIXTURE_COLOR,
+        bbox={"facecolor": "white", "edgecolor": "none", "pad": 1.5, "alpha": 0.85},
+        zorder=6,
     )
     plot_frame.panel_label(ax, "C · in-sample vs out-of-fold")
 

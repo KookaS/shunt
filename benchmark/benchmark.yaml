@@ -7,6 +7,10 @@
 models:                 # enabled models; a name must exist in the registry.
                         # Omit a registry model here to disable it (opus is off).
   - deepseek-v4-flash
+  - deepseek-v4-pro     # Measured 2026-09-03/04 (200/200 cells, $27.45). SH015 triage returns
+                        # KEEP on BOTH strata — routine frontier AND net-helpful escalation rung
+                        # (+15.3pp over deepseek-v4-flash) — so it is now a SERVED router model
+                        # too. Pinned default-arm-only (see arm_sampling.default_only_models).
   - qwen3.7-plus
   - gpt-5-mini
   - kimi-k2.5
@@ -114,9 +118,15 @@ arm_sampling:
   enabled: true
   weights: [0.6, 0.4, 0.25]   # cheaper-skewed; each is an independent p, not a distribution
   # Models pinned to their DEFAULT arm even while the sweep is on — the expensive
-  # tiers (high/frontier), where extra reasoning arms aren't worth the per-cell cost.
-  # Their default arm is already the high-reasoning one; other models still explore.
-  default_only_models: [zai-glm-5.2, kimi-k3]
+  # tiers (high/frontier), where extra reasoning arms aren't worth the per-cell cost,
+  # and deepseek-v4-pro, whose budget-capped measurement ran default-arm-only (a second
+  # arm would have split the capped budget and diluted the default-arm comparison). That
+  # measurement is COMPLETE: 200/200 cells at $27.45 real spend against a $30 cap, and
+  # pro is now a live-pool model (src/shunt/config/router.yaml). The pin stays because
+  # the comparison it protects is the one the triage frontier reads; lifting it would
+  # buy arm coverage nobody has asked for. Their default arm is already the high-
+  # reasoning one; other models still explore.
+  default_only_models: [zai-glm-5.2, kimi-k3, deepseek-v4-pro]
 
 # Per-model REPLICATE depth: how many independent observations of each of a model's cells to
 # collect. Rep 0 is the canonical observation the scoring path reads; reps 1..R-1 are audit
@@ -124,8 +134,8 @@ arm_sampling:
 # measures the run-to-run variance behind one.
 #
 # `enabled: false` IS A SPEND SAFETY, not a stylistic default. R>1 multiplies live collection
-# cost linearly, and the owner's total new-measurement budget is under $5, so depth is opt-in
-# per run. Consumed at exactly two sites — `run_matrix.classify_cells` (which emits the extra
+# cost linearly against a hard ~$200/mo LLM budget — the deepseek-v4-pro measurement alone
+# spent $27.45 for one arm on 200 cells — so depth is opt-in per run. Consumed at exactly two sites — `run_matrix.classify_cells` (which emits the extra
 # cells) and the column-coverage report. The SCORING path must never read it.
 replicates:
   enabled: false

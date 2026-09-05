@@ -70,7 +70,7 @@ and the check is blunt: after `make escalation-eval`, `git status` must report n
 change to `benchmark/escalation/reports/metrics.json`.
 
 The run must be scoring the published corpus, whose digest is
-`370b4f954df89cdf` (`run.corpus_digest` in `metrics.json`, and `data_digest` on
+`93a55a1b60e7f78d` (`run.corpus_digest` in `metrics.json`, and `data_digest` on
 every entry of `figures.json`). A different digest means a different corpus, and
 nothing below applies.
 
@@ -78,16 +78,16 @@ nothing below applies.
 |---|---|
 | `run.status` | `OK_OFFLINE_ONLY` |
 | `run.canonical_deployability.label` | `OFFLINE-ONLY UPPER BOUND` |
-| `run.n_trajectories` · `run.n_stamped` | 822 · 723 |
+| `run.n_trajectories` · `run.n_stamped` | 1022 · 917 |
 | `run.n_permutations` | 2000 |
-| `escalation_decision.png.base_rate` | 0.4177 |
-| `escalation_decision.png.auroc_as_shipped` | 0.6003 |
-| `escalation_decision.png.auroc_edit_gated` | 0.7782 |
-| `escalation_decision.png.null.null_mean` · `.null_sd` · `.p_value` | 0.5103 · 0.0197 · 0.0005 |
-| `operating_point.png.as_shipped.precision` (CI) | 0.4177 ([0.3426, 0.4835]) |
-| `operating_point.png.as_shipped.n_escalated` | 723 of 723 |
-| `operating_point.png.edit_gated.precision` (CI) | 0.5893 ([0.5084, 0.6554]) |
-| `operating_point.png.edit_gated.n_escalated` · `lift` | 431 of 723 · 1.4109 |
+| `escalation_decision.png.base_rate` | 0.3653 |
+| `escalation_decision.png.auroc_as_shipped` | 0.6001 |
+| `escalation_decision.png.auroc_edit_gated` | 0.7821 |
+| `escalation_decision.png.null.null_mean` · `.null_sd` · `.p_value` | 0.5088 · 0.0173 · 0.0005 |
+| `operating_point.png.as_shipped.precision` (CI) | 0.3665 ([0.3016, 0.4307]) |
+| `operating_point.png.as_shipped.n_escalated` | 914 of 917 |
+| `operating_point.png.edit_gated.precision` (CI) | 0.5745 ([0.4958, 0.6447]) |
+| `operating_point.png.edit_gated.n_escalated` · `lift` | 470 of 917 · 1.5725 |
 
 The figures are bit-identical too under the locked dependency set (`uv.lock`): the
 six PNGs a fresh run writes match the committed ones byte for byte. That is a

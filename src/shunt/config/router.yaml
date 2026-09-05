@@ -208,7 +208,7 @@ router:
 
   # Which registry models (src/shunt/config/models.yaml) the live router may pick.
   # Empty/absent = every registry model. This is the MEASURED-EVIDENCE pool:
-  # the cheap base the data supports, the two escalation targets measured
+  # the cheap base the data supports, the three escalation targets measured
   # net-helpful on the committed corpus, and the latest frontier models.
   # EXCLUDED: the superseded claude-opus-4-6 (it stays in the registry as the old
   # kill-gate baseline, just not live by default) and the cheap/mid models
@@ -220,15 +220,30 @@ router:
   # but a model absent from this list is known to the registry but NOT chosen for
   # live inference. Removing them also makes the price-ranked escalation ladder
   # approximately capability-ranked: the ladder steps deepseek-v4-flash ->
-  # zai-glm-5.2 (the first measured net-helpful rung), a research-estimated
-  # frontier slot (gemini-3.1-pro) sits inside the shortlist walk, and the
-  # jump to the top rank SKIPS kimi-k3 (the best-measured rung) — the
-  # residual defect. The frontier entries need their provider's key or the router marks them
+  # deepseek-v4-pro -> zai-glm-5.2, a research-estimated frontier slot
+  # (gemini-3.1-pro) sits inside the shortlist walk, and the jump to the top
+  # rank SKIPS kimi-k3 (the best-measured rung) — the residual defect.
+  # ADDED 2026-09-04: deepseek-v4-pro, on a full 200-cell measurement ($27.45).
+  # It is the FIRST rung above the cheap base and the only pool member that
+  # clears SH015 triage on BOTH strata — routine frontier AND escalation:
+  # +15.3pp over deepseek-v4-flash (helps 33 / hurts 4, McNemar p=1.1e-06), and
+  # statistically indistinguishable from kimi-k3 (-5.5pp, p=0.29) at 3.3x lower
+  # cost per solve. It shares deepseek-v4-flash's provider row, DEEPSEEK_API_KEY
+  # and `supports_cache_control: false`, so it adds no new key and no new
+  # cache-safety surface. NOTE it is an always-on reasoning model (it emits
+  # `reasoning_content` before `content`); only its default `high` arm is
+  # verified live.
+  # zai-glm-5.2 STAYS despite being largely redundant with the cheaper, stronger
+  # deepseek-v4-pro (it rescues only 4 deepseek-v4-flash failures pro misses, out
+  # of 49, at 3.3x the cost per rescue). Redundancy is not the triage rule's test:
+  # glm-5.2 returns KEEP on its own escalation evidence (+15.5pp, p=9.8e-04), so it
+  # keeps its slot until a rule that can see redundancy says otherwise.
+  # The frontier entries need their provider's key or the router marks them
   # unhealthy and falls back — and in the SHIPPED registry that key is
   # REQUESTY_API_KEY for all of them. Every model in models.yaml is `provider:
-  # requesty` except deepseek-v4-flash, which reads DEEPSEEK_API_KEY. Do NOT set
-  # ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY expecting these rows to
-  # light up: the shipped entries reach those vendors THROUGH Requesty, so those
+  # requesty` except deepseek-v4-flash and deepseek-v4-pro, which both read
+  # DEEPSEEK_API_KEY. Do NOT set ANTHROPIC_API_KEY / OPENAI_API_KEY /
+  # GEMINI_API_KEY expecting these rows to light up: the shipped entries reach those vendors THROUGH Requesty, so those
   # variables are never read. Each direct-vendor fragment in examples/providers/
   # carries its own env var, but only the vendors with a fragment there are covered
   # — of the three variables above, only OPENAI_API_KEY has one
@@ -238,6 +253,7 @@ router:
   # Benchmark model selection is separate (benchmark/benchmark.yaml `models:`).
   models:
     - deepseek-v4-flash
+    - deepseek-v4-pro
     - zai-glm-5.2
     - kimi-k3
     - gemini-3.1-pro

@@ -28,18 +28,18 @@
     {
       "axes": [
         {
-          "baseline": 96.0201,
+          "baseline": 94.3701,
           "column": "TotalCost_cacheaware",
-          "relative_delta": -0.599125,
+          "relative_delta": -0.728073,
           "result": "better",
-          "router": 38.4921
+          "router": 25.6618
         },
         {
           "baseline": 1.0,
           "column": "sessions_mean",
-          "relative_delta": 1.076,
+          "relative_delta": 0.768,
           "result": "worse",
-          "router": 2.076
+          "router": 1.768
         },
         {
           "baseline": 1.0,
@@ -49,36 +49,36 @@
           "router": 7.0
         },
         {
-          "baseline": 0.5579,
+          "baseline": 0.5623,
           "column": "cost_cv",
-          "relative_delta": 2.394874,
+          "relative_delta": 3.473413,
           "result": "worse",
-          "router": 1.894
+          "router": 2.5154
         }
       ],
       "baseline": "Always-Frontier",
       "dominates": false,
       "passes": false,
-      "quality_baseline": 95.11,
-      "quality_delta_pp": 1.63,
+      "quality_baseline": 95.03,
+      "quality_delta_pp": 2.21,
       "quality_non_inferior": true,
-      "quality_router": 96.74
+      "quality_router": 97.24
     },
     {
       "axes": [
         {
-          "baseline": 27.1107,
+          "baseline": 22.2694,
           "column": "TotalCost_cacheaware",
-          "relative_delta": 0.419812,
+          "relative_delta": 0.152335,
           "result": "worse",
-          "router": 38.4921
+          "router": 25.6618
         },
         {
-          "baseline": 1.592,
+          "baseline": 1.459,
           "column": "sessions_mean",
-          "relative_delta": 0.30402,
+          "relative_delta": 0.211789,
           "result": "worse",
-          "router": 2.076
+          "router": 1.768
         },
         {
           "baseline": 4.0,
@@ -88,20 +88,20 @@
           "router": 7.0
         },
         {
-          "baseline": 2.5326,
+          "baseline": 2.7915,
           "column": "cost_cv",
-          "relative_delta": -0.252152,
+          "relative_delta": -0.098907,
           "result": "better",
-          "router": 1.894
+          "router": 2.5154
         }
       ],
       "baseline": "Price-Cascade",
       "dominates": false,
       "passes": false,
-      "quality_baseline": 96.74,
+      "quality_baseline": 97.24,
       "quality_delta_pp": 0.0,
       "quality_non_inferior": true,
-      "quality_router": 96.74
+      "quality_router": 97.24
     }
   ],
   "operational_tolerance": 0.05,

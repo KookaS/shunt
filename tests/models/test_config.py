@@ -33,6 +33,8 @@ def _write_yaml(path: str, data: dict) -> str:
 DEFAULT_MODEL_NAMES: Final = [
     "qwen3.7-plus",
     "deepseek-v4-flash",
+    # Measured 2026-09-03/04 and promoted to the live pool (SH015 triage KEEP on both strata).
+    "deepseek-v4-pro",
     "gpt-5-mini",
     "zai-glm-5.2",
     "kimi-k2.5",
@@ -290,14 +292,14 @@ class TestRestrictToLive:
 class TestFallbackChain:
     def test_self_first_then_rank_neighbours(self) -> None:
         pool = ModelPool()
-        # qwen3.7-plus (1.60) sits at rank 2 of the UNRESTRICTED registry; nearest neighbours
-        # are zai-glm-5.3-flash (0.65) then gpt-5-mini (2.25), with deepseek-v4-flash (0.42)
-        # one step further out. This ranks the whole registry, probe- and judge-only rows
-        # included — the server restricts to the policy's live list before serving
-        # (`proxy/server.py`), which is what keeps a probe-only row out of real routing.
+        # qwen3.7-plus (1.60) sits mid-registry; its nearest neighbours by total price are
+        # deepseek-v4-pro (1.305) then gpt-5-mini (2.25), with zai-glm-5.3-flash (0.65) and
+        # deepseek-v4-flash (0.42) further out. This ranks the whole registry, probe- and
+        # judge-only rows included — the server restricts to the policy's live list before
+        # serving (`proxy/server.py`), which is what keeps a probe-only row out of real routing.
         chain = pool.fallback_chain("qwen3.7-plus")
         assert chain[0] == "qwen3.7-plus"
-        assert set(chain[:3]) == {"qwen3.7-plus", "zai-glm-5.3-flash", "gpt-5-mini"}
+        assert set(chain[:3]) == {"qwen3.7-plus", "deepseek-v4-pro", "gpt-5-mini"}
         # Exhaustive and duplicate-free, whatever the pool holds.
         assert chain == list(dict.fromkeys(chain))
         assert set(chain) == set(pool.model_names())

@@ -9,12 +9,14 @@ def _r(**passes: bool) -> dict:
 
 class TestPriceBands:
     def test_bands_split_enabled_pool_into_thirds(self) -> None:
-        # 6 enabled models, price ascending: deepseek, qwen, gpt-5-mini, kimi-k2.5,
-        # zai-glm, kimi-k3 → cheap {deepseek, qwen}, mid {gpt-5-mini, kimi-k2.5},
-        # escalation {zai-glm, kimi-k3}.
+        # 7 enabled models, price ascending: deepseek-v4-flash, deepseek-v4-pro, qwen,
+        # gpt-5-mini, kimi-k2.5, zai-glm, kimi-k3 → cheap {deepseek-v4-flash,
+        # deepseek-v4-pro}, mid {qwen, gpt-5-mini, kimi-k2.5}, escalation
+        # {zai-glm, kimi-k3}. deepseek-v4-pro joined the pool 2026-09-04 and prices into
+        # the cheap tercile, which pushed qwen3.7-plus up into mid.
         cheap, mid, escalation = _price_bands()
-        assert cheap == {"deepseek-v4-flash", "qwen3.7-plus"}
-        assert mid == {"gpt-5-mini", "kimi-k2.5"}
+        assert cheap == {"deepseek-v4-flash", "deepseek-v4-pro"}
+        assert mid == {"qwen3.7-plus", "gpt-5-mini", "kimi-k2.5"}
         assert escalation == {"zai-glm-5.2", "kimi-k3"}
 
     def test_escalation_band_is_the_top_price_tercile(self) -> None:
@@ -29,6 +31,7 @@ class TestPriceBands:
         assert cheap | mid | escalation == {
             "qwen3.7-plus",
             "deepseek-v4-flash",
+            "deepseek-v4-pro",
             "gpt-5-mini",
             "kimi-k2.5",
             "kimi-k3",

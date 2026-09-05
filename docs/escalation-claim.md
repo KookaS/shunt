@@ -196,8 +196,8 @@ its precision *is* the base rate and it has no quiet arm to compare against.
 
 | Shipped counter, replayed | Value | Provenance |
 |---|---:|---|
-| trajectories stamped | 723 | `run.n_stamped` |
-| fired | 723 | `operating_point.png.as_shipped.n_escalated` |
+| trajectories stamped | 917 | `run.n_stamped` |
+| fired | 914 | `operating_point.png.as_shipped.n_escalated` |
 | P(fail \| fired) | 0.4177 | `operating_point.png.as_shipped.p_fail_given_fired` |
 | corpus base failure rate | 0.4177 | `operating_point.png.as_shipped.base_failure_rate` |
 | AUROC | 0.500 | `operating_point.png.as_shipped.null_auroc_familywise.observed` |
@@ -236,9 +236,10 @@ mechanically rather than editorially (`run.canonical_deployability.reason`):
 
 **The escalate arm is not the shipped ladder.** The arm measured above is the two
 most expensive models in the corpus (`session_value.png.context.frontier_models`).
-The shipped ladder walks the reduced live pool — `zai-glm-5.2 →` (a frontier slot)
-`→ jump over kimi-k3` (`ladder_rungs.png` panel B, at `escalation.rank_shortlist: 3`).
-So production reaches one arm member (zai-glm-5.2) and never the other (kimi-k3).
+The shipped ladder walks the reduced live pool — `deepseek-v4-pro → zai-glm-5.2 →`
+(a frontier slot) `→ jump over kimi-k3` (`ladder_rungs.png` panel B, at
+`escalation.rank_shortlist: 3`). So production reaches one arm member (zai-glm-5.2)
+and never the other (kimi-k3).
 Read the claim as the value of escalating *to that arm*, never as what a default
 install achieves.
 
@@ -248,6 +249,7 @@ overlaps (`benchmark/routing/reports/ladder_evidence.json`, `targets[]`):
 
 | Rung | Price multiple | n | Δ resolve | p | Verdict | Ladder visits it? |
 |---|---:|---:|---:|---:|---|---|
+| `deepseek-v4-pro` | 3.11× | 190 | +0.1526 | 1.1e-06 | **NET-HELPFUL** | yes — first rung |
 | `qwen3.7-plus` | 3.81× | 87 | +0.0345 | 0.51 | INDISTINGUISHABLE | no — not live |
 | `gpt-5-mini` | 5.36× | 190 | −0.1684 | 0.0 | **NET-HARMFUL** | no — not live |
 | `kimi-k2.5` | 8.57× | 121 | −0.0165 | 0.81 | INDISTINGUISHABLE | no — not live |
@@ -275,19 +277,19 @@ alike.
 ## The data
 
 The corpus, its provenance, its censoring and its known biases are the
-[escalation dataset card](escalation-data-card.md). In one line: 822 committed
-trajectories (`run.n_trajectories`), 723 of them carrying per-step verified
-outcomes (`run.n_stamped`), over 6 models, scored at digest
-`370b4f954df89cdf` (`run.corpus_digest`).
+[escalation dataset card](escalation-data-card.md). In one line: 1022 committed
+trajectories (`run.n_trajectories`), 917 of them carrying per-step verified
+outcomes (`run.n_stamped`), over 7 models, scored at digest
+`93a55a1b60e7f78d` (`run.corpus_digest`).
 
-The session-cadence numbers are read on all 822 trajectories, because a session
+The session-cadence numbers are read on all 1022 trajectories, because a session
 outcome comes off the run header and does not need per-step stamping. Every
-per-step number is read on the 723.
+per-step number is read on the 917.
 
 Cost comes from the provider's billed `real_cost`
-(`session_value.png.cost_provenance.source`). Every one of the 822 sessions joins
-to a cost (`...join.join_rate` = 1.0, `n_joined` = 822 of `n_sessions` = 822).
-That rate is per *session*; the underlying result table holds 1265 rows
+(`session_value.png.cost_provenance.source`). Every one of the 1022 sessions joins
+to a cost (`...join.join_rate` = 1.0, `n_joined` = 1022 of `n_sessions` = 1022).
+That rate is per *session*; the underlying result table holds 1465 rows
 (`...join.n_result_rows`), and no published key states the join grain, so read
 the 100% as session coverage and nothing finer.
 
@@ -499,12 +501,13 @@ estimate compared to the unrestricted one.
 
 | Models kept (share ≥) | n | share of rows kept | AUROC | Δ vs all models | run-length-only | clears its null |
 |---|---:|---:|---:|---:|---:|---|
-| all 6 (0.5161) | 723 | 1.000 | 0.7103 | — | 0.5682 | yes, p = 0.0005 |
-| 5 (0.7231) | 707 | 0.978 | 0.7104 | +0.0001 | 0.5741 | yes, p = 0.0005 |
-| 4 (0.8468) | 660 | 0.913 | 0.7168 | +0.0065 | 0.5519 | yes, p = 0.0005 |
-| 3 (0.8814) | 566 | 0.783 | 0.7367 | +0.0264 | 0.5468 | yes, p = 0.0005 |
-| 2 (0.9118) | 514 | 0.711 | 0.7171 | +0.0068 | 0.5598 | yes, p = 0.0005 |
-| 1 (0.9366) | 266 | 0.368 | 0.6257 | −0.0847 | 0.5486 | yes, p = 0.0005 |
+| all 7 (0.6774) | 917 | 1.000 | 0.7312 | — | 0.5727 | yes, p = 0.0005 |
+| 6 (0.7846) | 896 | 0.9771 | 0.7321 | +0.0009 | 0.5723 | yes, p = 0.0005 |
+| 5 (0.8700) | 845 | 0.9215 | 0.7345 | +0.0033 | 0.5549 | yes, p = 0.0005 |
+| 4 (0.8919) | 671 | 0.7317 | 0.7171 | −0.0141 | 0.5590 | yes, p = 0.0005 |
+| 3 (0.9153) | 572 | 0.6238 | 0.7386 | +0.0074 | 0.5445 | yes, p = 0.0005 |
+| 2 (0.9265) | 518 | 0.5649 | 0.7183 | −0.0129 | 0.5587 | yes, p = 0.0005 |
+| 1 (0.9366) | 266 | 0.2901 | 0.6257 | −0.1055 | 0.5486 | yes, p = 0.0005 |
 <!-- generated-by: benchmark.escalation.run_eval -->
 (`coverage_sensitivity.strata[]`; the null each rung clears is its own
 `null_auroc_familywise`, whose 97.5th percentile widens from 0.5492 to 0.5738 as
@@ -601,9 +604,12 @@ USD-per-marginal-resolve is still not estimated.
 price, and the price order is not the capability order: it used to buy `gpt-5-mini`
 (NET-HARMFUL) and skip `zai-glm-5.2` (NET-HELPFUL, and 3× cheaper than the rung
 it jumped to). The pool change removed the dominated rungs, so the ladder now buys
-`zai-glm-5.2`; what remains is that the price order still skips `kimi-k3`
+`zai-glm-5.2`, and adding `deepseek-v4-pro` put a NET-HELPFUL rung at the *cheapest*
+step above the base — the first time price order and capability order agree at the
+bottom of the ladder. What remains is that the price order still skips `kimi-k3`
 (NET-HELPFUL, the best-measured rung) because a research-estimated frontier slot
-falls inside the shortlist. A capability-ordered ladder is the obvious next step.
+falls inside the shortlist, and that price order cannot see redundancy: `zai-glm-5.2`
+now sits above a cheaper rung that already rescues all but 4 of the cases it does. A capability-ordered ladder is the obvious next step.
 The resolver that would order rungs by measured outcome rather than by list price
 exists but is not wired to the escalation path.
 

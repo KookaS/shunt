@@ -13,13 +13,13 @@ The short version: cheap-first allocation with verified escalation reaches
 always-frontier quality for a fraction of the cost, and — new this cycle — it
 now does so on a **cache-safe strategy you can select by name**
 (`router.strategy: session_cascade`) rather than only on a blocked one.
-`Session-Cascade`, which makes one decision per session, costs **$28.71
-cache-aware at 96.74%** on the 184-task scoring path, against `Price-Cascade`'s
-$27.11 at the same pass rate and Always-Frontier's $96.02 at 95.11%. That row
+`Session-Cascade`, which makes one decision per session, costs **$23.40
+cache-aware at 97.24%** on the 181-task scoring path, against `Price-Cascade`'s
+$22.27 at the same pass rate and Always-Frontier's $94.37 at 95.03%. That row
 **is** what a default install runs. Its sibling `kNN-semantic-cascade`
 (`router.strategy: knn_semantic_cascade`, the opt-in routing model) opens the same ladder
-on the kNN pick rather than on the cheapest model, and reaches the same 96.74%
-for **$38.49 cache-aware** — on this corpus, dominated. Read that verdict with
+on the kNN pick rather than on the cheapest model, and reaches the same 97.24%
+for **$25.66 cache-aware** — on this corpus, dominated. Read that verdict with
 the caveat it comes with: [the shipped default, and the routing model priced
 against it](#the-shipped-default-and-the-routing-model-priced-against-it).
 On the harder, fully-measured 74-task set `Session-Cascade` <!-- frozen-value: n=74, date=2026-08-11, run=49b8362 -->
@@ -71,6 +71,7 @@ The two come apart, which is the whole reason routing might be worth doing:
 | model | price ($/Mtok) | measured pass rate | 95% CI |
 |---|---:|---:|---|
 | deepseek-v4-flash | 0.42 | 68.9% | 0.620–0.751 |
+| deepseek-v4-pro | 1.30 | 85.0% | 0.794–0.893 |
 | qwen3.7-plus | 1.60 | 43.7% | 0.337–0.541 |
 | gpt-5-mini | 2.25 | 54.5% | 0.476–0.613 |
 | kimi-k2.5 | 3.60 | 49.6% | 0.408–0.584 |
@@ -81,8 +82,10 @@ The two come apart, which is the whole reason routing might be worth doing:
 not buy capability monotonically. A model is only worth its price if it earns it
 on *your* tasks. (These rates are each model's marginal rate over the tasks it
 actually ran; coverage is adaptive, so they are not cross-comparable at face
-value. On the 74 tasks **all six** models ran, the ordering barely survives — and
-the cheapest model is the most flattered by adaptive coverage:
+value. On the tasks where they co-ran (coverage varies by model pair), the ordering
+barely survives — and the cheapest model is the most flattered by adaptive
+coverage. Below is the historical "common 74" table from the prior run (a fixed
+subset for reference); the current run's coverage varies:
 
 | model | pass rate, own coverage | pass rate, common 74 | pooling bias |
 |---|---:|---:|---:|
@@ -150,7 +153,7 @@ is not distinguishable from the trivial policy. The zero-ML rows (Oracle, Price-
 Always-Cheap, Always-Frontier) use no embeddings and are unchanged.
 
 Seven **router-selection** strategies — each one a rule for picking the model a
-task *starts* on — scored on the same 184 tasks (16 unscorable), from
+task *starts* on — scored on the same 181 tasks (19 unscorable), from
 [`strategy_summary.csv`](https://github.com/KookaS/shunt/blob/main/benchmark/routing/reports/strategy_summary.csv).
 Two further scored strategies, `Session-Cascade` and `kNN-semantic-cascade`, are not
 selection rules at all: they model the escalation *layer* over whatever base
@@ -163,13 +166,13 @@ table are naive per-task sums, cache-blind:
 
 | strategy | passes | pass rate | 95% CI | total cost | avg cost/task | cumulative regret |
 |---|---:|---|---:|---:|---:|---:|
-| Oracle (hindsight, not deployable) | 178 | 96.74% | 94.02–98.91 | $18.33 | $0.0996 | 0.00 |
-| Price-Cascade (blocked, not deployable) | 178 | 96.74% | 94.02–98.91 | $27.11 | $0.1473 | 0.88 |
-| kNN-semantic-cascade (within-task) (blocked, not deployable) | 178 | 96.74% | 94.02–98.91 | $30.44 | $0.1655 | 1.21 |
-| Session-Cascade (`strategy: session_cascade` — the shipped default) | 178 | 96.74% | 94.02–98.91 | $33.56 | $0.1824 | 1.52 |
-| kNN-difficulty-cascade (blocked, not deployable) | 178 | 96.74% | 94.02–98.91 | $33.86 | $0.1840 | 1.55 |
-| Difficulty-Band-cascade (blocked, not deployable) | 178 | 96.74% | 94.02–98.91 | $34.77 | $0.1890 | 1.64 |
-| Always-Frontier | 175 | 95.11% | 91.85–97.83 | $96.02 | $0.5218 | 10.77 |
+| Oracle (hindsight, not deployable) | 176 | 97.24% | 94.48–99.45 | $14.75 | $0.0815 | 0.00 |
+| Price-Cascade (blocked, not deployable) | 176 | 97.24% | 94.48–99.45 | $22.27 | $0.1230 | 0.75 |
+| kNN-semantic-cascade (within-task) (blocked, not deployable) | 176 | 97.24% | 94.48–99.45 | $24.29 | $0.1342 | 0.95 |
+| Session-Cascade (`strategy: session_cascade` — the shipped default) | 176 | 97.24% | 94.48–99.45 | $28.21 | $0.1559 | 1.35 |
+| kNN-difficulty-cascade (blocked, not deployable) | 176 | 97.24% | 94.48–99.45 | $28.51 | $0.1575 | 1.38 |
+| Difficulty-Band-cascade (blocked, not deployable) | 176 | 97.24% | 94.48–99.45 | $28.51 | $0.1575 | 1.38 |
+| Always-Frontier | 172 | 95.03% | 91.71–97.79 | $94.37 | $0.5214 | 11.96 |
 | kNN-semantic | 143 | 77.72% | 71.20–83.70 | $11.79 | $0.0641 | 34.35 |
 | Always-Cheap | 139 | 75.54% | 69.02–81.52 | $1.50 | $0.0081 | 37.32 |
 | kNN-difficulty (control — never shippable) | 139 | 75.54% | 69.02–81.52 | $1.80 | $0.0098 | 37.35 |
@@ -193,11 +196,11 @@ passes. Setting aside the hindsight `Oracle`, it is the cheapest row in the tabl
 whose quality interval overlaps Always-Frontier's — and it is **not purchasable
 today**. Stopping at the first passing patch requires a verified outcome
 mid-session; that is more than one decision per session and it breaks
-cache-safety, so `price_cascade` is rejected at boot. The $27.11 @ 96.74%
+cache-safety, so `price_cascade` is rejected at boot. The $22.27 @ 97.24%
 operating point measures a mechanism, not a product capability.
 
-The learned `kNN-semantic-cascade (within-task)` costs **more** ($30.44 against $27.11) for the same
-96.74%, and is blocked on the same cache-safety ground. The machine learning is
+The learned `kNN-semantic-cascade (within-task)` costs **more** ($24.29 against $22.27) for the same
+97.24%, and is blocked on the same cache-safety ground. The machine learning is
 not paying for itself. What buys the quality back is **verified escalation** —
 which is why the shipped router carries an escalation ladder rather than a
 cascade, at a lower ceiling (see [escalation](escalation.md)).
@@ -318,12 +321,12 @@ loop, so the difference between them is the opening rung and nothing else.
 
 | strategy | passes | pass rate | 95% CI | naive cost | cache-aware cost | avg cost/task | cumulative regret |
 |---|---|---:|---|---:|---:|---:|---:|
-| **Session-Cascade (`strategy: session_cascade`, the default)** | 178 | **96.74%** | 94.02–98.91 | $33.56 | **$28.71** | $0.1824 | 1.52 [0.99, 2.13] |
-| kNN-semantic-cascade (`strategy: knn_semantic_cascade`, opt-in) | 178 | 96.74% | 94.02–98.91 | $43.28 | $38.49 | $0.2352 | 2.50 [1.87, 3.18] |
+| **Session-Cascade (`strategy: session_cascade`, the default)** | 176 | **97.24%** | 94.48–99.45 | $28.21 | **$23.40** | $0.1592 | 1.35 [0.81, 1.95] |
+| kNN-semantic-cascade (`strategy: knn_semantic_cascade`, opt-in) | 176 | 97.24% | 94.48–99.45 | $29.87 | $25.66 | $0.1650 | 1.51 [0.99, 2.10] |
 
-**On this corpus the routing model is dominated by the cheap start.** Both reach 96.74% —
+**On this corpus the routing model is dominated by the cheap start.** Both reach 97.24% —
 the ladder walks to a model that solves the task either way — and opening on the kNN pick
-instead of on the cheapest model costs **$9.78 more cache-aware** ($38.49 against $28.71)
+instead of on the cheapest model costs **$2.26 more cache-aware** ($25.66 against $23.40)
 for no measured quality. That is the same verdict the selection-rule rows already carry,
 arriving by a second route: the embedding buys nothing here the ladder does not already
 deliver, and it pays for models the ladder would have skipped. It is also why the default

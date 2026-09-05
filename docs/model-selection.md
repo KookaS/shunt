@@ -65,6 +65,7 @@ nothing, so a flat rung — one that neither helps nor measurably hurts — stil
 | model | price $/Mtok | n | marginal rate | 95% CI | routine | esc Δ resolve | esc verdict | verdict |
 |:---|---:|---:|---:|:---:|---:|---:|:---|:---|
 | deepseek-v4-flash | 0.42 | 190 | 68.9% | 62.1–75.1 | KEEP | — | — | KEEP |
+| deepseek-v4-pro | 1.30 | 200 | 85.0% | 79.4–89.3 | KEEP | +0.1526 | NET-HELPFUL | KEEP |
 | zai-glm-5.2 | 5.80 | 84 | 57.1% | 46.5–67.2 | DROP | +0.1548 | NET-HELPFUL | KEEP |
 | gemini-3.1-pro | 14.00 | 0 | — | — | — | — | — | UNMEASURED-EXCEPTION |
 | kimi-k3 | 18.00 | 110 | 84.5% | 76.6–90.1 | KEEP | +0.2364 | NET-HELPFUL | KEEP |
@@ -95,10 +96,20 @@ the per-rung escalation numbers behind the esc columns are in
 [the ladder-rungs figure](routing.md#fig-ladder-rungs).
 
 This committed pool is also the rule's positive control. The rule must reproduce
-`deepseek-v4-flash` / `zai-glm-5.2` / `kimi-k3` = KEEP and
+`deepseek-v4-flash` / `deepseek-v4-pro` / `zai-glm-5.2` / `kimi-k3` = KEEP and
 `qwen3.7-plus` / `gpt-5-mini` / `kimi-k2.5` = DROP — and it does, on every run.
 `zai-glm-5.2` is the load-bearing case: dominated on the routine stratum, saved only
-by the escalation one.
+by the escalation one. `deepseek-v4-pro` is the opposite case and the only model in
+the table that clears **both** strata — it is the one row where the two halves of the
+rule agree, which is why it enters the ladder directly above the cheap base.
+
+The rule is deliberately blind to one thing: **redundancy between two KEEP rungs.**
+Each candidate is scored against the cheap base alone, so a rung can keep its slot on
+its own escalation evidence while a cheaper, stronger rung already rescues nearly
+everything it would. That is now the `zai-glm-5.2` situation — on the 49
+`deepseek-v4-flash` failures where both ran, it rescues only 4 that `deepseek-v4-pro`
+misses, at 3.3× the cost per rescue. It keeps its slot because redundancy is not the
+test, and changing that is a rule change, not a table edit.
 
 ## Statuses and exceptions
 

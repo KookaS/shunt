@@ -198,12 +198,14 @@ def test_features_move_when_the_prefix_itself_differs() -> None:
 # admission change) the XPASS turns the suite red and forces the ladder to be reconsidered.
 # `strict=True` is the ratchet: an xfail that would have XPASSed had it stayed on the ladder is
 # exactly the same guard, moved to where it still bites.
-_DEGENERATE_AT_DEPTH_5 = pytest.mark.xfail(
-    strict=True,
-    reason="412 of 414 depth-5 rows carry one identical feature vector on the rebuilt corpus, so "
-    "the design cannot rank above 3 of 4 — a corpus property, not a redundant column; depth 5 "
-    "left DEFAULT_DEPTHS for this reason and this xfail keeps the finding from returning unseen",
-)
+# RETIRED 2026-09-05, by the ratchet doing its job. The 200 deepseek-v4-pro trajectories added to
+# the corpus supplied the variation depth 5 lacked, so the strict xfail XPASSed and the design now
+# ranks 4 of 4. The RANK claim is dead; the finding behind it is NOT. Depth 5's design is still
+# near-constant — 531 of its 534 rows carry one identical feature vector, and only 4 distinct
+# vectors appear at all — so full rank here rests on 3 rows. That is why depth 5 has NOT been
+# returned to `DEFAULT_DEPTHS` under this change: readmitting it is a measurement decision about
+# what the eval reports, not a consequence of a test going green, and it is left open for the
+# owner. The test below pins the near-degeneracy so the reason survives without a false rank claim.
 
 
 @pytest.mark.parametrize("depth", features.DEFAULT_DEPTHS)
@@ -237,18 +239,22 @@ def test_the_design_matrix_has_full_column_rank_on_the_real_corpus(depth: int) -
     )
 
 
-@_DEGENERATE_AT_DEPTH_5
-def test_the_dropped_depth_5_remains_rank_deficient_on_the_real_corpus() -> None:
-    # Depth 5 left `DEFAULT_DEPTHS` because its design cannot rank full — the corpus property this
-    # xfail pins. Kept as its OWN test (not parametrized over the ladder) so the reason it is not
-    # reported cannot silently come back as a green full-rank row.
+def test_the_dropped_depth_5_is_near_constant_on_the_real_corpus() -> None:
+    # Depth 5 left `DEFAULT_DEPTHS` because its design carries almost no variation. It now ranks
+    # full, so rank alone no longer states the finding; what states it is the concentration below.
+    # Kept as its OWN test (not parametrized over the ladder) so the reason depth 5 is not reported
+    # cannot silently disappear behind a green full-rank row.
     trajectories = [t for t in _live_corpus() if features.is_stamped(t)]
     rows = features.build_rows(trajectories, 5)
     assert len(rows) >= prefix_eval.MIN_ROWS
-    design = np.column_stack(
-        [np.asarray([r.features for r in rows], dtype=float), np.ones(len(rows))]
+    vectors = np.asarray([r.features for r in rows], dtype=float)
+    _, counts = np.unique(vectors, axis=0, return_counts=True)
+    # A ratchet, not a pin: if depth 5 ever spreads out, this fails and the ladder is reconsidered
+    # deliberately — the same guard the retired strict xfail provided, stated on the real quantity.
+    assert counts.max() / len(rows) > 0.95, (
+        f"depth 5 is no longer near-constant ({counts.max()} of {len(rows)} rows share one vector, "
+        f"{len(counts)} distinct vectors) — reconsider returning it to DEFAULT_DEPTHS"
     )
-    assert int(np.linalg.matrix_rank(design)) == design.shape[1]
 
 
 @pytest.mark.parametrize("depth", features.DEFAULT_DEPTHS)
