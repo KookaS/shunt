@@ -19,15 +19,25 @@ _ROOT = Path(__file__).resolve().parents[2]
 
 # Stale corpus counts that used to be hardcoded across ~21 sites. A committed doc or string
 # stating either one is a disagreement with the live corpus and must fail the gate.
-_STALE_COUNTS = ("799", "29,422", "29 422", "29422")
+_STALE_COUNTS = (
+    "799",
+    "29,422",
+    "29 422",
+    "29422",
+    # Superseded 2026-09-04 when the 200 deepseek-v4-pro trajectories landed.
+    "822",
+    "30,541",
+    "30 541",
+    "30541",
+)
 
 
 def test_census_returns_the_live_corpus_counts() -> None:
     # The committed corpus, counted from disk at this commit. Asserting the tuple pins the
     # gate: when the corpus grows, this fails until the docs are updated to match.
     got = census()
-    assert got.trajectories == 822
-    assert got.steps == 30_541
+    assert got.trajectories == 1022
+    assert got.steps == 38_211
     # The manifest is the committed ledger; the census and the manifest must agree, or one of
     # them has rotted.
     manifest = json.loads((LIVE_DIR / "manifest.json").read_text(encoding="utf-8"))

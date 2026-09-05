@@ -201,11 +201,12 @@ def test_the_arm_membership_and_the_shipped_ladder_are_recorded_not_implied() ->
     # Six priced models present: cheapest is the base, the top two are the escalate arm.
     assert sc.cheap_models == ("deepseek-v4-flash",)
     assert sc.frontier_models == ("zai-glm-5.2", "kimi-k3")
-    # The shipped shortlist walks the SHIPPED live pool (not the corpus's models): it reaches
-    # zai-glm-5.2, the first arm member, as its first rung, then jumps to the top live rank — so
-    # it never reaches kimi-k3, the other half of the arm the figure scores.
+    # The shipped shortlist walks the SHIPPED live pool (not the corpus's models): since
+    # deepseek-v4-pro joined the pool on 2026-09-04 it is the FIRST rung, then zai-glm-5.2 —
+    # the first arm member — then the jump to the top live rank, so it still never reaches
+    # kimi-k3, the other half of the arm the figure scores.
     assert sc.rank_shortlist > 0
-    assert sc.ladder_visits == ("zai-glm-5.2", "gemini-3.1-pro", "claude-fable-5")
+    assert sc.ladder_visits == ("deepseek-v4-pro", "zai-glm-5.2", "claude-fable-5")
     assert "zai-glm-5.2" in sc.ladder_visits
     assert "kimi-k3" not in sc.ladder_visits
     assert sc.to_dict()["context"]["shipped_ladder_visits"] == list(sc.ladder_visits)

@@ -388,6 +388,7 @@ The registry (`models.yaml`) defines every model shunt *knows*. `router.yaml`'s
 router:
   models:                 # live-routable models; each name must exist in the registry
     - deepseek-v4-flash
+    - deepseek-v4-pro
     - zai-glm-5.2
     - kimi-k3
     - gemini-3.1-pro
@@ -437,7 +438,7 @@ Shunt config | strategy=knn_semantic_cascade
 Shunt config | knn: k=20 success_rate_threshold=0.60 min_samples=3
 Shunt config | exploration: enabled=True budget_frac=0.15 conservative_alpha=0.10 ...
 Shunt config | budget: max_spend_usd=unlimited
-Shunt config | models: 0:deepseek-v4-flash, 1:zai-glm-5.2, 2:kimi-k3
+Shunt config | models: 0:deepseek-v4-flash, 1:deepseek-v4-pro, 2:zai-glm-5.2, 3:kimi-k3
 Shunt config | session: inactivity_timeout=900s grace_period=120s retry_count=3
 ```
 
@@ -886,6 +887,7 @@ decisions:
 ```yaml
 models:                 # enabled models; each name must exist in the registry
   - deepseek-v4-flash
+  - deepseek-v4-pro
   - qwen3.7-plus
   - gpt-5-mini
   - kimi-k2.5

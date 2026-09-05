@@ -678,12 +678,15 @@ async def test_retry_then_fallback(router: ProxyRouter, session: Session) -> Non
         # First call fails (deepseek-v4-flash), a fallback model succeeds
         mock_acompletion.side_effect = [rate_err, rate_err, rate_err, mock_response]
 
-        # deepseek-v4-flash is retried 2x, then the next model in the LIVE pool
-        # (zai-glm-5.2) serves the fallback response. The pool here is restricted the way
-        # the server restricts it, so only a router.yaml model can be reached.
+        # deepseek-v4-flash is retried 2x, then the next model in the LIVE pool serves the
+        # fallback response. That neighbour is deepseek-v4-pro since 2026-09-05, when pro
+        # joined router.yaml and priced in between flash and zai-glm-5.2 — `fallback_chain`
+        # walks rank neighbours outward, so inserting a model changes who answers here. The
+        # pool is restricted the way the server restricts it, so only a router.yaml model
+        # can be reached.
         result, model_name, reason = await router.route_chat_completion(body, session)
 
-    assert model_name == "zai-glm-5.2"
+    assert model_name == "deepseek-v4-pro"
     assert result["choices"][0]["message"]["content"] == "from fallback"
 
 

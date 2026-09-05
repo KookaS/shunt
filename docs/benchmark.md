@@ -68,6 +68,7 @@ cache-read/write rate in the model registry (`src/shunt/config/models.yaml`). Li
 | Model | Input $/1M | Output $/1M |
 |-------|-----------:|------------:|
 | deepseek-v4-flash | 0.14 | 0.28 |
+| deepseek-v4-pro | 0.435 | 0.87 |
 | qwen3.7-plus | 0.32 | 1.28 |
 | gpt-5-mini | 0.25 | 2.00 |
 | kimi-k2.5 | 0.60 | 3.00 |
@@ -75,6 +76,12 @@ cache-read/write rate in the model registry (`src/shunt/config/models.yaml`). Li
 | kimi-k3 | 3.00 | 15.00 |
 
 Spread: ~21x input, ~54x output between the cheapest and the frontier model.
+`deepseek-v4-pro` (native api.deepseek.com pricing) is **measured and served**: 200/200
+cells on the committed corpus, pinned to its default reasoning arm, and — since
+2026-09-04 — a live router model as well as a benchmark one. It is the only pool member
+that clears the model-triage frontier on both strata at once (routine, and net-helpful as
+an escalation rung above `deepseek-v4-flash` at +15.3pp), which is why it sits directly
+above the cheap base in the live ladder.
 The model registry (`src/shunt/config/models.yaml`) is the single source of truth — the table above is a
 snapshot of it. (claude-opus-4-6 is priced in the registry for provenance but is left out of
 `benchmark/benchmark.yaml`'s `models` list — excluded from runs; the strongest enabled frontier model is the baseline.)
@@ -823,7 +830,7 @@ equal coverage across the whole suite is guaranteed by **ladder collection mode*
 versus fixed-frontier on the *same* completed task set — with its confidence interval, and
 it stays honest when that interval crosses zero (equal quality is reported as equal, not
 spun as a win). On the current coverage-incomplete data, the cheapest strategy that
-matches fixed-frontier quality is `Price-Cascade` (**+1.6 pp, CI crosses zero → statistically equal**, at roughly **72% lower cost** on the shared measurable set) — but <!-- generated-by: benchmark.routing.report:paired_quality_contrast -->
+matches fixed-frontier quality is `Price-Cascade` (**+2.2 pp, CI crosses zero → not statistically equal**, at roughly **76% lower cost** on the shared measurable set) — but <!-- generated-by: benchmark.routing.report:paired_quality_contrast -->
 it is **blocked, not deployable**: the router rejects `price_cascade` at boot, because
 stopping at the first passing patch needs a verified outcome mid-session and that is not
 one cache-safe decision per session. So this is a bound on what the mechanism is worth,

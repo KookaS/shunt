@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -51,16 +52,18 @@ SPEC = FigureSpec(
         "at the corpus's measured input/output token mix; the faint grey rule beneath each "
         "bar sweeps the one input nothing here measures, the cache hit rate, from 100% (left "
         "cap) to 50% (right cap). The right-hand column repeats each row as billed → "
-        "modelled with its row count. Lower is cheaper. Right: the switch tax — how much of "
-        "the MODELLED cache saving survives as the router changes model inside one session."
+        "modelled with its row count. Lower is cheaper. Right: the switch tax as MEASURED — "
+        "per scored strategy, the dollars its cache-aware bill came in under its naive bill, "
+        "which is what repeating a model inside one task actually banked on this corpus."
     ),
     goal=(
         "Read the DISTANCE between the blue bar and the green diamond. It is now small on "
         "every model, so caching alone is a large enough effect to account for essentially "
         "the whole discount. Read that as a SIZE agreement, not as a validation: the bar "
         "mixes every reason the invoice differs from list price, and two quantities landing "
-        "on the same number cannot separate them. Then read the right panel at the shipped "
-        "operating point — one decision per session."
+        "on the same number cannot separate them. Then read the right panel for who banks any "
+        "of it: only a strategy that RETRIES inside one task can, because the discount is "
+        "scoped per task, so every single-shot policy banks exactly zero."
     ),
     definitions=(
         (
@@ -82,8 +85,10 @@ SPEC = FigureSpec(
         ),
         (
             "switch tax",
-            "naive cost minus cache-aware cost. A model switch forfeits the cached prefix, "
-            "so the next turn is billed at full input price.",
+            "naive cost minus cache-aware cost. A model switch forfeits the cached prefix, so "
+            "the next turn is billed at full input price; the difference is what NOT switching "
+            "banked. Scoped per task — one task is one session, so only a within-task repeat "
+            "can bank it.",
         ),
     ),
     notes=(
@@ -98,8 +103,13 @@ SPEC = FigureSpec(
         "deliberately. They now land close together, and that is NOT a calibration result: "
         "the bar also contains negotiated rates and provider-side discounts, so agreement in "
         "magnitude cannot attribute the discount to caching.",
-        "The right panel is a MODEL of the switch tax, not a measurement — no live session "
-        "in this corpus switched model mid-conversation, because the shipped router cannot.",
+        "The right panel is measured, but it is a COST DECOMPOSITION of runs that already "
+        "happened, not an experiment: no live session in this corpus switched model "
+        "mid-conversation, because the shipped router cannot. It says what repeating banked, "
+        "never what switching would have cost in a world where the router could switch.",
+        "The right panel inherits the left panel's assumed hit rate: the cache-aware column "
+        "re-bills a repeat at the registry cache-read price under the same 90% assumption, so "
+        "the DOLLARS it reports move with that assumption even though the repeats are counted.",
     ),
 )
 
@@ -256,40 +266,85 @@ def _draw_models(ax: Axes, rows: list[ModelCache]) -> None:
     plot_frame.panel_label(ax, "A · list price vs the invoice, against the cache model")
 
 
-def _switch_curve(switches: list[float]) -> list[float]:
-    """Share of the achievable cache saving that survives at each switch rate."""
-    # One decision per session means a switch happens only BETWEEN sessions, so every
-    # turn after the first reuses the prefix: saving_share = 1 - switch_rate.
-    return [max(0.0, 1.0 - s) for s in switches]
+def _num(row: Mapping[str, str], key: str) -> float | None:
+    """A numeric cell from the strategy table, or None when it is absent or unparseable."""
+    try:
+        return float(row[key])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
-def _draw_switch_tax(ax: Axes, rows: list[ModelCache]) -> None:
-    xs = [i / 40.0 for i in range(41)]
-    ys = _switch_curve(xs)
-    mean_saving = sum(1.0 - r.registry_share for r in rows) / max(len(rows), 1)
-    ax.plot(xs, [y * mean_saving * 100 for y in ys], color=_TAX, lw=2.0, zorder=3)
-    ax.fill_between(xs, 0, [y * mean_saving * 100 for y in ys], color=_TAX, alpha=0.10, zorder=1)
-    ax.axvline(0.0, color=_REGISTRY, lw=1.6, zorder=4)
-    ax.annotate(
-        "shipped invariant: one decision per session\n"
-        "→ no mid-session switch, so the\n"
-        "full modelled saving is retained",
-        xy=(0.30, 0.93),
-        xycoords="axes fraction",
-        fontsize=7.5,
-        color=_REGISTRY,
-        va="top",
-        ha="left",
-    )
-    ax.set_xlim(-0.02, 1.02)
-    # Headroom for the callout, but never above 100: this axis is a percentage OF the bill,
-    # and the corrected input share puts the curve's origin near 76% rather than near 17%.
-    ax.set_ylim(0.0, min(mean_saving * 100 * 1.35, 100.0))
-    ax.set_xlabel("share of turns that switch model inside a session", fontsize=9)
-    ax.set_ylabel("cache saving retained (% of the bill)", fontsize=9)
-    ax.grid(color="#eeeeee", lw=0.6)
+def banked_rows(ctx: ctxmod.RoutingContext) -> list[tuple[str, float, float]]:
+    """(strategy, dollars banked, share of its naive bill) from the tracked strategy table."""
+    # MEASURED, not modelled. `TotalCost` bills every attempt at full input price; the
+    # `_cacheaware` column re-bills a WITHIN-TASK repeat of the same model at the cache-read
+    # price. Their difference is what repeating actually banked on this corpus — equivalently,
+    # what switching instead would have cost. Same subtraction `runner.kill_gate` prints.
+    out: list[tuple[str, float, float]] = []
+    for row in ctx.rows:
+        name = str(row.get("strategy") or "")
+        naive, cached = _num(row, "TotalCost"), _num(row, "TotalCost_cacheaware")
+        if not name or naive is None or cached is None:
+            continue
+        if int(float(row.get("n_tasks", 0) or 0)) <= 0:
+            continue
+        banked = naive - cached
+        out.append((name, banked, banked / naive if naive else 0.0))
+    return sorted(out, key=lambda item: (-item[1], item[0]))
+
+
+def _draw_switch_tax(ax: Axes, banked: list[tuple[str, float, float]]) -> None:
+    """Panel B: the cache discount each scored strategy actually banked, in dollars."""
+    # WHAT THIS PANEL USED TO BE, AND WHY IT IS NOT THAT ANY MORE. It drew
+    # `saving = mean_saving x (1 - switch_rate)` over switch_rate 0..1 — an identity, plotted
+    # across the whole range of a variable the shipped router pins at 0, so the line carried no
+    # measurement and the only two facts on the canvas were its intercept and the invariant at
+    # x=0. This draws the same quantity where it IS measured: per strategy, on this corpus.
+    if not banked:
+        ax.set_axis_off()
+        plot_frame.panel_label(ax, "B · no scored strategy carries both cost columns")
+        return
+    ys = list(range(len(banked)))
+    ax.barh(ys, [b for _n, b, _s in banked], height=0.62, color=_TAX, zorder=2)
+    widest = max((b for _n, b, _s in banked), default=0.0)
+    for y, (_name, dollars, share) in zip(ys, banked, strict=True):
+        # The zero rows say "$0" and nothing more: repeating the reason on every one of them
+        # spent eight lines of the panel restating a single fact, which now sits under the
+        # axis label once.
+        text = f"${dollars:,.2f}  ({share:.0%} of naive)" if dollars else "$0"
+        ax.text(
+            dollars + widest * 0.02,
+            y,
+            text,
+            va="center",
+            ha="left",
+            fontsize=7,
+            color="#333333" if dollars else "#888888",
+        )
+    n_zero = sum(1 for _n, b, _s in banked if not b)
+    if n_zero:
+        ax.annotate(
+            f"{n_zero} of {len(banked)} bank $0 — they make one attempt per task,\n"
+            "and the discount is scoped WITHIN a task",
+            xy=(0.98, 0.02),
+            xycoords="axes fraction",
+            fontsize=6.8,
+            color="#888888",
+            ha="right",
+            va="bottom",
+        )
+    ax.set_yticks(ys)
+    ax.set_yticklabels([n for n, _b, _s in banked], fontsize=7.2)
+    ax.invert_yaxis()
+    # Room for the right-hand value labels, which run past the widest bar. Tight enough that
+    # the bars still fill the panel: the labels are short now that the zero rows say "$0".
+    ax.set_xlim(0.0, max(widest * 1.55, 1.0))
+    ax.set_xlabel("cache discount actually banked over the corpus (USD)", fontsize=9)
+    ax.grid(axis="x", color="#eeeeee", lw=0.6)
     ax.set_axisbelow(True)
-    plot_frame.panel_label(ax, "B · modelled switch tax (mean over the enabled models)")
+    # SHORT ON PURPOSE. This is the narrow panel (width_ratios 1.25:1.0) and `panel_label`
+    # does not wrap, so a long label is silently cropped at the axes edge.
+    plot_frame.panel_label(ax, "B · switch tax, measured")
 
 
 def _annotations(rows: list[ModelCache]) -> Annotations:
@@ -335,7 +390,7 @@ def render(ctx: ctxmod.RoutingContext) -> Path | None:
     size = plot_frame.WIDE
     fig, axes = plot_frame.subplots(size, 1, 2, width_ratios=(1.25, 1.0))
     _draw_models(axes[0], rows)
-    _draw_switch_tax(axes[1], rows)
+    _draw_switch_tax(axes[1], banked_rows(ctx))
     plot_style.fit_end_labels(axes[0])
     return plot_frame.save(
         fig,

@@ -692,7 +692,7 @@ existing per-cell artifacts, all keyed by the same trajectory id:
 
 The message list is the *runnable* agent: the normalized trace is enough to replay for analysis,
 not enough to reconstitute an agent. The dump is what makes a future run **resumable and
-replayable**; the 822 existing trajectories predate it and cannot be retrofitted.
+replayable**; the 1022 existing trajectories predate it and cannot be retrofitted.
 
 **Retention policy.** Dumps live in the gitignored scratch alongside the per-step snapshot
 scratch, one file per cell, last-write-wins per trajectory id. Nothing deletes them

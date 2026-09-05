@@ -123,6 +123,51 @@ models:
         - id: max
           rank: 2
           api: {thinking: {type: enabled}, reasoning_effort: max}
+  deepseek-v4-pro:
+    model_id: deepseek-v4-pro
+    provider: deepseek
+    version: deepseek-v4-pro
+    supports_streaming: true
+    supports_cache_control: false
+    serving_mode: hosted
+    pricing:
+      input_cost_per_1m: 0.435
+      output_cost_per_1m: 0.87
+      cache_read_cost_per_1m: 0.0087
+      price_provider: deepseek
+      price_source: https://api-docs.deepseek.com/quick_start/pricing
+      price_as_of: "2026-09-02"
+      price_note: >-
+        DeepSeek native list pricing (api.deepseek.com) on the DIRECT deepseek provider
+        (same base_url / DEEPSEEK_API_KEY env as deepseek-v4-flash). MEASURED 2026-09-03/04
+        over the full 200-cell corpus ($27.45 real spend); SH015 triage returns KEEP on both
+        strata, so it is a LIVE router model — see router.yaml's `models:` list and
+        benchmark/routing/reports/triage_summary.csv.
+        cache_read 0.0087 = 2% of input, the same ratio flash carries (0.0028 / 0.14).
+    size:
+      total_params: UNDISCLOSED
+      active_params: UNDISCLOSED
+      size_source: https://api-docs.deepseek.com/
+      size_as_of: "2026-09-02"
+      size_note: "DeepSeek publishes no parameter count for the v4-pro API tier; no vendor figure exists to cite (the absence IS the finding)."
+    # Reasoning: native deepseek-v4-pro is an ALWAYS-ON reasoning model — it emits
+    # `reasoning_content` before the final `content`, so a thinking-disabled arm (flash's
+    # `nothink`) would NOT measure pro's default behavior and is deliberately omitted; a too-
+    # small output budget truncates it to EMPTY content, another reason the default must be a
+    # thinking arm that reliably yields a final answer. `high` mirrors flash's shipped default
+    # (same provider/family/param surface: `thinking: {type: enabled}` + `reasoning_effort`),
+    # and `max` is the cache-safe effort step above it for later arm exploration. The `high`
+    # arm is VERIFIED live: 200/200 benchmark cells returned scored, non-empty answers. `max`
+    # remains UNVERIFIED — nothing has run it — so smoke a cell before trusting it.
+    reasoning:
+      default_arm: high
+      arms:
+        - id: high
+          rank: 0
+          api: {thinking: {type: enabled}, reasoning_effort: high}
+        - id: max
+          rank: 1
+          api: {thinking: {type: enabled}, reasoning_effort: max}
   gpt-5-mini:
     model_id: openai/gpt-5-mini
     provider: requesty
@@ -246,8 +291,9 @@ models:
       price_note: >-
         Requesty router listing (moonshot/kimi-k3, released 2026-07-16). $3/M in, $15/M out,
         $0.30/M cache-read, 1M context. The cheapest-frontier model, and the benchmark's
-        kill-gate control baseline (claude-opus-4-6 is enabled:false in the benchmark; it
-        stays in the router registry as the top escalation target).
+        kill-gate control baseline (claude-opus-4-6 is OMITTED from benchmark/benchmark.yaml's
+        `models:` list, which is how a model is disabled — there is no `enabled` key in this
+        schema; it stays in the router registry as the top escalation target).
     size:
       total_params: 2800000000000
       active_params: 104000000000

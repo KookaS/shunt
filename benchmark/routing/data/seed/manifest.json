@@ -5,7 +5,7 @@
     "embedder": "jinaai/jina-embeddings-v2-base-code",
     "file": "seed_dfec4c83a001b16e.npz",
     "max_chars": 4000,
-    "n_cells": 833,
-    "results_digest": "5a290a3925025ab7f46ba2684d9b14728cf7ac13f26cda0a348c90c317f4c40f"
+    "n_cells": 1033,
+    "results_digest": "712c09177d2fe9abaad27d0588ab68fbf15a6994db712a5ef6c920fd94418ba5"
   }
 }

@@ -35,12 +35,21 @@ class TestPhaseModels:
         config.load("benchmark/benchmark.yaml")
 
     def test_single_picks_one_representative_per_tier(self):
+        # deepseek-v4-pro joined the pool 2026-09-04 and prices into the cheap tercile,
+        # which moved qwen3.7-plus up into mid — so mid's representative is qwen, not
+        # gpt-5-mini. The shape of the assertion (one per tier) is what is being pinned.
         models = collect.phase_a_models("single")
-        assert models == ["deepseek-v4-flash", "gpt-5-mini"]
+        assert models == ["deepseek-v4-flash", "qwen3.7-plus"]
 
     def test_full_includes_every_cheap_and_mid_model(self):
         models = collect.phase_a_models("full")
-        assert set(models) == {"deepseek-v4-flash", "qwen3.7-plus", "gpt-5-mini", "kimi-k2.5"}
+        assert set(models) == {
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "qwen3.7-plus",
+            "gpt-5-mini",
+            "kimi-k2.5",
+        }
 
     def test_frontier_defaults_to_control_model(self):
         assert collect.frontier_models(include_high=False) == ["kimi-k3"]

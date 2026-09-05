@@ -372,14 +372,14 @@ variance ~3×.
 
 **What survives all of it:** the cascade result. It is untouched by every defect
 above, because it uses no model, so there was no model to get wrong — and it is
-no longer only a measurement. `Price-Cascade` at $27.11 against Always-Frontier's
-$96.02 is still blocked at boot and still unrunnable, but the session-cadence
-ladder reaches the same 96.74% for $28.71 cache-aware, is cache-safe by
+no longer only a measurement. `Price-Cascade` at $22.27 against Always-Frontier's
+$94.37 is still blocked at boot and still unrunnable, but the session-cadence
+ladder reaches the same 97.24% for $23.40 cache-aware, is cache-safe by
 construction, ships enabled, and is now nameable as
 `router.strategy: session_cascade`. What the audit and the un-imputed basis together
 sharpened is the *size*: on fully-measured tasks the saving is ~25%, not ~75%.
 And ~90% of the headroom is mechanical, which bounds the entire remaining prize
-for a perfect difficulty predictor at **about $7.0 on a $96.02 base**. That number
+for a perfect difficulty predictor at **about $7.0 on a $94.37 base**. That number
 is the honest answer to "how much is routing intelligence worth here", and it is
 small.
 

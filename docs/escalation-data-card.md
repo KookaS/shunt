@@ -28,7 +28,7 @@ The traces are **agent sessions**, captured live and then normalized into one fr
 schema (`benchmark/escalation/schema.py`: a header record, then one `StepView` per
 agent decision). Four normalizers exist — `mini_swe_agent`, `swe_agent`, `openhands`
 and `swe_smith`, under `benchmark/escalation/normalize/` — but the committed corpus is
-**entirely mini-swe-agent**: all 822 trajectories declare `framework="mini_swe_agent"`.
+**entirely mini-swe-agent**: all 1022 trajectories declare `framework="mini_swe_agent"`.
 The other three parsers are an unexercised seam, not coverage. <!-- generated-by: benchmark.escalation.corpus:census -->
 
 Labels are **not** taken from the agent's own reports. Two levels:
@@ -79,18 +79,18 @@ sources disagree.
 
 | | |
 |---|---:|
-| Trajectories (one per live session) | **822** |
-| Steps | **30,541** |
-| Distinct SWE-bench Verified instances | **166** |
-| Upstream repositories | **10** |
-| Models | **6** |
+| Trajectories (one per live session) | **1022** |
+| Steps | **38,211** |
+| Distinct SWE-bench Verified instances | **200** |
+| Upstream repositories | **12** |
+| Models | **7** |
 | Reasoning arms | **6** |
-| Per-step stamped trajectories | **723** |
-| Median steps per run (range) | **32** (8–247) |
+| Per-step stamped trajectories | **917** |
+| Median steps per run (range) | **32** (5–247) |
 <!-- generated-by: benchmark.escalation.corpus:census -->
 
 Terminal failure rate — the share of sessions that did **not** resolve their instance —
-is **0.459** over all 822 trajectories and **0.418** over the 723 stamped ones. Escalation
+is **0.398** over all 1022 trajectories and **0.365** over the 917 stamped ones. Escalation
 figures that score per-step data quote the second; the session-cadence figure quotes the
 first. They are different denominators, not a discrepancy. <!-- generated-by: benchmark.escalation.run_eval -->
 
@@ -98,13 +98,14 @@ Per model:
 
 | Model | Trajectories | Stamped | Unstamped | Stamped share |
 |---|---:|---:|---:|---:|
-| deepseek-v4-flash | 272 | 248 | 24 | 0.912 |
+| deepseek-v4-flash | 272 | 252 | 20 | 0.926 |
+| deepseek-v4-pro | 200 | 174 | 26 | 0.87 |
 | gpt-5-mini | 284 | 266 | 18 | 0.937 |
-| kimi-k2.5 | 111 | 94 | 17 | 0.847 |
-| kimi-k3 | 59 | 52 | 7 | 0.881 |
-| qwen3.7-plus | 65 | 47 | 18 | 0.723 |
-| zai-glm-5.2 | 31 | 16 | 15 | 0.516 |
-| **Total** | **822** | **723** | **99** | **0.880** |
+| kimi-k2.5 | 111 | 99 | 12 | 0.892 |
+| kimi-k3 | 59 | 54 | 5 | 0.915 |
+| qwen3.7-plus | 65 | 51 | 14 | 0.785 |
+| zai-glm-5.2 | 31 | 21 | 10 | 0.677 |
+| **Total** | **1022** | **917** | **105** | **0.897** |
 <!-- generated-by: benchmark.escalation.run_eval -->
 
 ## Known defects and coverage gaps
@@ -113,9 +114,9 @@ This is the section the page exists for. Read it before quoting any escalation n
 
 ### Stamping coverage is model-correlated
 
-99 of 822 trajectories carry no per-step verified outcomes and are dropped from every
+105 of 1022 trajectories carry no per-step verified outcomes and are dropped from every
 per-step figure. The drop is **not uniform**: it ranges from 6.3% of `gpt-5-mini` runs
-to 48.4% of `zai-glm-5.2` runs (see the table above). Stamping coverage tracks capture
+to 32.3% of `zai-glm-5.2` runs (see the table above). Stamping coverage tracks capture
 *date*, capture date tracks *model*, so model and coverage are confounded on this corpus
 and cannot be separated from within it. Any per-step result is therefore measured on a
 population whose composition differs from the corpus's by model. <!-- generated-by: benchmark.escalation.run_eval -->
@@ -137,7 +138,7 @@ is not one. `benchmark/runner/state_capture_audit.py` detects that class post ho
 marks the affected steps **unmeasured**, written as the sentinel
 `(success=True, confirmed=False, is_infra_failure=True)`.
 
-**1,957 steps — 6.4% of the corpus — across 309 of the 822 runs carry that sentinel.**
+**1,957 steps — 5.1% of the corpus — across 309 of the 1022 runs carry that sentinel.**
 They are green in the data and were never measured. The forward fix (`git diff HEAD`)
 has landed, so runs collected after it cannot reproduce the staging half; a *commit*
 still defeats it, because the recorder is not told the instance's base SHA. A second,
@@ -157,11 +158,12 @@ be decoupled without a schema change.
 
 ### Fields that are empty or constant
 
-Nine `StepView` fields are **0% populated** on every one of the 30,541 committed steps:
+Eight `StepView` fields are **0% populated** on every one of the 38,211 committed steps:
 `test_passed`, `test_total`, `subgoal_progress`, `model`, `reasoning_effort`,
-`rank_index`, `effort_index`, `real_cost`, `replay_rc`. Three more are present but
+`rank_index`, `effort_index`, `real_cost`. Three more are present but
 **constant**: `is_revert` (always `False`), `retry_count` (always `0`), `loop_signal`
-(always `False`).
+(always `False`). `replay_rc` left the empty list on 2026-09-05: the re-stamping run that
+verified the deepseek-v4-pro trajectories populated it on 7,243 steps.
 <!-- generated-by: benchmark.escalation.corpus:census -->
 
 No feature may be built on any of them, and three consequences are worth stating out loud.
@@ -237,7 +239,7 @@ Docker, the images and HuggingFace access.
 
 The scored corpus carries a short deterministic fingerprint, recorded as `corpus_digest`
 in `benchmark/escalation/reports/metrics.json`. At the committed run it is
-**`370b4f954df89cdf`**. It is a fingerprint of the scored population — trajectory count,
+**`93a55a1b60e7f78d`**. It is a fingerprint of the scored population — trajectory count,
 stamped count, challenge ids — with no timestamp and no git sha, so it moves when the
 data moves and not otherwise. <!-- generated-by: benchmark.escalation.run_eval -->
 
@@ -276,7 +278,7 @@ Consult the upstream dataset card and the source repositories before redistribut
 derived task text — this project pins and cites the dataset, it does not relicense it.
 
 The trajectory schema reserves a per-trajectory `license` field
-(`TrajectoryHeader.license`), and it is a gap worth naming: it is **null on all 822
+(`TrajectoryHeader.license`), and it is a gap worth naming: it is **null on all 1022
 committed trajectories**, as is `dataset_revision`. Provenance is therefore
 pinned in code and in this page, not recorded per record. <!-- generated-by: benchmark.escalation.corpus:census -->
 

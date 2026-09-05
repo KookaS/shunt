@@ -47,6 +47,7 @@ router:
   # fails loudly at startup. An empty list routes over every registry model.
   models:
     - deepseek-v4-flash
+    - deepseek-v4-pro
     - zai-glm-5.2
     - kimi-k3
     - gemini-3.1-pro

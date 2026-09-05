@@ -16,27 +16,29 @@ The escalation detector is scored on a *separate* trajectory corpus with its own
 
 The challenge source is **SWE-bench Verified**, 500 real GitHub bug-fix tasks with
 human-verified test sets. We sample **200** of the 500 deterministically (a fixed
-seed, so the sample is reproducible). Of those 200, **184 are fully collected and
-usable** for analysis; the other **16 remain incomplete and are excluded**. In short:
-**for now we run 184 of the 200 sampled** (SWE-bench Verified has 500 total). <!-- generated-by: benchmark.routing.summary:complete_scored_matrix -->
+seed, so the sample is reproducible). Of those 200, **181 are fully collected and
+usable** for analysis; the other **19 remain incomplete and are excluded**. In short:
+**for now we run 181 of the 200 sampled** (SWE-bench Verified has 500 total). <!-- generated-by: benchmark.routing.summary:complete_scored_matrix -->
 
 A run does not fill every cell of the task × model grid. On the current data (the census
 the report writes to `benchmark/routing/reports/coverage_table.csv`):
 
 | Cells | Meaning |
 |------:|---------|
-| **765** | real, observed cells (a model actually ran the task and was graded) |
+| **965** | real, observed cells (a model actually ran the task and was graded) |
 | **410** | imputed cells (filled in memory under the monotonicity assumption, never paid for — see [below](#the-two-collection-algorithms)) |
 | **25** | unknown (no bracketing observation, so the outcome can't be inferred) |
 
-Six models are compared, ranked by **measured** capability (which, at cold start
+Seven models are compared, ranked by **measured** capability (which, at cold start
 before any data, is the price order): `gpt-5-mini` < `kimi-k2.5` < `deepseek-v4-flash`
-< `qwen3.7-plus` < `zai-glm-5.2` < `kimi-k3`. The rank is derived from the verified
+< `qwen3.7-plus` < `zai-glm-5.2` < `deepseek-v4-pro` < `kimi-k3`. Note that the measured
+rank is *not* the price order — `deepseek-v4-pro` is the second-cheapest model in the
+pool and ranks second-strongest. The rank is derived from the verified
 outcomes themselves, not assumed — see [Benchmark design](benchmark-design.md#equal-coverage-scoring-monotone-rank-imputation) for how the rank is measured.
 
-### The seventh model in the file, and why nothing scores it
+### The eighth model in the file, and why nothing scores it
 
-The collected data holds a **seventh** model, `zai-glm-5.3-flash` (41 rows). It is in the
+The collected data holds an **eighth** model, `zai-glm-5.3-flash` (41 rows). It is in the
 model registry but deliberately **not** in the benchmark's enabled list
 (`models:` in `benchmark/benchmark.yaml`), and every figure, table and strategy on this
 site is scoped to the enabled set — so it appears in no result here.

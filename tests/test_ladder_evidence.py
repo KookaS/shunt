@@ -25,6 +25,7 @@ CONFIG_PATH: Final = str(Path(config.__file__).resolve().parent / "benchmark.yam
 
 # target -> (n, helps, hurts, delta, verdict) from the committed results.csv.
 PINNED_ROWS: Final[dict[str, tuple[int, int, int, float, str]]] = {
+    "deepseek-v4-pro": (190, 33, 4, 0.1526, "NET-HELPFUL"),
     "qwen3.7-plus": (87, 6, 3, 0.0345, "INDISTINGUISHABLE"),
     "gpt-5-mini": (190, 4, 36, -0.1684, "NET-HARMFUL"),
     "kimi-k2.5": (121, 8, 10, -0.0165, "INDISTINGUISHABLE"),
@@ -38,7 +39,14 @@ RECORDED_PROBE: Final[dict[str, tuple[int, int, int]]] = {
     "kimi-k3": (56, 13, 2),
 }
 
-_PRICE_ORDER: Final = ["qwen3.7-plus", "gpt-5-mini", "kimi-k2.5", "zai-glm-5.2", "kimi-k3"]
+_PRICE_ORDER: Final = [
+    "deepseek-v4-pro",
+    "qwen3.7-plus",
+    "gpt-5-mini",
+    "kimi-k2.5",
+    "zai-glm-5.2",
+    "kimi-k3",
+]
 
 
 @pytest.fixture(scope="module")
