@@ -142,12 +142,13 @@ async def test_fallback_records_served_model_and_serving_log(
         mock_acompletion.side_effect = [failure, _response(0, 5)]
         _, model_name = await router._route_with_fallback(kwargs, session)
 
-    # The locked default (deepseek-v4-flash) fails, the next LIVE pool model (zai-glm-5.2)
-    # serves — the log names the real served model, not the locked one.
-    assert model_name == "zai-glm-5.2"
-    assert session.metadata["last_turn_served_model"] == "zai-glm-5.2"
+    # The locked default (deepseek-v4-flash) fails, the next LIVE pool model serves — the log
+    # names the real served model, not the locked one. That neighbour became deepseek-v4-pro
+    # on 2026-09-05, when pro joined router.yaml and priced in between flash and zai-glm-5.2.
+    assert model_name == "deepseek-v4-pro"
+    assert session.metadata["last_turn_served_model"] == "deepseek-v4-pro"
     assert (
-        f"serving: session={session.session_id} locked=deepseek-v4-flash served=zai-glm-5.2"
+        f"serving: session={session.session_id} locked=deepseek-v4-flash served=deepseek-v4-pro"
         in caplog.text
     )
 
