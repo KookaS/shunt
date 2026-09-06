@@ -23,6 +23,11 @@ from benchmark.routing.strategies.knn_difficulty import (
 from benchmark.routing.strategies.knn_session_cascade import kNNSessionCascadeStrategy
 from benchmark.routing.strategies.oracle import Oracle, OracleRewardAware
 from benchmark.routing.strategies.price_cascade import PriceCascade
+from benchmark.routing.strategies.ranker_defer import RankerDeferCascadeStrategy
+from benchmark.routing.strategies.ranker_difficulty import (
+    RankerDifficultyCascadeStrategy,
+    RankerDifficultyStrategy,
+)
 from benchmark.routing.strategies.session_cascade import (
     DEFAULT_LADDER,
     SessionCascadeStrategy,
@@ -70,6 +75,9 @@ def get_strategies(
             "knn_difficulty",
             "knn_difficulty_cascade",
             "difficulty_band_cascade",
+            "ranker_difficulty",
+            "ranker_difficulty_cascade",
+            "ranker_defer_cascade",
             "price_cascade",
             "session_cascade",
             "knn_semantic_tier",
@@ -84,6 +92,10 @@ def get_strategies(
     # embedding neighbourhood, and borrowing them would couple the two families' tuning.
     difficulty_p = dict(strat_cfg.get("knn_difficulty", {}))
     band_p = dict(strat_cfg.get("difficulty_band", {}))
+    # The ranker family reads its own knobs too: predicted-difficulty mirrors the judge
+    # difficulty family's neighbourhood knobs, and the defer row has ONE knob of its own.
+    ranker_diff_p = dict(strat_cfg.get("ranker_difficulty", {}))
+    ranker_defer_p = dict(strat_cfg.get("ranker_defer", {}))
 
     if k is not None:
         knn_p.setdefault("k", k)
@@ -116,13 +128,30 @@ def get_strategies(
         **session_p,
     }
     band_session_p = {**{key: band_p[key] for key in _KNN_KNOBS if key in band_p}, **session_p}
+    # The ranker session-cadence rows mirror knn_semantic_cascade: the ranker pick on the
+    # SAME session ladder, so every session-cadence row is scored at one ladder. The defer
+    # row takes no kNN knobs — its only selection knob is the pre-registered defer
+    # threshold.
+    ranker_diff_session_p = {
+        **{key: ranker_diff_p[key] for key in _KNN_KNOBS if key in ranker_diff_p},
+        **session_p,
+    }
+    ranker_defer_session_p = {
+        **{key: ranker_defer_p[key] for key in ("defer_threshold",) if key in ranker_defer_p},
+        **session_p,
+    }
     # STRUCTURAL: refuse to build either session-cadence row at a ladder its positive control does
     # not cover, rather than produce a row nobody may quote. Raised here — before any evaluation —
     # so the failure costs nothing and cannot be mistaken for a result.
     # The fallback is the STRATEGY's own default, not a restated literal: gating on a ladder the
     # row would not have run is a green gate over an uncertified replay.
     ladder = str(session_p.get("ladder", DEFAULT_LADDER))
-    for cadence_id in ("session_cascade", "knn_semantic_cascade"):
+    for cadence_id in (
+        "session_cascade",
+        "knn_semantic_cascade",
+        "ranker_difficulty_cascade",
+        "ranker_defer_cascade",
+    ):
         if cadence_id in enabled:
             assert_ladder_quotable(ladder)
 
@@ -138,6 +167,11 @@ def get_strategies(
         "knn_difficulty": lambda: knnDifficultyStrategy(**difficulty_p),
         "knn_difficulty_cascade": lambda: knnDifficultyCascadeStrategy(**difficulty_session_p),
         "difficulty_band_cascade": lambda: DifficultyBandCascadeStrategy(**band_session_p),
+        "ranker_difficulty": lambda: RankerDifficultyStrategy(**ranker_diff_p),
+        "ranker_difficulty_cascade": lambda: RankerDifficultyCascadeStrategy(
+            **ranker_diff_session_p
+        ),
+        "ranker_defer_cascade": lambda: RankerDeferCascadeStrategy(**ranker_defer_session_p),
         "price_cascade": lambda: PriceCascade(**price_p),
         "session_cascade": lambda: SessionCascadeStrategy(**session_p),
         "knn_semantic_tier": lambda: TierClassifier(**tier_p),

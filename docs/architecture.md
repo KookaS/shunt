@@ -63,7 +63,8 @@ live-eligible: `session_cascade` (the default), `knn_semantic_cascade`, `always_
 `src/shunt/router/policy.py`, and it is the whole of it — every other strategy the
 benchmark scores (`oracle`, `oracle_reward`, `random`,
 `knn_semantic_cascade_withintask`, `price_cascade`, `knn_semantic_tier`,
-`knn_difficulty`, `knn_difficulty_cascade`, `difficulty_band_cascade`) is rejected at boot.
+`knn_difficulty`, `knn_difficulty_cascade`, `difficulty_band_cascade`,
+`ranker_difficulty`, `ranker_difficulty_cascade`, `ranker_defer_cascade`) is rejected at boot.
 The reasons differ: `oracle` and `oracle_reward` read the task's own verified
 outcome and `random` is not a router at all; the two **within-task** cascades are
 excluded on purpose and permanently, because a real quality cascade has to verify

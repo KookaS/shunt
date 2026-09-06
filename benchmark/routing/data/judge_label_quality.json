@@ -1,0 +1,47 @@
+{
+  "anchor_consistency": {
+    "abs_diff": 0.001250086315723098,
+    "anchor_r2_loo_vs_cheap_pass": 0.028765524228576145,
+    "terra_r2_loo_vs_cheap_pass": 0.027515437912853047,
+    "within_0.01": true
+  },
+  "anomalous_run_counts": {
+    "astropy__astropy-14995": {
+      "gpt-5.6-terra": 6
+    }
+  },
+  "coverage": {
+    "sol_no_terra": [],
+    "terra_no_sol": [
+      "django__django-13297",
+      "sympy__sympy-21847"
+    ]
+  },
+  "human_stratum_concordance": {
+    "gpt-5.6-sol": {
+      "n": 498,
+      "spearman_vs_human_stratum": 0.425928874971881
+    },
+    "gpt-5.6-terra": {
+      "n": 500,
+      "spearman_vs_human_stratum": 0.4409653787218089
+    }
+  },
+  "judges": {
+    "gpt-5.6-sol": 498,
+    "gpt-5.6-terra": 500
+  },
+  "outcome_validity": {
+    "gpt-5.6-sol": {
+      "n": 190,
+      "spearman_vs_cheap_fail": 0.13231442424594486
+    },
+    "gpt-5.6-terra": {
+      "n": 190,
+      "spearman_vs_cheap_fail": 0.20372648697549411
+    }
+  },
+  "shared_terra_sol_tasks": 498,
+  "terra_sol_spearman_n": 498,
+  "terra_sol_spearman_rho": 0.7566663016571225
+}

@@ -287,8 +287,9 @@ def _arg_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--tasks",
         default=None,
-        help="Comma-separated task ids to judge (overrides the sampled measured set) — "
-        "used to top up a partially-collected probe round with the exact missing tasks",
+        help="Comma-separated task ids to judge (any indexed challenge; overrides the "
+        "sampled measured set) — used to top up a partially-collected probe round or "
+        "expand labels to unmeasured index tasks",
     )
     return ap
 
@@ -301,22 +302,31 @@ def main() -> int:
 
     matrix = config.load_matrix()
     results = matrix.get("results", {})
-    if not results:
-        print("No results yet — results.csv holds no rows. Refusing to judge on empty data.")
-        return 1
-    tasks = config.sample_tasks(sorted(results.keys()), seed=DEFAULT_SEED)
-    if args.tasks:
-        wanted = {t.strip() for t in args.tasks.split(",") if t.strip()}
-        missing = [t for t in wanted if t not in set(results.keys())]
-        if missing:
-            print(f"Refusing: task id(s) not in results.csv: {sorted(missing)[:5]}")
-            return 1
-        tasks = [t for t in wanted]  # preserve the caller's order
-    elif args.limit and args.limit > 0:
-        tasks = tasks[: args.limit]
-
     challenges = config.load_challenges()
     task_meta = challenges.get("tasks", {})
+    if not task_meta:
+        print("No indexed challenges — refusing to judge on empty task data.")
+        return 1
+    if not results and not args.tasks:
+        print("No results yet — results.csv holds no rows. Refusing to judge on empty data.")
+        return 1
+    # Explicit --tasks may target ANY indexed challenge (label expansion beyond the
+    # measured set); the default sampling stays over the measured (results.csv) set.
+    if args.tasks:
+        wanted = {t.strip() for t in args.tasks.split(",") if t.strip()}
+        missing = [t for t in wanted if t not in set(task_meta.keys())]
+        if missing:
+            print(f"Refusing: task id(s) not in the indexed challenges: {sorted(missing)[:5]}")
+            return 1
+        tasks = [t for t in wanted]  # preserve the caller's order
+    else:
+        if not results:
+            print("No results yet — results.csv holds no rows. Refusing to judge on empty data.")
+            return 1
+        tasks = config.sample_tasks(sorted(results.keys()), seed=DEFAULT_SEED)
+        if args.limit and args.limit > 0:
+            tasks = tasks[: args.limit]
+
     task_prompts = {
         tid: _PROMPT_TEMPLATE.format(**_task_context(tid, task_meta.get(tid, {}))) for tid in tasks
     }

@@ -62,6 +62,9 @@ routing/
     cost_quality_headline.py   # Four-point simplification of cost_quality_frontier.png for the front page
     refresh_price_sheet.py      # Fetch current prices from OpenRouter / Requesty / HuggingFace, write data/price_sheet.json
     derive_judge_difficulty.py # Generate judge_difficulty.json from judge probe outputs
+    derive_judge_label_csv.py  # Generate the committed judge_difficulty.csv (per-task, per-judge) + label-quality gate
+    derive_defer_labels.py     # Generate defer_labels.csv (cheap-fail per task) from measured results.csv cells
+    score_ranker_strategy_rows.py  # Score the ranker rows + their reference rows into one CSV (not in strategies.enabled, so run_eval never emits them)
     judge_probe.py            # Live LLM-as-a-judge difficulty labels on the measured task set (gitignored JSONL)
     judge_probe_metrics.py    # Judge labels vs measured outcomes: AUC/R², agreement, stability, LLM-as-router analysis, human-tag control
     learnability_probe.py     # Embedding learnability control: how much signal survives random shuffling
