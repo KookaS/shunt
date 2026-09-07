@@ -1,24 +1,24 @@
 {
   "cost_quality_headline": {
-    "inputs": "74c88e9ba1d76b5017a932ae5a330d2bf26b4e029f85fcd013c175135958e74a",
+    "inputs": "fb14f8bd6ba82594c4b3fd7bbcb5f3448ab9ae8635011f19f1f1be8b17cf4507",
     "outputs": {
       "cost_quality_headline.png": "031cac8b660fb93599114d3604685f1eac97bf9984baa426f978087c02040397"
     }
   },
   "plot_exploration": {
-    "inputs": "e9b00aa0ec29bec7bbf317ae462f639904bbc7c6c83abb0e25954da407855409",
+    "inputs": "71b5a7e6ce355596e3b59454656c8901505dbfe333aca2460735f46c1a94297d",
     "outputs": {
       "exploration_cost.png": "ea54e7d8a1e01294227f54ed69f02da84d22d86235777fe546af67cb3693d965"
     }
   },
   "plot_knn_nulls": {
-    "inputs": "9be7e4fdb85fa3ad94a4c994a0a0e3838918578775a7818f4b0bc0d2849a838d",
+    "inputs": "0010735f3758a79ceebaa6d89b24e022c0e3e968985bdb8013ccbdedac2e2187",
     "outputs": {
       "embedding_signal.png": "06dc0eb119dfd90c86e8fcdb4ab13fe168ed1e71511aa4fe3fdea98a6ea64220"
     }
   },
   "render_demo_figures": {
-    "inputs": "7cc5b7837a395edef41602d0eb3a47b9d713c53acba334464229683a3fa87cb9",
+    "inputs": "ade51d095eef0115463a9053715e2de39874f7f3291f4ffb98aca14b38569e10",
     "outputs": {
       "inference_cost.png": "3dd574a07ea1eb71add4bcd84472318f10229e1e4591adc7ac00ff24e91afdaf",
       "inference_escalation.png": "193cfa295c50052e89b4e19890003c4e95d63d8e960eaf26cedc147cfa78f032",
@@ -31,7 +31,7 @@
     }
   },
   "render_inference_figures": {
-    "inputs": "3c43364c552324a301b493cfab869306c9109e9abe3d0bda731c93f817d58ea1",
+    "inputs": "5c882ced455ff5c57df07af8c1892dfcc1b85beac2e99aa69e891b5775bdd514",
     "outputs": {
       "inference_cost.png": "e505e13206d2376cacd59645d903a2dac5412a9615b6b7ba4f0b31fb696dee8c",
       "inference_escalation.png": "ba86080378d75fd907e3e7121b8d47c01d6ffb68700fee4bdd66991bbc6e1b9e",
@@ -44,7 +44,7 @@
     }
   },
   "report": {
-    "inputs": "5a6f88bdf1505ad469f787461eee874d4d936f140adfc3a73ae9091645902697",
+    "inputs": "bf17b384acdd7cccd0f58fbeb269bd67e3b9ff1f0ddfff3126e58aaab08a4524",
     "outputs": {
       "arm_manipulation.png": "4061dcf67ce2259cc7e0d718f7f28823d091daf69b22eafc0a38a71513968b00",
       "cache_economics.png": "34ceed3c2c8aaeea13b4c8af681a0157b355a7509c6bda6a5a52ac315c837a21",
@@ -62,7 +62,7 @@
     }
   },
   "run_eval": {
-    "inputs": "2d22d7474af6d4a70ce6de272fc2362a24b81c625809b640faa77e39296dc2e9",
+    "inputs": "e97bc4223cae4a3263b7eb300ba50189cbba66e7ea5cc719b5ffb161af197f58",
     "outputs": {
       "corpus_and_coverage.png": "dd3329f43eebfc8ebf903699d999e23aa715289198a202a9edd2da5fdc37668d",
       "escalation_budget.png": "131f22cd75a774a03d58c504baddd6bedd000d62316b0e6acfd11b23fed26277",
@@ -74,13 +74,13 @@
     }
   },
   "threshold_sweep": {
-    "inputs": "a73984b7cb1d37cd13cc228a81ef5c0bb72fbd64f67dae1fbf3c687f3e5c7997",
+    "inputs": "2b771940551f08bf2a3945f589087606237eb02036fd7263dec890b67297cee3",
     "outputs": {
       "sweep_regimes.png": "87049b04fc5cafedd1edb8d72320b4ee1611a86abd4b9a050b2a6783151f6f85"
     }
   },
   "viz_knn": {
-    "inputs": "a8ce54930d1fc981c405a2d119cd5dde1779438d8324e99e10b814188dbf4fa4",
+    "inputs": "6938a16b9f1d46ac124d0bbcaa2dd8e82f7ce53c55d5e72899893bedb0960072",
     "outputs": {
       "knn_calibration.png": "9923f27c1c3db64d6d8840f2d9612dbda9b6d1afe26be45c6d7db0ad9809d2dd"
     }

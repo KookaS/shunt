@@ -60,6 +60,8 @@ benchmark/
       session_cascade.py                  The shipped default: always-cheap pick + the session ladder
       predict_then_cascade.py             Binary gate: cheap-direct vs session-cascade ladder
       price_cascade.py                    Try-verify-escalate in ascending price order (zero-ML)
+      ranker_defer.py                     Predicted-defer pick + session cascade (blocked research row)
+      ranker_difficulty.py                Predicted-difficulty pick (single-shot control + session cascade, blocked research row)
       tier_classifier.py                  Single-shot: predict crossover tier, route there directly
       _cascade_common.py                  Shared cascade utilities (internal)
       _template.py                        Skeleton for a new strategy

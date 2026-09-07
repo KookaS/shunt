@@ -54,6 +54,9 @@ DISPLAY_TO_ID: Final[Mapping[str, str]] = MappingProxyType(
         "kNN-difficulty": "knn_difficulty",
         "kNN-difficulty-cascade": "knn_difficulty_cascade",
         "Difficulty-Band-cascade": "difficulty_band_cascade",
+        "Ranker-Difficulty": "ranker_difficulty",
+        "Ranker-Difficulty-cascade": "ranker_difficulty_cascade",
+        "Ranker-Defer-cascade": "ranker_defer_cascade",
         "Always-Cheap": "always_cheap",
         "Always-Frontier": "always_frontier",
         "Oracle": "oracle",
@@ -155,6 +158,36 @@ _NON_LIVE: Final[Mapping[str, Classification]] = MappingProxyType(
             "the same judge dependency as kNN-difficulty-cascade — a per-task difficulty "
             "label is required before the band rule can fire",
             "docs/routing.md §difficulty-routing; identical path to kNN-difficulty-cascade",
+        ),
+        "Ranker-Difficulty": Classification(
+            StrategyClass.CONTROL,
+            "the ranker-predicted-difficulty selection rule with the escalation ladder "
+            "removed. No `router.strategy` value produces it; kept as the contrast that "
+            "isolates what the ladder buys on the PREDICTED-difficulty axis — and the R0 "
+            "zero-shot cross-encoder's difficulty signal measured near-chance, so this is a "
+            "research/control row, not a deployable mechanism",
+        ),
+        "Ranker-Difficulty-cascade": Classification(
+            StrategyClass.BLOCKED,
+            "needs a per-task PREDICTED-difficulty label and a difficulty index over "
+            "labelled history at inference — the label is a local fit-free cross-encoder "
+            "call (no paid judge), but the task-boundary scorer and the index build the "
+            "live path lacks",
+            "same mechanism as kNN-difficulty-cascade (docs/routing.md §difficulty-routing) "
+            "with the label source swapped from the paid LLM judge to the local zero-shot "
+            "cross-encoder; only the scorer wiring and index build remain, plus the "
+            "cold-start fallback to session_cascade",
+        ),
+        "Ranker-Defer-cascade": Classification(
+            StrategyClass.BLOCKED,
+            "needs a per-task predicted defer probability at the task boundary — a local "
+            "fit-free cross-encoder defer scorer the live path does not run — before it "
+            "can choose whether to skip the cheap rung. The finetuned defer signal measured "
+            "near-chance, so it is a research row, not a deployable one",
+            "run the local cross-encoder defer scorer at the task boundary and select "
+            "`ranker_defer_cascade` (equivalently: fold the p>threshold lift into "
+            "session_cascade's opening rung); fall back to session_cascade when the scorer "
+            "is unavailable",
         ),
     }
 )
