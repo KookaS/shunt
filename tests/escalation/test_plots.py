@@ -11,14 +11,18 @@ matplotlib.use("Agg")  # headless; no display in CI
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
+from matplotlib.colors import to_rgba  # noqa: E402
 from matplotlib.container import BarContainer  # noqa: E402
 
+from benchmark import plot_frame  # noqa: E402
 from benchmark.escalation import features, metrics, plots, policy_eval, replay  # noqa: E402
+from benchmark.escalation.schema import Trajectory  # noqa: E402
 from benchmark.escalation.session_eval import (  # noqa: E402
     ArmContrast,
     ArmCost,
     SessionCadenceReport,
 )
+from benchmark.plot_frame import CAVEAT_RED  # noqa: E402
 from tests.escalation.factories import make_step, make_trajectory  # noqa: E402
 
 _PERMUTATIONS = 200
@@ -534,24 +538,31 @@ def test_the_session_figure_never_inherits_the_per_step_stamping_caveat() -> Non
 # ---------------------------------------------------------- 5. the corpus and coverage
 
 
-def test_the_corpus_figure_names_the_models_with_no_per_step_outcomes() -> None:
-    covered = make_trajectory(
+def _stamped_model(model: str, n: int, *, stamped: bool) -> list[Trajectory]:
+    """`n` trajectories for one model, each with stamped or unstamped per-step outcomes."""
+    steps = (
         [
             make_step(step_index=i, decision_index=i, success=False, failing_check_id="k")
             for i in range(4)
-        ],
-        trajectory_id="inst__seeing-model__high",
-        terminal_resolved=False,
+        ]
+        if stamped
+        else [make_step(step_index=i, decision_index=i, confirmed=False) for i in range(4)]
     )
-    blind = make_trajectory(
-        [make_step(step_index=i, decision_index=i, confirmed=False) for i in range(4)],
-        trajectory_id="inst__blind-model__high",
-        terminal_resolved=False,
-    )
+    return [
+        make_trajectory(steps, trajectory_id=f"inst__{model}__high{i}", terminal_resolved=False)
+        for i in range(n)
+    ]
+
+
+def test_the_corpus_figure_names_the_models_with_no_per_step_outcomes() -> None:
+    # At least `_MIN_SCORABLE_RUNS` per model, so the zero-coverage model is a SCORED zero and
+    # still reaches the panel — the segregation is for under-collected rows, not this one.
+    covered = _stamped_model("seeing-model", 12, stamped=True)
+    blind = _stamped_model("blind-model", 12, stamped=False)
     fig, axes = _axes(4)
     ann = plots.corpus_and_coverage(
-        features.model_coverage([covered, blind]),
-        [plots.ModelArm("seeing-model", 1, 1.0, None)],
+        features.model_coverage([*covered, *blind]),
+        [plots.ModelArm("seeing-model", 12, 1.0, None)],
         plots.StratifiedAuroc(0.78, 0.75, 0.71),
         None,
         axes,
@@ -559,6 +570,58 @@ def test_the_corpus_figure_names_the_models_with_no_per_step_outcomes() -> None:
     assert any("blind-model" in lim for lim in ann.limitations)
     assert any("NO per-step outcomes" in lim for lim in ann.limitations)
     plt.close(fig)
+
+
+def test_an_under_collected_model_is_named_not_drawn() -> None:
+    # THE OWNER'S ORIGINAL BUG. `kilo-step-3.7-flash-free` (0/3) drew a glitch bar on panel A and
+    # made the header's model count disagree with the panel's rows. A model under
+    # `_MIN_SCORABLE_RUNS` is now segregated: absent from the panel, absent from the header count,
+    # and named in the limitations as insufficient evidence.
+    thin = _stamped_model("thin-model", 3, stamped=False)
+    big = _stamped_model("big-model", 40, stamped=True)
+    fig, axes = _axes(4)
+    ann = plots.corpus_and_coverage(
+        features.model_coverage([*thin, *big]),
+        [plots.ModelArm("thin-model", 3, 0.0, 0.0), plots.ModelArm("big-model", 40, 1.0, 0.0)],
+        plots.StratifiedAuroc(0.78, 0.75, 0.71),
+        None,
+        axes,
+    )
+    assert dict(ann.counts)["models"] == 1
+    assert dict(ann.counts)["insufficient_evidence"] == 1
+    assert any("INSUFFICIENT EVIDENCE" in lim and "thin-model" in lim for lim in ann.limitations)
+    assert any(
+        "1 inference-valid models scored" in fact or "1 sampled models scored" in fact
+        for fact in ann.subtitle_facts
+    )
+    panel_ticks = {t.get_text() for t in axes[0].get_yticklabels()}
+    assert not any("thin-model" in tick for tick in panel_ticks)
+    assert any("big-model" in tick for tick in panel_ticks)
+    plt.close(fig)
+
+
+def test_a_present_census_with_no_valid_match_returns_an_empty_subject_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The old `kept or list(...)` fallback re-admitted the benchmark-only models the census
+    # exists to exclude. A present census that matches nothing must stay empty.
+    monkeypatch.setattr(plots.model_universe, "valid_rows", lambda: [])
+    coverages = features.model_coverage(_stamped_model("only-model", 12, stamped=True))
+    arms = [plots.ModelArm("only-model", 12, 1.0, None)]
+    kept_cov, kept_arms = plots._inference_valid_subjects(coverages, arms)
+    assert kept_cov == []
+    assert kept_arms == []
+
+
+def test_an_absent_census_keeps_the_full_subject_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(plots.model_universe, "universe", lambda: [])
+    coverages = features.model_coverage(_stamped_model("only-model", 12, stamped=True))
+    arms = [plots.ModelArm("only-model", 12, 1.0, None)]
+    kept_cov, kept_arms = plots._inference_valid_subjects(coverages, arms)
+    assert len(kept_cov) == len(coverages)
+    assert len(kept_arms) == 1
 
 
 def test_the_corpus_figure_never_plots_the_tautological_capture_rate() -> None:
@@ -625,11 +688,120 @@ def test_the_admission_waterfall_states_both_base_rates() -> None:
         plots.Admission(10, 727, 10, 373, 344, 0.503, 0.421),
         axes,
     )
-    assert any(
-        "344/727" in fact and "0.503" in fact and "0.421" in fact for fact in ann.subtitle_facts
-    )
+    facts = "\n".join(ann.subtitle_facts)
+    # The admission share (344/727) and the admitted population's FAILURE rate (0.503) are two
+    # different quantities; the old one-string form sat them side by side and invited reading one
+    # as the other.
+    assert "344 admitted" in facts and "727 stamped" in facts
+    assert "admission share 0.473" in facts
+    assert "admitted-set failure base rate 0.503" in facts
+    assert "vs corpus 0.421" in facts
     assert any("0.503" in t.get_text() for t in axes[3].texts)
     plt.close(fig)
+
+
+def test_panel_d_is_a_sequential_waterfall_not_four_independent_bars() -> None:
+    # THE DEFECT THIS PINS. 917 stamped, −17 too short, −456 anti-leak, 444 admitted is a
+    # sequence (917−17−456=444). Drawn as four bars from the axis, "too short = 17" reads as a
+    # category beside "stamped = 917". Each removal now hangs off the running total.
+    fig, axes = _axes(4)
+    plots.corpus_and_coverage(
+        [],
+        [],
+        plots.StratifiedAuroc(0.78, 0.75, 0.71),
+        plots.Admission(10, 917, 17, 456, 444, 0.444, 0.365),
+        axes,
+    )
+    ax = axes[3]
+    # The two removal bars start ABOVE the axis, at the levels they subtract from.
+    bottoms = sorted(round(p.get_y(), 3) for p in ax.patches if p.get_height() > 0)
+    assert 900.0 in bottoms and 444.0 in bottoms, bottoms
+    assert ax.get_ylim()[1] >= 917.0
+    plt.close(fig)
+
+
+def test_the_tiny_too_short_removal_gets_a_visible_stub() -> None:
+    fig, axes = _axes(4)
+    plots.corpus_and_coverage(
+        [],
+        [],
+        plots.StratifiedAuroc(0.78, 0.75, 0.71),
+        plots.Admission(10, 917, 17, 456, 444, 0.444, 0.365),
+        axes,
+    )
+    ax = axes[3]
+    stub_floor = 917 * plots._MIN_STUB_FRACTION
+    # A hatched patch at least as tall as the minimum stub is what makes the 17 visible.
+    hatched = [p for p in ax.patches if p.get_hatch()]
+    assert hatched, "the too-short removal was drawn as an invisible sliver"
+    assert max(p.get_height() for p in hatched) == pytest.approx(stub_floor)
+    plt.close(fig)
+
+
+def test_the_palette_gives_each_status_one_meaning_and_never_paints_good_red() -> None:
+    # Red is the frame's caveat colour; using it as a data channel would imply "bad". Admitted
+    # (good) is green, removals are orange, the corpus/quiet baseline is blue-grey, and firing
+    # has its own hue — the same roles in every panel.
+    palette = {
+        plots._STATUS_CORPUS,
+        plots._STATUS_REMOVED,
+        plots._STATUS_ADMITTED,
+        plots._STATUS_FIRED,
+    }
+    assert palette == {"#455A64", "#E69F00", "#009E73", "#CC79A7"}
+    assert CAVEAT_RED not in palette
+    fig, axes = _axes(4)
+    plots.corpus_and_coverage(
+        [],
+        [],
+        plots.StratifiedAuroc(0.78, 0.75, 0.71),
+        plots.Admission(10, 917, 17, 456, 444, 0.444, 0.365),
+        axes,
+    )
+    # Panel D's admitted bar (the one reaching 444) is green, never the caveat red.
+    admitted = [p for p in axes[3].patches if round(p.get_height(), 1) == 444.0]
+    assert admitted
+    assert admitted[0].get_facecolor()[:3] == to_rgba(plots._STATUS_ADMITTED)[:3]
+    assert admitted[0].get_facecolor()[:3] != to_rgba(CAVEAT_RED)[:3]
+    plt.close(fig)
+
+
+def test_the_stratified_panel_marks_values_with_dots_over_a_stated_floor() -> None:
+    # Bars from a truncated floor exaggerate the drop the panel is about; dots do not, and the
+    # y label states the truncation at chance.
+    fig, axes = _axes(4)
+    plots.corpus_and_coverage([], [], plots.StratifiedAuroc(0.778, 0.710, 0.717), None, axes)
+    ax = axes[2]
+    assert "truncated at chance 0.5" in ax.get_ylabel()
+    assert ax.collections, "panel C drew no point markers"
+    assert not ax.patches, "panel C still draws bars from the truncated floor"
+    plt.close(fig)
+
+
+def test_the_corpus_canvas_renders_without_a_layout_violation(tmp_path) -> None:
+    # tests/conftest.py sets SHUNT_PLOT_STRICT=1, so `save` runs the layout audit: this pins that
+    # the funnel's count labels, dotted connectors and base-rate box stay inside their panels and
+    # that nothing is clipped off the canvas.
+    coverages = features.model_coverage(
+        [*_stamped_model("alpha", 20, stamped=True), *_stamped_model("beta", 12, stamped=False)]
+    )
+    size = plot_frame.WIDE_TALL
+    fig, axes = plot_frame.subplots(size, 2, 2)
+    extra = plots.corpus_and_coverage(
+        coverages,
+        [plots.ModelArm("alpha", 20, 0.7, 0.2), plots.ModelArm("beta", 12, 0.6, 0.5)],
+        plots.StratifiedAuroc(0.782, 0.732, 0.750),
+        plots.Admission(10, 917, 17, 456, 444, 0.444, 0.365),
+        list(axes.flat),
+    )
+    path = plot_frame.save(
+        fig,
+        tmp_path / "corpus_and_coverage.png",
+        plots.CORPUS_COVERAGE_SPEC,
+        extra=extra,
+        size=size,
+    )
+    assert path.exists()
 
 
 # ---------------------------------------------------------------- 6. the budget

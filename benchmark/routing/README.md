@@ -44,8 +44,8 @@ routing/
   metrics.py                  # Metric definitions
   collection_priority.py      # Free-tier collector's model-value priority, dedupe and stop rule
   repricing.py                # Reprices naive costs from a dated sheet (input to live_gap.png only)
-  report.py                   # Drives the 14 REPORT figures (derived from results.csv). The
-                              # routing half's manifest holds 19: these 14 plus the 5 standalone
+  report.py                   # Drives the 15 REPORT figures (derived from results.csv). The
+                              # routing half's manifest holds 20: these 15 plus the 5 standalone
                               # producers under scripts/ (cost_quality_headline, embedding_signal,
                               # exploration_cost, knn_calibration, sweep_regimes).
   figures/                    # One module per report figure; `context.py` loads the corpus once
@@ -61,6 +61,7 @@ routing/
     ladder_rungs.py           # What each escalation rung is measured to buy, beside the ladder
     live_gap.py               # The offline-to-live gap, repriced from the dated sheet
     model_validity.py         # Every evidenced model x the inference-valid criteria, free channel included
+    model_relevance.py        # Pass-rate (Wilson) vs measured coverage, K floor, validity funnel
     pareto_dimensions.py      # One plane per dimension: frontier membership is axis-dependent
     model_grid.py             # Adapter only — price/size/outcome grid drawn by shunt.inspect.model_grid
   scripts/                    # Analysis + figure producers (read results.csv, write docs/assets/figures/routing/)

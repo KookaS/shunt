@@ -242,6 +242,23 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      # SH019 makes the listing billing ENTITLEMENT and the observed results `channel` coherent:
+      # the shipped registry, the free overlay and the $0 smoke registry all declare `billing`
+      # in {free, paid} (the smoke registry is $0 by design, so only its declaration is
+      # required); an overlay `billing: free` row still carries the paid twin's REAL list price
+      # + provenance; every committed results CSV channel is in {free, paid, blank} with a
+      # channel_source in the declared vocabulary, channel=free implies real_cost==0 and
+      # channel=paid implies real_cost>0, and a CSV missing either channel column FAILS.
+      # Whole-tree scan on fixed targets (pass_filenames:false + always_run) so a hand-edited
+      # row cannot slip past; an empty subject set refuses green. BLOCKING.
+      - id: sh019-billing-channel
+        name: SH019 billing entitlement and observed channel are coherent
+        # `uv run` so the gate can import the declared channel_source vocabulary from
+        # benchmark.routing.channel (same reason SH015 uses it).
+        entry: uv run python tools/lint/check_billing_channel.py
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: sh013-workflow-timeouts
         name: SH013 every workflow job declares timeout-minutes
         entry: python tools/lint/check_workflow_timeouts.py

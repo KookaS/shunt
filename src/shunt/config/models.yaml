@@ -57,6 +57,7 @@ models:
     model_id: alibaba/qwen3.7-plus
     provider: requesty
     version: qwen3.7-plus
+    billing: paid
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted
@@ -96,6 +97,7 @@ models:
     model_id: deepseek-v4-flash
     provider: deepseek
     version: deepseek-v4-flash
+    billing: paid
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted
@@ -131,6 +133,7 @@ models:
     model_id: deepseek-v4-pro
     provider: deepseek
     version: deepseek-v4-pro
+    billing: paid
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted
@@ -176,6 +179,7 @@ models:
     model_id: openai/gpt-5-mini
     provider: requesty
     version: gpt-5-mini
+    billing: paid
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted
@@ -216,6 +220,7 @@ models:
     model_id: fireworks/glm-5.2      # requesty's serving path, not the origin vendor
     provider: requesty
     version: glm-5.2
+    billing: paid
     supports_streaming: true
     supports_cache_control: true
     serving_mode: hosted
@@ -248,6 +253,7 @@ models:
     model_id: moonshot/kimi-k2.5
     provider: requesty
     version: kimi-k2.5
+    billing: paid
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted
@@ -280,6 +286,7 @@ models:
     model_id: moonshot/kimi-k3
     provider: requesty
     version: kimi-k3
+    billing: paid
     supports_streaming: true
     # Conservative: mirrors kimi-k2.5 (same provider/family). Not verified against
     # a live response — sending unsupported cache_control breakpoints risks a 400.
@@ -315,6 +322,7 @@ models:
     model_id: google/gemini-3.1-pro
     provider: requesty
     version: gemini-3.1-pro
+    billing: paid
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted
@@ -357,6 +365,7 @@ models:
     model_id: openai/gpt-5.6-sol
     provider: requesty
     version: gpt-5.6-sol
+    billing: paid
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted
@@ -401,6 +410,7 @@ models:
     model_id: openai/gpt-5.6-terra
     provider: requesty
     version: gpt-5.6-terra
+    billing: paid
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted
@@ -425,6 +435,7 @@ models:
     model_id: anthropic/claude-fable-5
     provider: requesty
     version: claude-fable-5
+    billing: paid
     supports_streaming: true
     supports_cache_control: true
     serving_mode: hosted
@@ -456,6 +467,7 @@ models:
     model_id: anthropic/claude-opus-4-8
     provider: requesty
     version: claude-opus-4-8
+    billing: paid
     supports_streaming: true
     supports_cache_control: true
     serving_mode: hosted
@@ -493,6 +505,7 @@ models:
     model_id: anthropic/claude-opus-4-6
     provider: requesty
     version: claude-opus-4-6
+    billing: paid
     supports_streaming: true
     supports_cache_control: true
     serving_mode: hosted
@@ -534,6 +547,7 @@ models:
     model_id: anthropic/claude-sonnet-5
     provider: requesty
     version: claude-sonnet-5
+    billing: paid
     supports_streaming: true
     supports_cache_control: true
     serving_mode: hosted
@@ -558,6 +572,10 @@ models:
     model_id: z-ai/glm-5.3-flash
     provider: openrouter
     version: glm-5.3-flash
+    billing: paid
+    billing_note: Paid listing whose 41 committed cells were collected during a genuine
+      $0 promo window (2026-08-20..26), recorded as a dated ACCOUNTING_HOLE exemption in
+      benchmark/routing/validate.py; the listing itself is not free.
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted
@@ -599,6 +617,7 @@ models:
     model_id: gpt-6-astra
     provider: explabs
     version: gpt-6-astra
+    billing: paid
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted
@@ -618,6 +637,7 @@ models:
     model_id: claude-fable-5.1
     provider: explabs
     version: claude-fable-5.1
+    billing: paid
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted
@@ -636,6 +656,7 @@ models:
     model_id: gpt-5.6-luna
     provider: explabs
     version: gpt-5.6-luna
+    billing: paid
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted
@@ -655,6 +676,7 @@ models:
     model_id: qwen3.8-27b
     provider: explabs
     version: qwen3.8-27b
+    billing: paid
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted
@@ -674,6 +696,7 @@ models:
     model_id: glm-5.3
     provider: explabs
     version: glm-5.3
+    billing: paid
     supports_streaming: true
     supports_cache_control: false
     serving_mode: hosted

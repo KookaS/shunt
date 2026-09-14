@@ -1239,6 +1239,58 @@ def canonical_display_labels(models: Sequence[str]) -> dict[str, str]:
     return {model: canonical_model_name(model) for model in models}
 
 
+# CVD-safe status palette for THIS canvas (Okabe–Ito hues), one channel = one meaning so a hue
+# never has to be re-decoded panel to panel. Red is deliberately absent: red is the frame's
+# caveat colour, so a data channel that used it would put a status hue and a warning hue in the
+# same panel and imply a judgement ("bad") the corpus does not make.
+#   _STATUS_CORPUS   — the population a rate is measured over (stamped, quiet, a corpus score)
+#   _STATUS_REMOVED  — a run a filter drops (too short, anti-leak margin)
+#   _STATUS_ADMITTED — a run that survives every filter
+#   _STATUS_FIRED    — the trigger fired on the run (panel B)
+_STATUS_CORPUS = "#455A64"
+_STATUS_REMOVED = "#E69F00"
+_STATUS_ADMITTED = "#009E73"
+_STATUS_FIRED = "#CC79A7"
+
+# Below this many trajectories a model cannot be scored at all: a Wilson interval on a handful of
+# runs is unreadable and the dumbbell's arms sit under `policy_eval.MIN_ARM`. Such a model is
+# segregated as "insufficient evidence" rather than drawn as a zero-width glitch bar or allowed
+# to inflate the header's model count.
+_MIN_SCORABLE_RUNS: Final[int] = policy_eval.MIN_ARM
+
+# A removal smaller than this share of the stamped corpus renders as a 1–2px sliver. The waterfall
+# keeps the bar's true top (the running level) and extends it downward to a hatched minimum stub,
+# so the step is visible; the hatch says the height is for visibility, not value.
+_MIN_STUB_FRACTION: Final[float] = 0.03
+
+
+def _insufficient_evidence(
+    coverages: Sequence[ModelCoverage],
+) -> tuple[list[ModelCoverage], list[ModelCoverage]]:
+    """Split coverages into scorable rows and rows too small to score at all.
+
+    A model under `_MIN_SCORABLE_RUNS` carries no readable share or separation, so it is kept
+    apart for the canvas to NAME rather than drawn. This is what the former `kilo-step-3.7-flash-
+    free` (0/3) case needed: its bar was a glitch on panel A and its presence made the header's
+    model count disagree with the panel's rows.
+    """
+    scored = [c for c in coverages if c.n_trajectories >= _MIN_SCORABLE_RUNS]
+    thin = [c for c in coverages if c.n_trajectories < _MIN_SCORABLE_RUNS]
+    return scored, thin
+
+
+def _insufficient_limits(thin: Sequence[ModelCoverage]) -> tuple[str, ...]:
+    """Name the models too small to score, and say where they were excluded from."""
+    if not thin:
+        return ()
+    names = ", ".join(f"{c.model} ({c.n_trajectories} runs, {c.n_stamped} stamped)" for c in thin)
+    return (
+        f"INSUFFICIENT EVIDENCE — {names}: too few trajectories to score, so the model is "
+        "excluded from panels A and B and from the header's model count rather than drawn as a "
+        "zero-width bar.",
+    )
+
+
 def _inference_valid_subjects(
     coverages: Sequence[ModelCoverage], arms: Sequence[ModelArm]
 ) -> tuple[list[ModelCoverage], list[ModelArm]]:
@@ -1246,13 +1298,17 @@ def _inference_valid_subjects(
 
     Panel A/B name and compare models, so a benchmark-only or collection-only lane drawn beside
     a served one implies an inference pool it is not in. The predicate is the routing half's
-    one census (`model_universe.valid_rows`), read here rather than re-derived. A caller with no
-    routing census keeps the full set rather than drawing an empty panel.
+    one census (`model_universe.valid_rows`), read here rather than re-derived. When the census
+    itself is ABSENT (no committed universe at all) the full set is kept rather than drawing an
+    empty panel; when it is PRESENT but no coverage matches, the empty set is returned so the
+    caller draws an annotated empty state instead of re-admitting the invalid models.
     """
+    if not model_universe.universe():
+        return list(coverages), list(arms)
     valid = {row.identity for row in model_universe.valid_rows()}
     kept_cov = [c for c in coverages if model_universe.resolve_identity(c.model) in valid]
     kept_arms = [a for a in arms if model_universe.resolve_identity(a.model) in valid]
-    return (kept_cov or list(coverages)), (kept_arms or list(arms))
+    return kept_cov, kept_arms
 
 
 def _merge_coverages(coverages: Sequence[ModelCoverage]) -> list[ModelCoverage]:
@@ -1335,15 +1391,16 @@ CORPUS_COVERAGE_SPEC = FigureSpec(
         "two ends coincide contributes no separation. C: the recurrence score's AUROC pooled, "
         "then computed WITHIN each model and WITHIN each challenge and pooled by comparable pairs "
         "— the drop between them is how much of the pooled number is the confound rather than the "
-        "score. D: the prefix risk model's admission bars at its reported depth — how many "
-        "runs each filter removes and how many are admitted — with the admitted population's "
-        "base failure rate against the corpus's."
+        "score; dots mark the values against the chance rule. D: the prefix risk model's "
+        "SEQUENTIAL admission funnel at its reported depth — stamped, then the runs each filter "
+        "removes, then the runs that survive — with the admitted population's failure rate "
+        "against the corpus's."
     ),
     goal=(
-        "In C the within-strata bars must stay well above chance: if the pooled edge disappears "
+        "In C the within-strata dots must stay well above chance: if the pooled edge disappears "
         "once ranking happens inside a model or inside a challenge, the score is reading which "
-        "model or which task the run belongs to. In D read the two base rates against each other "
-        "— an admitted population failing far more often than the corpus is a different "
+        "model or which task the run belongs to. In D read the two failure rates against each "
+        "other — an admitted population failing far more often than the corpus is a different "
         "population, and a null measured on it is a coverage gap, not a falsification."
     ),
     definitions=(
@@ -1354,14 +1411,26 @@ CORPUS_COVERAGE_SPEC = FigureSpec(
         ("canonical cell", "the eval-only edit-gated counter at the shipped knobs (panels B, C)"),
         ("within-model AUROC", "ranked only against runs of the same model, pooled by pair count"),
         ("admission margin", "runs that reached the depth but leave too few steps unread after it"),
+        (
+            "admitted-set failure base rate",
+            "share of the ADMITTED runs that ultimately failed — compared against the whole "
+            "corpus's failure rate, never against the admission share",
+        ),
+        (
+            "insufficient evidence",
+            "a model under the minimum runs to score: named, never drawn or counted",
+        ),
     ),
     notes=(
-        "Panel C's y axis is anchored at chance (0.5), not at zero, and its label says so: a bar's "
-        "HEIGHT is the score's skill above chance, and a bar at chance has none. The half of the "
-        "AUROC range below 0.5 is not a quantity the score can report, so charting it would make "
-        "every bar look alike; anchoring anywhere between 0 and 0.5 — the old 0.4 — would instead "
-        "inflate the drop the panel exists to size. A below-chance value drops the axis back to "
+        "Panel C's y axis is truncated at chance (0.5), not at zero, and its label says so: the "
+        "panel asks how much SKILL ABOVE CHANCE survives the strata, and the half of the AUROC "
+        "range below 0.5 is unreachable by a merely mis-signed score. Values are drawn as dots, "
+        "not bars, because a bar is read from the axis floor and would make the confound drop the "
+        "panel exists to size look larger than it is. A below-chance value drops the axis back to "
         "zero and relabels it.",
+        "Panel D is a funnel, not four independent categories: each removal comes off the running "
+        "total (stamped → minus too short → minus anti-leak → admitted). The too-short removal is "
+        "drawn at a hatched minimum height because its true 17 is a sliver at print size.",
         "Stamping coverage tracks capture DATE, and capture date correlates with model, so model "
         "and coverage are confounded on this corpus and cannot be separated from it.",
         "A single-class stratum contributes no comparable pairs and is DROPPED from the "
@@ -1393,24 +1462,36 @@ def corpus_and_coverage(
     view. The subtitle states both scopes so a reader never carries the A/B count onto C/D.
     """
     ax_cov, ax_arms, ax_strat, ax_admit = axes
-    all_models = len(_merge_coverages(coverages))
     if valid_only:
         coverages, arms = _inference_valid_subjects(coverages, arms)
     coverages = _merge_coverages(coverages)
-    _draw_stamping(ax_cov, coverages)
-    _draw_model_arms(ax_arms, arms)
+    scored, thin = _insufficient_evidence(coverages)
+    scored_slugs = {canonical_model_name(c.model) for c in scored}
+    scored_arms = [a for a in arms if canonical_model_name(a.model) in scored_slugs]
+    _draw_stamping(ax_cov, scored)
+    _draw_model_arms(ax_arms, scored_arms)
     _draw_stratified(ax_strat, strat)
     _draw_admission(ax_admit, admission)
-    total = sum(c.n_trajectories for c in coverages)
-    stamped = sum(c.n_stamped for c in coverages)
+    total = sum(c.n_trajectories for c in scored)
+    stamped = sum(c.n_stamped for c in scored)
     scope = "inference-valid" if valid_only else "sampled"
-    facts = [f"{len(coverages)} {scope} models · {stamped}/{total} trajectories stamped"]
-    if valid_only and all_models != len(coverages):
-        facts.append(f"panels C/D stay corpus-level over {all_models} sampled models")
-    if admission is not None:
+    facts = [
+        f"{len(scored)} {scope} models scored · {stamped}/{total} of their trajectories stamped"
+    ]
+    facts.append("panel C strata: pooled / within-model / within-challenge")
+    if thin:
         facts.append(
-            f"prefix depth {admission.depth} admits {admission.n_admitted}/"
-            f"{admission.n_stamped} at base rate {admission.admitted_base_rate:.3f} vs corpus "
+            f"{len(thin)} under-collected model(s) named as insufficient evidence, not scored"
+        )
+    if admission is not None:
+        share = admission.n_admitted / admission.n_stamped if admission.n_stamped else 0.0
+        facts.append(
+            f"panel D funnel: {admission.n_stamped} stamped → −{admission.n_too_short} too short "
+            f"→ −{admission.n_by_margin} anti-leak → {admission.n_admitted} admitted "
+            f"(admission share {share:.3f})"
+        )
+        facts.append(
+            f"admitted-set failure base rate {admission.admitted_base_rate:.3f} vs corpus "
             f"{admission.corpus_base_rate:.3f}"
         )
     return Annotations(
@@ -1431,8 +1512,13 @@ def corpus_and_coverage(
             "Model labels are canonical weights slugs; the serving channel is a label, never "
             "part of the name.",
         ),
-        limitations=_coverage_limits(coverages),
-        counts=(("models", len(coverages)), ("trajectories", total), ("stamped", stamped)),
+        limitations=_coverage_limits(scored) + _insufficient_limits(thin),
+        counts=(
+            ("models", len(scored)),
+            ("trajectories", total),
+            ("stamped", stamped),
+            ("insufficient_evidence", len(thin)),
+        ),
     )
 
 
@@ -1447,18 +1533,20 @@ def _draw_stamping(ax: Axes, coverages: Sequence[ModelCoverage]) -> None:
             [max(0.0, hi - s) for s, (_lo, hi) in zip(shares, intervals, strict=True)],
         ]
     )
-    ax.barh(names, shares, xerr=errors, color=_SHIPPED, height=0.6, capsize=3)
+    ax.barh(names, shares, xerr=errors, color=_STATUS_CORPUS, height=0.6, capsize=3)
     for index, cov in enumerate(coverages):
         # A zero-coverage row drew a zero-width bar with a zero-width Wilson interval — a bare
         # rule at the axis, which reads as a missing row rather than as a measured zero. A
-        # hatched stub marks it as a value, not an absence.
+        # hatched stub marks it as a value, not an absence. Only a model that cleared
+        # `_MIN_SCORABLE_RUNS` reaches this panel, so the stub is a measured zero, never the
+        # under-collected glitch bar the segregation exists to remove.
         if cov.n_stamped == 0:
             ax.barh(
                 index,
                 0.012,
                 left=0.0,
                 height=0.56,
-                color=_SHIPPED,
+                color=_STATUS_CORPUS,
                 hatch="////",
                 edgecolor="white",
                 linewidth=0.0,
@@ -1480,12 +1568,12 @@ def _draw_model_arms(ax: Axes, arms: Sequence[ModelArm]) -> None:
         quiet = arm.p_fail_quiet or 0.0
         fired = arm.p_fail_fired or 0.0
         ax.plot([quiet, fired], [index, index], color=_FAINT, linewidth=2, zorder=1)
-        ax.scatter([quiet], [index], color=_SHIPPED, zorder=2, s=34)
-        ax.scatter([fired], [index], color=_OBSERVED, zorder=2, s=34)
+        ax.scatter([quiet], [index], color=_STATUS_CORPUS, zorder=2, s=34)
+        ax.scatter([fired], [index], color=_STATUS_FIRED, zorder=2, s=34)
     labels = canonical_display_labels([a.model for a in arms])
     ax.set_yticks(range(len(readable)), [f"{labels[a.model]} (n={a.n})" for a in readable])
-    ax.scatter([], [], color=_SHIPPED, label="quiet", s=34)
-    ax.scatter([], [], color=_OBSERVED, label="fired", s=34)
+    ax.scatter([], [], color=_STATUS_CORPUS, label="quiet", s=34)
+    ax.scatter([], [], color=_STATUS_FIRED, label="fired", s=34)
     ax.set_xlabel("P(run ultimately failed)")
     ax.set_xlim(0, 1)
     ax.tick_params(labelsize=_TICK_PT)
@@ -1500,41 +1588,82 @@ def _draw_stratified(ax: Axes, strat: StratifiedAuroc) -> None:
         ("within challenge", strat.within_challenge),
     ]
     drawn = [(name, value) for name, value in bars if value is not None]
-    # ONE colour: the three bars are the SAME quantity (the recurrence score's AUROC) under
+    positions = list(range(len(drawn)))
+    # ONE colour: the three values are the SAME quantity (the recurrence score's AUROC) under
     # three rankings, and their x tick labels name the strata. A red/orange/grey scheme keyed
-    # nothing that the labels did not, so it implied a category channel that is not there.
-    ax.bar(
-        [name for name, _ in drawn],
-        [value for _, value in drawn],
-        color=_OBSERVED,
-        width=0.55,
-    )
+    # nothing the labels did not, so it implied a category channel that is not there.
+    #
+    # Dots, not bars. A bar is drawn FROM the axis floor, and the floor here is chance (0.5), so
+    # a bar's HEIGHT reads as skill-above-chance while its baseline implies a zero origin an
+    # AUROC does not have — the exact exaggeration the truncation note exists to prevent. A dot
+    # states the value; the chance rule states the gap to it.
+    ax.scatter(positions, [value for _name, value in drawn], color=_STATUS_CORPUS, s=72, zorder=3)
     for index, (_name, value) in enumerate(drawn):
-        ax.text(index, value + 0.012, f"{value:.3f}", ha="center", fontsize=9.5)
+        ax.text(index, value + 0.018, f"{value:.3f}", ha="center", fontsize=9.5)
     ax.axhline(_CHANCE, linestyle="--", color=_NULL_CENTRE, label="chance")
     # The axis floor was 0.4 — a truncation at a value that means nothing, which roughly doubled
     # the apparent size of the very confound drop this panel exists to size. An AUROC's floor is
     # not 0 either: 0.5 is chance, the half of the range below it is unreachable by a score that
     # is merely mis-signed, and the panel's question is how much SKILL ABOVE CHANCE survives the
-    # strata. So the axis is anchored at chance and SAYS SO on the y label, which is what makes it
-    # honest rather than merely tidier. A bar at chance then has zero height, which is the
-    # correct reading of "no separation". A below-chance value would be clipped by that anchor,
-    # so the floor drops to zero whenever one appears, and the label follows it.
+    # strata. So the axis is truncated at chance and SAYS SO on the y label, which is what makes
+    # it honest rather than merely tidier. A below-chance value would be clipped by that
+    # truncation, so the floor drops to zero whenever one appears, and the label follows it.
     anchored = all(value >= _CHANCE for _name, value in drawn)
     # The floor sits a hair BELOW chance so the dashed chance rule lands INSIDE the panel.
-    # Anchored exactly at 0.5 the rule and the bottom spine were the same pixel, so the key
-    # named a line a reader could not see. A 0.02 offset does not inflate the confound drop.
+    # Truncated exactly at 0.5 the rule and the bottom spine were the same pixel, so the key
+    # named a line a reader could not see. The offset does not inflate the confound drop.
     floor = _CHANCE - 0.02 if anchored else 0.0
-    ax.set_ylim(floor, 1.0)
+    ax.set_ylim(floor, 1.05)
     ax.set_ylabel(
-        "recurrence AUROC (floor just below chance 0.5)"
+        "recurrence AUROC (axis truncated at chance 0.5)"
         if anchored
-        else "recurrence AUROC (floor at 0)",
+        else "recurrence AUROC (axis floor at 0)",
         fontsize=8.5,
     )
+    ax.set_xticks(positions, [name for name, _ in drawn])
     ax.tick_params(labelsize=_TICK_PT)
     ax.legend(fontsize=_LEGEND_PT, loc="upper right")
-    panel_label(ax, "C · does the edge survive the strata; bar height is skill above chance")
+    panel_label(ax, "C · does the edge survive the strata; dot height is AUROC above the floor")
+
+
+def _admission_steps(admission: Admission) -> list[tuple[str, float, float, str, str]]:
+    """(stage label, bar bottom, bar height, colour, value label) for the four funnel stages.
+
+    Each removal's bar hangs off the running total rather than rising from the axis, which is
+    what makes the panel a funnel: ``stamped → −too short → −anti-leak → admitted``.
+    """
+    return [
+        ("stamped", 0.0, float(admission.n_stamped), _STATUS_CORPUS, f"{admission.n_stamped}"),
+        (
+            "− too short",
+            float(admission.n_stamped - admission.n_too_short),
+            float(admission.n_too_short),
+            _STATUS_REMOVED,
+            f"−{admission.n_too_short}",
+        ),
+        (
+            "− anti-leak",
+            float(admission.n_admitted),
+            float(admission.n_by_margin),
+            _STATUS_REMOVED,
+            f"−{admission.n_by_margin}",
+        ),
+        ("admitted", 0.0, float(admission.n_admitted), _STATUS_ADMITTED, f"{admission.n_admitted}"),
+    ]
+
+
+def _admission_connectors(ax: Axes, steps: Sequence[tuple[str, float, float, str, str]]) -> None:
+    """Dotted leads from each running level to the next bar, so the funnel reads as one flow."""
+    running = [steps[0][1] + steps[0][2], *(bottom for _l, bottom, _h, _c, _v in steps[1:])]
+    for index in range(len(steps) - 1):
+        ax.plot(
+            [index + 0.3, index + 1 - 0.3],
+            [running[index], running[index]],
+            color=_NULL_CENTRE,
+            linewidth=0.9,
+            linestyle=":",
+            zorder=1,
+        )
 
 
 def _draw_admission(ax: Axes, admission: Admission | None) -> None:
@@ -1542,46 +1671,60 @@ def _draw_admission(ax: Axes, admission: Admission | None) -> None:
         ax.axis("off")
         ax.text(0.5, 0.5, "no prefix depth was estimable", ha="center", va="center", color=MUTED)
         return
-    labels = ["stamped", "too short", "anti-leak\nmargin", "admitted"]
-    # Counts from the baseline, not a hanging waterfall. The old form drew "too short" as a
-    # 17-tall bar floating at ~900 and "anti-leak margin" from the axis — two decrements drawn
-    # on two different baselines, so the step a reader read off each bar was not its label.
-    values = [
-        admission.n_stamped,
-        admission.n_too_short,
-        admission.n_by_margin,
-        admission.n_admitted,
-    ]
-    colours = [_SHIPPED, _UNDEFINED, _UNDEFINED, _OBSERVED]
-    ax.bar(labels, values, color=colours, width=0.6)
-    for index, value in enumerate(values):
+    steps = _admission_steps(admission)
+    positions = list(range(len(steps)))
+    ax.bar(
+        positions,
+        [height for _l, _b, height, _c, _v in steps],
+        bottom=[bottom for _l, bottom, _h, _c, _v in steps],
+        color=[colour for _l, _b, _h, colour, _v in steps],
+        width=0.6,
+    )
+    # A removal under the stub fraction is a 1–2px sliver at print size. The true top (the running
+    # level) is kept and a hatched minimum-height extension is drawn beneath it, so the "too
+    # short = 17" step is visible; the hatch says the height is for visibility, not value.
+    stub = admission.n_stamped * _MIN_STUB_FRACTION
+    for index, (_label, bottom, height, colour, _value) in enumerate(steps):
+        if 0 < height < stub:
+            ax.bar(
+                index,
+                stub,
+                bottom=bottom + height - stub,
+                color=colour,
+                width=0.6,
+                hatch="////",
+                edgecolor="white",
+                linewidth=0.0,
+                zorder=2,
+            )
+    for index, (_label, bottom, height, _colour, value) in enumerate(steps):
         ax.text(
             index,
-            value + admission.n_stamped * 0.015,
-            f"{value}",
+            bottom + height + admission.n_stamped * 0.015,
+            value,
             ha="center",
             fontsize=9,
         )
+    _admission_connectors(ax, steps)
     ax.set_ylabel("trajectories on the reported basis")
     ax.set_ylim(0, admission.n_stamped * 1.16)
+    ax.set_xticks(positions, [label for label, *_rest in steps])
     ax.tick_params(labelsize=_TICK_PT)
-    # In the "too short" column's own empty space (its bar is ~0.02 of the axis, so everything
-    # above it is blank). Center it on that column in DATA coordinates: an axes-fraction x
-    # drifted with the panel width and let the note's left glyphs run under the stamped bar.
-    # The y stays in axes fraction, below the anti-leak bar's count label, so no opaque backing
-    # is needed and the text cannot touch either tall bar.
+    # The two rates are SEPARATED and each is named: "0.444" is the admitted set's failure base
+    # rate, not the admission share (444/917 = 0.484). One line, placed in the upper-right gap
+    # above the short admitted bar, clear of both removal counts.
     ax.text(
-        1.0,
-        0.20,
-        f"admitted base rate {admission.admitted_base_rate:.3f}\nvs corpus "
-        f"{admission.corpus_base_rate:.3f}",
-        transform=ax.get_xaxis_transform(),
-        ha="center",
+        0.97,
+        0.78,
+        f"failure base rate — admitted {admission.admitted_base_rate:.3f}, "
+        f"corpus {admission.corpus_base_rate:.3f}",
+        transform=ax.transAxes,
+        ha="right",
         va="center",
         fontsize=8.0,
-        color=_OBSERVED,
+        color=_NULL_CENTRE,
     )
-    panel_label(ax, f"D · prefix admission at depth {admission.depth}")
+    panel_label(ax, f"D · sequential prefix admission at depth {admission.depth}")
 
 
 def _coverage_limits(coverages: Sequence[ModelCoverage]) -> tuple[str, ...]:

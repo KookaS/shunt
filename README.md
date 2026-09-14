@@ -92,26 +92,26 @@ up.
 ![What each approach costs against how many tasks it finishes](docs/assets/figures/routing/cost_quality_headline.png)
 
 The orange dot is what most setups do today. The blue dot is Shunt's default:
-same height, a third of the way along. The other seven strategies we measured,
+same height, a quarter of the way along. The other seven strategies we measured,
 and the uncertainty on every point, are in
 [docs/routing.md](docs/routing.md#fig-cost-quality-frontier).
 
-| strategy | pass rate | total cost, 184 tasks |
+| strategy | pass rate | total cost, 181 tasks |
 |---|---:|---:|
-| Oracle — a cheat: picks the right model already knowing the answer | 96.7% | $18 |
-| `session_cascade` — the default | 96.7% | $29 |
-| `knn_semantic_cascade` — opt-in | 96.7% | $38 |
-| Always frontier — what most setups do today | 95.1% | $96 |
-| Always cheap | 75.5% | $1.50 |
+| Oracle — a cheat: picks the right model already knowing the answer | 97.2% | $15 |
+| `session_cascade` — the default | 97.2% | $23 |
+| `knn_semantic_cascade` — opt-in | 97.2% | $26 |
+| Always frontier — what most setups do today | 95.0% | $94 |
+| Always cheap | 75.1% | $1.48 |
 
-184 SWE-bench-Verified tasks, each judged by its own repository's test suite.
+181 SWE-bench-Verified tasks, each judged by its own repository's test suite.
 Method: [docs/benchmark.md](docs/benchmark.md). Full tables, every strategy we
 dropped from this one, and the caveats: [docs/results.md](docs/results.md).
 
-Read the default against always-frontier: **$29 against $96, at the same pass
-rate.** The two quality figures carry 95% confidence intervals of 94.0–98.9% and
-91.9–97.8%, which overlap — and that overlap *is* the claim. Same quality, a
-third of the bill.
+Read the default against always-frontier: **$23 against $94, at the same pass
+rate.** The two quality figures carry 95% confidence intervals of 94.5–99.5% and
+91.7–97.8%, which overlap — and that overlap *is* the claim. Same quality, a
+quarter of the bill.
 
 Dollars are not the only currency. Rank the same twelve strategies by provider
 calls, by the slowest sessions, by output tokens, or by how spiky the bill is,
@@ -255,7 +255,7 @@ that only reports its wins is advertising rather than measuring.
 First, four things that qualify the table above — we would rather you heard
 them from us.
 
-**The three rows at 96.7% retry until something passes.** They are scored on the
+**The three rows at 97.2% retry until something passes.** They are scored on the
 attempt that passed; always-frontier gets one shot. That flatters any retry
 strategy, ours included. The cost column is honest either way — every attempt in
 the chain is billed, failures included.
@@ -276,7 +276,7 @@ What that does to quality is untested and we do not know which way it cuts:
 is on the chart to show how much room is left, and it is not a setting.
 
 One more row worth explaining: the opt-in routing model reaches the same quality
-as the default and costs about $10 more on this corpus. We publish that because
+as the default and costs about $2 more on this corpus. We publish that because
 we measured it.
 
 And the mechanisms themselves.
@@ -306,7 +306,7 @@ baseline that was reading its own test labels. We wrote up what broke and how:
 There is a ceiling on how much the missing piece is worth, and it is low. Almost
 all of the saving comes from paying a cheaper tariff, not from predicting
 anything: a *perfect* difficulty predictor would be worth roughly $7 more on a
-$96 bill. We do not claim the make-or-break gate is passed.
+$94 bill. We do not claim the make-or-break gate is passed.
 
 ## Scope and limits
 
@@ -350,7 +350,7 @@ of them could turn out wrong, so here they are, stated rather than buried.
   hard than ours, your saving is smaller.
 - **That the cache discount reaches your bill.** We measure each provider's
   cache-read price, but the 90% hit rate behind the prices above is assumed,
-  not observed. At a lower rate, $29 moves toward $96.
+  not observed. At a lower rate, $23 moves toward $94.
 
 One distinction worth keeping straight. *Rank* is a model's position in the
 registry, which is ordered by price — and as above, price is not capability.

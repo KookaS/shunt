@@ -69,9 +69,10 @@ SPEC = FigureSpec(
     definitions=(
         (
             "billed share",
-            "sum(real_cost) / sum(estimated_cost) over every measured row for that model. "
-            "1.0 means the invoice matched list price. It mixes EVERY reason the two differ "
-            "— caching, negotiated rates, provider-side discounts — not caching alone.",
+            "sum(real_cost) / sum(estimated_cost) over every measured rep-0 row for that "
+            "CANONICAL identity, folding every channel mirror of the same weights into one "
+            "model. 1.0 means the invoice matched list price. It mixes EVERY reason the two "
+            "differ — caching, negotiated rates, provider-side discounts — not caching alone.",
         ),
         (
             "registry prediction",
@@ -136,7 +137,13 @@ class ModelCache:
 
 
 def billed_shares(results_csv: Path) -> dict[str, tuple[float, int]]:
-    """model -> (sum(real_cost)/sum(estimated_cost), n rows) over the rep-0 priced rows."""
+    """canonical identity -> (sum(real_cost)/sum(estimated_cost), n rows) over rep-0 rows.
+
+    Merged by IDENTITY, not by lane: one weights set served through several channels (a
+    direct id and its `-explabs`/`-free` mirror) is ONE model to the reader, so every
+    measured row for that model must enter the billed share. Keying this on `lane` and then
+    looking it up with the canonical identity silently dropped the mirror lanes.
+    """
     # The MEASUREMENT view, not every row on disk. Summing raw rows counts a replicate of a
     # cell as a second observation, so the day a second rep is run the `n.priced_rows` count
     # this figure publishes silently doubles — and that count is byte-locked into the docs by
@@ -151,9 +158,11 @@ def billed_shares(results_csv: Path) -> dict[str, tuple[float, int]]:
             continue
         if estimated <= 0:
             continue
-        # Key on the LANE: a row carries the bare weights identity in `model` and the channel
-        # listing in `lane`, while the drawn model list names the identity.
-        bucket = totals[str(row.get("lane") or row["model"])]
+        # Key on the CANONICAL IDENTITY: a row carries the bare weights identity in `model`
+        # and a channel listing in `lane`, and mirror lanes must fold into the one model the
+        # axis names. `resolve_identity` is the same authoritative canonicaliser the drawn
+        # model list uses, so the keys cannot fork.
+        bucket = totals[resolve_identity(str(row.get("lane") or row["model"]))]
         bucket[0] += real
         bucket[1] += estimated
         bucket[2] += 1
@@ -161,14 +170,19 @@ def billed_shares(results_csv: Path) -> dict[str, tuple[float, int]]:
 
 
 def _drawn_models(ctx: ctxmod.RoutingContext) -> list[str]:
-    """Price-ordered inference-valid models; every enabled model when no census was passed."""
+    """Price-ordered inference-valid models; every enabled model when no census was passed.
+
+    A PRESENT census that matches nothing draws an empty panel (the caller returns None with an
+    annotated empty state) rather than falling back to the full list: the old
+    `drawn or ctx.models_by_price` re-admitted exactly the inference-invalid models the census
+    exists to exclude.
+    """
     if ctx.validity is None:
         return ctx.models_by_price
     # Compare by CANONICAL identity: a model list entry may be a channel listing
     # (`z-ai/glm-5.3:free`) while the census keys on the bare weights identity (`glm-5.3`).
     valid = {r.model for r in ctx.validity if r.valid}
-    drawn = [m for m in ctx.models_by_price if resolve_identity(m) in valid]
-    return drawn or ctx.models_by_price
+    return [m for m in ctx.models_by_price if resolve_identity(m) in valid]
 
 
 def model_rows(ctx: ctxmod.RoutingContext) -> list[ModelCache]:
@@ -178,7 +192,10 @@ def model_rows(ctx: ctxmod.RoutingContext) -> list[ModelCache]:
     prices = cache_cost.cache_prices(drawn)
     rows: list[ModelCache] = []
     for model in drawn:
-        share, n = billed.get(model, (float("nan"), 0))
+        # Look the share up by CANONICAL IDENTITY: `drawn` entries are enabled/registry names
+        # while `billed_shares` keys on the identity, and a channel listing must find its
+        # model's merged rows rather than the empty default.
+        share, n = billed.get(resolve_identity(model), (float("nan"), 0))
         price = prices[model]
         rows.append(
             ModelCache(
@@ -391,7 +408,8 @@ def _annotations(rows: list[ModelCache]) -> Annotations:
     mean_modelled = sum(r.registry_share for r in rows) / max(len(rows), 1)
     residuals = [r.residual for r in billed]
     facts = [
-        f"{len(billed)} models, {sum(r.n_rows for r in billed)} priced rows",
+        f"{len(billed)} models, {sum(r.n_rows for r in billed)} priced rows "
+        "(channel mirrors merged by canonical identity)",
         f"cache-read price measured for {len(measured)}/{len(rows)} models and input share for "
         f"{len(measured_share)}/{len(rows)}; hit rate assumed at "
         f"{cache_cost.ASSUMED_CACHE_HIT_RATE:.0%}",

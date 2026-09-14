@@ -9,19 +9,21 @@
         8.0
       ],
       "generator": "benchmark.escalation.run_eval",
-      "goal": "In C the within-strata bars must stay well above chance: if the pooled edge disappears once ranking happens inside a model or inside a challenge, the score is reading which model or which task the run belongs to. In D read the two base rates against each other \u2014 an admitted population failing far more often than the corpus is a different population, and a null measured on it is a coverage gap, not a falsification.",
+      "goal": "In C the within-strata dots must stay well above chance: if the pooled edge disappears once ranking happens inside a model or inside a challenge, the score is reading which model or which task the run belongs to. In D read the two failure rates against each other \u2014 an admitted population failing far more often than the corpus is a different population, and a null measured on it is a coverage gap, not a falsification.",
       "limitations": [
         "Panel D's population is length-selected by construction: the anti-leak margin excludes every short run, and short runs resolve more often, so the admitted base rate is higher than the corpus's by design rather than by accident.",
         "105/1022 trajectories have no per-step verified outcomes and are excluded from this figure.",
         "EVAL-ONLY COUNTER: this figure is drawn from the 'edit_gated' cell, which ignores failures before the agent's first edit-like action \u2014 a rule that reads action, a per-step field the live router never sees, and that no EscalationPolicy knob can ask for. The counter the product does run fires on almost every run and reads the base rate."
       ],
       "n": {
+        "insufficient_evidence": 0,
         "models": 4,
         "stamped": 501,
         "trajectories": 562
       },
       "notes": [
-        "Panel C's y axis is anchored at chance (0.5), not at zero, and its label says so: a bar's HEIGHT is the score's skill above chance, and a bar at chance has none. The half of the AUROC range below 0.5 is not a quantity the score can report, so charting it would make every bar look alike; anchoring anywhere between 0 and 0.5 \u2014 the old 0.4 \u2014 would instead inflate the drop the panel exists to size. A below-chance value drops the axis back to zero and relabels it.",
+        "Panel C's y axis is truncated at chance (0.5), not at zero, and its label says so: the panel asks how much SKILL ABOVE CHANCE survives the strata, and the half of the AUROC range below 0.5 is unreachable by a merely mis-signed score. Values are drawn as dots, not bars, because a bar is read from the axis floor and would make the confound drop the panel exists to size look larger than it is. A below-chance value drops the axis back to zero and relabels it.",
+        "Panel D is a funnel, not four independent categories: each removal comes off the running total (stamped \u2192 minus too short \u2192 minus anti-leak \u2192 admitted). The too-short removal is drawn at a hatched minimum height because its true 17 is a sliver at print size.",
         "Stamping coverage tracks capture DATE, and capture date correlates with model, so model and coverage are confounded on this corpus and cannot be separated from it.",
         "A single-class stratum contributes no comparable pairs and is DROPPED from the within-strata AUROCs rather than scored at chance.",
         "AUROC pooled 0.782 \u00b7 within-model 0.732 \u00b7 within-challenge 0.750",
@@ -31,9 +33,9 @@
         "canonical cell: OFFLINE-ONLY UPPER BOUND \u2014 the 'edit_gated' counter reads step fields absent from the production decision context (action), and the product has no such counting mode; 2 feature(s) read fields absent from the production decision context (infra_rate, max_action_repeat_rate); scored at cadence 'step' while production decides once per 'session'"
       ],
       "price_sheet": null,
-      "reading": "A: the share of each model's trajectories that carry per-step verified outcomes, with 95% Wilson intervals and the counts printed \u2014 a run without them cannot fire the trigger at all and is excluded from every per-step metric. B: per model, P(run failed | fired) against P(run failed | quiet) at the canonical cell, drawn as a dumbbell; a model whose two ends coincide contributes no separation. C: the recurrence score's AUROC pooled, then computed WITHIN each model and WITHIN each challenge and pooled by comparable pairs \u2014 the drop between them is how much of the pooled number is the confound rather than the score. D: the prefix risk model's admission bars at its reported depth \u2014 how many runs each filter removes and how many are admitted \u2014 with the admitted population's base failure rate against the corpus's.",
+      "reading": "A: the share of each model's trajectories that carry per-step verified outcomes, with 95% Wilson intervals and the counts printed \u2014 a run without them cannot fire the trigger at all and is excluded from every per-step metric. B: per model, P(run failed | fired) against P(run failed | quiet) at the canonical cell, drawn as a dumbbell; a model whose two ends coincide contributes no separation. C: the recurrence score's AUROC pooled, then computed WITHIN each model and WITHIN each challenge and pooled by comparable pairs \u2014 the drop between them is how much of the pooled number is the confound rather than the score; dots mark the values against the chance rule. D: the prefix risk model's SEQUENTIAL admission funnel at its reported depth \u2014 stamped, then the runs each filter removes, then the runs that survive \u2014 with the admitted population's failure rate against the corpus's.",
       "size": "wide_tall",
-      "subtitle": "4 inference-valid models \u00b7 501/562 trajectories stamped \u00b7 panels C/D stay corpus-level over 7 sampled models \u00b7 prefix depth 10 admits 444/917 at base rate 0.444 vs corpus 0.365 \u00b7 917/1022 runs scored",
+      "subtitle": "4 inference-valid models scored \u00b7 501/562 of their trajectories stamped \u00b7 panel C strata: pooled / within-model / within-challenge \u00b7 panel D funnel: 917 stamped \u2192 \u221217 too short \u2192 \u2212456 anti-leak \u2192 444 admitted (admission share 0.484) \u00b7 admitted-set failure base rate 0.444 vs corpus 0.365 \u00b7 917/1022 runs scored",
       "terms": [
         [
           "stamped",
@@ -50,6 +52,14 @@
         [
           "admission margin",
           "runs that reached the depth but leave too few steps unread after it"
+        ],
+        [
+          "admitted-set failure base rate",
+          "share of the ADMITTED runs that ultimately failed \u2014 compared against the whole corpus's failure rate, never against the admission share"
+        ],
+        [
+          "insufficient evidence",
+          "a model under the minimum runs to score: named, never drawn or counted"
         ]
       ],
       "title": "Who is in the sample, and whether the edge survives the confounds"

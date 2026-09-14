@@ -206,6 +206,30 @@ figures split on the field rather than pooling a $0 local run with a paid namesa
 A local quantised model is also a **different model** from its hosted BF16 namesake —
 give it its own registry id carrying the quant tag.
 
+### Billing entitlement
+
+`billing: paid | free` states what a listing *is*, independent of what any one run cost.
+`paid` is the normal case; `free` marks a promotional or collection-only listing whose
+harvested rows may legitimately record `real_cost == 0`:
+
+```yaml
+    billing: paid
+    billing_note: Optional — why this value, where it needs context (a promo window, an allowance cap).
+```
+
+The entitlement is the **census channel**: a model is treated as paid when any listing
+that serves those weights declares `billing: paid`, so a free promotional window never
+flips a model's channel. It is deliberately separate from the per-row `channel` column in
+the results CSVs, which records what a row's own evidence says happened (`paid` when
+`real_cost > 0`, `free` when a `$0` window / the free corpus / the listing says so, blank
+when unobserved). A `billing: free` overlay row still carries the paid twin's real list
+price — see `configs/free-tier/overlay.yaml` and its HARD RULE 2. The `SH019` pre-commit
+gate requires the field on every shipped-registry, overlay, and `$0` smoke-registry row
+(`configs/free-tier/models.yaml`; invariant 1 applies to the smoke registry too even though
+the runtime resolver never loads it — only invariant 2, the overlay price, is overlay-only)
+and keeps the observed channel coherent; the benchmark design notes cover the full
+observed-channel rule.
+
 Once a model is registered, score it with `make benchmark-live` (i.e. `uv run --extra
 benchmark python -m benchmark.runner.run_matrix`; the extra is required — a bare `uv run`
 strips the eval deps). The
@@ -232,6 +256,7 @@ test locks it (`tests/models/test_consumer_config_contract.py`).
 | `pricing` (`input_cost_per_1m`, `output_cost_per_1m`, `cache_read_cost_per_1m`, `price_provider`, `price_source`, `price_as_of`) | every used model | the price-implied capability-rank prior (input + output), cost scoring, and the imputation ladder; absent pricing = routable but unscored |
 | `size` (`total_params`, `active_params`, `size_source`, `size_as_of`) | optional | the size axis of the model-grid figure; `UNDISCLOSED` where the vendor publishes nothing |
 | `serving_mode` | optional, defaults `hosted` | splits hosted from local rows on the cost axes, and marks which rows a local server's serving configuration governs (there is no latency axis: nothing published here measures latency) |
+| `billing` | every committed registry, free-overlay, and `$0` smoke-registry row (SH019) | the listing's `free`/`paid` entitlement — the census channel; a free promo window never flips it |
 | `reasoning` (`default_arm` + rank-ordered `arms`) | every used model | the escalation ladder's first step is a same-model effort raise — it only exists when `default_arm` is not the model's top arm; a model with no bracket would step rank directly and lose that cache-safe rung |
 
 The two consumers each keep their own policy on top of this shared data layer: the

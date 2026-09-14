@@ -63,18 +63,26 @@ class TestSchema:
     def test_optional_columns_follow_prompt_hash(self):
         fields = integrity.RESULTS_FIELDS
         tail = fields[fields.index("prompt_hash") + 1 :]
-        assert tail == (integrity.REPLICATE_COLUMN, *integrity.OPTIONAL_COLUMNS)
+        assert tail == (
+            integrity.REPLICATE_COLUMN,
+            *integrity.OPTIONAL_COLUMNS,
+            *integrity.CHANNEL_COLUMNS,
+        )
 
     def test_no_optional_column_is_a_cache_column(self):
         # Every member of CACHE_COLUMNS is READ as a cache/staleness field; an optional
         # column is not one, and adding it there would give a blank staleness meaning.
-        overlap = set(integrity.OPTIONAL_COLUMNS) | {integrity.REPLICATE_COLUMN}
+        overlap = (set(integrity.OPTIONAL_COLUMNS) | {integrity.REPLICATE_COLUMN}) | set(
+            integrity.CHANNEL_COLUMNS
+        )
         assert overlap.isdisjoint(integrity.CACHE_COLUMNS)
 
     def test_no_optional_column_is_write_required(self):
         # The fail-closed guard: adding one of these to either tuple would ERROR on all 1265
         # committed rows and abort every future write.
-        forbidden = set(integrity.OPTIONAL_COLUMNS) | {integrity.REPLICATE_COLUMN}
+        forbidden = (set(integrity.OPTIONAL_COLUMNS) | {integrity.REPLICATE_COLUMN}) | set(
+            integrity.CHANNEL_COLUMNS
+        )
         assert forbidden.isdisjoint(validate._NUMERIC_FIELDS)
         assert forbidden.isdisjoint(validate._REQUIRED_COLLECTION_FIELDS)
 

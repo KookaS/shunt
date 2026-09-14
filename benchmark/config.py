@@ -86,6 +86,11 @@ def _flatten(model: ModelConfig, pricing: Pricing) -> dict:
         # prefers `lane`, so the wire call stays correct; they are surfaced for provenance.
         "lane": model.lane,
         "model": model.model,
+        # The listing's billing ENTITLEMENT (`free`/`paid`), carried on the flat row so
+        # `_is_free_lane`, `validate`, and the census read the DECLARATION rather than
+        # inferring a channel from the `-explabs` suffix or the corpus file it came from.
+        "billing": model.billing,
+        "billing_note": model.billing_note,
         # Where the weights actually run. Carried here so the live runner can LABEL every
         # latency it records without re-parsing the registry per cell: a local batch-1
         # second and a hosted batched second are not the same measurement, and an
@@ -218,9 +223,9 @@ def catalog_host_rung(slug: str) -> dict | None:
 def _collection_provider() -> Provider | None:
     """The `explabs` provider row: the shipped registry first, else the non-shipped overlay.
 
-    The collection-only free-model policy moved the provider out of the shipped registry and
-    into the overlay, so the generic `S-explabs` synthesis still resolves when the overlay is
-    configured.
+    The `explabs` provider SHIPS in `src/shunt/config/models.yaml`, so the generic `S-explabs`
+    synthesis resolves without the overlay; the overlay lookup is only a fallback for a tree
+    whose shipped registry has dropped it.
     """
     shipped = load_registry(_pricing_path()).providers.get(COLLECTION_PROVIDER)
     if shipped is not None:
@@ -265,6 +270,10 @@ def synthesize_collection_model(name: str) -> dict | None:
         api_key_env_var=provider.api_key_env_var,
         litellm_prefix=provider.litellm_prefix,
         serving_mode="hosted",
+        # A synthesized `S-explabs` id is a free-promo collection channel by construction: the
+        # declaration is set HERE, at the synth site, so `_is_free_lane`/`validate` read a
+        # billing declaration rather than the `-explabs` suffix.
+        billing="free",
         pricing=pricing,
     )
     return _flatten(model, pricing)

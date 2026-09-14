@@ -105,6 +105,16 @@ OPTIONAL_COLUMNS: Final[tuple[str, ...]] = (
     *PROVENANCE_OPTIONAL_COLUMNS,
 )
 
+# OBSERVED channel accounting — one row's actual billing evidence, distinct from the listing's
+# ENTITLEMENT (`billing:` in the registry/overlay). Computed at write time and backfilled by
+# `benchmark/routing/scripts/backfill_channel.py`: `paid` iff real_cost>0; `free` iff a
+# free-window / free-corpus / free-listing / `-explabs`-fallback claim holds AND real_cost==0;
+# blank when unobserved (calls==0) or no evidence. `channel_source` names the rule that fired.
+# Audit-only, never a staleness key.
+CHANNEL_COLUMN: Final[str] = "channel"
+CHANNEL_SOURCE_COLUMN: Final[str] = "channel_source"
+CHANNEL_COLUMNS: Final[tuple[str, ...]] = (CHANNEL_COLUMN, CHANNEL_SOURCE_COLUMN)
+
 # The columns whose drift STALES a cached cell — the single declaration of that set. It used
 # to exist only as scattered branches in ``run_matrix._is_stale``, so "is this column an
 # anchor?" had no answer a reader (or the coverage report) could consult. ``_is_stale``
@@ -144,6 +154,7 @@ RESULTS_FIELDS: Final[tuple[str, ...]] = (
     *CACHE_COLUMNS,
     REPLICATE_COLUMN,
     *OPTIONAL_COLUMNS,
+    *CHANNEL_COLUMNS,
 )
 # Default reasoning arm written for every cell until full arm support lands.
 DEFAULT_REASONING: Final[str] = "default"

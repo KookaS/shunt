@@ -403,13 +403,13 @@ version control audits.
 
 ### Optional columns and replicates
 
-`RESULTS_FIELDS` declares nine append-only columns beyond the collection-param block, and the
-schema widened backward-compatibly: legacy rows (the 1265 written before the columns existed)
-carry none of them, while the committed corpus's 248 live cells carry the
+`RESULTS_FIELDS` declares nine optional append-only columns beyond the collection-param
+block, and the schema widened backward-compatibly: legacy rows (the 1265 written before the
+columns existed) carry none of them, while the committed corpus's 334 live cells carry the
 measurement/provenance ones the live runner emits — the 200 `deepseek-v4-pro` cells
 (measured 2026-09-02/04), including `cached_in_tok` backfilled on those cells from the
-archived per-turn usage, and 48 of the 50 collection-only `*-explabs` cells (measured
-2026-09-06/08 over the free-promo channel; 2 qwen3.8-27b-explabs rows carry none of the
+archived per-turn usage, and 134 of the 136 collection-only `*-explabs` cells (measured
+2026-09-06/10 over the free-promo channel; 2 qwen3.8-27b-explabs rows carry none of the
 optional columns), with `cached_in_tok` present where the provider reported it.
 They fall in three classes, deliberately kept
 apart because they answer to different rules — and outside the replicate key, a column absent
@@ -470,6 +470,41 @@ the default `supersede` mode refuses (`REPLICATE_MISKEYED`) when a row's stalene
 unchanged, because intent cannot be inferred from content — a re-run always differs on
 `computed_at` and `real_cost`, so only the caller knows whether it is a correction or a second
 observation.
+
+### Billing entitlement vs observed channel
+
+Every model row in the shipped registry, the non-shipped free overlay and the `$0` smoke
+registry declares `billing: free | paid`. That field is the **entitlement** — what a listing
+*is* — and it is the census's channel: an identity is PAID when **any** listing that serves
+those weights declares `billing: paid`, so a free promotional window can never flip a model's
+channel. The `-explabs` channel suffix is a label, not a billing claim; a paid listing that ends
+in it (the direct explabs rows) stays paid, and the free rows carry a short `billing_note` where
+the value needs context (an allowance-limited free plan, a promo that partially billed). The
+`$0` smoke registry `configs/free-tier/models.yaml` is a declaration input too: invariant 1
+requires its rows to declare `billing`, while only the overlay price invariant is overlay-only.
+
+The results CSVs carry the complementary **observed** view in two append-only columns, written
+by `run_matrix._build_row` and backfilled over the committed corpus by
+`benchmark/routing/scripts/backfill_channel.py`:
+
+| `channel` | `channel_source` | rule |
+|---|---|---|
+| `paid` | `real_cost` | `real_cost > 0` — the provider billed this row |
+| *(blank)* | `unobserved` | `calls == 0` — censored, no billing evidence |
+| `free` | `declared_free_window` | collected inside a dated provider `$0` window |
+| `free` | `results_free_file` | the row lives in `results_free.csv` |
+| `free` | `overlay_billing_free` | the listing declares `billing: free` |
+| *(blank)* | `no_evidence` | none of the above |
+
+The two views are allowed to disagree in the promo direction and that disagreement is the
+evidence, not a bug: a `billing: free` listing whose row billed carries `channel=paid`, and a
+`billing: paid` listing collected during a `$0` window carries `channel=free`. `validate` walls
+both failure modes separately — `ACCOUNTING_HOLE` for a paid listing that ran with
+`real_cost == 0`, `FREE_LANE_BILLED` for an admitted free lane that was billed — and the `SH019`
+pre-commit gate asserts the two CSV invariants (`channel=free ⇒ real_cost==0`,
+`channel=paid ⇒ real_cost>0`), the `channel`/`channel_source` vocabularies, and `billing`
+presence on every shipped-registry, overlay, and `$0` smoke-registry row. Sources and the
+retired promotional windows: `benchmark/routing/validate.py`.
 
 ### Temporal drift — what a July cell and an August cell do not share
 

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Final, Literal, NoReturn
 
 from benchmark import config, model_coverage
-from benchmark.routing import censoring, coverage, impute, integrity, validate
+from benchmark.routing import censoring, channel, coverage, impute, integrity, validate
 from benchmark.routing.strategies.fixed import AlwaysCheap, AlwaysFrontier
 from benchmark.routing.strategies.oracle import Oracle
 from benchmark.runner import (
@@ -162,20 +162,39 @@ def _arm_free_lane_cost_breaker() -> None:
     mswea_models.GLOBAL_MODEL_STATS.cost_limit = float(FREE_LANE_GLOBAL_COST_LIMIT)
 
 
-def _is_free_lane(model: str, overlay_ids: set[str] | None = None) -> bool:
-    """True iff *model* is a $0 free lane: a declared-free overlay row or an `-explabs` slug.
+def _billing_of(model: str) -> str | None:
+    """The listing's declared billing entitlement (`free`/`paid`), or None when undeclared.
 
-    Membership in the overlay is not enough: a row for a provider with no free lane (Together)
-    or an app-gated one (OpenCode Zen) is a collection-provenance row, not a spendable $0 lane,
-    so it must fail the ``--require-zero-cost`` interlock too.
+    Read from the shipped registry first, then the non-shipped overlay, then the collection
+    synthesizer — so a `billing: free` declaration is found wherever the row lives. Never
+    inferred from the `-explabs` suffix.
     """
-    if model.endswith(config.COLLECTION_SUFFIX):
-        return True
-    ids = config.free_registry_ids() if overlay_ids is None else overlay_ids
-    if model not in ids:
+    for row in (config.load_pricing().get(model), config.free_registry().get(model)):
+        if isinstance(row, dict) and row.get("billing"):
+            return str(row["billing"])
+    synthesized = config.synthesize_collection_model(model)
+    if isinstance(synthesized, dict) and synthesized.get("billing"):
+        return str(synthesized["billing"])
+    return None
+
+
+def _is_free_lane(model: str, overlay_ids: set[str] | None = None) -> bool:
+    """True iff *model*'s listing DECLARES `billing: free` — the entitlement, not the suffix.
+
+    An overlay `billing: free` row on a provider with no declared free lane (Together) or an
+    app-gated one (OpenCode Zen) is collection provenance, not a spendable $0 lane, so the
+    provider gate still applies. The `-explabs` suffix used to stand in for a free
+    declaration; it is no longer consulted at all — no fallback path for it remains in
+    `benchmark/routing/scripts/backfill_channel.py`, which resolves a free listing only
+    through `declared_billing`.
+    """
+    if _billing_of(model) != "free":
         return False
-    provider = config.free_registry().get(model, {}).get("provider")
-    return config.is_declared_free_provider(provider)
+    ids = config.free_registry_ids() if overlay_ids is None else overlay_ids
+    if model in ids:
+        provider = config.free_registry().get(model, {}).get("provider")
+        return config.is_declared_free_provider(provider)
+    return True
 
 
 def require_zero_cost_refusal(
@@ -699,6 +718,18 @@ def _build_row(
     # kind here, not even to a configured value like `step_limit`'s: a default on a latency
     # column would publish "this cell took no time" as an affirmative measured claim.
     row.update({column: str(outcome.get(column) or "") for column in integrity.OPTIONAL_COLUMNS})
+    # OBSERVED channel accounting — computed from the row's own evidence, independent of the
+    # listing ENTITLEMENT (`billing:`). Written on every row so a corpus reader never has to
+    # re-derive it; the same rule backfills historical rows (routing.scripts.backfill_channel).
+    observed, channel_source = channel.observed_channel(
+        model,
+        real_cost,
+        int(outcome.get("calls", 0)),
+        str(row["computed_at"]),
+        pricing=pricing,
+    )
+    row[integrity.CHANNEL_COLUMN] = observed
+    row[integrity.CHANNEL_SOURCE_COLUMN] = channel_source
     # Write-time data-integrity wall: never silently persist a poison row. An ERROR
     # invariant (e.g. the $35 fingerprint: paid model ran but real_cost==0) aborts the
     # whole run loudly on the offending cell rather than caching a fabricated outcome.

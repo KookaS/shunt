@@ -22,6 +22,7 @@ models:
     model_id: nvidia/nemotron-nano-9b-v2:free
     provider: openrouter
     version: nemotron-nano-9b-v2-free
+    billing: free
     supports_streaming: true
     supports_cache_control: false
     pricing:

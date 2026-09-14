@@ -1316,3 +1316,172 @@ def test_sh018_default_scan_of_this_repo_is_clean() -> None:
     # The default target is the real overlay; if it ever widened to models.yaml (which is
     # $0 by design), this would fail — that is the scope guarantee.
     assert _run("check_free_registry_zero.py") == 0
+
+
+# --- SH019: billing entitlement + observed channel -----------------------------------------
+
+_VALID_BILLING_REGISTRY = """\
+models:
+  m:
+    model_id: x/y
+    provider: p
+    version: y
+    billing: paid
+    pricing:
+      input_cost_per_1m: 1.0
+      output_cost_per_1m: 2.0
+      price_source: https://example.test
+      price_as_of: "2026-09-10"
+"""
+
+
+def _billing_registry(tmp_path: Path, body: str) -> Path:
+    f = tmp_path / "models.yaml"
+    f.write_text(body)
+    return f
+
+
+def _billing_results(tmp_path: Path, body: str) -> Path:
+    f = tmp_path / "results.csv"
+    f.write_text(body)
+    return f
+
+
+# A header-only CSV is a valid (if empty) results file; it keeps the registry tests isolated
+# from the results invariants now that a missing channel column is itself a failure.
+_VALID_BILLING_RESULTS = "challenge_id,lane,real_cost,channel,channel_source\n"
+
+
+def test_sh019_accepts_a_declared_registry(tmp_path: Path) -> None:
+    f = _billing_registry(tmp_path, _VALID_BILLING_REGISTRY)
+    results = _billing_results(tmp_path, _VALID_BILLING_RESULTS)
+    assert (
+        _run(
+            "check_billing_channel.py",
+            "--registry",
+            str(f),
+            "--overlay",
+            str(f),
+            "--smoke",
+            str(f),
+            "--results",
+            str(results),
+        )
+        == 0
+    )
+
+
+def test_sh019_fails_a_row_without_billing(tmp_path: Path) -> None:
+    body = _VALID_BILLING_REGISTRY.replace("    billing: paid\n", "")
+    f = _billing_registry(tmp_path, body)
+    results = _billing_results(tmp_path, _VALID_BILLING_RESULTS)
+    assert _run("check_billing_channel.py", "--registry", str(f), "--results", str(results)) == 1
+
+
+def test_sh019_fails_an_out_of_vocabulary_billing(tmp_path: Path) -> None:
+    body = _VALID_BILLING_REGISTRY.replace("billing: paid", "billing: FREEMIUM")
+    f = _billing_registry(tmp_path, body)
+    results = _billing_results(tmp_path, _VALID_BILLING_RESULTS)
+    assert _run("check_billing_channel.py", "--registry", str(f), "--results", str(results)) == 1
+
+
+def test_sh019_fails_a_free_overlay_row_priced_at_zero(tmp_path: Path) -> None:
+    # HARD RULE 2 at the entitlement grain: billing:free still carries the paid twin's real price.
+    body = _VALID_BILLING_REGISTRY.replace("billing: paid", "billing: free").replace(
+        "input_cost_per_1m: 1.0", "input_cost_per_1m: 0.0"
+    )
+    f = _billing_registry(tmp_path, body)
+    results = _billing_results(tmp_path, _VALID_BILLING_RESULTS)
+    assert (
+        _run(
+            "check_billing_channel.py",
+            "--overlay",
+            str(f),
+            "--registry",
+            str(f),
+            "--smoke",
+            str(f),
+            "--results",
+            str(results),
+        )
+        == 1
+    )
+
+
+def test_sh019_fails_a_free_channel_with_a_positive_cost(tmp_path: Path) -> None:
+    csv = "challenge_id,lane,real_cost,channel,channel_source\nc1,lane-a,0.5,free,real_cost\n"
+    f = _billing_results(tmp_path, csv)
+    assert _run("check_billing_channel.py", "--results", str(f)) == 1
+
+
+def test_sh019_fails_a_paid_channel_with_no_cost(tmp_path: Path) -> None:
+    csv = "challenge_id,lane,real_cost,channel,channel_source\nc1,lane-a,0,paid,real_cost\n"
+    f = _billing_results(tmp_path, csv)
+    assert _run("check_billing_channel.py", "--results", str(f)) == 1
+
+
+def test_sh019_fails_an_out_of_vocabulary_channel(tmp_path: Path) -> None:
+    csv = "challenge_id,lane,real_cost,channel,channel_source\nc1,lane-a,0.5,PAID,real_cost\n"
+    f = _billing_results(tmp_path, csv)
+    assert _run("check_billing_channel.py", "--results", str(f)) == 1
+
+
+def test_sh019_fails_an_out_of_vocabulary_channel_source(tmp_path: Path) -> None:
+    csv = "challenge_id,lane,real_cost,channel,channel_source\nc1,lane-a,0.5,paid,bogus_source\n"
+    f = _billing_results(tmp_path, csv)
+    assert _run("check_billing_channel.py", "--results", str(f)) == 1
+
+
+def test_sh019_fails_a_results_file_missing_the_channel_column(tmp_path: Path) -> None:
+    # The `if "channel" in row` guard let a legacy/malformed CSV read green; it must refuse.
+    csv = "challenge_id,lane,real_cost,channel_source\nc1,lane-a,0.5,real_cost\n"
+    f = _billing_results(tmp_path, csv)
+    assert _run("check_billing_channel.py", "--results", str(f)) == 1
+
+
+def test_sh019_fails_a_results_file_missing_the_channel_source_column(tmp_path: Path) -> None:
+    csv = "challenge_id,lane,real_cost,channel\nc1,lane-a,0.5,paid\n"
+    f = _billing_results(tmp_path, csv)
+    assert _run("check_billing_channel.py", "--results", str(f)) == 1
+
+
+def test_sh019_fails_an_empty_results_file(tmp_path: Path) -> None:
+    f = _billing_results(tmp_path, "")
+    assert _run("check_billing_channel.py", "--results", str(f)) == 1
+
+
+def test_sh019_fails_a_smoke_registry_row_without_billing(tmp_path: Path) -> None:
+    # The `--smoke` flag used to be inert; a smoke row omitting `billing` must now fail.
+    body = _VALID_BILLING_REGISTRY.replace("    billing: paid\n", "")
+    f = _billing_registry(tmp_path, body)
+    assert _run("check_billing_channel.py", "--smoke", str(f)) == 1
+
+
+def test_sh019_accepts_a_smoke_registry_row_declaring_free(tmp_path: Path) -> None:
+    # A genuine $0 smoke row is checked for its declaration only, never invariant 2's price.
+    body = _VALID_BILLING_REGISTRY.replace("billing: paid", "billing: free")
+    f = _billing_registry(tmp_path, body)
+    assert _run("check_billing_channel.py", "--smoke", str(f)) == 0
+
+
+def test_sh019_refuses_to_report_green_on_no_subjects(tmp_path: Path) -> None:
+    # A wrong cwd or a renamed path used to read zero rows and exit 0 — green on nothing.
+    missing = tmp_path / "nope"
+    assert (
+        _run(
+            "check_billing_channel.py",
+            "--registry",
+            str(missing),
+            "--overlay",
+            str(missing),
+            "--smoke",
+            str(missing),
+            "--results",
+            str(missing),
+        )
+        == 1
+    )
+
+
+def test_sh019_default_scan_of_this_repo_is_clean() -> None:
+    assert _run("check_billing_channel.py") == 0

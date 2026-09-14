@@ -13,6 +13,7 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
 from benchmark import plot_contract, plot_frame  # noqa: E402
+from shunt.inspect.plot_contract import request_annotation_audit  # noqa: E402
 
 _SPEC = plot_frame.FigureSpec(
     title="A claim about the data",
@@ -104,6 +105,36 @@ class TestRealDefectsAreCaught:
     def test_assert_clean_raises_with_the_figure_name_and_every_violation(self):
         with pytest.raises(plot_contract.LayoutError, match=r"broken\.png"):
             plot_contract.assert_clean(_clipping_figure(), "broken.png")
+
+
+class TestAnnotationCollisions:
+    """F11: in-axes text-over-text is an opt-in pass; a label collage must fail loudly."""
+
+    def test_an_overlapping_pair_is_reported_only_when_opted_in(self) -> None:
+        fig = plot_frame.new_figure(plot_frame.SINGLE)
+        ax = fig.subplots()
+        ax.text(0.5, 0.5, "alpha", transform=ax.transAxes)
+        ax.text(0.5, 0.5, "beta", transform=ax.transAxes)
+        # Off by default: a legitimate dense panel may place labels this close on purpose.
+        assert "annotation_overlap" not in _kinds(fig)
+        request_annotation_audit(fig)
+        assert "annotation_overlap" in _kinds(fig)
+
+    def test_separated_labels_do_not_report_even_when_opted_in(self) -> None:
+        fig = plot_frame.new_figure(plot_frame.SINGLE)
+        ax = fig.subplots()
+        ax.text(0.1, 0.1, "alpha", transform=ax.transAxes)
+        ax.text(0.7, 0.7, "beta", transform=ax.transAxes)
+        request_annotation_audit(fig)
+        assert "annotation_overlap" not in _kinds(fig)
+
+    def test_tick_and_axis_labels_are_not_direct_annotations(self) -> None:
+        fig = plot_frame.new_figure(plot_frame.SINGLE)
+        ax = fig.subplots()
+        ax.set_xlabel("a long axis label that must not be read as an annotation")
+        ax.plot([0, 1], [0, 1])
+        request_annotation_audit(fig)
+        assert "annotation_overlap" not in _kinds(fig)
 
 
 class TestStrictModeIsWired:

@@ -1,28 +1,28 @@
 {
   "cost_quality_headline": {
-    "inputs": "16d134939e9c4edf60f1ae84c76f94920aff824a1b66c91681055af2f83c367a",
+    "inputs": "a3f48ea7d617be8857e6b4e057aa59f6057404f994a3fffed806c43bcc2ae726",
     "outputs": {
       "cost_quality_headline.png": "06c2da54ccd115627ba1d6af6ea981047a5d915ef36dabb3983dc9e2c73d511d"
     }
   },
   "plot_exploration": {
-    "inputs": "09afbf7a48aaac73e0438877fac975ca4a26e0b17948956e8b78928d2e5e9f60",
+    "inputs": "a29e611d982b57d2a22972df546727ea602f3f49627c15282e02a5f1da27d928",
     "outputs": {
-      "exploration_cost.png": "a4ef644402066eae84d39de90ea7e2149145d0f21d3e337bcc2ed34cb529ae94"
+      "exploration_cost.png": "fbb473f43e6b1d25eea1acd90ba39f01433b6d78defc4865aa6e46ab4e8588ff"
     }
   },
   "plot_knn_nulls": {
-    "inputs": "4e22cdf7bfae3c667b79507db18204a44870e013dae7ae85be87131274f0e2a0",
+    "inputs": "8cd29c0c5831952a0f6460ff5fc7aafdb4d4bc248398ab6685849e5c74aa2698",
     "outputs": {
       "embedding_signal.png": "2163157662eacc8d96cccfbfd79d5f524062b3a69c60a3b03bb731c90d201109"
     }
   },
   "render_demo_figures": {
-    "inputs": "3ed4a1bd4b882df2c5d1b1d71fbc4b23df6ef8224442c9e4f1cc089a5084b9d0",
+    "inputs": "95e17b635861853cac52f560a8062b9b1a696e755a110d652158f6b3e7c5f71c",
     "outputs": {
       "inference_cost.png": "3dd574a07ea1eb71add4bcd84472318f10229e1e4591adc7ac00ff24e91afdaf",
       "inference_escalation.png": "193cfa295c50052e89b4e19890003c4e95d63d8e960eaf26cedc147cfa78f032",
-      "inference_model_grid.png": "a483e7cf86a7ac5e1bdeac9a6d4c73f4a65a4d721c6457ecc47e44ebcacbbb16",
+      "inference_model_grid.png": "3d564164b87d95c5617cf79518188a408ab15e0da77833b750270028341420d1",
       "inference_neighbourhood.png": "2e4d15fbaf65a505f9263e38455c895f0bf1bc97b40c69738e5eda7c70ee8889",
       "inference_ope.png": "3a8e02a299e1ebe19f64b9d2b21359c57bbe84be7575547d2478d4e07758028f",
       "inference_policy.png": "7763640e731a7fd55c0ac3a6948fd8823db1adca72373f51f5bdc44bf5761d5b",
@@ -31,61 +31,62 @@
     }
   },
   "render_inference_figures": {
-    "inputs": "bb05ba720e47b47f30cfe38936172b0deb9d2a0800abed9757df6ddcf8fdce3d",
+    "inputs": "e5c0fdbcccba9b9c5d045c2331eea425afdc67d9088dad475dcf027696d879ab",
     "outputs": {
       "inference_cost.png": "b79ef33f13ab835acbd7659c0bf433bff687360831d04e85f027ffc706c6345b",
       "inference_escalation.png": "bb2f941d478824041b497e5164ad047027ee7bc35af8c02f4ca344a20e874ee2",
-      "inference_model_grid.png": "bf18d47f925ff89bcf44946d0ffae8aecb2b5344e4c54b1df5d83b530864fb14",
+      "inference_model_grid.png": "a3dd771bf4ef8a18310d315dcbb916655dcb98b8921aac24e371563a12d98894",
       "inference_neighbourhood.png": "39c5c006906f2bd03c9b357a6a5c8c39d4fc47bec804535422dae0d7d32d0d87",
       "inference_ope.png": "f91efec92ab0a805791d281ae8afb836436ee621cf063321b8a14f7a079a19e5",
       "inference_policy.png": "a742fd423bce3257d0bf1ae1daf15e84f0de55986cedb089cac7df362a5fdf1b",
-      "inference_strata.png": "8aaf2cebbf3180dad8d130e4bdfb8334cb34f10441e6d20748c8a7c8299f8479",
+      "inference_strata.png": "25a19f5a2e89dd79a2abc2a2ddd1ead7fcfa40027c4472cc5d738745b12f830f",
       "inference_unit_economics.png": "1593e90d7f3b3b48bb945734211d7261a0f3b16c0666713dc8c0b97d853c5593",
       "no_live_sessions.png": "3daa4df6d5de588303bdb8c4d6fc0e7ec755c9f22adeeba1e1a68f771164d3e6"
     }
   },
   "report": {
-    "inputs": "0de0b35820c6a8231ea32a428f3df98cd0ca61d09ceb0b697d2e265facbd0d7f",
+    "inputs": "6941b1a94bd1d19f956b0ec122e0a1e4c46aae8942d87454b49864991f66b053",
     "outputs": {
-      "arm_manipulation.png": "92668569021a7f43ae307ab325320dd7fc9330025b0f5cdaa56e7182289f8a6f",
-      "cache_economics.png": "74aed73656ab009fb1ce11a71bea90ddc6643fd24ab5a12918ae9465824b60ee",
-      "complementarity.png": "869cdffcd2559b6403245e518c1644d5e46980098ae49353d5768ff6f5e942d4",
-      "cost_quality_frontier.png": "f675b15775868388bad2014271a1be2428d2486f23f12566f083b67ed77b30b5",
-      "evidence_basis.png": "8f900f0e9975928bf5a874a93b24359ee602b1635878a1584017f518b70273e7",
-      "invalid_models.png": "c08b7d0e4bb77bb3bb9e003329794fb6a4aeca93f9a80577466afe40cb548c21",
+      "arm_manipulation.png": "874533aa2879c1aade837b4000a33ab645241809bd0edd090ab88578ac87de8b",
+      "cache_economics.png": "2984fae3a83289bda75df31b7b91a596db409cb081bbd8c07dce98eebb5b57ed",
+      "complementarity.png": "e9f49d57eca7165d25bd8df0b4707ebbd127fac37b86dff18fc20888df52f23a",
+      "cost_quality_frontier.png": "9f8f06528f4fab0e1603e8f91da992f10ea55f16d6e6f88e302ce37f9f3800c3",
+      "evidence_basis.png": "39d4f13eaced08a8c84d25496d1d7573c09a5ff57d6fcb4c73cfc6058913edce",
+      "invalid_models.png": "ee0f6f543d8d6f85131c59974acf651eeb2b527aab17aad84fdc2993d63edae7",
       "kill_gate.png": "48ee9ecb54054a2c44a0b948dd81bea7208d0300c79a9445d2bd955a16febe78",
-      "ladder_rungs.png": "9d3c395a70b8c611360fe68e299ddd203078b4c8eb9f6a6f5e799f1d9490a249",
+      "ladder_rungs.png": "7d13c6c144ccd46506f0e76c087c4c4f7a90f1af0b08a515a52109f55fb51b84",
       "live_gap.png": "0f137b906b82d7cf9b836122a4e48223895d52e244ccfc3b88f0aa3dca81d677",
-      "model_grid.png": "74b746cbb8b044a8973c2bbd7f1debb9da4f99e73705e44515675fee44862cad",
-      "model_validity.png": "15662f3fa29c1f16f7011441cfb825210369497a70068e55d5126adac30fe09d",
-      "oracle_gap.png": "da3b329a1e9d706820a0686f1e6fb964b23e6da01487701b5475cd1a227f039d",
-      "pareto_dimensions.png": "e89a0c47479b2539b6b4517540549cb7900c634d8aec7bd25923a8d6a3571b08",
-      "routing_decision_audit.png": "882ab11b4b1f830640a9d69046186ed405d4a33c7eb8816d253a750ef6f5a78e",
-      "task_difficulty.png": "cb33fa3f1079a42699a0056c02177016442e65f5cb728d560ae9b5f09829f8dd",
-      "universe_coverage.png": "34565ddcfcd7ba692f79d69717881fb92ad19bfb97b85a94cd10e0f417297ed5",
-      "universe_economics.png": "a0049a69dd5a4822a5203a07eb96b30c5a321a7e1a7b08cf3b869b0d16fa26c3"
+      "model_grid.png": "5f6bca3818455eb9579f082fd72bacf4c71aa90d6e0cbd9d6ef0aa7693970f49",
+      "model_relevance.png": "faa32c6324381e26f80bc483fbb11221bc15975aae8bf4356bd5949444f0482c",
+      "model_validity.png": "4b6a31410845667d1fbb1bcd442b458b81e4bea3aeb162d963388b99a2486d60",
+      "oracle_gap.png": "9741e6ba2dcb0ace859b432f10cafafb5f0d147f479a927ecf135ee2d28c43e1",
+      "pareto_dimensions.png": "5f391672fe9597c3fc240c5ee779b15a8bfb4e455072198023ecf93a66ec2b83",
+      "routing_decision_audit.png": "c344c78fbd3158c9e324d084bbfff4a8e35a9ad796ae8eddcfaa35ed2b496228",
+      "task_difficulty.png": "e78a586a4a99d6708d13febd81eb68dc77af84ba8cf37bae04fb7b5038e5ddfe",
+      "universe_coverage.png": "2f7236e1eff1e391e96694572c6453b73e024009b753ddd91d0024b97a0ce596",
+      "universe_economics.png": "b2fecec9ab14f2bea193c4073370c477d36f9875d4f35cdafd5a2deea42cfd89"
     }
   },
   "run_eval": {
-    "inputs": "96b3111a3e6279b369d68d21eb24ddff52cb380d88eec71fda9cbf15e298c09e",
+    "inputs": "5edd57f7fbfaa17dba26b67d9c51bbfa8c1e022123aa0c958daad0ff0164c00b",
     "outputs": {
-      "corpus_and_coverage.png": "ff2f726c4d94f01377f9aa33715d4588deb86f8b53811692d84d754d686e65d4",
+      "corpus_and_coverage.png": "53d73ef9d89eebb68a5462270797bcd02fb16ba9b74be2c3e3faf5fde77698ab",
       "escalation_budget.png": "8afa725867b794df7cdb063be99d5fbb68d1697b88ae4052dcde558f600a6faa",
-      "escalation_decision.png": "d2f4c13a42ce6919f7e01015047fa2c5bc5047d6f2e3c29e7ad24af4dba3f98a",
+      "escalation_decision.png": "4d01a79deb7afdf2655e5d7d124a395fe1d9651b20d6de538fdd92ab3e3012e0",
       "metrics.json": "928ad68d7968393bac00ccb729ec327210da53c58fe2a647a8b7847ee5e95077",
       "operating_point.png": "c72757f7c4cfab818afe9aec667ea86bfb2380a41fcc950611e774d7b68486b3",
       "policy_sweep.png": "62241a1e1dbc5420f9fc14b14fc180752b799908e12d9a1fed61626cb1a95663",
-      "session_value.png": "47d60afabbf3f59907cdfe280539fdc678287ba2b1745f5a1a5d059993ddd41d"
+      "session_value.png": "c7af4108820b237bb0f4f16440bf06497fa5a9ed238e43f3ee9226aab6b964d5"
     }
   },
   "threshold_sweep": {
-    "inputs": "e847a06b87610f94e11b740f18fcaa4843e48cf169e6409e6bf9d5d0db253645",
+    "inputs": "1a05dff6725b9a95e422d27623689ae42060c24eb7902d024710ad6c17d406a2",
     "outputs": {
-      "sweep_regimes.png": "e1b83506e0fce513914994a4ae832f77187e8b24ede92b97cc088e15458c5a16"
+      "sweep_regimes.png": "744e5e3857e5c80757480d52b919e1a2c9232142f6cb7db97b1332581cac979e"
     }
   },
   "viz_knn": {
-    "inputs": "09950a5dbde3f557883a8595e2d753c71644c9685d8fb33607a60a699eec0e06",
+    "inputs": "dfbb771463568d571f1c98f2f4b388289115cfa142193f68ed599213eadac0c0",
     "outputs": {
       "knn_calibration.png": "abc2072bdddd32b13e5a2b0acd91279f1853d3075195d6b68f8bd6eb2e107656"
     }

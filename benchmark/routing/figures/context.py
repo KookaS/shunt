@@ -103,10 +103,13 @@ class RoutingContext:
 
         The model-COMPARISON figures (the decision audit, the difficulty allocation) draw only
         these: the rest are benchmark-only or collection-only and are named on model_validity /
-        invalid_models instead. Falls back to the full enabled order when no census is present,
-        so a standalone caller degrades to the old behaviour rather than drawing an empty grid.
+        invalid_models instead. Falls back to the full enabled order ONLY when no census is
+        present (a standalone caller degrades to the old behaviour rather than drawing an empty
+        grid). When the census IS present but nothing matches, the empty list is returned — the
+        old `scoped or list(...)` fallback re-admitted inference-invalid models, the exact
+        thing the filter exists to prevent.
         """
-        if not self.validity:
+        if self.validity is None:
             return list(self.models_by_price)
         # Compare by CANONICAL identity: a model list entry may be a channel listing
         # (`z-ai/glm-5.3:free`) while the census keys on the bare weights identity
@@ -114,8 +117,7 @@ class RoutingContext:
         from benchmark.routing import model_universe  # noqa: PLC0415 — avoid an import cycle
 
         valid = {row.model for row in self.validity if row.valid}
-        scoped = [m for m in self.models_by_price if model_universe.resolve_identity(m) in valid]
-        return scoped or list(self.models_by_price)
+        return [m for m in self.models_by_price if model_universe.resolve_identity(m) in valid]
 
     def cells(self, name: str) -> tuple[StrategyCells, set[str]] | None:
         return self.by_strategy.get(name)

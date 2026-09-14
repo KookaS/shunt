@@ -109,8 +109,9 @@ SPEC = FigureSpec(
         ),
         (
             "not live",
-            "a benchmark target absent from router.yaml's models: list — measured for evidence, "
-            "never chosen for live inference",
+            "a benchmark target absent from router.yaml's models: list — benchmark-only and "
+            "outside the inference-valid pool, measured for evidence, never chosen for live "
+            "inference",
         ),
     ),
     limitations=(
@@ -380,7 +381,14 @@ def _annotations(rows: list[Rung], payload: dict[str, Any], shortlist: int) -> A
         ),
     ]
     if not_live:
-        facts.append("not live (registry only): " + ", ".join(not_live))
+        # Provenance labels the benchmark-only targets unambiguously rather than dropping them:
+        # they ARE panel A's evidence rows (the figure contrasts them with the live pool), so
+        # the name stays but the label says exactly what they are — outside the inference-valid
+        # pool, measured only.
+        facts.append(
+            "not live — benchmark-only, outside the inference-valid pool (never served): "
+            + ", ".join(not_live)
+        )
     notes = tuple(
         f"{canonical_label(r.target)} at {r.price_multiple:.1f}x base: n={r.n}, helps {r.helps}, "
         f"hurts "

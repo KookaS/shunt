@@ -2,10 +2,11 @@
 
 # `arm_monotonicity` reported flat pass-rate contrasts across reasoning arms and read as a
 # null result: "more reasoning effort does not help". On most of the pairs it is not a null
-# result, because the knob NEVER FIRED. Paired on co-measured tasks, the high arm spends
-# 0.78x to 1.08x the low arm's output tokens on deepseek, kimi-k2.5, qwen and zai — at or
-# below the noise of no change at all. Only gpt-5-mini's minimal/medium -> high steps show a
-# real manipulation, at 2.6-2.9x.
+# result, because the knob NEVER FIRED. Paired on co-measured tasks, the high arm's output
+# tokens stay at or below the low arm's on the pairs where nothing moved — at or below the
+# noise of no change at all — so a flat contrast there measures nothing. WHICH pairs actually
+# fired is DERIVED from the corpus at render time and printed on the canvas (title, subtitle,
+# caveat); no model or ratio is frozen into this comment.
 #
 # A treatment that was never applied cannot have a null effect; it has no effect to measure.
 # So the manipulation check is the FIRST panel and it gates the second: a row whose knob did

@@ -40,13 +40,14 @@ from __future__ import annotations
 
 import math
 import textwrap
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Final, cast
 
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
+from matplotlib.transforms import offset_copy
 
-from shunt.inspect import plot_frame
+from shunt.inspect import plot_contract, plot_frame
 from shunt.inspect.plot_frame import Annotations, FigureSpec
 from shunt.inspect.plot_style import ci_yerr, wilson_interval
 
@@ -55,6 +56,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from pathlib import Path
 
     from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
+    from matplotlib.transforms import Transform
 
     from shunt.inspect.plot_frame import Provenance
 
@@ -106,13 +109,22 @@ _EMPTY_WRAP: Final[int] = 30
 _LABEL_NEAR_DECADES: Final[float] = 0.09
 _LABEL_NEAR_POINTS: Final[float] = 7.0
 # The offsets a crowded label may take, in points, tried in this order: above the marker, then
-# below it, then one row further out on each side. A LADDER rather than a two-way flip because
-# the ladder is growing — three rungs at one price and one rate is the expected case, not a
+# below it, then one rung further out on each side. A LADDER rather than a two-way flip because
+# the ladder is growing — a cluster at one price and one rate is the expected case, not a
 # corner — and a flip can only separate two of them. Every rung on the ladder is one label
-# height apart, so two labels that end on different rungs cannot overprint. THREE rungs per
-# SIDE, not per ladder: the ceiling case may only go downwards, and a ladder with two negative
-# rungs would collapse a cluster of three ceiling-height rows back onto each other.
-_LABEL_OFFSETS: Final[tuple[float, ...]] = (11.0, -18.0, 24.0, -31.0, 37.0, -44.0)
+# height apart, so two labels that end on different rungs cannot overprint. EIGHT rungs per
+# side: a realistic cluster is six to eight models, and a short ladder silently returned its
+# last slot to the seventh label, which printed it on the sixth. `label_offset` returns None
+# once the ladder is exhausted so the caller routes the name to the notes instead.
+_LABEL_UP: Final[tuple[float, ...]] = (11.0, 24.0, 37.0, 50.0, 63.0, 76.0, 89.0, 102.0)
+_LABEL_DOWN: Final[tuple[float, ...]] = (-18.0, -31.0, -44.0, -57.0, -70.0, -83.0, -96.0, -109.0)
+_LABEL_OFFSETS: Final[tuple[float, ...]] = tuple(
+    offset for pair in zip(_LABEL_UP, _LABEL_DOWN, strict=True) for offset in pair
+)
+# How far a marker whose data point coincides with an already-drawn one is nudged, in points,
+# so two rungs at the same price and rate do not render as one glyph. The true coordinate keeps
+# a short leader back to the mark.
+_NUDGE_POINTS: Final[float] = 18.0
 
 
 @dataclass(frozen=True)
@@ -273,14 +285,18 @@ def label_offset(
     placed: Sequence[tuple[tuple[float, float], float]],
     *,
     forced_below: bool,
-) -> float:
-    """The first offset on the ladder that no already-placed nearby label is using."""
-    # `forced_below` is the ceiling case: a label above a marker whose Wilson bar already
-    # reaches the top of the axis is drawn off-canvas, and raising the ceiling to hold it
-    # would invent headroom the measurement does not have.
-    ladder = [o for o in _LABEL_OFFSETS if o < 0] if forced_below else list(_LABEL_OFFSETS)
+) -> float | None:
+    """The first offset on the ladder no already-placed nearby label uses, or None if full.
+
+    `forced_below` is the ceiling case: a label above a marker whose Wilson bar already
+    reaches the top of the axis is drawn off-canvas, and raising the ceiling to hold it would
+    invent headroom the measurement does not have, so only the downward ladder is tried.
+    None is a sentinel, not a collision: the caller routes that name to the notes rather than
+    drawing it on top of a label that already holds the slot.
+    """
+    ladder = _LABEL_DOWN if forced_below else _LABEL_OFFSETS
     taken = {offset for other, offset in placed if _near(anchor, other)}
-    return next((o for o in ladder if o not in taken), ladder[-1])
+    return next((o for o in ladder if o not in taken), None)
 
 
 def _label(row: GridRow) -> str:
@@ -295,14 +311,133 @@ def _label(row: GridRow) -> str:
 # ------------------------------------------------------------------ panel A
 
 
+@dataclass
+class _LabelState:
+    """The mutable placement state one panel's labels share: what is placed, what overflowed."""
+
+    ceiling: float
+    placed: list[tuple[tuple[float, float], float]] = field(default_factory=list)
+    overflow: list[str] = field(default_factory=list)
+
+
+def _place_frontier_label(
+    ax: Axes,
+    row: GridRow,
+    x: float,
+    state: _LabelState,
+    transform: Transform | None = None,
+) -> None:
+    """Place one row's direct label, or route its name to the notes when the ladder is full."""
+    anchor = (x, row.rate * 100)
+    offset = label_offset(anchor, state.placed, forced_below=row.wilson[1] * 100 >= state.ceiling)
+    if offset is None:
+        # The point is drawn; only its name could not find a non-overprinting slot.
+        state.overflow.append(_label(row))
+        return
+    state.placed.append((anchor, offset))
+    # A label moved off the default slot sits nearer a NEIGHBOUR's marker than its own, so it
+    # gets a thin leader back to the rung it names. Without it `qwen3.5-35b-a3b` beside
+    # `deepseek-v4-flash` reads as labelling the corpus marker.
+    moved = offset != _LABEL_OFFSETS[0]
+    ax.annotate(
+        _label(row),
+        anchor,
+        xycoords=transform if transform is not None else ax.transData,
+        textcoords="offset points",
+        xytext=(0, offset),
+        ha="center",
+        va="top" if offset < 0 else "baseline",
+        fontsize=6.6,
+        color=plot_frame.INK,
+        arrowprops=(
+            {"arrowstyle": "-", "color": _RULE, "lw": 0.6, "shrinkA": 1.0, "shrinkB": 3.0}
+            if moved
+            else None
+        ),
+    )
+
+
+def _draw_rung(
+    ax: Axes, row: GridRow, x: float, span: tuple[int, int] | None, transform: Transform | None
+) -> None:
+    """One rung's whisker and marker at (x, rate), drawn through `transform` when nudged."""
+    edge, width = _edge(row)
+    lo, hi = row.wilson
+    down, up = ci_yerr(row.rate * 100, lo * 100, hi * 100)
+    ax.errorbar(
+        [x],
+        [row.rate * 100],
+        yerr=[[down], [up]],
+        fmt="none",
+        ecolor=_RULE,
+        elinewidth=1.0,
+        capsize=2.5,
+        transform=transform,
+        zorder=2,
+    )
+    ax.scatter(
+        [x],
+        [row.rate * 100],
+        s=marker_area(row.active_params, span),
+        c=CLUSTER_COLOR[row.cluster],
+        marker="D" if row.total_params is None else "o",
+        edgecolors=edge,
+        linewidths=width,
+        alpha=0.92,
+        transform=transform,
+        zorder=3,
+    )
+
+
+def _draw_panel_row(
+    ax: Axes,
+    row: GridRow,
+    x: float,
+    span: tuple[int, int] | None,
+    drawn: list[tuple[float, float]],
+    state: _LabelState,
+) -> None:
+    """Draw one rung, nudging its marker and leader when it coincides with an earlier one."""
+    # Two rungs at the same price and rate would otherwise draw as ONE glyph. The second is
+    # nudged a few points right, and a short leader ties it back to its true coordinate so the
+    # displacement is disclosed rather than hidden.
+    anchor = (x, row.rate * 100)
+    collides = any(_near(anchor, other) for other in drawn)
+    transform = (
+        offset_copy(ax.transData, fig=cast("Figure", ax.figure), x=_NUDGE_POINTS, units="points")
+        if collides
+        else ax.transData
+    )
+    _draw_rung(ax, row, x, span, transform)
+    if collides:
+        ax.annotate(
+            "",
+            xy=anchor,
+            xycoords=transform,
+            xytext=anchor,
+            textcoords=ax.transData,
+            arrowprops={
+                "arrowstyle": "-",
+                "color": _RULE,
+                "lw": 0.6,
+                "shrinkA": 0.0,
+                "shrinkB": 1.0,
+            },
+            zorder=2,
+        )
+    _place_frontier_label(ax, row, x, state, transform)
+    drawn.append(anchor)
+
+
 def _draw_operating_frontier(
     ax_zero: Axes, ax_log: Axes, rows: Sequence[GridRow], x_label: str
-) -> tuple[float, float]:
-    """The price/quality plane, with the $0 column and the log region on one shared y."""
+) -> tuple[float, float, tuple[str, ...]]:
+    """The price/quality plane, plus the labels the ladder could not place without overprinting."""
     span = _active_span(rows)
     priced = [r for r in rows if r.x is not None]
     free = [r for r in rows if r.x is None]
     ceiling = min(100.0, max(r.wilson[1] * 100 for r in rows) + 9.0) - 6.0
+    state = _LabelState(ceiling=ceiling)
 
     for ax, subset, xs in (
         (ax_zero, free, [0.0] * len(free)),
@@ -310,54 +445,10 @@ def _draw_operating_frontier(
     ):
         # Labels are placed left to right so the choice is deterministic: the same corpus
         # draws the same canvas, and each row dodges every label already placed near it.
-        placed: list[tuple[tuple[float, float], float]] = []
+        drawn: list[tuple[float, float]] = []
         for row, x in sorted(zip(subset, xs, strict=True), key=lambda p: (p[1], p[0].name)):
-            edge, width = _edge(row)
-            lo, hi = row.wilson
-            down, up = ci_yerr(row.rate * 100, lo * 100, hi * 100)
-            ax.errorbar(
-                [x],
-                [row.rate * 100],
-                yerr=[[down], [up]],
-                fmt="none",
-                ecolor=_RULE,
-                elinewidth=1.0,
-                capsize=2.5,
-                zorder=2,
-            )
-            ax.scatter(
-                [x],
-                [row.rate * 100],
-                s=marker_area(row.active_params, span),
-                c=CLUSTER_COLOR[row.cluster],
-                marker="D" if row.total_params is None else "o",
-                edgecolors=edge,
-                linewidths=width,
-                alpha=0.92,
-                zorder=3,
-            )
-            anchor = (x, row.rate * 100)
-            offset = label_offset(anchor, placed, forced_below=row.wilson[1] * 100 >= ceiling)
-            placed.append((anchor, offset))
-            # A label moved off the default slot sits nearer a NEIGHBOUR's marker than its own,
-            # so it gets a thin leader back to the rung it names. Without it `qwen3.5-35b-a3b`
-            # beside `deepseek-v4-flash` reads as labelling the corpus marker.
-            moved = offset != _LABEL_OFFSETS[0]
-            ax.annotate(
-                _label(row),
-                anchor,
-                textcoords="offset points",
-                xytext=(0, offset),
-                ha="center",
-                va="top" if offset < 0 else "baseline",
-                fontsize=6.6,
-                color=plot_frame.INK,
-                arrowprops=(
-                    {"arrowstyle": "-", "color": _RULE, "lw": 0.6, "shrinkA": 1.0, "shrinkB": 3.0}
-                    if moved
-                    else None
-                ),
-            )
+            _draw_panel_row(ax, row, x, span, drawn, state)
+    overflow = state.overflow
 
     ax_zero.set_xlim(-0.6, 0.6)
     ax_zero.set_xticks([0.0])
@@ -412,7 +503,7 @@ def _draw_operating_frontier(
     # canvas instead of over a confidence bar. Empty space is honest; a hidden bar is not.
     lo = max(0.0, min(lows) - 13.0)
     hi = min(100.0, max(highs + rates) + 9.0)
-    return lo, hi
+    return lo, hi, tuple(overflow)
 
 
 def _draw_break(ax_zero: Axes, ax_log: Axes) -> None:
@@ -472,7 +563,10 @@ def _panel_a_key(ax: Axes, rows: Sequence[GridRow]) -> None:
             marker="o",
             linestyle="none",
             markersize=6,
-            markerfacecolor="none",
+            # FILLED, matching the data marks, because hollow is spoken for: panel B uses
+            # hollow-vs-filled for total-vs-active, and a hollow swatch here made the same
+            # channel mean "serving mode" on one panel and "total parameters" on the other.
+            markerfacecolor="#dddddd",
             markeredgecolor=_LOCAL_EDGE if m == "local" else _HOSTED_EDGE,
             markeredgewidth=1.9 if m == "local" else 1.1,
             label=f"{m} (edge)",
@@ -497,14 +591,14 @@ def _panel_a_key(ax: Axes, rows: Sequence[GridRow]) -> None:
                     label=f"{value / 1e9:.0f}B active",
                 )
             )
-    # ONE legend, three columns. Three separate legends had to be placed in three free
-    # regions, and the only region big enough for the size key sat on top of the
-    # highest-scoring marker — a key that hides the point it explains.
+    # ONE legend, three columns, seated BELOW the axes rather than over the data region: a key
+    # that hides the point it explains is worse than a key one line down.
     ax.legend(
         handles=[*hue, *edge, *size_key],
         fontsize=6.2,
-        loc="lower right",
-        ncols=2,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.13),
+        ncols=3,
         framealpha=0.94,
         labelspacing=0.9,
         handletextpad=0.9,
@@ -513,6 +607,15 @@ def _panel_a_key(ax: Axes, rows: Sequence[GridRow]) -> None:
 
 
 # ------------------------------------------------------------------ panel B
+
+
+def _size_axis_label(*, log: bool) -> str:
+    """Panel B's x label: the scale is named from the axis actually drawn, never assumed.
+
+    Every row can be UNDISCLOSED, in which case no sized row is drawn and the axis stays
+    linear; the old hardcoded "(log)" then stated a scale the panel did not use.
+    """
+    return f"parameters ({'log' if log else 'linear'}) — hollow: total · filled: active"
 
 
 def _draw_size_ladder(ax: Axes, rows: Sequence[GridRow]) -> int:
@@ -555,7 +658,7 @@ def _draw_size_ladder(ax: Axes, rows: Sequence[GridRow]) -> int:
     ax.set_ylim(-0.7, len(labels) - 0.3)
     if drawn:
         ax.set_xscale("log")
-    ax.set_xlabel("parameters (log) — hollow: total · filled: active", fontsize=8.5)
+    ax.set_xlabel(_size_axis_label(log=drawn > 0), fontsize=8.5)
     ax.grid(visible=True, axis="x", alpha=0.22, linewidth=0.6)
     ax.tick_params(labelsize=7.5)
     return drawn
@@ -571,7 +674,7 @@ def _draw_size_ladder(ax: Axes, rows: Sequence[GridRow]) -> int:
 # `results.csv` and `benchmark/runner/infer.py` records them at collection time.
 
 
-def grid_annotations(data: GridData, *, sized: int) -> Annotations:
+def grid_annotations(data: GridData, *, sized: int, overflow: Sequence[str] = ()) -> Annotations:
     """Subtitle facts and notes derived from the rows actually drawn."""
     rows = data.rows
     free = [r for r in rows if r.x is None]
@@ -579,7 +682,10 @@ def grid_annotations(data: GridData, *, sized: int) -> Annotations:
     external = [r for r in rows if r.is_external]
     ns = [r.n for r in rows]
     facts = [
-        f"{len(rows)} models over {data.source}",
+        # A colon, not "N models over X": the source clause already names the inference-valid
+        # subset and then adds the out-of-corpus rungs, so "6 models over the 4 … plus 2" read
+        # as one broken arithmetic sentence. The count and its provenance are two facts.
+        f"{len(rows)} models: {data.source}",
         f"{len(free)} at $0 (local) · {len(rows) - len(free)} priced",
     ]
     if ns:
@@ -606,6 +712,14 @@ def grid_annotations(data: GridData, *, sized: int) -> Annotations:
         )
     for row in sorted(external, key=lambda r: r.name):
         notes.append(f"† {row.display}: {row.provenance_note}")
+    if overflow:
+        # The point is still drawn; only its direct label could not find a non-overprinting
+        # slot. Naming it here is explicit, so the loss is stated rather than printed over a
+        # neighbour, and `plot_contract`'s opt-in annotation audit fails a real collision.
+        notes.append(
+            "panel A label ladder was full, so these names are here rather than on the canvas "
+            "(their markers are drawn, unlabelled): " + ", ".join(overflow)
+        )
     limitations = [
         data.x_limitation,
         "The $0 column and the log region are not one ruler. The gap between them is a break, "
@@ -660,8 +774,11 @@ def render(
     plot_frame.panel_label(axd["a_log"], "A · operating frontier")
     plot_frame.panel_label(axd["b"], "B · size ladder")
 
+    overflow: tuple[str, ...] = ()
     if data.rows:
-        ylo, yhi = _draw_operating_frontier(axd["a_zero"], axd["a_log"], data.rows, data.x_label)
+        ylo, yhi, overflow = _draw_operating_frontier(
+            axd["a_zero"], axd["a_log"], data.rows, data.x_label
+        )
         axd["a_log"].set_ylim(ylo, yhi)
         _panel_a_key(axd["a_log"], data.rows)
         _draw_break(axd["a_zero"], axd["a_log"])
@@ -670,11 +787,15 @@ def render(
         _empty(axd["a_log"], "no model in this corpus carries a verified outcome")
     sized = _draw_size_ladder(axd["b"], data.rows)
 
+    # Panel A's labels must not print on each other. The placement ladder avoids it by
+    # construction; this opt-in check is the backstop that turns any residual collision into a
+    # failed render rather than a shipped collage. Off by default elsewhere — see plot_contract.
+    plot_contract.request_annotation_audit(fig)
     return plot_frame.save(
         fig,
         path,
         spec,
-        extra=grid_annotations(data, sized=sized),
+        extra=grid_annotations(data, sized=sized, overflow=overflow),
         provenance=provenance,
         size=size,
     )

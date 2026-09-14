@@ -110,7 +110,7 @@
       "price_sheet": null,
       "reading": "Panel A: each model the store holds a Tier-2 label for, at its mean billed dollars per labeled session (x, log \u2014 with a separate column at the left for locally-served models, whose marginal price is exactly zero and cannot sit on a log axis) against its verified-success rate (y), with Wilson 95% whiskers. Marker area follows the square root of the active parameter count, the marker edge says hosted or local, and hue is the coarse total-size band. Panel B: a hollow mark at total parameters and a filled mark at active parameters, the rule between them being the mixture-of-experts sparsity gap. The former latency panels are retired: no committed row carries a sample, so they drew nothing and claimed nothing.",
       "size": "wide_tall",
-      "subtitle": "the benchmark half's grid, redrawn over the outcome store \u2014 both strata, split stated below \u00b7 2 models over the outcome store's Tier-2-labeled sessions \u2014 209 live and 250 replayed from the benchmark corpus; 1 of 2 models drawn carry any live session \u00b7 0 at $0 (local) \u00b7 2 priced \u00b7 n per model 25\u201390, unpaired task sets \u00b7 x = billed spend over labeled sessions, from the store's own cost rows",
+      "subtitle": "the benchmark half's grid, redrawn over the outcome store \u2014 both strata, split stated below \u00b7 2 models: the outcome store's Tier-2-labeled sessions \u2014 209 live and 250 replayed from the benchmark corpus; 1 of 2 models drawn carry any live session \u00b7 0 at $0 (local) \u00b7 2 priced \u00b7 n per model 25\u201390, unpaired task sets \u00b7 x = billed spend over labeled sessions, from the store's own cost rows",
       "terms": [
         [
           "verified success",

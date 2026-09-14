@@ -238,13 +238,15 @@ def _source_line(
     """What the canvas is drawn FROM, and where the excluded models are explained."""
     base = f"the {valid_count} inference-valid models' measured default-arm cells of results.csv"
     if external_count:
-        base += f", plus {external_count} † out-of-corpus rung(s)"
+        # The dagger rides the word, not the count: "plus 2 † out-of-corpus" wrapped after the
+        # count and orphaned the glyph onto the next line ("plus 2 / t out-of-corpus").
+        base += f", plus {external_count} out-of-corpus rung(s) (†)"
     excluded = _undrawn_rungs(validity)
     if not excluded:
         return base
     return (
         f"{base} · {len(excluded)} excluded model(s) are named and explained in "
-        "model_validity.png — not drawn here"
+        "the model-validity figure — not drawn here"
     )
 
 

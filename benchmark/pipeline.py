@@ -919,6 +919,7 @@ _REPORT_JOB: Final[FigureJob] = FigureJob(
         "ladder_rungs.png",
         "live_gap.png",
         "model_grid.png",
+        "model_relevance.png",
         "model_validity.png",
         "oracle_gap.png",
         "pareto_dimensions.png",
@@ -1011,6 +1012,13 @@ _INFERENCE_ANALYSIS: Final[tuple[str, ...]] = (
     "benchmark.routing.docs_corpus",
     "benchmark.routing.integrity",  # the results.csv schema the seeded rows are built to
     "benchmark.routing.seed_live",
+    # The producer also imports `model_universe.canonical_label` to strip a channel listing to
+    # its bare weights identity before a grid row is labelled. That single import reaches the
+    # WHOLE routing analysis layer (`model_validity` -> triage/_live_pool/plot_style, and
+    # `scan_free_models` -> the identity map), so a change to any of them can move an inference
+    # figure's model labels. Reuse the one routing declaration rather than re-listing its
+    # closure by hand and drifting from it.
+    *_ROUTING_ANALYSIS,
     # The drawing is all SHIPPED code — the same modules the rig container renders from, where
     # no `benchmark/` exists. `shunt.inspect.inference` itself is digested as a directory (see
     # the job's `inputs`) so a new module in the package joins without anyone listing it.

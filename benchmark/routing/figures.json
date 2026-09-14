@@ -58,23 +58,23 @@
       ],
       "n": {
         "models": 4,
-        "priced_rows": 735
+        "priced_rows": 758
       },
       "notes": [
         "The cache-read prices come from the shipped registry (src/shunt/config/models.yaml), so a provider price change moves this figure rather than silently invalidating it.",
-        "deepseek-v4-flash: billed 0.063 (n=345), registry predicts 0.141 [discount measured, input share 0.974 measured], hit-rate band 0.046\u20130.523",
-        "deepseek-v4-pro: billed 0.273 (n=200), registry predicts 0.139 [discount measured, input share 0.977 measured], hit-rate band 0.043\u20130.521",
+        "deepseek-v4-flash: billed 0.060 (n=360), registry predicts 0.141 [discount measured, input share 0.974 measured], hit-rate band 0.046\u20130.523",
+        "deepseek-v4-pro: billed 0.274 (n=201), registry predicts 0.139 [discount measured, input share 0.977 measured], hit-rate band 0.043\u20130.521",
         "glm-5.2: billed 0.189 (n=87), registry predicts 0.233 [discount measured, input share 0.946 measured], hit-rate band 0.148\u20130.574",
-        "kimi-k3: billed 0.217 (n=103), registry predicts 0.262 [discount measured, input share 0.911 measured], hit-rate band 0.180\u20130.590"
+        "kimi-k3: billed 0.207 (n=110), registry predicts 0.262 [discount measured, input share 0.911 measured], hit-rate band 0.180\u20130.590"
       ],
       "price_sheet": null,
       "reading": "Left: per model, the share of the list-price bill that was actually charged. The blue bar is MEASURED \u2014 every row's real_cost over its estimated_cost in results.csv, which is the whole gap between list price and the invoice. The green diamond is the share the registry's cache-read price predicts would survive, priced at the corpus's measured input/output token mix; the faint grey rule beneath each bar sweeps the one input nothing here measures, the cache hit rate, from 100% (left cap) to 50% (right cap). The right-hand column repeats each row as billed \u2192 modelled with its row count. Lower is cheaper. Right: the switch tax as MEASURED \u2014 per scored strategy, the dollars its cache-aware bill came in under its naive bill, which is what repeating a model inside one task actually banked on this corpus.",
       "size": "wide",
-      "subtitle": "4 models, 735 priced rows \u00b7 cache-read price measured for 4/4 models and input share for 4/4; hit rate assumed at 90% \u00b7 mean billed share 0.19 of list price vs a modelled 0.19 \u2014 residual -0.13 to +0.08 per model",
+      "subtitle": "4 models, 758 priced rows (channel mirrors merged by canonical identity) \u00b7 cache-read price measured for 4/4 models and input share for 4/4; hit rate assumed at 90% \u00b7 mean billed share 0.18 of list price vs a modelled 0.19 \u2014 residual -0.14 to +0.08 per model",
       "terms": [
         [
           "billed share",
-          "sum(real_cost) / sum(estimated_cost) over every measured row for that model. 1.0 means the invoice matched list price. It mixes EVERY reason the two differ \u2014 caching, negotiated rates, provider-side discounts \u2014 not caching alone."
+          "sum(real_cost) / sum(estimated_cost) over every measured rep-0 row for that CANONICAL identity, folding every channel mirror of the same weights into one model. 1.0 means the invoice matched list price. It mixes EVERY reason the two differ \u2014 caching, negotiated rates, provider-side discounts \u2014 not caching alone."
         ],
         [
           "registry prediction",
@@ -414,9 +414,9 @@
         "The dense slice is found greedily, not optimally, and comes from a single workload.",
         "How much of the corpus exploration left un-probed is NOT drawn: the replay report carries aggregate decisions, not the per-(task, model) probe record that question needs.",
         "The two marginal pass-rate CIs overlap ([72%, 85%] vs [73%, 84%]) \u2014 at 162 paired tasks only the paired difference separates the arms.",
-        "NO FRONTIER ARM IN THIS SLICE: the dense sub-grid covers only deepseek-v4-flash, deepseek-v4-pro, gpt-5-mini \u2014 the priciest model here is \\$2.25/Mtok against \\$18.00 across all enabled models (kimi-k3, glm-5.2, kimi-k2.5, qwen3.7-plus are absent). The exploration overhead measured here is between CHEAP models and is a LOWER BOUND on the shipped policy's, where an exploratory pull can land on the frontier model.",
-        "NOT IN THE LIVE POOL: gpt-5-mini of the dense slice is a registry/benchmark-only model, measured here for mechanism but never shortlisted by the shipped router. The exploration overhead is between these slice models; a valid-only companion over the inference-valid subset is not drawn.",
-        "THE DROPPED BASELINE CELLS ARE NOT A RANDOM SAMPLE: all 9 unscorable exploit-only cells are qwen3.7-plus, a model outside the dense slice \u2014 so the exploit-only arm is systematically missing that model's tasks, not a random subset. The overhead is therefore reported PAIRED, over only the tasks both arms scored."
+        "NO FRONTIER ARM IN THIS SLICE: the dense sub-grid covers only deepseek-v4-flash, deepseek-v4-pro, plus 1 benchmark-only model(s) (not named, outside the inference-valid pool) \u2014 the priciest model here is \\$2.25/Mtok against \\$18.00 across all enabled models (kimi-k3, glm-5.2, 2 benchmark-only model(s) (not named, outside the inference-valid pool) are absent). The exploration overhead measured here is between CHEAP models and is a LOWER BOUND on the shipped policy's, where an exploratory pull can land on the frontier model.",
+        "NOT IN THE LIVE POOL: 1 of the 3 dense-slice models are benchmark-only model(s) (not named, outside the inference-valid pool), measured here for mechanism but never shortlisted by the shipped router. The exploration overhead is between these slice models; a valid-only companion over the inference-valid subset is not drawn.",
+        "THE DROPPED BASELINE CELLS ARE NOT A RANDOM SAMPLE: all 9 unscorable exploit-only cells are one benchmark-only model (not named, outside the inference-valid pool) outside the dense slice \u2014 so the exploit-only arm is systematically missing that model's tasks, not a random subset. The overhead is therefore reported PAIRED, over only the tasks both arms scored."
       ],
       "n": {
         "paired tasks": 162,
@@ -436,7 +436,7 @@
       "price_sheet": null,
       "reading": "A: the cost/quality plane. Each arm is one point \u2014 mean cost per task on x, pass rate on y \u2014 with 95% bootstrap intervals on both axes; the arrow runs from the exploit-only arm to the exploring one, and the box states the PAIRED difference, which is what this slice has the power to resolve. B: where the budget went. The orange curve is the running share of decisions that were exploratory as the replay proceeds, the dotted line is the router's own confidence-weighted explore counter at the end of the run, and the dashed line is the configured cap it is measured against.",
       "size": "wide",
-      "subtitle": "offline Direct-Method replay of the shipped policy \u2014 recorded outcomes, no live calls \u00b7 dense slice 171 tasks \u00d7 3 models (deepseek-v4-flash, deepseek-v4-pro, gpt-5-mini) (gpt-5-mini: registry-only, not shortlisted), 162 scored by both arms, 20 seeds \u00b7 exploration bills 1.60\u00d7 the exploit-only run (worst seed 1.85\u00d7) \u00b7 95% percentile-bootstrap CIs over tasks",
+      "subtitle": "offline Direct-Method replay of the shipped policy \u2014 recorded outcomes, no live calls \u00b7 dense slice 171 tasks \u00d7 3 models (deepseek-v4-flash, deepseek-v4-pro) (1 benchmark-only model(s) (not named, outside the inference-valid pool)), 162 scored by both arms, 20 seeds \u00b7 exploration bills 1.60\u00d7 the exploit-only run (worst seed 1.85\u00d7) \u00b7 95% percentile-bootstrap CIs over tasks",
       "terms": [
         [
           "exploration",
@@ -472,13 +472,12 @@
         "Free-channel rows were collected under a different campaign and their intervals are wide from thin coverage, not from measured weakness."
       ],
       "n": {
-        "free": 13,
+        "free": 14,
         "invalid_evidenced": 23
       },
       "notes": [
-        "The predicate and the first-failing reason are not restated here \u2014 they are read from benchmark.routing.model_validity, the same source model_validity.png draws.",
+        "The predicate and the first-failing reason are not restated here \u2014 they are read from benchmark.routing.model_validity, the same source the model-validity figure draws.",
         "claude-fable-5.1: collection-only promo probe \u2014 never enabled or routed \u2014 22/500 challenges, 22 cells, paid, capability not-ranked, triage not-triaged",
-        "deepseek-v4.1-flash: collection-only promo probe \u2014 never enabled or routed \u2014 20/500 challenges, 20 cells, paid, capability not-ranked, triage not-triaged",
         "glm-5.3: collection-only promo probe \u2014 never enabled or routed \u2014 13/500 challenges, 13 cells, paid, capability not-ranked, triage not-triaged",
         "glm-5.3-flash: collection-only promo probe \u2014 never enabled or routed \u2014 41/500 challenges, 41 cells, paid, capability not-ranked, triage not-triaged",
         "gpt-5-mini: not in the live pool \u2014 benchmark-only, triage DROP \u2014 200/500 challenges, 200 cells, paid, capability measured, triage DROP",
@@ -487,6 +486,7 @@
         "kimi-k2.5: not in the live pool \u2014 benchmark-only, triage DROP \u2014 121/500 challenges, 121 cells, paid, capability measured, triage DROP",
         "qwen3.7-plus: not in the live pool \u2014 benchmark-only, triage DROP \u2014 87/500 challenges, 87 cells, paid, capability measured, triage DROP",
         "qwen3.8-27b: collection-only promo probe \u2014 never enabled or routed \u2014 42/500 challenges, 42 cells, paid, capability not-ranked, triage not-triaged",
+        "deepseek-v4.1-flash: collection-only free channel \u2014 never enabled or routed \u2014 20/500 challenges, 20 cells, free, capability not-ranked, triage not-triaged",
         "gemini-flash-lite-latest: collection-only free channel \u2014 never enabled or routed \u2014 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged",
         "glm-4.7-flash: collection-only free channel \u2014 never enabled or routed \u2014 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged",
         "granite-4.0-h-micro: collection-only free channel \u2014 never enabled or routed \u2014 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged",
@@ -502,13 +502,17 @@
         "step-3.7-flash: collection-only free channel \u2014 never enabled or routed \u2014 20/500 challenges, 20 cells, free, capability not-ranked, triage not-triaged"
       ],
       "price_sheet": null,
-      "reading": "Every evidenced model that fails at least one inference criterion, on two axes. Panel A: verified-challenge coverage, with the measured-cell count printed. Panel B: measured pass rate with a 95% Wilson interval, the mean billed cost per task printed beside it. Blue is a paid channel, orange a free one. Each row carries its first failing reason in the notes below.",
+      "reading": "Every evidenced model that fails at least one inference criterion, on two axes. Panel A: verified-challenge coverage, with the measured-cell count printed; a row covering nothing draws a hatched zero stub, not a missing bar. Panel B: measured pass rate with a 95% Wilson interval, the mean billed cost per task printed beside it. A row with fewer than the provisional cell floor is drawn hatched and faded in both panels, so a thin sample is never read as a full measurement. Blue is a paid channel, orange a free one. Each row carries its first failing reason in the notes below.",
       "size": "table_25",
-      "subtitle": "inference-invalid on committed evidence \u00b7 not selected for routing, not erased \u00b7 23 inference-invalid evidenced models (10 paid, 13 free) \u00b7 the four inference-valid models are on model_validity.png",
+      "subtitle": "inference-invalid on committed evidence \u00b7 not selected for routing, not erased \u00b7 23 inference-invalid evidenced models (9 paid, 14 free) \u00b7 34 named \u00b7 27 evidenced (\u22651 measured outcome) \u00b7 23 invalid-with-outcome \u00b7 the 4 inference-valid models are on the model-validity figure",
       "terms": [
         [
           "inference-invalid",
           "fails at least one of: live pool, triage KEEP, capability rank measured, coverage >= K cells, a paid channel. The first failing reason is named per row."
+        ],
+        [
+          "evidenced",
+          "a canonical identity with at least one committed measured default-arm outcome (Performance.n > 0); a named identity with no measured outcome is drawn as an empty band and is not a claim that the model is weak"
         ]
       ],
       "title": "Outside the inference pool: what the other measured models deliver"
@@ -522,9 +526,9 @@
         6.0
       ],
       "generator": "benchmark.routing.figures.kill_gate",
-      "goal": "Read both panels together, in that order. The left panel is the gate: a saving on the right is only admissible once the left one is green. On the pre-registered rows it is not \u2014 that arm's quality deficit is several times the margin and the whisker excludes it on every basis, so the spend reduction beside it is bought at a loss that was pre-registered as unacceptable rather than at equal quality. The bottom row is a different arm and a different verdict: the shipped default clears the bar, at four times the pre-registered arm's bill and still under half the baseline's. It was not pre-registered, so read it as an observation, not as the gate being met.",
+      "goal": "Read both panels together, in that order. The left panel is the gate: a saving on the right is only admissible once the left one is green. On the pre-registered rows it is not \u2014 that arm's quality deficit is several times the margin and the whisker excludes it on every basis, so the spend reduction beside it is bought at a loss that was pre-registered as unacceptable rather than at equal quality. The bottom row is a different arm and a different verdict: the shipped default clears the bar, at about 6.1 times the pre-registered arm's bill and still under half the baseline's. It was not pre-registered, so read it as an observation, not as the gate being met.",
       "limitations": [
-        "The cost panel is naive per-task cost. The gate's real criterion is cache-aware cost, which the gate bootstraps per task \u2014 cache cost is scoped per task (one task is one session), so a whole-task resample preserves within-task adjacency \u2014 and publishes as a 90% CI in the tracked verdict artifact. See cache_economics.png for how far the assumed hit rate moves that ratio."
+        "The cost panel is TOTAL SPEND over the scored task set, at naive prices. The gate's real criterion is cache-aware cost, which the gate bootstraps per task \u2014 cache cost is scoped per task (one task is one session), so a whole-task resample preserves within-task adjacency \u2014 and publishes as a 90% CI in the tracked verdict artifact. See cache_economics.png for how far the assumed hit rate moves that ratio."
       ],
       "n": {
         "Session-Cascade \u2014 shipped default, NOT pre-registered": 181,
@@ -647,7 +651,7 @@
       "price_sheet": null,
       "reading": "Left: for each candidate escalation target, the paired difference in resolve rate against the cheap base model, computed only on challenges where BOTH models have a scored default-arm outcome. The dot is the point estimate, the dark whisker the paired percentile bootstrap over challenges, and the pale whisker behind it the exact paired-exchangeability null band, so a dot inside the pale band is indistinguishable from chance. Rows are ordered by list price, cheapest at the bottom, which is the same order the ladder ranks by. Right: the same rows against the SHIPPED LIVE POOL (read from src/shunt/config/router.yaml's models list) \u2014 a filled marker is a rung the ladder actually visits, a hollow one a live rung the shortlist jump skips, and a hollow square is a benchmark target the shipped router no longer routes to (it stays measured, never served). The visit sequence is drawn as a stepped path and the shortlist's jump as a single long arrow.",
       "size": "wide",
-      "subtitle": "paired on the overlap of scored default-arm runs \u00b7 exact paired-exchangeability null \u00b7 base deepseek-v4-flash \u00b7 rank_shortlist=3 visits 2 of 3 live targets \u00b7 visited: deepseek-v4-pro (+0.153), glm-5.2 (+0.155) \u00b7 skipped: kimi-k3 (+0.236) \u00b7 not live (registry only): qwen3.7-plus, gpt-5-mini, kimi-k2.5",
+      "subtitle": "paired on the overlap of scored default-arm runs \u00b7 exact paired-exchangeability null \u00b7 base deepseek-v4-flash \u00b7 rank_shortlist=3 visits 2 of 3 live targets \u00b7 visited: deepseek-v4-pro (+0.153), glm-5.2 (+0.155) \u00b7 skipped: kimi-k3 (+0.236) \u00b7 not live \u2014 benchmark-only, outside the inference-valid pool (never served): qwen3.7-plus, gpt-5-mini, kimi-k2.5",
       "terms": [
         [
           "helps",
@@ -671,7 +675,7 @@
         ],
         [
           "not live",
-          "a benchmark target absent from router.yaml's models: list \u2014 measured for evidence, never chosen for live inference"
+          "a benchmark target absent from router.yaml's models: list \u2014 benchmark-only and outside the inference-valid pool, measured for evidence, never chosen for live inference"
         ]
       ],
       "title": "The evidence-backed pool, and the rung the price-ranked ladder still skips"
@@ -696,7 +700,7 @@
         "strategies": 12
       },
       "notes": [
-        "This axis is the NAIVE per-task cost \u2014 the raw sum of what each attempt was billed, repriced only when the subtitle says so. cost_quality_frontier.png ranks on the CACHE-AWARE total instead, which prices a repeat-model discount the naive sum does not. The two are different cost models, so a span read off this figure is NOT comparable with one read off that one: a cascade that re-hits one model is cheaper there than it is here, and the gap is the discount, not a different strategy.",
+        "This axis is TOTAL SPEND over the shared scored task set, at NAIVE prices \u2014 the raw sum of what each attempt was billed, repriced only when the subtitle says so. cost_quality_frontier.png ranks on the CACHE-AWARE total instead, which prices a repeat-model discount the naive sum does not. The two are different cost models, so a span read off this figure is NOT comparable with one read off that one: a cascade that re-hits one model is cheaper there than it is here, and the gap is the discount, not a different strategy.",
         "Oracle: \\$14.75, 97.24% (bound)",
         "Price-Cascade: \\$22.27, 97.24% (blocked)",
         "kNN-semantic-cascade (within-task): \\$24.29, 97.24% (blocked)",
@@ -767,7 +771,7 @@
       "price_sheet": null,
       "reading": "Panel A: each model at its blended token price (x, log \u2014 with a separate column at the left for locally-served rungs, which have no per-token list price at all and so cannot sit on a log axis; that column says nothing about what such a rung costs to run, which is UNDEFINED here and stated in the row's note) against its measured pass rate (y), with Wilson 95% whiskers. Marker area follows the square root of the active parameter count, the marker edge says whether the weights are hosted or local, and hue is the coarse total-size band. Panel B: one row per model, a hollow mark at total parameters and a filled mark at active parameters \u2014 the rule joining them IS the mixture-of-experts sparsity gap. A row whose name carries a dagger was measured outside this corpus under a different harness; its note below states which, and its height is not comparable cell-for-cell with the rows beside it.",
       "size": "wide_tall",
-      "subtitle": "one measured arm per model, nothing imputed \u00b7 Wilson 95% intervals \u00b7 6 models over the 4 inference-valid models' measured default-arm cells of results.csv, plus 2 \u2020 out-of-corpus rung(s) \u00b7 30 excluded model(s) are named and explained in model_validity.png \u2014 not drawn here \u00b7 1 at $0 (local) \u00b7 5 priced \u00b7 n per model 20\u2013200, unpaired task sets \u00b7 blend = 99% input / 1% output, the corpus's own 517,584,265:7,428,975 token split",
+      "subtitle": "one measured arm per model, nothing imputed \u00b7 Wilson 95% intervals \u00b7 6 models: the 4 inference-valid models' measured default-arm cells of results.csv, plus 2 out-of-corpus rung(s) (\u2020) \u00b7 30 excluded model(s) are named and explained in the model-validity figure \u2014 not drawn here \u00b7 1 at $0 (local) \u00b7 5 priced \u00b7 n per model 20\u2013200, unpaired task sets \u00b7 blend = 99% input / 1% output, the corpus's own 517,584,265:7,428,975 token split",
       "terms": [
         [
           "blended $/Mtok",
@@ -788,6 +792,95 @@
       ],
       "title": "Every rung: what it costs, what it weighs, what it delivers"
     },
+    "model_relevance.png": {
+      "caveat": "a pass rate left of the K rule is not yet evidence; wide intervals are thin coverage",
+      "data_digest": "541b3067de2a6908",
+      "dpi": 150,
+      "figsize": [
+        14.0,
+        10.5
+      ],
+      "generator": "benchmark.routing.figures.model_relevance",
+      "goal": "Read the 4 starred points as the models the router may actually serve, then read the points at and above K that are NOT valid: those are the near-misses, models with enough measured evidence that a policy change (a channel, a triage verdict) could admit. A high pass rate far left of the K rule is a promising but under-measured model, not a rejected one.",
+      "limitations": [
+        "The x axis counts measured cells, not comparable task sets: models were not run on identical tasks, so two points at the same height are not a paired comparison.",
+        "Free-channel points were collected under a different campaign from the paid corpus's, so their coverage is not comparable cell-for-cell and their intervals are wide from thin coverage, not from measured weakness.",
+        "A named identity with no measured cell cannot be placed on panel A at all; panel B's first milestone accounts for it as the drop from named to evidenced.",
+        "Panel B's paid-channel milestone is the count of named identities with a paid channel (20); it is NOT the paid subset of the 27 evidenced identities, which is smaller (13). The milestones are separate filters, not a nested chain."
+      ],
+      "n": {
+        "evidenced": 27,
+        "free": 14,
+        "named": 34,
+        "paid": 20,
+        "valid": 4
+      },
+      "notes": [
+        "The status taxonomy is READ from benchmark.routing.model_validity: hue is the channel and marker form the first-failing criterion or the evidence floor, so no reader has to decode a model from a colour.",
+        "panel B milestones: 34 named, 27 evidenced, 20 with a paid channel (of all named), 4 inference-valid; 13 of the evidenced identities are paid",
+        "deepseek-v4-flash: paid, status valid \u2014 70.8% on n=219, $0.0080/task; 219 cells, 201/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid",
+        "deepseek-v4-pro: paid, status valid \u2014 85.1% on n=201, $0.1376/task; 201 cells, 201/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid",
+        "glm-5.2: paid, status valid \u2014 57.1% on n=84, $0.3429/task; 84 cells, 77/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid",
+        "kimi-k3: paid, status valid \u2014 85.5% on n=117, $0.5159/task; 117 cells, 103/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid",
+        "claude-fable-5: paid, status no-evidence \u2014 no measured outcome; 0 cells, 0/500 challenges; triage UNMEASURED-EXCEPTION \u2014 slot does not clear the frontier",
+        "claude-fable-5.1: paid, status invalid:live \u2014 90.9% on n=22, $0.0726/task; 22 cells, 22/500 challenges; collection-only promo probe \u2014 never enabled or routed",
+        "claude-opus-4-6: paid, status no-evidence \u2014 no measured outcome; 0 cells, 0/500 challenges; collection-only promo probe \u2014 never enabled or routed",
+        "claude-opus-4-8: paid, status no-evidence \u2014 no measured outcome; 0 cells, 0/500 challenges; triage UNMEASURED-EXCEPTION \u2014 slot does not clear the frontier",
+        "claude-sonnet-5: paid, status no-evidence \u2014 no measured outcome; 0 cells, 0/500 challenges; collection-only promo probe \u2014 never enabled or routed",
+        "gemini-3.1-pro: paid, status no-evidence \u2014 no measured outcome; 0 cells, 0/500 challenges; triage UNMEASURED-EXCEPTION \u2014 slot does not clear the frontier",
+        "glm-5.3: paid, status insufficient \u2014 100.0% on n=13, $0.3542/task; 13 cells, 13/500 challenges; collection-only promo probe \u2014 never enabled or routed",
+        "glm-5.3-flash: paid, status invalid:live \u2014 95.1% on n=41, $0.0000/task; 41 cells, 41/500 challenges; collection-only promo probe \u2014 never enabled or routed",
+        "gpt-5-mini: paid, status invalid:live \u2014 54.5% on n=200, $0.0285/task; 200 cells, 200/500 challenges; not in the live pool \u2014 benchmark-only, triage DROP",
+        "gpt-5.6-luna: paid, status insufficient \u2014 100.0% on n=2, $0.0063/task; 2 cells, 2/500 challenges; collection-only promo probe \u2014 never enabled or routed",
+        "gpt-5.6-sol: paid, status no-evidence \u2014 no measured outcome; 0 cells, 0/500 challenges; triage UNMEASURED-EXCEPTION \u2014 slot does not clear the frontier",
+        "gpt-5.6-terra: paid, status no-evidence \u2014 no measured outcome; 0 cells, 0/500 challenges; collection-only promo probe \u2014 never enabled or routed",
+        "gpt-6-astra: paid, status insufficient \u2014 100.0% on n=4, $0.2294/task; 4 cells, 4/500 challenges; collection-only promo probe \u2014 never enabled or routed",
+        "kimi-k2.5: paid, status invalid:live \u2014 49.6% on n=121, $0.1249/task; 121 cells, 121/500 challenges; not in the live pool \u2014 benchmark-only, triage DROP",
+        "qwen3.7-plus: paid, status invalid:live \u2014 43.7% on n=87, $0.0801/task; 87 cells, 87/500 challenges; not in the live pool \u2014 benchmark-only, triage DROP",
+        "qwen3.8-27b: paid, status invalid:live \u2014 52.4% on n=42, $0.0034/task; 42 cells, 42/500 challenges; collection-only promo probe \u2014 never enabled or routed",
+        "deepseek-v4.1-flash: free, status free-only \u2014 95.0% on n=20, $0.0000/task; 20 cells, 20/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "gemini-flash-lite-latest: free, status free-only \u2014 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "glm-4.7-flash: free, status free-only \u2014 100.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "granite-4.0-h-micro: free, status free-only \u2014 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "laguna-s-2.1: free, status free-only \u2014 80.0% on n=10, $0.0000/task; 10 cells, 10/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "laguna-xs-2.1: free, status free-only \u2014 80.0% on n=10, $0.0000/task; 10 cells, 10/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "ling-3-0-flash-fin: free, status free-only \u2014 100.0% on n=2, $0.0000/task; 2 cells, 2/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "llama-3.2-1b-instruct: free, status free-only \u2014 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "llama-4-scout-17b-16e-instruct: free, status free-only \u2014 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "mistral-small-3.1-24b-instruct: free, status free-only \u2014 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "muse-glimmer-30b: free, status free-only \u2014 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "nemotron-3-nano-omni-30b-a3b-reasoning: free, status free-only \u2014 33.3% on n=3, $0.0000/task; 3 cells, 3/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "nemotron-3.5-lightning: free, status free-only \u2014 20.0% on n=15, $0.0000/task; 15 cells, 13/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "step-3.7-flash: free, status free-only \u2014 60.0% on n=20, $0.0000/task; 20 cells, 20/500 challenges; collection-only free channel \u2014 never enabled or routed"
+      ],
+      "price_sheet": null,
+      "reading": "Panel A: one point per EVIDENCED canonical weights identity \u2014 x is its measured default-arm cell count on a log axis, y its measured pass rate with a 95% Wilson interval. The dashed vertical rule is the K-cell floor; a point to its left has too little measured evidence to clear the bar however high its rate. Hue is the CHANNEL (blue paid, orange free) \u2014 never a hue per model \u2014 and the marker FORM is the validity status: a star is inference-valid, and each other form is a first-failing criterion or an insufficient sample. Inference-valid and near-miss models are direct-labelled; a name the placement ladder cannot seat without overprinting is listed in the notes rather than drawn on a neighbour, and two markers at the same measured coordinate are separated with a short leader back to the true point. Panel B shows four milestones \u2014 named, evidenced, paid-channel, inference-valid \u2014 and panel B\u2032 counts, per criterion, how many named identities fail it (the categories overlap, so they do not sum to the milestones). The paid-channel bar counts ALL named identities with a paid channel, not only the evidenced ones, so it is a milestone and not a nested filter: the paid subset of the evidenced set is smaller, and the notes state it.",
+      "size": "model_relevance",
+      "subtitle": "canonical weights identity \u00b7 hue = channel (paid/free) \u00b7 marker form = validity status \u00b7 no hue-per-model \u00b7 34 named \u00b7 27 evidenced (13 paid) \u00b7 20 paid channel \u00b7 14 free \u00b7 4 inference-valid \u00b7 coverage floor K=20 measured default-arm cells \u00b7 500 verified challenges",
+      "terms": [
+        [
+          "canonical identity",
+          "the weights slug (`model_version`), so the same weights served by several providers are ONE point and a provider prefix or `-free` marker is never a name"
+        ],
+        [
+          "inference-valid",
+          "in the live pool AND triage pass (KEEP/EXCEPTION) AND capability rank measured AND coverage >= K measured default-arm cells AND a paid channel"
+        ],
+        [
+          "evidenced",
+          "a canonical identity with at least one measured default-arm cell in either channel (paid or free); a named identity with no measured cell is a coverage gap, not a weak model"
+        ],
+        [
+          "near-miss",
+          "an evidenced identity at or above the K cell floor that is not inference-valid \u2014 enough measured evidence to be a candidate, kept out by a criterion rather than by a thin sample"
+        ],
+        [
+          "measured pass rate",
+          "passes over measured default-arm cells in either channel; the whisker is a 95% Wilson interval drawn symmetrically about the estimate, half-width = the larger Wilson arm, so it reads as uncertainty rather than as a bar from zero"
+        ]
+      ],
+      "title": "Which models clear the evidence bar \u2014 and why the rest fall short"
+    },
     "model_validity.png": {
       "caveat": "invalid = not selected on committed evidence, not that the model is weak",
       "data_digest": "541b3067de2a6908",
@@ -800,27 +893,31 @@
       "goal": "Read the valid rows first \u2014 they are the only models the other routing figures show. Then read panel B to see that the excluded models are excluded for DIFFERENT reasons: a dominated benchmark model, an unmeasured frontier slot, and a collection-only probe are not the same kind of absence and must not be collapsed into one.",
       "limitations": [
         "The criteria are order-independent only in the panel; the written reason reports the FIRST one a row fails, so a model that fails several shows only the first.",
+        "'Evidenced' has ONE definition here: at least one measured cell in either channel. So the 34-identity roster holds 27 evidenced identities, and the two counts differ on purpose \u2014 the roster also names live slots and collection-only listings with no committed measurement.",
+        "The coverage cell count is the measured cells for the DECLARED default arm, falling back to a sole cached arm (the definition the universe's evidenced count reads). model_grid.png counts ONLY the strict declared arm, so its cell count can be smaller \u2014 this is why glm-5.2 shows 84 here and 21 there, and both labels say which definition they use.",
         "Free-channel coverage counts a handful of challenges and is not comparable with the paid corpus's; the two channels were collected under different campaigns.",
-        "A live slot with no committed measurement is flagged inference-invalid here, but it is a COVERAGE GAP, not evidence that the model is dominated \u2014 collect it and the verdict can change."
+        "A free-only (collection-only) identity is never triaged or capability-ranked, so its triage and capability cells read 'n/a' rather than 'no'; the free channel \u2014 not a failed criterion \u2014 is what puts it outside the inference pool.",
+        "A live slot with no committed measurement is flagged inference-invalid here, but it is a COVERAGE GAP, not evidence that the model is dominated \u2014 collect it and the verdict can change.",
+        "This panel is the per-kind exclusion breakdown, not a second cumulative funnel. model_relevance.png carries the funnel (named to evidenced to paid to valid) and the pass-rate-vs-coverage plane; here panel B keeps each exclusion KIND distinct."
       ],
       "n": {
-        "free": 13,
+        "evidenced": 27,
+        "free": 14,
         "invalid": 30,
         "models": 34,
-        "paid": 21,
+        "paid": 20,
         "valid": 4
       },
       "notes": [
-        "deepseek-v4-flash: VALID \u2014 inference-valid: live, triage KEEP, capability measured, coverage OK (channel paid, providers deepseek, explabs, triage KEEP, capability measured, 219 cells, 201/500 verified challenges)",
-        "deepseek-v4-pro: VALID \u2014 inference-valid: live, triage KEEP, capability measured, coverage OK (channel paid, providers deepseek, explabs, triage KEEP, capability measured, 201 cells, 201/500 verified challenges)",
-        "glm-5.2: VALID \u2014 inference-valid: live, triage KEEP, capability measured, coverage OK (channel paid, providers requesty, triage KEEP, capability measured, 84 cells, 77/500 verified challenges)",
-        "kimi-k3: VALID \u2014 inference-valid: live, triage KEEP, capability measured, coverage OK (channel paid, providers explabs, requesty, triage KEEP, capability measured, 117 cells, 103/500 verified challenges)",
+        "deepseek-v4-flash: VALID \u2014 inference-valid: live, triage pass, capability measured, coverage OK, paid (channel paid, providers deepseek, explabs, triage KEEP, capability measured, 219 cells, 201/500 verified challenges)",
+        "deepseek-v4-pro: VALID \u2014 inference-valid: live, triage pass, capability measured, coverage OK, paid (channel paid, providers deepseek, explabs, triage KEEP, capability measured, 201 cells, 201/500 verified challenges)",
+        "glm-5.2: VALID \u2014 inference-valid: live, triage pass, capability measured, coverage OK, paid (channel paid, providers requesty, triage KEEP, capability measured, 84 cells, 77/500 verified challenges)",
+        "kimi-k3: VALID \u2014 inference-valid: live, triage pass, capability measured, coverage OK, paid (channel paid, providers explabs, requesty, triage KEEP, capability measured, 117 cells, 103/500 verified challenges)",
         "claude-fable-5: invalid \u2014 triage UNMEASURED-EXCEPTION \u2014 slot does not clear the frontier (channel paid, providers requesty, triage UNMEASURED-EXCEPTION, capability not-ranked, 0 cells, 0/500 verified challenges)",
         "claude-fable-5.1: invalid \u2014 collection-only promo probe \u2014 never enabled or routed (channel paid, providers explabs, triage not-triaged, capability not-ranked, 22 cells, 22/500 verified challenges)",
         "claude-opus-4-6: invalid \u2014 collection-only promo probe \u2014 never enabled or routed (channel paid, providers requesty, triage not-triaged, capability not-ranked, 0 cells, 0/500 verified challenges)",
         "claude-opus-4-8: invalid \u2014 triage UNMEASURED-EXCEPTION \u2014 slot does not clear the frontier (channel paid, providers requesty, triage UNMEASURED-EXCEPTION, capability not-ranked, 0 cells, 0/500 verified challenges)",
         "claude-sonnet-5: invalid \u2014 collection-only promo probe \u2014 never enabled or routed (channel paid, providers requesty, triage not-triaged, capability not-ranked, 0 cells, 0/500 verified challenges)",
-        "deepseek-v4.1-flash: invalid \u2014 collection-only promo probe \u2014 never enabled or routed (channel paid, providers explabs, triage not-triaged, capability not-ranked, 20 cells, 20/500 verified challenges)",
         "gemini-3.1-pro: invalid \u2014 triage UNMEASURED-EXCEPTION \u2014 slot does not clear the frontier (channel paid, providers requesty, triage UNMEASURED-EXCEPTION, capability not-ranked, 0 cells, 0/500 verified challenges)",
         "glm-5.3: invalid \u2014 collection-only promo probe \u2014 never enabled or routed (channel paid, providers explabs, triage not-triaged, capability not-ranked, 13 cells, 13/500 verified challenges)",
         "glm-5.3-flash: invalid \u2014 collection-only promo probe \u2014 never enabled or routed (channel paid, providers openrouter, triage not-triaged, capability not-ranked, 41 cells, 41/500 verified challenges)",
@@ -832,6 +929,7 @@
         "kimi-k2.5: invalid \u2014 not in the live pool \u2014 benchmark-only, triage DROP (channel paid, providers requesty, triage DROP, capability measured, 121 cells, 121/500 verified challenges)",
         "qwen3.7-plus: invalid \u2014 not in the live pool \u2014 benchmark-only, triage DROP (channel paid, providers requesty, triage DROP, capability measured, 87 cells, 87/500 verified challenges)",
         "qwen3.8-27b: invalid \u2014 collection-only promo probe \u2014 never enabled or routed (channel paid, providers explabs, triage not-triaged, capability not-ranked, 42 cells, 42/500 verified challenges)",
+        "deepseek-v4.1-flash: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers explabs, triage not-triaged, capability not-ranked, 20 cells, 20/500 verified challenges)",
         "gemini-flash-lite-latest: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers google_ai_studio, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)",
         "glm-4.7-flash: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)",
         "granite-4.0-h-micro: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)",
@@ -847,9 +945,9 @@
         "step-3.7-flash: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers kilo_gateway, triage not-triaged, capability not-ranked, 20 cells, 20/500 verified challenges)"
       ],
       "price_sheet": null,
-      "reading": "Panel A: one row per CANONICAL weights identity the committed evidence names (paid and free channels merged on `model_version`, never on a provider-prefixed listing id), one column per criterion \u2014 channel (paid or free), the serving provider(s), selected for inference (in the live pool), triage KEEP, capability rank measured rather than a price prior, and coverage at or above the K default-arm cell floor (the cell count is printed). The last column is verified challenge coverage, shaded by how much of the corpus the model holds. A green cell passes, a red one fails. Panel B counts the identities by why they are out, keeping the free channel, the collection-only promo probes, the unmeasured live slots and the triage DROPs distinct.",
+      "reading": "Panel A: one row per CANONICAL weights identity the committed evidence names (paid and free channels merged on `model_version`, never on a provider-prefixed listing id), one column per criterion \u2014 channel (paid or free), the serving provider(s), selected for inference (in the live pool), triage pass (KEEP or EXCEPTION), capability rank measured rather than a price prior, coverage at or above the K default-arm cell floor (the cell count is printed), and a paid channel. The last column is DISTINCT verified challenges covered (not the same quantity as the default-arm cell count in the coverage column: a challenge can contribute several cells), shaded by how much of the corpus the model holds. A green cell passes, a red one fails; a free-only row's triage and capability cells are NOT APPLICABLE and read 'n/a' on a neutral cell, because a collection-only identity is never triaged or capability-ranked, while its paid-channel cell stays 'no' \u2014 the fact that puts it outside the pool. The subtitle separates the roster ('canonical identities named') from 'evidenced' \u2014 at least one measured cell in either channel \u2014 because the roster also names slots no committed measurement covers. Panel B counts the identities by why they are out, keeping the free channel, the collection-only promo probes, the unmeasured live slots and the triage DROPs distinct.",
       "size": "model_validity",
-      "subtitle": "canonical weights identity \u00b7 provider is a label, never part of the name \u00b7 criteria: live, triage, capability measured, coverage \u00b7 4 inference-valid of 34 evidenced models (21 paid, 13 free) \u00b7 coverage floor K=20 measured default-arm cells",
+      "subtitle": "canonical weights identity \u00b7 provider is a label, never part of the name \u00b7 criteria: live, triage pass (KEEP/EXCEPTION), capability measured, coverage, paid channel \u00b7 4 inference-valid of 34 canonical identities named by committed evidence (20 paid, 14 free); 27 evidenced (\u22651 measured cell in either channel) \u00b7 coverage floor K=20 measured default-arm cells (declared default arm, sole-arm fallback)",
       "terms": [
         [
           "canonical identity",
@@ -857,7 +955,11 @@
         ],
         [
           "inference-valid",
-          "in the packaged live pool AND triage KEEP AND capability rank measured AND coverage >= K default-arm cells AND a paid channel"
+          "in the packaged live pool AND triage pass (KEEP or EXCEPTION) AND capability rank measured AND coverage >= K measured default-arm cells (declared default arm, sole-arm fallback) AND a paid channel"
+        ],
+        [
+          "evidenced",
+          "at least one measured cell in either channel (paid or free). NARROWER than the roster: the roster also names live slots and collection-only listings with no committed measurement, so 34 identities named is not 27 evidenced"
         ],
         [
           "capability measured",
@@ -1021,20 +1123,23 @@
         "Cheapest-sufficient is read off the coverage-completed matrix, so a task whose cheap cell was imputed pass=True yields a cheaper 'correct answer' than measurement alone supports \u2014 the over-provisioning count is an upper bound."
       ],
       "n": {
-        "decisions": 156,
+        "decisions": 181,
         "exact": 103,
+        "outside_pool": 25,
         "over": 17,
         "under": 31
       },
       "notes": [
         "Both axes are in price order and rows are the CHOSEN model, so a cell below the diagonal is over-provisioning by construction rather than by convention.",
-        "The grid is scoped to the inference-VALID models \u2014 the live pool clear of the coverage/triage/capability floor. Benchmark-only and collection-only models are named on model_validity.png and invalid_models.png; a choice outside this pool is not drawn.",
-        "exact-hit rate 68.2% over the decidable set; over-provisioning is 11.3%"
+        "The grid is scoped to the inference-VALID models \u2014 the live pool clear of the coverage/triage/capability floor. Benchmark-only and collection-only models are named on model_validity.png and invalid_models.png; a choice outside this pool is not drawn, but it is counted and its count is printed in the subtitle.",
+        "exact-hit rate 68.2% over the decidable set; over-provisioning is 11.3%",
+        "denominator: 181 scored decisions = 151 decidable + 5 unwinnable + 25 outside the inference-valid pool. The outside-pool picks are counted but not drawn on the pool-only grid.",
+        "the budget bar's base is 156 outcomes (151 decidable + 5 unwinnable), so its exact segment reads 66.0%; the exact-hit rate over the decidable set alone is 68.2%. The 25 outside-pool picks enter neither base."
       ],
       "price_sheet": null,
       "reading": "Left: rows are the model the router chose, columns the cheapest model that actually solved the task. The diagonal is an exact hit. BELOW it the router paid for a model it did not need; above it the router under-provisioned and the task was lost. Right: the same decisions as an error budget \u2014 exact, over-provisioned, under-provisioned, and the tasks no model solved, which no decision could have won.",
       "size": "wide",
-      "subtitle": "151 decidable decisions, 5 tasks no model solved \u00b7 103 exact / 17 over-provisioned / 31 under-provisioned",
+      "subtitle": "151 decidable decisions, 5 tasks no model solved \u00b7 25 picks outside the inference-valid pool (not drawn) \u00b7 103 exact / 17 over-provisioned / 31 under-provisioned",
       "terms": [
         [
           "cheapest sufficient",
@@ -1047,6 +1152,10 @@
         [
           "under-provisioned",
           "the chosen model failed a task some dearer model solved."
+        ],
+        [
+          "outside the inference-valid pool",
+          "the router's pick is a benchmark-only or collection-only model, so it has no axis on the pool-only grid. Counted in the decision denominator, never drawn."
         ]
       ],
       "title": "The kNN selection rule's errors go both ways \u2014 it loses tasks, not just money"
@@ -1130,10 +1239,12 @@
       "limitations": [
         "An imputed cell is always a pass, so a task's band is a LOWER bound on the capability it truly needs and the solving-model count is an upper bound.",
         "The right panel is NOT circular for the rule plotted \u2014 kNN decides before any outcome for this task exists \u2014 but it is not independent either: the neighbours it reads and the solving-model count it is plotted against come from one matrix.",
-        "'No enabled model solved it' counts the inference-VALID benchmark models at their DEFAULT arms (benchmark-only and collection-only models are excluded, because the live router cannot pick them). complementarity.png counts every sampled (model, arm) column instead, so its solved-by-none figure is smaller \u2014 a different denominator, not a disagreement."
+        "'No enabled model solved it' counts the inference-VALID benchmark models at their DEFAULT arms (benchmark-only and collection-only models are excluded, because the live router cannot pick them). complementarity.png counts every sampled (model, arm) column instead, so its solved-by-none figure is smaller \u2014 a different denominator, not a disagreement.",
+        "Picks naming a model outside the inference-valid pool are counted in the denominator but aggregated into one grey segment and NOT named; the individual models are named on model_validity.png and invalid_models.png."
       ],
       "n": {
         "excluded": 19,
+        "outside_pool": 27,
         "tasks": 181,
         "unsolved": 5
       },
@@ -1142,16 +1253,17 @@
         "band 2: 136 tasks",
         "band 3: 5 tasks",
         "band 4: 35 tasks",
-        "0 solvers: {'deepseek-v4-flash': 3, 'gpt-5-mini': 2}",
-        "1 solvers: {'deepseek-v4-flash': 7, 'deepseek-v4-pro': 2, 'qwen3.7-plus': 1}",
-        "2 solvers: {'deepseek-v4-flash': 11, 'deepseek-v4-pro': 1, 'gpt-5-mini': 3}",
-        "3 solvers: {'deepseek-v4-flash': 13, 'deepseek-v4-pro': 3, 'gpt-5-mini': 2}",
-        "4 solvers: {'deepseek-v4-flash': 97, 'deepseek-v4-pro': 17, 'gpt-5-mini': 16, 'kimi-k2.5': 3}"
+        "0 solvers: {'deepseek-v4-flash': 3, 'outside inference-valid pool (not named)': 2}",
+        "1 solvers: {'deepseek-v4-flash': 7, 'deepseek-v4-pro': 2, 'outside inference-valid pool (not named)': 1}",
+        "2 solvers: {'deepseek-v4-flash': 11, 'deepseek-v4-pro': 1, 'outside inference-valid pool (not named)': 3}",
+        "3 solvers: {'deepseek-v4-flash': 13, 'deepseek-v4-pro': 3, 'outside inference-valid pool (not named)': 2}",
+        "4 solvers: {'deepseek-v4-flash': 97, 'deepseek-v4-pro': 17, 'outside inference-valid pool (not named)': 19}",
+        "Panels A and B share one denominator: tasks with at least one inference-valid cell. A task the completion dropped (no cells at all) is excluded from both, never counted as unwinnable."
       ],
       "price_sheet": null,
       "reading": "Left: how many tasks each capability band is the cheapest sufficient answer for, weakest band on the left, plus the tasks no enabled model solved. Right: for each count of solving models \u2014 the corpus's own difficulty measure \u2014 the share of tasks the kNN selection rule sent to each model, as stacked bars with the task count above.",
       "size": "wide",
-      "subtitle": "181 scored tasks (19 incomplete challenges excluded); 5 solved by no enabled model \u00b7 3 capability bands populated \u00b7 hardest bucket (0 solvers) mostly deepseek-v4-flash, easiest (4 solvers) mostly deepseek-v4-flash",
+      "subtitle": "181 scored tasks (19 incomplete challenges excluded); 5 solved by no enabled model \u00b7 3 capability bands populated \u00b7 27 of panel B's picks fall outside the inference-valid pool (drawn as one grey segment, not named) \u00b7 hardest bucket (0 solvers) mostly deepseek-v4-flash, easiest (4 solvers) mostly deepseek-v4-flash",
       "terms": [
         [
           "capability band",
@@ -1170,7 +1282,7 @@
       "dpi": 150,
       "figsize": [
         14.0,
-        13.5
+        14.5
       ],
       "generator": "benchmark.routing.figures.universe",
       "goal": "Read that coverage is ragged and channel-specific. The four starred rows above the green rule are the only models the main routing figures draw; every row below it is still measured and still named, and a row of pale cells says no committed outcome exists rather than that the model is weak.",
@@ -1180,7 +1292,7 @@
       ],
       "n": {
         "challenges": 500,
-        "free": 13,
+        "free": 14,
         "models": 34,
         "valid": 4
       },
@@ -1195,7 +1307,6 @@
         "claude-opus-4-6: 0/500 challenges, 0 measured cells, paid, collection-only promo probe \u2014 never enabled or routed",
         "claude-opus-4-8: 0/500 challenges, 0 measured cells, paid, triage UNMEASURED-EXCEPTION \u2014 slot does not clear the frontier",
         "claude-sonnet-5: 0/500 challenges, 0 measured cells, paid, collection-only promo probe \u2014 never enabled or routed",
-        "deepseek-v4.1-flash: 20/500 challenges, 20 measured cells, paid, collection-only promo probe \u2014 never enabled or routed",
         "gemini-3.1-pro: 0/500 challenges, 0 measured cells, paid, triage UNMEASURED-EXCEPTION \u2014 slot does not clear the frontier",
         "glm-5.3: 13/500 challenges, 13 measured cells, paid, collection-only promo probe \u2014 never enabled or routed",
         "glm-5.3-flash: 41/500 challenges, 41 measured cells, paid, collection-only promo probe \u2014 never enabled or routed",
@@ -1207,6 +1318,7 @@
         "kimi-k2.5: 121/500 challenges, 121 measured cells, paid, not in the live pool \u2014 benchmark-only, triage DROP",
         "qwen3.7-plus: 87/500 challenges, 87 measured cells, paid, not in the live pool \u2014 benchmark-only, triage DROP",
         "qwen3.8-27b: 42/500 challenges, 42 measured cells, paid, collection-only promo probe \u2014 never enabled or routed",
+        "deepseek-v4.1-flash: 20/500 challenges, 20 measured cells, free, collection-only free channel \u2014 never enabled or routed",
         "gemini-flash-lite-latest: 1/500 challenges, 1 measured cells, free, collection-only free channel \u2014 never enabled or routed",
         "glm-4.7-flash: 1/500 challenges, 1 measured cells, free, collection-only free channel \u2014 never enabled or routed",
         "granite-4.0-h-micro: 1/500 challenges, 1 measured cells, free, collection-only free channel \u2014 never enabled or routed",
@@ -1224,7 +1336,7 @@
       "price_sheet": null,
       "reading": "One row per canonical weights identity the committed evidence names, one column per verified challenge, in the corpus's own sorted order. A blue cell is a paid channel's measured default-arm cell, an orange cell a free one, a pale cell no measured outcome. Vertical rules mark repository boundaries, and each row label carries its covered/total count. Rows are ordered inference-valid first (marked \u2605, above the green rule), then the paid collection, then the free collection.",
       "size": "universe_coverage",
-      "subtitle": "one row per canonical weights identity \u00b7 verified challenges as columns \u00b7 34 canonical models: 21 paid, 13 free \u00b7 4 inference-valid, 30 outside the pool \u00b7 500 verified challenges",
+      "subtitle": "one row per canonical weights identity \u00b7 verified challenges as columns \u00b7 34 canonical models: 20 paid, 14 free \u00b7 4 inference-valid, 30 outside the pool \u00b7 34 named \u00b7 27 evidenced (\u22651 measured outcome) \u00b7 23 invalid-with-outcome \u00b7 500 verified challenges",
       "terms": [
         [
           "canonical identity",
@@ -1233,12 +1345,16 @@
         [
           "measured cell",
           "a committed default-arm outcome for one (challenge, model) pair; imputed cells are not counted here"
+        ],
+        [
+          "evidenced",
+          "a canonical identity with at least one committed measured default-arm outcome (Performance.n > 0); a named identity with no measured outcome is drawn as an empty band and is not a claim that the model is weak"
         ]
       ],
       "title": "Every model's evidence on one grid \u2014 free and paid, valid and not"
     },
     "universe_economics.png": {
-      "caveat": "A $0 row is a free price or a PAID sub-cent mean; both draw as a hatched floor, not a bar.",
+      "caveat": "Panel A draws dots, not bars \u2014 a log axis reads position. Free $0 and paid sub-floor rows are separate hatched markers.",
       "data_digest": "541b3067de2a6908",
       "dpi": 150,
       "figsize": [
@@ -1253,7 +1369,7 @@
       ],
       "n": {
         "evidenced": 27,
-        "free": 13,
+        "free": 14,
         "valid": 4
       },
       "notes": [
@@ -1263,7 +1379,6 @@
         "glm-5.2: 57.1% on n=84, $0.3429/task, paid, VALID",
         "kimi-k3: 85.5% on n=117, $0.5159/task, paid, VALID",
         "claude-fable-5.1: 90.9% on n=22, $0.0726/task, paid, collection-only promo probe \u2014 never enabled or routed",
-        "deepseek-v4.1-flash: 95.0% on n=20, $0.0000/task, paid, collection-only promo probe \u2014 never enabled or routed",
         "glm-5.3: 100.0% on n=13, $0.3542/task, paid, collection-only promo probe \u2014 never enabled or routed",
         "glm-5.3-flash: 95.1% on n=41, $0.0000/task, paid, collection-only promo probe \u2014 never enabled or routed",
         "gpt-5-mini: 54.5% on n=200, $0.0285/task, paid, not in the live pool \u2014 benchmark-only, triage DROP",
@@ -1272,6 +1387,7 @@
         "kimi-k2.5: 49.6% on n=121, $0.1249/task, paid, not in the live pool \u2014 benchmark-only, triage DROP",
         "qwen3.7-plus: 43.7% on n=87, $0.0801/task, paid, not in the live pool \u2014 benchmark-only, triage DROP",
         "qwen3.8-27b: 52.4% on n=42, $0.0034/task, paid, collection-only promo probe \u2014 never enabled or routed",
+        "deepseek-v4.1-flash: 95.0% on n=20, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
         "gemini-flash-lite-latest: 0.0% on n=1, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
         "glm-4.7-flash: 100.0% on n=1, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
         "granite-4.0-h-micro: 0.0% on n=1, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
@@ -1287,9 +1403,9 @@
         "step-3.7-flash: 60.0% on n=20, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed"
       ],
       "price_sheet": null,
-      "reading": "Panel A: per canonical identity, the mean measured cost per task on a log axis. A $0.0000 row \u2014 whether a genuinely free channel or a paid model whose mean rounds to zero \u2014 is drawn as a hatched floor stub at the left of the axis, because a log axis has no width for a zero bar. Panel B: the same identity's measured pass rate with a 95% Wilson interval, same row order, so cost and quality read across one line. Blue is a paid channel, orange a free one, and a star marks the four inference-valid models.",
+      "reading": "Panel A: per canonical identity, the mean measured cost per task on a log axis. Each priced row is a dot at its cost \u2014 a dot carries position, the one thing a log axis reads honestly, where a bar's length would encode log(cost) and misstate every ratio. A `$0.0000 free` row (a genuinely free channel) and a `<$0.000001 paid` row (a paid mean that rounds below the axis floor) are distinct hatched stubs in a fixed column at the left, not bars and not each other. Panel B: the same identity's measured pass rate with a 95% Wilson interval, same row order, so cost and quality read across one line. Blue is a paid channel, orange a free one, and a star marks the inference-valid models.",
       "size": "table_29",
-      "subtitle": "measured default-arm outcomes only \u00b7 blue paid, orange free \u00b7 \u2605 inference-valid \u00b7 27 evidenced models (14 paid, 13 free) \u00b7 4 inference-valid marked \u2605",
+      "subtitle": "measured default-arm outcomes only \u00b7 blue paid, orange free \u00b7 \u2605 inference-valid \u00b7 27 evidenced models (13 paid, 14 free) \u00b7 4 inference-valid marked \u2605 \u00b7 34 named \u00b7 27 evidenced (\u22651 measured outcome) \u00b7 23 invalid-with-outcome",
       "terms": [
         [
           "measured cost",
@@ -1298,6 +1414,10 @@
         [
           "pass rate",
           "passes over measured default-arm cells, with a 95% Wilson interval"
+        ],
+        [
+          "evidenced",
+          "a canonical identity with at least one committed measured default-arm outcome (Performance.n > 0); a named identity with no measured outcome is drawn as an empty band and is not a claim that the model is weak"
         ]
       ],
       "title": "What every free and paid model costs and delivers"

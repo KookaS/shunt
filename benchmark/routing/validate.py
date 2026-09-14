@@ -43,44 +43,25 @@ FREE_LANE_BILLED: Final[str] = "FREE_LANE_BILLED"
 # a paid run on the same id outside the window is still an ACCOUNTING_HOLE. Add a row only
 # with the provider's published promo dates; never to silence a harvesting failure.
 #
-# The GENERIC companion is the free-promo namespace: ANY model id ending in
-# `_COLLECTION_FREE_SUFFIX` with real_cost==0 is accepted (see `_is_collection_free_model`).
-# It exists because a dynamically-synthesized collection id has no hand-maintained dated
-# window, yet rides the same $0 umbrella. It is scoped to the namespace so a non-explabs
-# paid model with real_cost==0 STILL trips ACCOUNTING_HOLE — the negative control the $35
-# miss depends on — and the dated windows below stay as the per-id provenance record.
+# The GENERIC companion is now the listing `billing: free` DECLARATION, not a namespace: a
+# dynamically-synthesized collection id declares `billing: free` at the synth site, so it needs
+# no hand-maintained dated window. A `billing: paid` row with real_cost==0 still trips
+# ACCOUNTING_HOLE — the negative control the $35 miss depends on.
 _FREE_WINDOWS: Final[tuple[tuple[str, str, str], ...]] = (
     # OpenRouter listed z-ai/glm-5.3-flash (then stealth/ox-alpha) at $0 for this window;
-    # the 41 committed cells all fall inside it. Price source in the registry entry.
+    # the 41 committed cells all fall inside it. Price source in the registry entry. This is
+    # the ONE window still needed here: `glm-5.3-flash` is a shipped registry row whose listing
+    # remains `billing: paid`, so its $0-collected cells would otherwise be ACCOUNTING_HOLEs.
     ("glm-5.3-flash", "2026-08-20", "2026-08-26"),
-    # Experiential Labs' free-tier promo: these *-explabs ids were genuinely $0 for
-    # this window; the 20 committed cells all fall inside it. Priced at real list price in
-    # the registry (reversible owner reprice 2026-09-07), so extend the window deliberately
-    # each day the promo continues — a real_cost==0 row outside it still trips ACCOUNTING_HOLE.
-    # Price source in each registry entry. The paid gpt-*-explabs rows are NOT listed here.
-    # Verified still genuinely free 2026-09-09 by live probe (umbrella free daily allowance —
-    # all models free): claude-fable-5.1-explabs returned to the free list after lapsing
-    # 2026-09-07; deepseek-v4-flash-explabs and qwen3.8-27b-explabs continue; the NEW
-    # kimi-k3-explabs id (collection-only row registered 2026-09-09) is free from 09-09,
-    # and deepseek-v4-pro-explabs / glm-5.3-explabs / glm-5.3-flash-explabs joined the
-    # umbrella the same day (live catalog read + bounded free probes).
-    # Each window below therefore ends 2026-09-09 (keep dated — never open-ended). kimi-k3-explabs
-    # and the three 09-09 additions have no committed rows yet; the windows let clean
-    # 09-09-collected real_cost==0 rows land.
-    ("claude-fable-5.1-explabs", "2026-09-06", "2026-09-09"),
-    ("deepseek-v4-flash-explabs", "2026-09-06", "2026-09-09"),
-    ("qwen3.8-27b-explabs", "2026-09-06", "2026-09-09"),
-    ("kimi-k3-explabs", "2026-09-09", "2026-09-09"),
-    ("deepseek-v4-pro-explabs", "2026-09-09", "2026-09-09"),
-    ("glm-5.3-explabs", "2026-09-09", "2026-09-09"),
-    ("glm-5.3-flash-explabs", "2026-09-09", "2026-09-09"),
+    # The Explabs promo windows that used to sit here were RETIRED (2026-09-14): committed cells
+    # billed (real_cost>0) INSIDE them on glm-5.3-explabs (6), claude-fable-5.1-explabs (2),
+    # deepseek-v4-pro-explabs (1) and qwen3.8-27b-explabs (1), so the windows were not uniformly
+    # free. The four lanes are now `billing: free` overlay rows, so their real_cost==0 cells are
+    # exempt through the declared entitlement (`_is_collection_free_model`) rather than a dated
+    # window; the billed cells carry observed channel=paid. deepseek-v4-flash-explabs's window
+    # was retired too: it is billing-free and needs no dated exemption. The remaining promo
+    # windows were similarly redundant and are gone.
 )
-
-# The free-promo collection namespace (see the generic companion note above). A row for ANY
-# `-explabs` id is free-promo provenance when real_cost==0, which admits a synthesized
-# collection id with no dated window while leaving a non-explabs paid model's zero-cost row
-# an ACCOUNTING_HOLE.
-_COLLECTION_FREE_SUFFIX: Final[str] = "-explabs"
 
 # Registry price fields (both the load_pricing and the _pricing_dict spellings).
 _PRICE_KEYS: Final[tuple[str, ...]] = (
@@ -371,29 +352,51 @@ def _in_free_window(model: str, computed_at: str) -> bool:
     return False
 
 
-def _is_overlay_model(model: str) -> bool:
-    """True iff *model* is a row of the non-shipped free overlay registry (free-overlay id)."""
+def in_free_window(model: str, computed_at: str) -> bool:
+    """Public form of :func:`_in_free_window` for the channel backfill/observed-channel rule."""
+    return _in_free_window(model, computed_at)
+
+
+def declared_billing(model: str, pricing: dict | None = None) -> str | None:
+    """The listing's declared billing entitlement (`free`/`paid`), or None when undeclared.
+
+    The caller's `pricing` view is consulted first (it may carry a test/run-site flattening),
+    then the shipped registry, the non-shipped overlay, and the collection synthesizer. The
+    declaration — never the `-explabs` suffix — is what makes a lane collection-free.
+    """
+    if pricing is not None:
+        row = pricing.get(model)
+        if isinstance(row, dict) and row.get("billing"):
+            return str(row["billing"])
     from benchmark import config  # noqa: PLC0415 (avoid a config<->validate import cycle)
 
-    return model in config.free_registry_ids()
+    for row in (config.load_pricing().get(model), config.free_registry().get(model)):
+        if isinstance(row, dict) and row.get("billing"):
+            return str(row["billing"])
+    synthesized = config.synthesize_collection_model(model)
+    if isinstance(synthesized, dict) and synthesized.get("billing"):
+        return str(synthesized["billing"])
+    return None
 
 
 def _is_collection_free_model(
-    model: str, free_collection_models: Collection[str] | None = None
+    model: str,
+    free_collection_models: Collection[str] | None = None,
+    pricing: dict | None = None,
 ) -> bool:
-    """True iff *model* is a free-promo collection lane.
+    """True iff *model* is a collection-free lane.
 
     With run provenance (``free_collection_models`` = the models admitted as free collection
-    lanes by the run that wrote the row), ONLY an explicitly-admitted lane qualifies — the
-    ``-explabs`` namespace and the overlay both contain PAID promo history, so the suffix
-    alone is not evidence a row rode a $0 lane. Without provenance (a plain corpus scan) the
-    namespace and the configured overlay are the only signal available, which keeps the
-    conservative ``real_cost==0`` accounting exemption for historical rows while leaving a
-    non-overlay paid model's zero-cost row an ACCOUNTING_HOLE.
+    lanes by the run that wrote the row), ONLY an explicitly-admitted lane qualifies. Without
+    provenance (a plain corpus scan) the listing's ``billing`` DECLARATION is the evidence: a
+    `billing: free` row (registry, overlay, or synthesized collection id) is exempt, while a
+    `billing: paid` row's zero-cost row is an ACCOUNTING_HOLE even when its id ends in
+    ``-explabs``. The suffix is not consulted here — only the backfill script's legacy
+    fallback reads it.
     """
     if free_collection_models is not None:
         return model in free_collection_models
-    return model.endswith(_COLLECTION_FREE_SUFFIX) or _is_overlay_model(model)
+    return declared_billing(model, pricing) == "free"
 
 
 def _check_accounting(
@@ -413,7 +416,7 @@ def _check_accounting(
     if not is_paid_model(model, pricing):
         return None
     if _in_free_window(model, str(row.get("computed_at", ""))) or _is_collection_free_model(
-        model, free_collection_models
+        model, free_collection_models, pricing
     ):
         return None
     return Violation(
@@ -429,12 +432,12 @@ def _check_free_lane_billed(
     """The mirror of ACCOUNTING_HOLE: an admitted free lane that cost ANYTHING is a leak.
 
     `_check_accounting` walls the forbidding case (a paid model that ran for $0). This walls
-    the opposite, the $0 interlock's failure mode: a lane we admitted as free-promo recorded a
-    positive real_cost, so the "free" channel billed. Unlike the accounting exemption, this
-    requires RUN PROVENANCE (``free_collection_models``): the ``-explabs`` namespace and the
-    overlay both hold legitimate PAID historical rows, so the suffix alone cannot prove a row
-    rode a $0 lane. A plain corpus scan (provenance ``None``) therefore never fires this wall;
-    the run that admitted a free lane passes that lane set and catches its leak at write time.
+    the opposite, the $0 interlock's failure mode: a lane we admitted as `billing: free` recorded
+    a positive real_cost, so the declared-free channel billed. The wall still requires RUN
+    PROVENANCE (``free_collection_models``): a plain corpus scan cannot know which historical
+    rows rode an admitted $0 lane, and committed promo history may include legitimate billed rows
+    whose observed channel is `paid`. The run that admitted a free lane passes that lane set and
+    catches the leak at write time.
     """
     if free_collection_models is None:
         return None

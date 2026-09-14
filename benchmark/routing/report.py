@@ -23,6 +23,7 @@ from benchmark.routing import (
     figures,
     impute,
     metrics,
+    model_catalog,
     model_validity,
     plot_style,
     repricing,
@@ -39,6 +40,7 @@ from benchmark.routing.figures import kill_gate as fig_kill_gate
 from benchmark.routing.figures import ladder_rungs as fig_ladder
 from benchmark.routing.figures import live_gap as fig_live_gap
 from benchmark.routing.figures import model_grid as fig_model_grid
+from benchmark.routing.figures import model_relevance as fig_relevance
 from benchmark.routing.figures import model_validity as fig_validity
 from benchmark.routing.figures import oracle_gap as fig_oracle
 from benchmark.routing.figures import pareto_dimensions as fig_pareto_dims
@@ -1265,6 +1267,10 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     # not the model roster. The census is computed once and shared through the context.
     validity_evidence = model_validity.gather_evidence()
     validity = model_validity.validity_census(validity_evidence)
+    # The canonical catalogue is a generated report (reports/, gitignored), written from the
+    # SAME in-memory census the model figures draw, so the CSV and the canvases cannot disagree.
+    catalog = model_catalog.catalog_rows(validity_evidence)
+    print(f"  Model catalog : {model_catalog.write_catalog(out_dir, catalog)}")
     if raw_results is not None:
         raw_results = model_validity.filter_valid(raw_results, validity_evidence)
     matrix_for_plots = matrix
@@ -1305,6 +1311,7 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     _step("Cost/quality", fig_frontier.render(ctx) or "skipped (no cost)")
     _step("Pareto dimensions", fig_pareto_dims.render(ctx) or "skipped (no live row)")
     _step("Model validity", fig_validity.render(ctx) or "skipped (no evidenced model)")
+    _step("Model relevance", fig_relevance.render(ctx) or "skipped (no evidenced model)")
     _step("Universe coverage", fig_universe.render_coverage(ctx) or "skipped (no evidenced model)")
     _step(
         "Universe economics",

@@ -309,6 +309,16 @@ provenance strings (`provider`, `serving_mode`, `provider_latency_source`). A bl
 means 0; every other blank means **MISSING, never zero**, and aggregating one raises rather
 than defaulting.
 
+Two further audit columns, `channel` and `channel_source`, record each row's **observed**
+billing: `paid` when the provider billed it (`real_cost > 0`), `free` when its evidence is a
+declared `$0` window, the free corpus, or a `billing: free` listing, and blank when unobserved
+(`calls == 0`) or unsupported. These are distinct from the listing's **entitlement** — the
+`billing: free|paid` field on every registry/overlay row — which is what the model-validity
+census reads, so a promotional window never flips an identity's channel. The two views may
+disagree in the promo direction (a free listing that billed, or a paid listing collected in a
+`$0` window), and that disagreement is the accounting evidence; `SH019` keeps the columns
+coherent. See the design notes' "Billing entitlement vs observed channel".
+
 **The optional measurement and provenance columns are populated only on live cells.** The
 schema was widened backward-compatibly so `wall_clock_s`, `latency_per_call_s`, `provider`,
 `serving_mode`, `provider_latency_source` and `cached_in_tok` are *collectable* by a live
@@ -744,7 +754,7 @@ Exploration ships on ([configuration](configuration.md#tune-the-router)), so the
 obvious question is what it costs. You can answer it from the committed data alone.
 `results.csv` is a partly-dense grid of *measured* (task, model) outcomes. The replay
 runs on the largest fully dense sub-grid inside it, found greedily — currently
-**165 tasks × 2 models = 330 measured cells** against a full matrix that is 62.1%
+**171 tasks × 3 models = 513 measured cells** against a full matrix that is 68.7%
 dense. On a fully dense sub-grid, replaying a routing policy is exact rather than
 estimated: look up the model the policy picks, read the outcome that was actually
 recorded for that cell, average. Nothing is simulated and no request is sent.
@@ -759,15 +769,14 @@ off and once with it on, and writes `docs/assets/figures/routing/exploration_cos
 summary to stdout. Cells the policy routes to but the benchmark never ran are
 skipped and counted, never filled in with a guess.
 
-On the 165-task dense slice, averaged over 20 seeds: exploration costs **1.28× the
-exploration-off bill** on average and **1.48× on the worst seed**. That ratio is
-paired over the 138 tasks both arms scored — the exploit-only arm drops 27 cells as
-unscorable and all 27 are `qwen3.7-plus`, a model outside the dense slice, so
-comparing the arms' raw totals would compare different task sets. We previously
-published **1.65×/1.77×** from that unpaired ratio; it was ~30% too high. The paired
-per-task difference is **−3.2 pp pass rate (95% CI −4.8 to −1.8)** and **+$0.0023
-per task (95% CI +$0.0018 to +$0.0029)** — the paired numbers are the ones to read,
-since the two arms' marginal pass-rate intervals ([71%, 85%] vs [69%, 82%]) overlap
+On the 171-task dense slice, averaged over 20 seeds: exploration costs **1.60× the
+exploration-off bill** on average and **1.85× on the worst seed**. That ratio is
+paired over the 162 tasks both arms scored — the exploit-only arm drops 9 cells as
+unscorable and all 9 are `qwen3.7-plus`, a model outside the dense slice, so
+comparing the arms' raw totals would compare different task sets. The paired
+per-task difference is **−0.5 pp pass rate (95% CI −2.1 to +1.0)** and **+$0.0202
+per task (95% CI +$0.0148 to +$0.0275)** — the paired numbers are the ones to read,
+since the two arms' marginal pass-rate intervals ([72%, 85%] vs [73%, 84%]) overlap
 heavily.
 
 Four caveats keep this honest. The replay's outcome matrix is **static**, so an
@@ -776,12 +785,12 @@ cost with its learning benefit set to zero, which is the pessimistic half of the
 ledger, not a verdict on whether exploration pays. The budget cap counts the
 router's own confidence-weighted neighbourhood costs, not realized ones, so the
 realized explore/exploit spend ratio can exceed `explore_budget_frac` on an unlucky
-seed (0.66 against a 0.4 cap on the worst of 20 seeds here) even though the cap is doing its job. The dense
+seed (1.18 against a 0.4 cap on the worst of 20 seeds here) even though the cap is doing its job. The dense
 slice maximises *cells*, which currently favours many tasks over many models: it
-holds only the two cheapest models and **no frontier arm**, so the measured overhead
+holds only three cheap-to-mid models and **no frontier arm**, so the measured overhead
 is the cost of exploring between cheap models and is a **lower bound** on the shipped
-policy's, where an exploratory pull can land on a model ~40× the price. And it is
-one workload.
+policy's, where an exploratory pull can land on a model ~8× the priciest model in the
+slice. And it is one workload.
 
 ## Scoring every strategy on one task set — monotone-rank imputation
 

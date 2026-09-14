@@ -47,11 +47,14 @@ FREE: Final[str] = "free"
 _PASSING_TRIAGE: Final[frozenset[str]] = frozenset({triage.VERDICT_KEEP, triage.VERDICT_EXCEPTION})
 
 # Criteria column order for the matrix figure — the labels are the claim, not a key.
+# FIVE, not four: CHANNEL is a pass/fail conjunct of the predicate like any other, and the
+# triage column PASSES EXCEPTION as well as KEEP, so its label says so.
 CRITERIA: Final[tuple[str, ...]] = (
     "selected\n(live pool)",
-    "triage\nKEEP",
+    "triage pass\n(KEEP/EXCEPTION)",
     "capability\nmeasured",
     "coverage\n≥K cells",
+    "paid\nchannel",
 )
 
 
@@ -80,13 +83,29 @@ class ModelValidity:
 
     @property
     def criteria(self) -> tuple[bool, ...]:
-        """The four pass/fail criteria, in `CRITERIA` order."""
+        """The five pass/fail criteria, in `CRITERIA` order (channel included)."""
         return (
             self.live,
             self.triage in _PASSING_TRIAGE,
             self.capability == "measured",
             self.cells >= cell_floor(),
+            self.channel == PAID,
         )
+
+    @property
+    def evidenced(self) -> bool:
+        """True when the identity has >=1 measured cell in either channel (free or paid)."""
+        return self.cells > 0
+
+
+def is_evidenced(row: ModelValidity) -> bool:
+    """The ONE definition of "evidenced": >=1 measured cell in either channel.
+
+    The census roster (:func:`validity_census`) is wider than this — it also names live
+    slots and collection-only listings with no committed measurement — so a figure that
+    says "evidenced" must count through here, never through ``len(rows)``.
+    """
+    return row.evidenced
 
 
 @dataclass(frozen=True)
@@ -165,16 +184,31 @@ def _version_aliases() -> Mapping[str, str]:
         return {}
 
 
+def _authoritative_slug(label: str) -> str:
+    """The ONE canonicaliser for a label: `model_universe.display_name`.
+
+    Lazily imported because `model_universe` imports this module at load time; the call
+    happens at runtime, after both modules exist. Routing both `_bare` and `_resolve`
+    through it means a registry/overlay/identity label cannot fork into two slugs here and
+    in `model_universe` — the defect that had `zai-glm-5.2` stay raw on one path and become
+    `glm-5.2` on the other.
+    """
+    from benchmark.routing import model_universe  # noqa: PLC0415 — avoid an import cycle
+
+    return model_universe.display_name(label)
+
+
 def _bare(name: str) -> str:
     """Bare canonical identity for a registry NAME, `version` slug or channel listing.
 
     A registry name resolves through its declared `version` first (a fixpoint for the shipped
-    one-id pool), then through the curated `version_aliases:` merge; an unknown name is returned
-    unchanged. A channel listing id is canonicalised by the same path, so no `zai-` serving
-    prefix and no publisher namespace can leak into an identity or label.
+    one-id pool), then through the curated `version_aliases:` merge, and finally through the
+    shared canonicaliser (`model_universe.display_name`), so no `zai-` serving prefix and no
+    publisher namespace can leak into an identity or label. An unknown name is returned
+    unchanged by the display step.
     """
     version = _registry_versions().get(name, name)
-    return _version_aliases().get(version, version)
+    return _authoritative_slug(_version_aliases().get(version, version))
 
 
 def _resolve(listing: str, model_version: str) -> str:
@@ -182,15 +216,44 @@ def _resolve(listing: str, model_version: str) -> str:
 
     `model_version` is the bare identity the corpus/registry/overlay row already carries. A
     `version_aliases:` entry merges a same-weights legacy slug onto its canonical one; a row
-    with no recorded version falls back to the registry name's declared `version` and finally
-    to the listing. Provider is a label either way, never a prefix.
+    with no recorded version falls back to the registry name's declared `version`, then to the
+    listing, and every path ends in the shared canonicaliser (`_bare`/`display_name`), so a
+    channel listing cannot fork from the identity the display path renders. Provider is a
+    label either way, never a prefix.
     """
     version = _version_aliases().get(model_version, model_version)
-    return version or _bare(listing)
+    return _authoritative_slug(version) if version else _bare(listing)
+
+
+def _listing_billing(listing: str) -> str | None:
+    """The listing's declared billing entitlement (`free`/`paid`), or None when undeclared.
+
+    Read from the shipped registry, the non-shipped overlay, then the collection synthesizer —
+    the LISTING grain the census reads, so a promo window that billed a cell does not flip an
+    identity's channel. None lets the caller fall back to corpus-file origin as a last resort.
+    """
+    try:
+        for row in (config.load_pricing().get(listing), config.free_registry().get(listing)):
+            if isinstance(row, dict) and row.get("billing"):
+                return str(row["billing"])
+    except Exception:  # noqa: BLE001 — registries are optional at plot time
+        return None
+    try:
+        synthesized = config.synthesize_collection_model(listing)
+    except Exception:  # noqa: BLE001 — same graceful degradation as the registry reads
+        return None
+    if isinstance(synthesized, dict) and synthesized.get("billing"):
+        return str(synthesized["billing"])
+    return None
 
 
 def _corpus_rows(path: Path, *, free: bool) -> Iterable[_ChannelRow]:
-    """Channel rows from one results CSV, keyed by `lane`, resolved through `model_version`."""
+    """Channel rows from one results CSV, keyed by `lane`, resolved through `model_version`.
+
+    `free` is the corpus FILE's origin, used only when the listing declares no `billing`
+    entitlement; otherwise the declaration wins, so the census does not read a promo window's
+    billed cells as a free channel.
+    """
     if not path.exists():
         return
     with path.open(newline="") as handle:
@@ -198,16 +261,17 @@ def _corpus_rows(path: Path, *, free: bool) -> Iterable[_ChannelRow]:
             listing = str(row.get("lane") or row.get("model") or "").strip()
             if not listing:
                 continue
+            declared = _listing_billing(listing)
             yield _ChannelRow(
                 listing=listing,
                 identity=_resolve(listing, str(row.get("model_version") or "").strip()),
                 provider=str(row.get("provider") or "").strip(),
-                free=free,
+                free=declared == FREE if declared is not None else free,
             )
 
 
 def _registry_rows() -> Iterable[_ChannelRow]:
-    """Paid registry rows and overlay (free) rows, so a channel with no corpus row still names."""
+    """Paid registry rows and overlay rows, so a channel with no corpus row still names."""
     try:
         pricing = config.load_pricing()
     except Exception:  # noqa: BLE001 — the registry is optional at plot time
@@ -219,7 +283,7 @@ def _registry_rows() -> Iterable[_ChannelRow]:
             listing=name,
             identity=_bare(name),
             provider=str(meta.get("provider") or ""),
-            free=False,
+            free=str(meta.get("billing") or "") == FREE,
         )
     try:
         overlay = config.free_registry()
@@ -232,7 +296,7 @@ def _registry_rows() -> Iterable[_ChannelRow]:
             listing=name,
             identity=_resolve(name, str(meta.get("version") or "")),
             provider=str(meta.get("provider") or ""),
-            free=True,
+            free=str(meta.get("billing") or "") == FREE,
         )
 
 
@@ -275,7 +339,15 @@ def _free_cells(identities: Mapping[str, str]) -> dict[str, int]:
 
 
 def _measured_cells(identities: Mapping[str, str]) -> dict[str, int]:
-    """Identity -> measured default-arm cells in the paid corpus plus the free corpus."""
+    """Identity -> measured default-arm cells in the paid corpus plus the free corpus.
+
+    The declared default arm, falling back to a SOLE cached arm — `config.flatten_default_arm`'s
+    definition. A model measured only on a non-default arm (e.g. glm-5.2's think rows beside
+    its declared nothink default) counts those cells, which is why the census column reads
+    "default arm, sole-arm fallback" and model_grid.png's strict declared-arm count can be
+    smaller. The figure LABELS the broader definition rather than narrowing it, so the
+    evidenced set stays what the rest of the universe reads.
+    """
     counts: dict[str, int] = {}
     for cells in config.flatten_default_arm(config.load_results()).values():
         for model in cells:
@@ -375,7 +447,7 @@ def classify(model: str, ev: Evidence) -> ModelValidity:
     valid = live and triage_pass and cap_measured and coverage_ok and channel == PAID
 
     if valid:
-        reason = "inference-valid: live, triage KEEP, capability measured, coverage OK"
+        reason = "inference-valid: live, triage pass, capability measured, coverage OK, paid"
     elif channel == FREE:
         reason = "collection-only free channel — never enabled or routed"
     elif collection_only:
@@ -437,12 +509,18 @@ def inference_valid_set(ev: Evidence | None = None) -> set[str]:
 
 
 def filter_valid(raw: RawResults, ev: Evidence | None = None) -> RawResults:
-    """Drop every channel listing whose canonical identity is outside the valid set."""
-    evidence = ev or gather_evidence()
-    valid = inference_valid_set(evidence)
-    if not valid:
+    """Drop every channel listing whose canonical identity is outside the valid set.
+
+    ``ev`` is the one censused evidence. When it is ABSENT (``None``) there is no census to
+    filter against, so the raw matrix is returned unchanged. When it is PRESENT the filter
+    always runs: a census that yields no valid models returns an EMPTY matrix, never the raw
+    one — the old `if not valid: return raw` re-admitted exactly the models the predicate
+    rejected, and the caller could then draw them as if they were servable.
+    """
+    if ev is None:
         return raw
-    canonical = evidence.identities
+    valid = inference_valid_set(ev)
+    canonical = ev.identities
     return {
         challenge: {
             model: arms for model, arms in by_model.items() if _canonical(canonical, model) in valid

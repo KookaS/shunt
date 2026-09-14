@@ -492,6 +492,7 @@ deepseek-v4-flash high→max: output-token ratio 0.95x on n=42 pairs — never f
 glm-5.2 nothink→think: output-token ratio 0.93x on n=8 pairs — never fired — not a null; paired Δ +12.5pp [-10.4, +35.4], cost Δ \$0.0037
 deepseek-v4-flash nothink→high: output-token ratio 0.92x on n=113 pairs — never fired — not a null; paired Δ +2.7pp [-3.6, +8.9], cost Δ \$-0.0012
 deepseek-v4-flash nothink→max: output-token ratio 0.78x on n=27 pairs — never fired — not a null; paired Δ +3.7pp [-12.5, +19.9], cost Δ \$-0.0034
+
 **Limits.** The ratio is over co-measured tasks only. A knob could fire on tasks neither arm shares, and this check would not see it.
 
 <!-- n: arm_pairs=4, fired=0 --><!-- generated-by: benchmark.routing.figures.arm_manipulation -->
@@ -499,22 +500,23 @@ deepseek-v4-flash nothink→max: output-token ratio 0.78x on n=27 pairs — neve
 
 ![The modelled cache saving is now the same size as the whole list-to-bill discount](assets/figures/routing/cache_economics.png)
 
-*4 models, 735 priced rows · cache-read price measured for 4/4 models and input share for 4/4; hit rate assumed at 90% · mean billed share 0.19 of list price vs a modelled 0.19 — residual -0.13 to +0.08 per model*
+*4 models, 758 priced rows (channel mirrors merged by canonical identity) · cache-read price measured for 4/4 models and input share for 4/4; hit rate assumed at 90% · mean billed share 0.18 of list price vs a modelled 0.19 — residual -0.14 to +0.08 per model*
 > **Caveat.** Agreement in size is not calibration: blue mixes every discount, green models caching alone.
 **Reading.** Left: per model, the share of the list-price bill that was actually charged. The blue bar is MEASURED — every row's real_cost over its estimated_cost in results.csv, which is the whole gap between list price and the invoice. The green diamond is the share the registry's cache-read price predicts would survive, priced at the corpus's measured input/output token mix; the faint grey rule beneath each bar sweeps the one input nothing here measures, the cache hit rate, from 100% (left cap) to 50% (right cap). The right-hand column repeats each row as billed → modelled with its row count. Lower is cheaper. Right: the switch tax as MEASURED — per scored strategy, the dollars its cache-aware bill came in under its naive bill, which is what repeating a model inside one task actually banked on this corpus.
 
 **What to look for.** Read the DISTANCE between the blue bar and the green diamond. It is now small on every model, so caching alone is a large enough effect to account for essentially the whole discount. Read that as a SIZE agreement, not as a validation: the bar mixes every reason the invoice differs from list price, and two quantities landing on the same number cannot separate them. Then read the right panel for who banks any of it: only a strategy that RETRIES inside one task can, because the discount is scoped per task, so every single-shot policy banks exactly zero.
 
-**Terms.** *billed share* — sum(real_cost) / sum(estimated_cost) over every measured row for that model. 1.0 means the invoice matched list price. It mixes EVERY reason the two differ — caching, negotiated rates, provider-side discounts — not caching alone. *registry prediction* — 1 - input_share x hit_rate x (1 - cache_read_price / input_price), the per-model cache economics benchmark.runner.kill_gate now costs with. *input share* — the share of a model's spend that is INPUT tokens, from the measured in_tok / out_tok mix in results.csv priced at registry rates. This corpus is input-dominated, which is why the modelled saving is large. *switch tax* — naive cost minus cache-aware cost. A model switch forfeits the cached prefix, so the next turn is billed at full input price; the difference is what NOT switching banked. Scoped per task — one task is one session, so only a within-task repeat can bank it.
+**Terms.** *billed share* — sum(real_cost) / sum(estimated_cost) over every measured rep-0 row for that CANONICAL identity, folding every channel mirror of the same weights into one model. 1.0 means the invoice matched list price. It mixes EVERY reason the two differ — caching, negotiated rates, provider-side discounts — not caching alone. *registry prediction* — 1 - input_share x hit_rate x (1 - cache_read_price / input_price), the per-model cache economics benchmark.runner.kill_gate now costs with. *input share* — the share of a model's spend that is INPUT tokens, from the measured in_tok / out_tok mix in results.csv priced at registry rates. This corpus is input-dominated, which is why the modelled saving is large. *switch tax* — naive cost minus cache-aware cost. A model switch forfeits the cached prefix, so the next turn is billed at full input price; the difference is what NOT switching banked. Scoped per task — one task is one session, so only a within-task repeat can bank it.
 
 **Notes.** The cache-read prices come from the shipped registry (src/shunt/config/models.yaml), so a provider price change moves this figure rather than silently invalidating it.
-deepseek-v4-flash: billed 0.063 (n=345), registry predicts 0.141 [discount measured, input share 0.974 measured], hit-rate band 0.046–0.523
-deepseek-v4-pro: billed 0.273 (n=200), registry predicts 0.139 [discount measured, input share 0.977 measured], hit-rate band 0.043–0.521
+deepseek-v4-flash: billed 0.060 (n=360), registry predicts 0.141 [discount measured, input share 0.974 measured], hit-rate band 0.046–0.523
+deepseek-v4-pro: billed 0.274 (n=201), registry predicts 0.139 [discount measured, input share 0.977 measured], hit-rate band 0.043–0.521
 glm-5.2: billed 0.189 (n=87), registry predicts 0.233 [discount measured, input share 0.946 measured], hit-rate band 0.148–0.574
-kimi-k3: billed 0.217 (n=103), registry predicts 0.262 [discount measured, input share 0.911 measured], hit-rate band 0.180–0.590
+kimi-k3: billed 0.207 (n=110), registry predicts 0.262 [discount measured, input share 0.911 measured], hit-rate band 0.180–0.590
+
 **Limits.** The hit rate is still assumed: no run in this corpus records a per-turn cache-hit ratio, so only the DISCOUNT and the INPUT SHARE are measured. The grey whisker is the whole range that assumption can move the green marker over. The blue bar and the markers are different quantities drawn on one axis deliberately. They now land close together, and that is NOT a calibration result: the bar also contains negotiated rates and provider-side discounts, so agreement in magnitude cannot attribute the discount to caching. The right panel is measured, but it is a COST DECOMPOSITION of runs that already happened, not an experiment: no live session in this corpus switched model mid-conversation, because the shipped router cannot. It says what repeating banked, never what switching would have cost in a world where the router could switch. The right panel inherits the left panel's assumed hit rate: the cache-aware column re-bills a repeat at the registry cache-read price under the same 90% assumption, so the DOLLARS it reports move with that assumption even though the repeats are counted.
 
-<!-- n: models=4, priced_rows=735 --><!-- generated-by: benchmark.routing.figures.cache_economics -->
+<!-- n: models=4, priced_rows=758 --><!-- generated-by: benchmark.routing.figures.cache_economics -->
 ### The split count is a LOWER bound on contestable tasks — unsampled cells can only add {#fig-complementarity}
 
 ![The split count is a LOWER bound on contestable tasks — unsampled cells can only add](assets/figures/routing/complementarity.png)
@@ -531,6 +533,7 @@ The upper end of the interval counts the solved-by-all slice only. Solved-by-non
 solved by all: 127; split: 61; solved by none: 12; no column sampled: 1 (the four slices sum to 201)
 all 127 of 127 solved-by-all tasks still have unsampled columns (1 to 6 of 7, median 4) — any one of them becomes contestable if an unsampled column fails
 the 12 solved-by-none tasks are under-sampled too (1 to 5 columns), but could join only by an unsampled column PASSING, so they are excluded from the interval
+
 **Limits.** The grid is drawn from the RAW measured cache, not the imputed matrix, so a grey cell is genuinely unmeasured rather than filled. Every other figure in this set that quotes a pass rate scores the imputed matrix instead. At this sampling density 'solved by every sampled column' is NOT 'solved by every column', so the contestable count is an interval rather than a number. Only filling the grey cells pins it down.
 
 <!-- n: columns=7, contestable_ceiling=188, contestable_floor=61, sampled_cells=747, split_tasks=61, tasks=201 --><!-- generated-by: benchmark.routing.figures.complementarity -->
@@ -569,6 +572,7 @@ equal-coverage via monotone imputation — 24% of frontier cells imputed (every 
 layout: THREE levels of magnification, stacked full width — panel A carries every strategy over the full cost range. panel B redraws panel A's box at full width (\$6.54–\$134.15 at 89.3–100.0%), which is the detail window — every strategy whose pass rate clears the best measured row's own Wilson lower bound, plus the fixed-frontier baseline and the oracle bound, never written down. panel C redraws panel B's box at full width (\$20.96–\$30.59 at 97.0–97.5%), which is the group whose markers overlap in the panel above, measured on the rendered canvas, never written down. the pass-rate Wilson interval and the two cost marks are drawn in panel(s) A, B, and panel C carries neither — at that scale they run off the panel — carrying the context-transfer brackets instead. every panel names every strategy its own window holds, so a name repeats down the stack at each scale; the exception is the group panel C magnifies, whose markers are one blob above it and which is therefore named only there.
 layout: 2 strategies within \$1.48–\$1.77 at 75.1–75.1% have separable markers but names too wide to print beside them, so the names are stacked on levels, each on a vertical leader to its own marker — no second copy of the points is drawn
 layout: no panel could print Difficulty-Band-cascade, kNN-semantic-cascade (within-task) — their markers are drawn and their numbers are in the per-strategy note rows above
+
 **Limits.** A non-live point's number is still a real measurement — it is the CONCLUSION that is limited: no router.strategy setting reproduces it, so it may not anchor the frontier or a headline. It does NOT follow that the underlying capability is unavailable — a blocked row may measure a mechanism that ships in a different layer — and the per-strategy blocker in benchmark/routing/strategy_class.py says which case it is. A cascade point prices the LADDER's cost, not its per-rung quality. The shipped ladder's cheap intermediate rungs are measured separately against the base model on this same corpus, and are null or net-harmful there — see ladder_rungs.png. The cache-aware x position rests on an ASSUMED cache hit rate; only the per-model discount and input share are measured — see cache_economics.png for the range that assumption spans. The difficulty rows' x position includes the MEASURED per-task judge label cost (gpt-5.6-terra, ~$0.0016/task measured — folded into both cost columns and published as judge_label_cost in strategy_summary.csv). A judge call is one per task and never cached, so it is identical under both cost models; every other row carries no judge bill at all. The horizontal interval belongs to the NAIVE total and is not transplanted onto the cache-aware marker. The cache-aware ratio's own 90% bootstrap CI is published by the kill gate (cache cost is scoped per task, so a whole-task resample preserves it) — not transplanted onto this plot. Pass rates are scored on the coverage-completed matrix, whose imputed cells are all pass=True — see evidence_basis.png for how much of each strategy's number that is. The scored set is chosen by coverage, not at random: the collector runs the expensive tier only on the discriminating slice, so both axes describe a difficulty-biased sample. The subtitle carries the measured gap. The dashed context bracket is a COST MODEL, not a measurement. It re-prices the marker when the context an attempt ends holding is resent to the model escalation moves to — a cache MISS by construction, so it is charged at full input rate. It asserts NO pass rate: the bracket is horizontal because nothing here measures what carrying context does to quality. The canvas labels the bracket in CONFIG vocabulary; the cost model underneath is parameterised by alpha, the share of the context an attempt ends holding that is resent. The mapping is exact: `context_transfer: summary` is the alpha 0.1-0.3 band (a band, because a summariser's compression ratio is not a constant and one tick would assert a precision this model does not have), `context_transfer: full` is alpha = 1.0, and the marker itself is alpha = 0 — a fresh context on every rung, which is what the OFFLINE benchmark replays and what live inference never does. alpha = 0 is deliberately not offered as a config value: `none` is not a context_transfer setting, so the marker is the offline/live divergence made visible rather than a third option. A bracket is drawn on the DEPLOYABLE escalating strategies only. The summary table also carries alpha columns for the two within-task cascades, and they are deliberately not drawn: the model prices a SESSION-BOUNDARY handoff, and those two rows are blocked precisely because they retry inside one task, so they have no boundary to hand off at. A strategy that never escalates carries nothing and correctly shows no bracket at all. The bracket's context size is estimated as t = 2 x in_tok / calls, which assumes the prefix grows LINEARLY across a task's calls. Tool output and file reads do not arrive at a constant rate, so the error is one-sided in an unknown direction, and the bracket is an ordering of magnitudes rather than a quotable dollar amount. The bracket is computed on the token-complete subset — the tasks where every attempt on the realized path landed on a measured, token-bearing cell — which is strictly smaller than the scored set, because an imputed cell carries no token columns at all. What transfers to the plotted marker is the dimensionless surcharge FACTOR, not the subset's own dollars, and that transfer ASSUMES the subset carries context per dollar the way the scored set does. The subset is not a random sample of it — it is the tasks the collector happened to measure on every rung this strategy walked — so if those tasks escalate differently from the rest, the bracket is biased in the direction of that difference and nothing here corrects it. The subset size is published as the n in the bracket note row.
 
 <!-- n: strategies=12, tasks=181 --><!-- generated-by: benchmark.routing.figures.cost_quality_frontier -->
@@ -590,6 +594,7 @@ Always-Frontier: \$94.37 cache-aware, 95.03% passed, n=181 (the baseline the kil
 Always-Cheap: \$1.48 cache-aware, 75.14% passed, n=181 (the cheap floor)
 The four rows are read from the derived strategy summary at render time, so this figure and cost_quality_frontier.png cannot quote different numbers for one strategy.
 No interval is drawn. This figure states an ordering, not a precision — the intervals, the mixture region and the eight strategies left out are in cost_quality_frontier.png.
+
 **Limits.** This is FOUR of the strategies the benchmark scores. The full plane — every strategy, its interval, the mixture region a router has to clear, and which rows are not selectable at all — is cost_quality_frontier.png, and this figure asserts nothing the parent does not. The y axis starts above zero and is labelled with the range it shows: the four points span about twenty points of pass rate, which on a 0-100 axis is a flat line. The cache-aware x position rests on an ASSUMED cache hit rate; only the per-model discount and input share are measured — see cache_economics.png for the range that assumption spans. Pass rates are scored on the coverage-completed matrix, whose imputed cells are all pass=True — see evidence_basis.png for how much of each strategy's number that is. The scored set is chosen by coverage, not at random: the collector runs the expensive tier only on the discriminating slice, so both axes describe a difficulty-biased sample.
 
 <!-- n: strategies_drawn=4, tasks=181 --><!-- generated-by: benchmark.routing.scripts.cost_quality_headline -->
@@ -614,6 +619,7 @@ the human difficulty tag
 (positive control) leave-one-out R² is 0.1259, above the shuffled-outcome null band [-0.1142, 0.0063] (z=+5.58, 200 permutations)
 the diagonal advantage over 10 repos with ≥8 tasks is 0.0636, above the shuffled-outcome null band [-0.0163, 0.0278] (z=+5.02, 200 permutations)
 NULL RESULT: the diagonal advantage over 8 repos with ≥16 tasks is 0.0000, INSIDE the shuffled-outcome null band [-0.0174, 0.0284] (null mean 0.0014, z=-0.14, 200 permutations)
+
 **Limits.** Pass labels come from the coverage-completed matrix, in which every imputed cell is filled pass=True, so all series including the null sit above what measurement alone supports. The COMPARISON between them is the readable part, not the level. One workload (SWE-bench-style tasks over a dozen repositories). Transfer to a different task distribution is not evidence this figure can give. 396/1267 scored cells (31.3%) are monotone-IMPUTED, not measured, and 390/396 of them are filled pass=True — imputation here is near-exclusively pass-filling (the ladder's fail branch fires rarely), so it almost never adds a failure. Every rate on this figure is biased UPWARD by that fill.
 
 <!-- n: permutations=200, tasks=181 --><!-- generated-by: benchmark.routing.scripts.plot_knn_nulls -->
@@ -646,6 +652,7 @@ band 1: 317 real / 82 imputed / 3 unknown
 band 2: 190 real / 10 imputed / 1 unknown
 band 3: 156 real / 225 imputed / 21 unknown
 band 4: 302 real / 93 imputed / 7 unknown
+
 **Limits.** Imputation is directional. Nothing here corrects the bias; it states its size so a reader can discount the pass rates by it.
 
 <!-- n: completed_cells=1375, imputed_cells=410, unknown=32 --><!-- generated-by: benchmark.routing.figures.evidence_basis -->
@@ -653,7 +660,7 @@ band 4: 302 real / 93 imputed / 7 unknown
 
 ![Exploration costs more, buys no pass rate, and its learning benefit is unmeasurable](assets/figures/routing/exploration_cost.png)
 
-*offline Direct-Method replay of the shipped policy — recorded outcomes, no live calls · dense slice 171 tasks × 3 models (deepseek-v4-flash, deepseek-v4-pro, gpt-5-mini) (gpt-5-mini: registry-only, not shortlisted), 162 scored by both arms, 20 seeds · exploration bills 1.60× the exploit-only run (worst seed 1.85×) · 95% percentile-bootstrap CIs over tasks*
+*offline Direct-Method replay of the shipped policy — recorded outcomes, no live calls · dense slice 171 tasks × 3 models (deepseek-v4-flash, deepseek-v4-pro) (1 benchmark-only model(s) (not named, outside the inference-valid pool)), 162 scored by both arms, 20 seeds · exploration bills 1.60× the exploit-only run (worst seed 1.85×) · 95% percentile-bootstrap CIs over tasks*
 > **Caveat.** Static matrix: an exploratory pull can never inform a later decision — cost only, learning benefit pinned to zero.
 **Reading.** A: the cost/quality plane. Each arm is one point — mean cost per task on x, pass rate on y — with 95% bootstrap intervals on both axes; the arrow runs from the exploit-only arm to the exploring one, and the box states the PAIRED difference, which is what this slice has the power to resolve. B: where the budget went. The orange curve is the running share of decisions that were exploratory as the replay proceeds, the dotted line is the router's own confidence-weighted explore counter at the end of the run, and the dashed line is the configured cap it is measured against.
 
@@ -668,9 +675,11 @@ Intervals are percentile-bootstrap over tasks rather than Wilson: the exploring 
 Direct-Method replay on the fully-dense slice: 513 measured cells (full matrix 68.7% dense)
 Cells skipped as unscorable: 9 baseline, 0.6/seed exploration
 Realized explore/exploit SPEND 0.463 (worst seed 1.176); the router's own counter reached 0.298 of its 0.4 cap
-**Limits.** The outcome matrix is static, so an exploratory pull can never improve a later decision: this measures exploration's COST with its learning benefit set to zero, the pessimistic half of the ledger — not a verdict on whether exploration pays. The dense slice is found greedily, not optimally, and comes from a single workload. How much of the corpus exploration left un-probed is NOT drawn: the replay report carries aggregate decisions, not the per-(task, model) probe record that question needs. The two marginal pass-rate CIs overlap ([72%, 85%] vs [73%, 84%]) — at 162 paired tasks only the paired difference separates the arms. NO FRONTIER ARM IN THIS SLICE: the dense sub-grid covers only deepseek-v4-flash, deepseek-v4-pro, gpt-5-mini — the priciest model here is \$2.25/Mtok against \$18.00 across all enabled models (kimi-k3, glm-5.2, kimi-k2.5, qwen3.7-plus are absent). The exploration overhead measured here is between CHEAP models and is a LOWER BOUND on the shipped policy's, where an exploratory pull can land on the frontier model. NOT IN THE LIVE POOL: gpt-5-mini of the dense slice is a registry/benchmark-only model, measured here for mechanism but never shortlisted by the shipped router. The exploration overhead is between these slice models; a valid-only companion over the inference-valid subset is not drawn. THE DROPPED BASELINE CELLS ARE NOT A RANDOM SAMPLE: all 9 unscorable exploit-only cells are qwen3.7-plus, a model outside the dense slice — so the exploit-only arm is systematically missing that model's tasks, not a random subset. The overhead is therefore reported PAIRED, over only the tasks both arms scored.
+
+**Limits.** The outcome matrix is static, so an exploratory pull can never improve a later decision: this measures exploration's COST with its learning benefit set to zero, the pessimistic half of the ledger — not a verdict on whether exploration pays. The dense slice is found greedily, not optimally, and comes from a single workload. How much of the corpus exploration left un-probed is NOT drawn: the replay report carries aggregate decisions, not the per-(task, model) probe record that question needs. The two marginal pass-rate CIs overlap ([72%, 85%] vs [73%, 84%]) — at 162 paired tasks only the paired difference separates the arms. NO FRONTIER ARM IN THIS SLICE: the dense sub-grid covers only deepseek-v4-flash, deepseek-v4-pro, plus 1 benchmark-only model(s) (not named, outside the inference-valid pool) — the priciest model here is \$2.25/Mtok against \$18.00 across all enabled models (kimi-k3, glm-5.2, 2 benchmark-only model(s) (not named, outside the inference-valid pool) are absent). The exploration overhead measured here is between CHEAP models and is a LOWER BOUND on the shipped policy's, where an exploratory pull can land on the frontier model. NOT IN THE LIVE POOL: 1 of the 3 dense-slice models are benchmark-only model(s) (not named, outside the inference-valid pool), measured here for mechanism but never shortlisted by the shipped router. The exploration overhead is between these slice models; a valid-only companion over the inference-valid subset is not drawn. THE DROPPED BASELINE CELLS ARE NOT A RANDOM SAMPLE: all 9 unscorable exploit-only cells are one benchmark-only model (not named, outside the inference-valid pool) outside the dense slice — so the exploit-only arm is systematically missing that model's tasks, not a random subset. The overhead is therefore reported PAIRED, over only the tasks both arms scored.
 
 <!-- n: paired tasks=162, seeds=20, slice models=3, slice tasks=171 --><!-- generated-by: benchmark.routing.scripts.plot_exploration -->
+
 ### The pre-registered arm misses the 5pp bar on every basis; the shipped default clears it {#fig-kill-gate}
 
 ![The pre-registered arm misses the 5pp bar on every basis; the shipped default clears it](assets/figures/routing/kill_gate.png)
@@ -679,7 +688,7 @@ Realized explore/exploit SPEND 0.463 (worst seed 1.176); the router's own counte
 > **Caveat.** 1 of 1 clearing the bar rests on 4 discordant pairs; 3 of 4 rows are WORSE by more than the margin.
 **Reading.** Left: one row per evidence basis. The dot is the paired pass-rate difference (the kNN selection rule minus fixed-frontier) in percentage points, the whisker its 95% paired interval, and the dashed red line the pre-registered non-inferiority margin of -5pp. A row is green only when the Tango score test rejects H0 at that margin, red when the router is proven WORSE by more than the margin, grey when the data cannot tell. Right: the same tasks' total spend, baseline dot to router dot; a leftward arrow is a saving.
 
-**What to look for.** Read both panels together, in that order. The left panel is the gate: a saving on the right is only admissible once the left one is green. On the pre-registered rows it is not — that arm's quality deficit is several times the margin and the whisker excludes it on every basis, so the spend reduction beside it is bought at a loss that was pre-registered as unacceptable rather than at equal quality. The bottom row is a different arm and a different verdict: the shipped default clears the bar, at four times the pre-registered arm's bill and still under half the baseline's. It was not pre-registered, so read it as an observation, not as the gate being met.
+**What to look for.** Read both panels together, in that order. The left panel is the gate: a saving on the right is only admissible once the left one is green. On the pre-registered rows it is not — that arm's quality deficit is several times the margin and the whisker excludes it on every basis, so the spend reduction beside it is bought at a loss that was pre-registered as unacceptable rather than at equal quality. The bottom row is a different arm and a different verdict: the shipped default clears the bar, at about 6.1 times the pre-registered arm's bill and still under half the baseline's. It was not pre-registered, so read it as an observation, not as the gate being met.
 
 **Terms.** *the two router rows* — The kNN-semantic row is the selection rule with the escalation ladder removed — the pre-registered verdict arm, and not a value router.strategy accepts. The Session-Cascade row is what a default install runs: one decision per session, cheapest-first, with the ladder on top, published without pre-registration. *non-inferiority* — H0: router quality <= baseline - delta, tested by the Tango score statistic on the discordant pairs. Rejecting it is positive evidence of equivalence; an overlapping confidence interval is not. *evidence basis* — Which tasks enter. `completed` includes monotone-imputed cells; `measured` keeps only tasks where neither arm billed a projected cell; `gate sample` is the subset benchmark.runner.kill_gate itself scores at its default N. *MDE* — The smallest true difference the design detects at 80% power, one-sided. For a paired test it is driven by the DISCORDANT rate, not by n alone, so it is quoted both at the observed discordance and at a reference 10% discordance.
 
@@ -690,7 +699,8 @@ pre-registered kNN-semantic · measured only: Δ=-21.3pp [-31.0, -11.6], inferio
 pre-registered kNN-semantic · gate sample (N=20): Δ=-20.0pp [-37.5, -2.5], inferior, b=0 c=4, router \$0.40 vs baseline \$9.13, MDE ±24.9pp (±17.6pp at 10% discordance)
 Session-Cascade — shipped default, NOT pre-registered: Δ=+2.2pp [+0.1, +4.4], non_inferior, b=4 c=0, router \$28.21 vs baseline \$94.37, MDE ±2.7pp (±5.8pp at 10% discordance)
 equal-coverage via monotone imputation — 24% of frontier cells imputed (every strategy scored on n=181). Monotonicity holds on 88% of 200 multi-observed task(s) (measured, not assumed). NEARLY every imputed cell is filled pass=True at a median measured price (the monotone ladder has a fail branch, and 12 of 410 filled cells took it), for the router as well as for the baseline — see evidence_basis.png for how much of each strategy's number that is, and kill_gate.png's measured-only row for what survives when the projection is removed.
-**Limits.** The cost panel is naive per-task cost. The gate's real criterion is cache-aware cost, which the gate bootstraps per task — cache cost is scoped per task (one task is one session), so a whole-task resample preserves within-task adjacency — and publishes as a 90% CI in the tracked verdict artifact. See cache_economics.png for how far the assumed hit rate moves that ratio.
+
+**Limits.** The cost panel is TOTAL SPEND over the scored task set, at naive prices. The gate's real criterion is cache-aware cost, which the gate bootstraps per task — cache cost is scoped per task (one task is one session), so a whole-task resample preserves within-task adjacency — and publishes as a 90% CI in the tracked verdict artifact. See cache_economics.png for how far the assumed hit rate moves that ratio.
 
 <!-- n: Session-Cascade — shipped default, NOT pre-registered=181, pre-registered kNN-semantic · completed (imputed)=181, pre-registered kNN-semantic · gate sample (N=20)=20, pre-registered kNN-semantic · measured only=94 --><!-- generated-by: benchmark.routing.figures.kill_gate -->
 ### The router's one input does not predict outcomes; a human difficulty tag does {#fig-knn-calibration}
@@ -711,6 +721,7 @@ bin [0.2,0.4): predicted 0.372, observed 1.000 (n=3)
 bin [0.4,0.6): predicted 0.537, observed 0.647 (n=139)
 bin [0.6,0.8): predicted 0.712, observed 0.755 (n=465)
 bin [0.8,1.0): predicted 0.897, observed 0.862 (n=645)
+
 **Limits.** The neighbour weight is similarity only. The shipped rule also multiplies by each neighbour's verification confidence, which is 1.0 for every cell in this corpus, so the two coincide here and could diverge on live traffic. 396/1267 scored cells (31.3%) are monotone-IMPUTED, not measured, and 390/396 of them are filled pass=True — imputation here is near-exclusively pass-filling (the ladder's fail branch fires rarely), so it almost never adds a failure. Every rate on this figure is biased UPWARD by that fill.
 
 <!-- n: k=20, models=7, tasks=181 --><!-- generated-by: benchmark.routing.scripts.viz_knn -->
@@ -718,13 +729,13 @@ bin [0.8,1.0): predicted 0.897, observed 0.862 (n=645)
 
 ![The evidence-backed pool, and the rung the price-ranked ladder still skips](assets/figures/routing/ladder_rungs.png)
 
-*paired on the overlap of scored default-arm runs · exact paired-exchangeability null · base deepseek-v4-flash · rank_shortlist=3 visits 2 of 3 live targets · visited: deepseek-v4-pro (+0.153), glm-5.2 (+0.155) · skipped: kimi-k3 (+0.236) · not live (registry only): qwen3.7-plus, gpt-5-mini, kimi-k2.5*
+*paired on the overlap of scored default-arm runs · exact paired-exchangeability null · base deepseek-v4-flash · rank_shortlist=3 visits 2 of 3 live targets · visited: deepseek-v4-pro (+0.153), glm-5.2 (+0.155) · skipped: kimi-k3 (+0.236) · not live — benchmark-only, outside the inference-valid pool (never served): qwen3.7-plus, gpt-5-mini, kimi-k2.5*
 > **Caveat.** Observational overlap per pair, not a ladder replay: no logged session walked these rungs in sequence.
 **Reading.** Left: for each candidate escalation target, the paired difference in resolve rate against the cheap base model, computed only on challenges where BOTH models have a scored default-arm outcome. The dot is the point estimate, the dark whisker the paired percentile bootstrap over challenges, and the pale whisker behind it the exact paired-exchangeability null band, so a dot inside the pale band is indistinguishable from chance. Rows are ordered by list price, cheapest at the bottom, which is the same order the ladder ranks by. Right: the same rows against the SHIPPED LIVE POOL (read from src/shunt/config/router.yaml's models list) — a filled marker is a rung the ladder actually visits, a hollow one a live rung the shortlist jump skips, and a hollow square is a benchmark target the shipped router no longer routes to (it stays measured, never served). The visit sequence is drawn as a stepped path and the shortlist's jump as a single long arrow.
 
 **What to look for.** Read panel A first and ignore the ladder: only two targets' intervals clear zero on the helpful side, and one of them is the most expensive rung measured. Then read panel B on the same rows: the shipped pool no longer holds the flat-to-harmful rungs (they are drawn NOT-LIVE), so the ladder's bought rungs are now the ones the evidence supports — and the remaining defect is visible on the canvas: the price-ranked walk can still jump over a net-helpful rung when a pricier frontier model's slot falls inside the shortlist. A row whose dark interval overlaps its own pale null band is unmeasured at this n, not shown to be neutral.
 
-**Terms.** *helps* — base failed the challenge, target resolved it *hurts* — base resolved the challenge, target failed it *delta* — target resolve rate minus base resolve rate on the shared challenges == (helps - hurts) / n *exact null* — the two-sided paired randomization test, in closed form — no Monte Carlo, no seed *rung* — a model the ladder can step to; the shortlist walks the cheapest ranks one at a time and then jumps to the top rank *not live* — a benchmark target absent from router.yaml's models: list — measured for evidence, never chosen for live inference
+**Terms.** *helps* — base failed the challenge, target resolved it *hurts* — base resolved the challenge, target failed it *delta* — target resolve rate minus base resolve rate on the shared challenges == (helps - hurts) / n *exact null* — the two-sided paired randomization test, in closed form — no Monte Carlo, no seed *rung* — a model the ladder can step to; the shortlist walks the cheapest ranks one at a time and then jumps to the top rank *not live* — a benchmark target absent from router.yaml's models: list — benchmark-only and outside the inference-valid pool, measured for evidence, never chosen for live inference
 
 **Notes.** deepseek-v4-pro at 3.1x base: n=190, helps 33, hurts 4, delta +0.1526 [+0.0947, +0.2105], exact null [-0.0579, +0.0579], p 1.1e-06, NET-HELPFUL
 qwen3.7-plus at 3.8x base: n=87, helps 6, hurts 3, delta +0.0345 [-0.0345, +0.1034], exact null [-0.0575, +0.0575], p 0.51, INDISTINGUISHABLE
@@ -733,9 +744,11 @@ kimi-k2.5 at 8.6x base: n=121, helps 8, hurts 10, delta -0.0165 [-0.0826, +0.049
 glm-5.2 at 13.8x base: n=84, helps 14, hurts 1, delta +0.1548 [+0.0714, +0.2381], exact null [-0.0833, +0.0833], p 0.00098, NET-HELPFUL
 kimi-k3 at 42.9x base: n=110, helps 29, hurts 3, delta +0.2364 [+0.1455, +0.3273], exact null [-0.1091, +0.1091], p 2.6e-06, NET-HELPFUL
 the shortlist jumps over kimi-k3, a target whose interval clears zero on this corpus
+
 **Limits.** Overlap only: each row is scored on the challenges both models were run on, and those sets differ by row, so the rows are not scored on one common set and their deltas are not directly comparable to each other. Coverage is opportunistic, not assigned: which challenges each model was run on was not randomized, so a target measured on an easier overlap looks better for free. Default reasoning arm only. A rung the ladder reaches at a raised effort arm is not this row. This measures TARGETS, not the ladder: a real ladder pays for a rung only after a verified recurrence, so the cost of a harmful rung is not the whole of its price. One base, one corpus. A rung that is net-harmful here is net-harmful on this corpus's task mix, which is SWE-bench-derived and not your workload. The live pool's price order — and therefore which rung the shortlist jump skips — depends on frontier rows whose prices are research-estimated, not live Requesty listings.
 
 <!-- n: paired_challenges=782, targets=6, visited_rungs=2 --><!-- generated-by: benchmark.routing.figures.ladder_rungs -->
+
 ### What the bound's quality costs, and which of those prices you may actually pay {#fig-live-gap}
 
 ![What the bound's quality costs, and which of those prices you may actually pay](assets/figures/routing/live_gap.png)
@@ -748,7 +761,7 @@ the shortlist jumps over kimi-k3, a target whose interval clears zero on this co
 
 **Terms.** *bound* — a strategy that reads the query task's own realised outcome. Unreachable BY DESIGN; it exists to say how much is left, never to be shipped. *blocked* — no router.strategy value names it, with the reason and a path to live recorded in benchmark/routing/strategy_class.py. A costed to-do, not a result — but the to-do is sometimes only the NAME, not the mechanism. *control* — exists so the other numbers mean something — a strategy the measurement is compared against, which must never ship. *at the bound's quality* — pass rate within 1.0pp of the best bound's. A cost comparison across the band is therefore an equal-quality comparison to within that tolerance.
 
-**Notes.** This axis is the NAIVE per-task cost — the raw sum of what each attempt was billed, repriced only when the subtitle says so. cost_quality_frontier.png ranks on the CACHE-AWARE total instead, which prices a repeat-model discount the naive sum does not. The two are different cost models, so a span read off this figure is NOT comparable with one read off that one: a cascade that re-hits one model is cheaper there than it is here, and the gap is the discount, not a different strategy.
+**Notes.** This axis is TOTAL SPEND over the shared scored task set, at NAIVE prices — the raw sum of what each attempt was billed, repriced only when the subtitle says so. cost_quality_frontier.png ranks on the CACHE-AWARE total instead, which prices a repeat-model discount the naive sum does not. The two are different cost models, so a span read off this figure is NOT comparable with one read off that one: a cascade that re-hits one model is cheaper there than it is here, and the gap is the discount, not a different strategy.
 Oracle: \$14.75, 97.24% (bound)
 Price-Cascade: \$22.27, 97.24% (blocked)
 kNN-semantic-cascade (within-task): \$24.29, 97.24% (blocked)
@@ -756,6 +769,7 @@ Session-Cascade: \$28.21, 97.24% (live)
 kNN-difficulty-cascade: \$28.51, 97.24% (blocked)
 Difficulty-Band-cascade: \$28.51, 97.24% (blocked)
 kNN-semantic-cascade: \$29.87, 97.24% (live)
+
 **Limits.** The blue bracket is what the BLOCKED strategies measured here would buy IF their blockers were removed, and the blockers are not one kind of thing: some are structural (cache-safety, an offline-fit input) and the live mechanism replacing them may land nowhere near this span, while another is only that no router.strategy value names a mechanism that already ships in a different layer. Read each blocker in benchmark/routing/strategy_class.py before treating this span as unbuilt work. Only strategies inside the quality band appear on the left panel. A cheap strategy that gives up quality is not a smaller version of this gap — read the frontier figure for that trade. The bound reads realised outcomes on the SAME corpus it is measured on, so it is a ceiling for this task set, not a general one.
 
 <!-- n: in_band=7, strategies=12 --><!-- generated-by: benchmark.routing.figures.live_gap -->
@@ -787,6 +801,7 @@ kNN-semantic-cascade: regret 1.5120
 kNN-semantic-cascade (within-task): regret 0.9540
 kNN-semantic-tier: regret 57.6691
 Every strategy holds the same rank at every gamma on the grid, so the ladder's ordering is a statement about quality-at-cost and not about the exchange rate.
+
 **Limits.** The price decomposition treats a cheaper model as a cheaper way to get the SAME outcome. Measured per-rung, the cheap intermediate targets do not deliver the base model's outcome on this corpus, so the price term is an upper bound on what cheapness buys — see ladder_rungs.png. The bandit is an illustrative inline learner drawn for this figure only, not a shipped routing strategy. It shows that a naive learner loses here; it does not show that every learner would. The arm series exist only where more than one arm per model was sampled; the coverage is sparse by design.
 
 <!-- n: both_pass_tasks=62, series=14 --><!-- generated-by: benchmark.routing.figures.oracle_gap -->
@@ -827,6 +842,7 @@ counted paths for panels B and D — kNN-semantic: 174 of 181 scored task(s)
 counted paths for panels B and D — kNN-semantic-cascade: 168 of 181 scored task(s)
 counted paths for panels B and D — kNN-semantic-cascade (within-task): 167 of 181 scored task(s)
 counted paths for panels B and D — kNN-semantic-tier: 147 of 181 scored task(s)
+
 **Limits.** TWO COST MODELS SHARE THIS CANVAS. Panel A's dollars are the cache-aware total (`TotalCost_cacheaware`, the column cost_quality_frontier.png ranks on); panel E's CV is the dispersion of the NAIVE per-task cost (`TotalCost`), because the cache-aware discount is published as a row total and there is no per-task cache-aware series to take a CV of. The panel labels carry the difference; a reader must not read A and E as two views of one bill. The y axis is the same imputation-biased pass rate every figure in this set uses: every filled cell is a pass, so all five frontiers sit on quality numbers biased upward by the share evidence_basis.png publishes. The dollar axis rests on an ASSUMED cache hit rate, as cost_quality_frontier.png's does. THE OTHER FOUR ARE COUNTED, NOT MODELLED — but two of them are counted over a SUBSET, not over the corpus: an imputed cell records no calls and no tokens at all, so panels B and D are per-task rates over each row's counted paths only, and the note below gives how much of each row that is. Panel C is counted on every scored task, because a session count comes from the strategy's own ladder rather than from a cell. Nothing here is scaled up to a corpus total: an unrun cell contributes nothing, never a zero. The five dimensions are NOT independent, and this is the size of it — strongest Spearman rho over the 12 drawn rows: provider calls/output tokens +0.929; provider calls/session tail (p95) +0.924; session tail (p95)/output tokens +0.924. A cascade that re-attempts spends more calls, more output tokens and more sessions at once, so those axes move together. provider calls, cost CV select the IDENTICAL front (Always-Frontier, kNN-semantic-cascade). The figure claims only that MEMBERSHIP differs across them, which is a statement about the ordering, not a claim that the axes measure five separate things.
 
 <!-- n: configurable_strategies=4, dimensions=5, excluded_pairs=0 --><!-- generated-by: benchmark.routing.figures.pareto_dimensions -->
@@ -834,24 +850,23 @@ counted paths for panels B and D — kNN-semantic-tier: 147 of 181 scored task(s
 
 ![Only the measured live pool is inference-valid; the rest are named, not dropped](assets/figures/routing/model_validity.png)
 
-*canonical weights identity · provider is a label, never part of the name · criteria: live, triage, capability measured, coverage · 4 inference-valid of 34 evidenced models (21 paid, 13 free) · coverage floor K=20 measured default-arm cells*
+*canonical weights identity · provider is a label, never part of the name · criteria: live, triage pass (KEEP/EXCEPTION), capability measured, coverage, paid channel · 4 inference-valid of 34 canonical identities named by committed evidence (20 paid, 14 free); 27 evidenced (≥1 measured cell in either channel) · coverage floor K=20 measured default-arm cells (declared default arm, sole-arm fallback)*
 > **Caveat.** invalid = not selected on committed evidence, not that the model is weak
-**Reading.** Panel A: one row per CANONICAL weights identity the committed evidence names (paid and free channels merged on `model_version`, never on a provider-prefixed listing id), one column per criterion — channel (paid or free), the serving provider(s), selected for inference (in the live pool), triage KEEP, capability rank measured rather than a price prior, and coverage at or above the K default-arm cell floor (the cell count is printed). The last column is verified challenge coverage, shaded by how much of the corpus the model holds. A green cell passes, a red one fails. Panel B counts the identities by why they are out, keeping the free channel, the collection-only promo probes, the unmeasured live slots and the triage DROPs distinct.
+**Reading.** Panel A: one row per CANONICAL weights identity the committed evidence names (paid and free channels merged on `model_version`, never on a provider-prefixed listing id), one column per criterion — channel (paid or free), the serving provider(s), selected for inference (in the live pool), triage pass (KEEP or EXCEPTION), capability rank measured rather than a price prior, coverage at or above the K default-arm cell floor (the cell count is printed), and a paid channel. The last column is DISTINCT verified challenges covered (not the same quantity as the default-arm cell count in the coverage column: a challenge can contribute several cells), shaded by how much of the corpus the model holds. A green cell passes, a red one fails; a free-only row's triage and capability cells are NOT APPLICABLE and read 'n/a' on a neutral cell, because a collection-only identity is never triaged or capability-ranked, while its paid-channel cell stays 'no' — the fact that puts it outside the pool. The subtitle separates the roster ('canonical identities named') from 'evidenced' — at least one measured cell in either channel — because the roster also names slots no committed measurement covers. Panel B counts the identities by why they are out, keeping the free channel, the collection-only promo probes, the unmeasured live slots and the triage DROPs distinct.
 
 **What to look for.** Read the valid rows first — they are the only models the other routing figures show. Then read panel B to see that the excluded models are excluded for DIFFERENT reasons: a dominated benchmark model, an unmeasured frontier slot, and a collection-only probe are not the same kind of absence and must not be collapsed into one.
 
-**Terms.** *canonical identity* — the weights slug (`model_version`), so the same weights served by several providers are ONE row and a provider prefix or `-free` marker is never a name *inference-valid* — in the packaged live pool AND triage KEEP AND capability rank measured AND coverage >= K default-arm cells AND a paid channel *capability measured* — the derived rank clears the confidence gate (K cells, CI width W, two qualifying peers); otherwise the model sits at its price-implied slot as a price prior *collection-only* — a row the benchmark may collect but never enable or route: the free overlay channel or a priced `-explabs` promo probe
+**Terms.** *canonical identity* — the weights slug (`model_version`), so the same weights served by several providers are ONE row and a provider prefix or `-free` marker is never a name *inference-valid* — in the packaged live pool AND triage pass (KEEP or EXCEPTION) AND capability rank measured AND coverage >= K measured default-arm cells (declared default arm, sole-arm fallback) AND a paid channel *evidenced* — at least one measured cell in either channel (paid or free). NARROWER than the roster: the roster also names live slots and collection-only listings with no committed measurement, so 34 identities named is not 27 evidenced *capability measured* — the derived rank clears the confidence gate (K cells, CI width W, two qualifying peers); otherwise the model sits at its price-implied slot as a price prior *collection-only* — a row the benchmark may collect but never enable or route: the free overlay channel or a priced `-explabs` promo probe
 
-**Notes.** deepseek-v4-flash: VALID — inference-valid: live, triage KEEP, capability measured, coverage OK (channel paid, providers deepseek, explabs, triage KEEP, capability measured, 219 cells, 201/500 verified challenges)
-deepseek-v4-pro: VALID — inference-valid: live, triage KEEP, capability measured, coverage OK (channel paid, providers deepseek, explabs, triage KEEP, capability measured, 201 cells, 201/500 verified challenges)
-glm-5.2: VALID — inference-valid: live, triage KEEP, capability measured, coverage OK (channel paid, providers requesty, triage KEEP, capability measured, 84 cells, 77/500 verified challenges)
-kimi-k3: VALID — inference-valid: live, triage KEEP, capability measured, coverage OK (channel paid, providers explabs, requesty, triage KEEP, capability measured, 117 cells, 103/500 verified challenges)
+**Notes.** deepseek-v4-flash: VALID — inference-valid: live, triage pass, capability measured, coverage OK, paid (channel paid, providers deepseek, explabs, triage KEEP, capability measured, 219 cells, 201/500 verified challenges)
+deepseek-v4-pro: VALID — inference-valid: live, triage pass, capability measured, coverage OK, paid (channel paid, providers deepseek, explabs, triage KEEP, capability measured, 201 cells, 201/500 verified challenges)
+glm-5.2: VALID — inference-valid: live, triage pass, capability measured, coverage OK, paid (channel paid, providers requesty, triage KEEP, capability measured, 84 cells, 77/500 verified challenges)
+kimi-k3: VALID — inference-valid: live, triage pass, capability measured, coverage OK, paid (channel paid, providers explabs, requesty, triage KEEP, capability measured, 117 cells, 103/500 verified challenges)
 claude-fable-5: invalid — triage UNMEASURED-EXCEPTION — slot does not clear the frontier (channel paid, providers requesty, triage UNMEASURED-EXCEPTION, capability not-ranked, 0 cells, 0/500 verified challenges)
 claude-fable-5.1: invalid — collection-only promo probe — never enabled or routed (channel paid, providers explabs, triage not-triaged, capability not-ranked, 22 cells, 22/500 verified challenges)
 claude-opus-4-6: invalid — collection-only promo probe — never enabled or routed (channel paid, providers requesty, triage not-triaged, capability not-ranked, 0 cells, 0/500 verified challenges)
 claude-opus-4-8: invalid — triage UNMEASURED-EXCEPTION — slot does not clear the frontier (channel paid, providers requesty, triage UNMEASURED-EXCEPTION, capability not-ranked, 0 cells, 0/500 verified challenges)
 claude-sonnet-5: invalid — collection-only promo probe — never enabled or routed (channel paid, providers requesty, triage not-triaged, capability not-ranked, 0 cells, 0/500 verified challenges)
-deepseek-v4.1-flash: invalid — collection-only promo probe — never enabled or routed (channel paid, providers explabs, triage not-triaged, capability not-ranked, 20 cells, 20/500 verified challenges)
 gemini-3.1-pro: invalid — triage UNMEASURED-EXCEPTION — slot does not clear the frontier (channel paid, providers requesty, triage UNMEASURED-EXCEPTION, capability not-ranked, 0 cells, 0/500 verified challenges)
 glm-5.3: invalid — collection-only promo probe — never enabled or routed (channel paid, providers explabs, triage not-triaged, capability not-ranked, 13 cells, 13/500 verified challenges)
 glm-5.3-flash: invalid — collection-only promo probe — never enabled or routed (channel paid, providers openrouter, triage not-triaged, capability not-ranked, 41 cells, 41/500 verified challenges)
@@ -863,6 +878,7 @@ gpt-6-astra: invalid — collection-only promo probe — never enabled or routed
 kimi-k2.5: invalid — not in the live pool — benchmark-only, triage DROP (channel paid, providers requesty, triage DROP, capability measured, 121 cells, 121/500 verified challenges)
 qwen3.7-plus: invalid — not in the live pool — benchmark-only, triage DROP (channel paid, providers requesty, triage DROP, capability measured, 87 cells, 87/500 verified challenges)
 qwen3.8-27b: invalid — collection-only promo probe — never enabled or routed (channel paid, providers explabs, triage not-triaged, capability not-ranked, 42 cells, 42/500 verified challenges)
+deepseek-v4.1-flash: invalid — collection-only free channel — never enabled or routed (channel free, providers explabs, triage not-triaged, capability not-ranked, 20 cells, 20/500 verified challenges)
 gemini-flash-lite-latest: invalid — collection-only free channel — never enabled or routed (channel free, providers google_ai_studio, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)
 glm-4.7-flash: invalid — collection-only free channel — never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)
 granite-4.0-h-micro: invalid — collection-only free channel — never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)
@@ -877,14 +893,66 @@ nemotron-3-nano-omni-30b-a3b-reasoning: invalid — collection-only free channel
 nemotron-3.5-lightning: invalid — collection-only free channel — never enabled or routed (channel free, providers kilo_gateway, requesty, triage not-triaged, capability not-ranked, 15 cells, 13/500 verified challenges)
 step-3.7-flash: invalid — collection-only free channel — never enabled or routed (channel free, providers kilo_gateway, triage not-triaged, capability not-ranked, 20 cells, 20/500 verified challenges)
 
-**Limits.** The criteria are order-independent only in the panel; the written reason reports the FIRST one a row fails, so a model that fails several shows only the first. Free-channel coverage counts a handful of challenges and is not comparable with the paid corpus's; the two channels were collected under different campaigns. A live slot with no committed measurement is flagged inference-invalid here, but it is a COVERAGE GAP, not evidence that the model is dominated — collect it and the verdict can change.
+**Limits.** The criteria are order-independent only in the panel; the written reason reports the FIRST one a row fails, so a model that fails several shows only the first. 'Evidenced' has ONE definition here: at least one measured cell in either channel. So the 34-identity roster holds 27 evidenced identities, and the two counts differ on purpose — the roster also names live slots and collection-only listings with no committed measurement. The coverage cell count is the measured cells for the DECLARED default arm, falling back to a sole cached arm (the definition the universe's evidenced count reads). model_grid.png counts ONLY the strict declared arm, so its cell count can be smaller — this is why glm-5.2 shows 84 here and 21 there, and both labels say which definition they use. Free-channel coverage counts a handful of challenges and is not comparable with the paid corpus's; the two channels were collected under different campaigns. A free-only (collection-only) identity is never triaged or capability-ranked, so its triage and capability cells read 'n/a' rather than 'no'; the free channel — not a failed criterion — is what puts it outside the inference pool. A live slot with no committed measurement is flagged inference-invalid here, but it is a COVERAGE GAP, not evidence that the model is dominated — collect it and the verdict can change. This panel is the per-kind exclusion breakdown, not a second cumulative funnel. model_relevance.png carries the funnel (named to evidenced to paid to valid) and the pass-rate-vs-coverage plane; here panel B keeps each exclusion KIND distinct.
 
-<!-- n: free=13, invalid=30, models=34, paid=21, valid=4 --><!-- generated-by: benchmark.routing.figures.model_validity -->
+<!-- n: evidenced=27, free=14, invalid=30, models=34, paid=20, valid=4 --><!-- generated-by: benchmark.routing.figures.model_validity -->
+### Which models clear the evidence bar — and why the rest fall short {#fig-model-relevance}
+
+![Which models clear the evidence bar — and why the rest fall short](assets/figures/routing/model_relevance.png)
+
+*canonical weights identity · hue = channel (paid/free) · marker form = validity status · no hue-per-model · 34 named · 27 evidenced (13 paid) · 20 paid channel · 14 free · 4 inference-valid · coverage floor K=20 measured default-arm cells · 500 verified challenges*
+> **Caveat.** a pass rate left of the K rule is not yet evidence; wide intervals are thin coverage
+**Reading.** Panel A: one point per EVIDENCED canonical weights identity — x is its measured default-arm cell count on a log axis, y its measured pass rate with a 95% Wilson interval. The dashed vertical rule is the K-cell floor; a point to its left has too little measured evidence to clear the bar however high its rate. Hue is the CHANNEL (blue paid, orange free) — never a hue per model — and the marker FORM is the validity status: a star is inference-valid, and each other form is a first-failing criterion or an insufficient sample. Inference-valid and near-miss models are direct-labelled; a name the placement ladder cannot seat without overprinting is listed in the notes rather than drawn on a neighbour, and two markers at the same measured coordinate are separated with a short leader back to the true point. Panel B shows four milestones — named, evidenced, paid-channel, inference-valid — and panel B′ counts, per criterion, how many named identities fail it (the categories overlap, so they do not sum to the milestones). The paid-channel bar counts ALL named identities with a paid channel, not only the evidenced ones, so it is a milestone and not a nested filter: the paid subset of the evidenced set is smaller, and the notes state it.
+
+**What to look for.** Read the 4 starred points as the models the router may actually serve, then read the points at and above K that are NOT valid: those are the near-misses, models with enough measured evidence that a policy change (a channel, a triage verdict) could admit. A high pass rate far left of the K rule is a promising but under-measured model, not a rejected one.
+
+**Terms.** *canonical identity* — the weights slug (`model_version`), so the same weights served by several providers are ONE point and a provider prefix or `-free` marker is never a name *inference-valid* — in the live pool AND triage pass (KEEP/EXCEPTION) AND capability rank measured AND coverage >= K measured default-arm cells AND a paid channel *evidenced* — a canonical identity with at least one measured default-arm cell in either channel (paid or free); a named identity with no measured cell is a coverage gap, not a weak model *near-miss* — an evidenced identity at or above the K cell floor that is not inference-valid — enough measured evidence to be a candidate, kept out by a criterion rather than by a thin sample *measured pass rate* — passes over measured default-arm cells in either channel; the whisker is a 95% Wilson interval drawn symmetrically about the estimate, half-width = the larger Wilson arm, so it reads as uncertainty rather than as a bar from zero
+
+**Notes.** The status taxonomy is READ from benchmark.routing.model_validity: hue is the channel and marker form the first-failing criterion or the evidence floor, so no reader has to decode a model from a colour.
+panel B milestones: 34 named, 27 evidenced, 20 with a paid channel (of all named), 4 inference-valid; 13 of the evidenced identities are paid
+deepseek-v4-flash: paid, status valid — 70.8% on n=219, $0.0080/task; 219 cells, 201/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid
+deepseek-v4-pro: paid, status valid — 85.1% on n=201, $0.1376/task; 201 cells, 201/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid
+glm-5.2: paid, status valid — 57.1% on n=84, $0.3429/task; 84 cells, 77/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid
+kimi-k3: paid, status valid — 85.5% on n=117, $0.5159/task; 117 cells, 103/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid
+claude-fable-5: paid, status no-evidence — no measured outcome; 0 cells, 0/500 challenges; triage UNMEASURED-EXCEPTION — slot does not clear the frontier
+claude-fable-5.1: paid, status invalid:live — 90.9% on n=22, $0.0726/task; 22 cells, 22/500 challenges; collection-only promo probe — never enabled or routed
+claude-opus-4-6: paid, status no-evidence — no measured outcome; 0 cells, 0/500 challenges; collection-only promo probe — never enabled or routed
+claude-opus-4-8: paid, status no-evidence — no measured outcome; 0 cells, 0/500 challenges; triage UNMEASURED-EXCEPTION — slot does not clear the frontier
+claude-sonnet-5: paid, status no-evidence — no measured outcome; 0 cells, 0/500 challenges; collection-only promo probe — never enabled or routed
+gemini-3.1-pro: paid, status no-evidence — no measured outcome; 0 cells, 0/500 challenges; triage UNMEASURED-EXCEPTION — slot does not clear the frontier
+glm-5.3: paid, status insufficient — 100.0% on n=13, $0.3542/task; 13 cells, 13/500 challenges; collection-only promo probe — never enabled or routed
+glm-5.3-flash: paid, status invalid:live — 95.1% on n=41, $0.0000/task; 41 cells, 41/500 challenges; collection-only promo probe — never enabled or routed
+gpt-5-mini: paid, status invalid:live — 54.5% on n=200, $0.0285/task; 200 cells, 200/500 challenges; not in the live pool — benchmark-only, triage DROP
+gpt-5.6-luna: paid, status insufficient — 100.0% on n=2, $0.0063/task; 2 cells, 2/500 challenges; collection-only promo probe — never enabled or routed
+gpt-5.6-sol: paid, status no-evidence — no measured outcome; 0 cells, 0/500 challenges; triage UNMEASURED-EXCEPTION — slot does not clear the frontier
+gpt-5.6-terra: paid, status no-evidence — no measured outcome; 0 cells, 0/500 challenges; collection-only promo probe — never enabled or routed
+gpt-6-astra: paid, status insufficient — 100.0% on n=4, $0.2294/task; 4 cells, 4/500 challenges; collection-only promo probe — never enabled or routed
+kimi-k2.5: paid, status invalid:live — 49.6% on n=121, $0.1249/task; 121 cells, 121/500 challenges; not in the live pool — benchmark-only, triage DROP
+qwen3.7-plus: paid, status invalid:live — 43.7% on n=87, $0.0801/task; 87 cells, 87/500 challenges; not in the live pool — benchmark-only, triage DROP
+qwen3.8-27b: paid, status invalid:live — 52.4% on n=42, $0.0034/task; 42 cells, 42/500 challenges; collection-only promo probe — never enabled or routed
+deepseek-v4.1-flash: free, status free-only — 95.0% on n=20, $0.0000/task; 20 cells, 20/500 challenges; collection-only free channel — never enabled or routed
+gemini-flash-lite-latest: free, status free-only — 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
+glm-4.7-flash: free, status free-only — 100.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
+granite-4.0-h-micro: free, status free-only — 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
+laguna-s-2.1: free, status free-only — 80.0% on n=10, $0.0000/task; 10 cells, 10/500 challenges; collection-only free channel — never enabled or routed
+laguna-xs-2.1: free, status free-only — 80.0% on n=10, $0.0000/task; 10 cells, 10/500 challenges; collection-only free channel — never enabled or routed
+ling-3-0-flash-fin: free, status free-only — 100.0% on n=2, $0.0000/task; 2 cells, 2/500 challenges; collection-only free channel — never enabled or routed
+llama-3.2-1b-instruct: free, status free-only — 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
+llama-4-scout-17b-16e-instruct: free, status free-only — 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
+mistral-small-3.1-24b-instruct: free, status free-only — 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
+muse-glimmer-30b: free, status free-only — 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
+nemotron-3-nano-omni-30b-a3b-reasoning: free, status free-only — 33.3% on n=3, $0.0000/task; 3 cells, 3/500 challenges; collection-only free channel — never enabled or routed
+nemotron-3.5-lightning: free, status free-only — 20.0% on n=15, $0.0000/task; 15 cells, 13/500 challenges; collection-only free channel — never enabled or routed
+step-3.7-flash: free, status free-only — 60.0% on n=20, $0.0000/task; 20 cells, 20/500 challenges; collection-only free channel — never enabled or routed
+
+**Limits.** The x axis counts measured cells, not comparable task sets: models were not run on identical tasks, so two points at the same height are not a paired comparison. Free-channel points were collected under a different campaign from the paid corpus's, so their coverage is not comparable cell-for-cell and their intervals are wide from thin coverage, not from measured weakness. A named identity with no measured cell cannot be placed on panel A at all; panel B's first milestone accounts for it as the drop from named to evidenced. Panel B's paid-channel milestone is the count of named identities with a paid channel (20); it is NOT the paid subset of the 27 evidenced identities, which is smaller (13). The milestones are separate filters, not a nested chain.
+
+<!-- n: evidenced=27, free=14, named=34, paid=20, valid=4 --><!-- generated-by: benchmark.routing.figures.model_relevance -->
 ### Every rung: what it costs, what it weighs, what it delivers {#fig-model-grid}
 
 ![Every rung: what it costs, what it weighs, what it delivers](assets/figures/routing/model_grid.png)
 
-*one measured arm per model, nothing imputed · Wilson 95% intervals · 6 models over the 4 inference-valid models' measured default-arm cells of results.csv, plus 2 † out-of-corpus rung(s) · 30 excluded model(s) are named and explained in model_validity.png — not drawn here · 1 at $0 (local) · 5 priced · n per model 20–200, unpaired task sets · blend = 99% input / 1% output, the corpus's own 517,584,265:7,428,975 token split*
+*one measured arm per model, nothing imputed · Wilson 95% intervals · 6 models: the 4 inference-valid models' measured default-arm cells of results.csv, plus 2 out-of-corpus rung(s) (†) · 30 excluded model(s) are named and explained in the model-validity figure — not drawn here · 1 at $0 (local) · 5 priced · n per model 20–200, unpaired task sets · blend = 99% input / 1% output, the corpus's own 517,584,265:7,428,975 token split*
 > **Caveat.** Panel A's x axis is a list price per TOKEN, never a bill per solved task.
 **Reading.** Panel A: each model at its blended token price (x, log — with a separate column at the left for locally-served rungs, which have no per-token list price at all and so cannot sit on a log axis; that column says nothing about what such a rung costs to run, which is UNDEFINED here and stated in the row's note) against its measured pass rate (y), with Wilson 95% whiskers. Marker area follows the square root of the active parameter count, the marker edge says whether the weights are hosted or local, and hue is the coarse total-size band. Panel B: one row per model, a hollow mark at total parameters and a filled mark at active parameters — the rule joining them IS the mixture-of-experts sparsity gap. A row whose name carries a dagger was measured outside this corpus under a different harness; its note below states which, and its height is not comparable cell-for-cell with the rows beside it.
 
@@ -909,20 +977,24 @@ drawn at a fixed reference marker because no parameter count is published: deeps
 
 ![The kNN selection rule's errors go both ways — it loses tasks, not just money](assets/figures/routing/routing_decision_audit.png)
 
-*151 decidable decisions, 5 tasks no model solved · 103 exact / 17 over-provisioned / 31 under-provisioned*
+*151 decidable decisions, 5 tasks no model solved · 25 picks outside the inference-valid pool (not drawn) · 103 exact / 17 over-provisioned / 31 under-provisioned*
 > **Caveat.** 31 task(s) were lost to under-provisioning — those are quality, not cost.
 **Reading.** Left: rows are the model the router chose, columns the cheapest model that actually solved the task. The diagonal is an exact hit. BELOW it the router paid for a model it did not need; above it the router under-provisioned and the task was lost. Right: the same decisions as an error budget — exact, over-provisioned, under-provisioned, and the tasks no model solved, which no decision could have won.
 
 **What to look for.** Read the two error columns against each other. Over-provisioning is the bill for guessing high and costs only money; under-provisioning costs a task that some dearer model would have solved, and no threshold recovers it after the fact. The rule plotted here is a single-shot kNN prediction with no verify-and-escalate step, so both are reachable — an earlier draft of this figure read the empty under-provisioned column of a CASCADE as a property of the router itself.
 
-**Terms.** *cheapest sufficient* — the cheapest measured model that passed this task — the router's correct answer. Undefined when no model passed. *over-provisioned* — the chosen model was dearer than the cheapest that would have passed. *under-provisioned* — the chosen model failed a task some dearer model solved.
+**Terms.** *cheapest sufficient* — the cheapest measured model that passed this task — the router's correct answer. Undefined when no model passed. *over-provisioned* — the chosen model was dearer than the cheapest that would have passed. *under-provisioned* — the chosen model failed a task some dearer model solved. *outside the inference-valid pool* — the router's pick is a benchmark-only or collection-only model, so it has no axis on the pool-only grid. Counted in the decision denominator, never drawn.
 
 **Notes.** Both axes are in price order and rows are the CHOSEN model, so a cell below the diagonal is over-provisioning by construction rather than by convention.
-The grid is scoped to the inference-VALID models — the live pool clear of the coverage/triage/capability floor. Benchmark-only and collection-only models are named on model_validity.png and invalid_models.png; a choice outside this pool is not drawn.
+The grid is scoped to the inference-VALID models — the live pool clear of the coverage/triage/capability floor. Benchmark-only and collection-only models are named on model_validity.png and invalid_models.png; a choice outside this pool is not drawn, but it is counted and its count is printed in the subtitle.
 exact-hit rate 68.2% over the decidable set; over-provisioning is 11.3%
+denominator: 181 scored decisions = 151 decidable + 5 unwinnable + 25 outside the inference-valid pool. The outside-pool picks are counted but not drawn on the pool-only grid.
+the budget bar's base is 156 outcomes (151 decidable + 5 unwinnable), so its exact segment reads 66.0%; the exact-hit rate over the decidable set alone is 68.2%. The 25 outside-pool picks enter neither base.
+
 **Limits.** Cheapest-sufficient is read off the coverage-completed matrix, so a task whose cheap cell was imputed pass=True yields a cheaper 'correct answer' than measurement alone supports — the over-provisioning count is an upper bound.
 
-<!-- n: decisions=156, exact=103, over=17, under=31 --><!-- generated-by: benchmark.routing.figures.decision_audit -->
+<!-- n: decisions=181, exact=103, outside_pool=25, over=17, under=31 --><!-- generated-by: benchmark.routing.figures.decision_audit -->
+
 ### A narrow mid-k band beats the two-policy mixture; the shipped setting does not {#fig-sweep-regimes}
 
 ![A narrow mid-k band beats the two-policy mixture; the shipped setting does not](assets/figures/routing/sweep_regimes.png)
@@ -942,6 +1014,7 @@ OUTER-LOOP CV: for each of 5 folds the configuration is chosen on the other fold
 Panel A's trace takes, per k, the cheapest cell whose out-of-fold pass rate clears the best cell's 95% Wilson lower bound. The two fixed policies are scored on the same corpus: always-cheapest (deepseek-v4-flash) 75.1% at \$1.48, always-frontier (kimi-k3) 95.0% at \$94.37.
 The k grid actually swept runs 2 to 174 (11 values), clipped to a corpus of 181 tasks.
 Reward is driven by success_rate_thresh (η²=0.66); k also matters (η²=0.08) — neither can be picked freely. min_samples: η²=0.00 — negligible effect
+
 **Limits.** Folds split TASKS, not repositories, so an out-of-fold task can still sit next to a sibling task from the same repo — this is a lower bound on optimism, not an estimate of transfer to a new codebase (see embedding_signal.png's cross-repo panel). The S regime was added on 2026-09-05 and is not a new measurement: those cells were always single-model, and `_regime` simply could not see it. Every earlier render of this panel drew them green, as mixed allocation. REWARD-ARGMAX IS DEGENERATE: maximising reward (passes - gamma x cost, gamma=0.1) picks k=128, thresh=0.9, which routes 74% of tasks to kimi-k3 using 2 distinct model(s). At this gamma one extra pass is worth 10 USD against a suite costing a few dollars, so cost is nearly a no-op and the argmax escalates everything. The selected k=174 sits at the EDGE of the swept range k in [2, 174] — the optimum is not bracketed and the true peak may lie beyond it 396/1267 cells (31.3%) in THE MATRIX THIS SWEEP SCORES (181 tasks x 7 ranked models — not the corpus-wide count in evidence_basis.png) are monotone-IMPUTED rather than measured, and the imputation is near-exclusively pass-filling, so it can almost never add a failure. The neighbourhood VOTES and the pass rates on this grid both read those synthetic passes — every quality number here is biased up Cost is model-price dependent — the selected cell moves when model prices move.
 
 <!-- n: folds=5, grid_cells=275, in_sample_scored=181, oof_scored=181, tasks=181 --><!-- generated-by: benchmark.routing.scripts.threshold_sweep -->
@@ -949,7 +1022,7 @@ Reward is driven by success_rate_thresh (η²=0.66); k also matters (η²=0.08) 
 
 ![The kNN selection rule sends most of every difficulty bucket to the cheapest model](assets/figures/routing/task_difficulty.png)
 
-*181 scored tasks (19 incomplete challenges excluded); 5 solved by no enabled model · 3 capability bands populated · hardest bucket (0 solvers) mostly deepseek-v4-flash, easiest (4 solvers) mostly deepseek-v4-flash*
+*181 scored tasks (19 incomplete challenges excluded); 5 solved by no enabled model · 3 capability bands populated · 27 of panel B's picks fall outside the inference-valid pool (drawn as one grey segment, not named) · hardest bucket (0 solvers) mostly deepseek-v4-flash, easiest (4 solvers) mostly deepseek-v4-flash*
 **Reading.** Left: how many tasks each capability band is the cheapest sufficient answer for, weakest band on the left, plus the tasks no enabled model solved. Right: for each count of solving models — the corpus's own difficulty measure — the share of tasks the kNN selection rule sent to each model, as stacked bars with the task count above.
 
 **What to look for.** Compare the stacks across the right panel's buckets. The rule plotted here is kNN: it predicts ONCE from the neighbourhood and does not escalate, so a stack that barely moves from the hardest bucket to the easiest means the prediction is barely conditioning on difficulty at all. Read embedding_signal.png for why — the input it predicts from carries almost no routable signal.
@@ -960,25 +1033,27 @@ Reward is driven by success_rate_thresh (η²=0.66); k also matters (η²=0.08) 
 band 2: 136 tasks
 band 3: 5 tasks
 band 4: 35 tasks
-0 solvers: {'deepseek-v4-flash': 3, 'gpt-5-mini': 2}
-1 solvers: {'deepseek-v4-flash': 7, 'deepseek-v4-pro': 2, 'qwen3.7-plus': 1}
-2 solvers: {'deepseek-v4-flash': 11, 'deepseek-v4-pro': 1, 'gpt-5-mini': 3}
-3 solvers: {'deepseek-v4-flash': 13, 'deepseek-v4-pro': 3, 'gpt-5-mini': 2}
-4 solvers: {'deepseek-v4-flash': 97, 'deepseek-v4-pro': 17, 'gpt-5-mini': 16, 'kimi-k2.5': 3}
-**Limits.** An imputed cell is always a pass, so a task's band is a LOWER bound on the capability it truly needs and the solving-model count is an upper bound. The right panel is NOT circular for the rule plotted — kNN decides before any outcome for this task exists — but it is not independent either: the neighbours it reads and the solving-model count it is plotted against come from one matrix. 'No enabled model solved it' counts the inference-VALID benchmark models at their DEFAULT arms (benchmark-only and collection-only models are excluded, because the live router cannot pick them). complementarity.png counts every sampled (model, arm) column instead, so its solved-by-none figure is smaller — a different denominator, not a disagreement.
+0 solvers: {'deepseek-v4-flash': 3, 'outside inference-valid pool (not named)': 2}
+1 solvers: {'deepseek-v4-flash': 7, 'deepseek-v4-pro': 2, 'outside inference-valid pool (not named)': 1}
+2 solvers: {'deepseek-v4-flash': 11, 'deepseek-v4-pro': 1, 'outside inference-valid pool (not named)': 3}
+3 solvers: {'deepseek-v4-flash': 13, 'deepseek-v4-pro': 3, 'outside inference-valid pool (not named)': 2}
+4 solvers: {'deepseek-v4-flash': 97, 'deepseek-v4-pro': 17, 'outside inference-valid pool (not named)': 19}
+Panels A and B share one denominator: tasks with at least one inference-valid cell. A task the completion dropped (no cells at all) is excluded from both, never counted as unwinnable.
 
-<!-- n: excluded=19, tasks=181, unsolved=5 --><!-- generated-by: benchmark.routing.figures.task_difficulty -->
+**Limits.** An imputed cell is always a pass, so a task's band is a LOWER bound on the capability it truly needs and the solving-model count is an upper bound. The right panel is NOT circular for the rule plotted — kNN decides before any outcome for this task exists — but it is not independent either: the neighbours it reads and the solving-model count it is plotted against come from one matrix. 'No enabled model solved it' counts the inference-VALID benchmark models at their DEFAULT arms (benchmark-only and collection-only models are excluded, because the live router cannot pick them). complementarity.png counts every sampled (model, arm) column instead, so its solved-by-none figure is smaller — a different denominator, not a disagreement. Picks naming a model outside the inference-valid pool are counted in the denominator but aggregated into one grey segment and NOT named; the individual models are named on model_validity.png and invalid_models.png.
+
+<!-- n: excluded=19, outside_pool=27, tasks=181, unsolved=5 --><!-- generated-by: benchmark.routing.figures.task_difficulty -->
 ### Every model's evidence on one grid — free and paid, valid and not {#fig-universe-coverage}
 
 ![Every model's evidence on one grid — free and paid, valid and not](assets/figures/routing/universe_coverage.png)
 
-*one row per canonical weights identity · verified challenges as columns · 34 canonical models: 21 paid, 13 free · 4 inference-valid, 30 outside the pool · 500 verified challenges*
+*one row per canonical weights identity · verified challenges as columns · 34 canonical models: 20 paid, 14 free · 4 inference-valid, 30 outside the pool · 34 named · 27 evidenced (≥1 measured outcome) · 23 invalid-with-outcome · 500 verified challenges*
 > **Caveat.** Coverage is an evidence status, not a quality score — a covered cell can fail.
 **Reading.** One row per canonical weights identity the committed evidence names, one column per verified challenge, in the corpus's own sorted order. A blue cell is a paid channel's measured default-arm cell, an orange cell a free one, a pale cell no measured outcome. Vertical rules mark repository boundaries, and each row label carries its covered/total count. Rows are ordered inference-valid first (marked ★, above the green rule), then the paid collection, then the free collection.
 
 **What to look for.** Read that coverage is ragged and channel-specific. The four starred rows above the green rule are the only models the main routing figures draw; every row below it is still measured and still named, and a row of pale cells says no committed outcome exists rather than that the model is weak.
 
-**Terms.** *canonical identity* — the registry `version` slug, so the same weights served under several channel listings are ONE row and a provider prefix or `-free` marker is never a name *measured cell* — a committed default-arm outcome for one (challenge, model) pair; imputed cells are not counted here
+**Terms.** *canonical identity* — the registry `version` slug, so the same weights served under several channel listings are ONE row and a provider prefix or `-free` marker is never a name *measured cell* — a committed default-arm outcome for one (challenge, model) pair; imputed cells are not counted here *evidenced* — a canonical identity with at least one committed measured default-arm outcome (Performance.n > 0); a named identity with no measured outcome is drawn as an empty band and is not a claim that the model is weak
 
 **Notes.** Cells are measured outcomes only. The completed matrix used by the strategy figures adds imputed cells, which this canvas deliberately excludes.
 deepseek-v4-flash: 201/500 challenges, 219 measured cells, paid, VALID
@@ -990,7 +1065,6 @@ claude-fable-5.1: 22/500 challenges, 22 measured cells, paid, collection-only pr
 claude-opus-4-6: 0/500 challenges, 0 measured cells, paid, collection-only promo probe — never enabled or routed
 claude-opus-4-8: 0/500 challenges, 0 measured cells, paid, triage UNMEASURED-EXCEPTION — slot does not clear the frontier
 claude-sonnet-5: 0/500 challenges, 0 measured cells, paid, collection-only promo probe — never enabled or routed
-deepseek-v4.1-flash: 20/500 challenges, 20 measured cells, paid, collection-only promo probe — never enabled or routed
 gemini-3.1-pro: 0/500 challenges, 0 measured cells, paid, triage UNMEASURED-EXCEPTION — slot does not clear the frontier
 glm-5.3: 13/500 challenges, 13 measured cells, paid, collection-only promo probe — never enabled or routed
 glm-5.3-flash: 41/500 challenges, 41 measured cells, paid, collection-only promo probe — never enabled or routed
@@ -1002,6 +1076,7 @@ gpt-6-astra: 4/500 challenges, 4 measured cells, paid, collection-only promo pro
 kimi-k2.5: 121/500 challenges, 121 measured cells, paid, not in the live pool — benchmark-only, triage DROP
 qwen3.7-plus: 87/500 challenges, 87 measured cells, paid, not in the live pool — benchmark-only, triage DROP
 qwen3.8-27b: 42/500 challenges, 42 measured cells, paid, collection-only promo probe — never enabled or routed
+deepseek-v4.1-flash: 20/500 challenges, 20 measured cells, free, collection-only free channel — never enabled or routed
 gemini-flash-lite-latest: 1/500 challenges, 1 measured cells, free, collection-only free channel — never enabled or routed
 glm-4.7-flash: 1/500 challenges, 1 measured cells, free, collection-only free channel — never enabled or routed
 granite-4.0-h-micro: 1/500 challenges, 1 measured cells, free, collection-only free channel — never enabled or routed
@@ -1015,20 +1090,21 @@ muse-glimmer-30b: 1/500 challenges, 1 measured cells, free, collection-only free
 nemotron-3-nano-omni-30b-a3b-reasoning: 3/500 challenges, 3 measured cells, free, collection-only free channel — never enabled or routed
 nemotron-3.5-lightning: 13/500 challenges, 15 measured cells, free, collection-only free channel — never enabled or routed
 step-3.7-flash: 20/500 challenges, 20 measured cells, free, collection-only free channel — never enabled or routed
+
 **Limits.** Paid and free corpora were collected under different campaigns, so a free row's coverage is not comparable cell-for-cell with a paid row's. A row with no committed cell is drawn as an empty band and is not evidence that the model is weak.
 
-<!-- n: challenges=500, free=13, models=34, valid=4 --><!-- generated-by: benchmark.routing.figures.universe -->
+<!-- n: challenges=500, free=14, models=34, valid=4 --><!-- generated-by: benchmark.routing.figures.universe -->
 ### What every free and paid model costs and delivers {#fig-universe-economics}
 
 ![What every free and paid model costs and delivers](assets/figures/routing/universe_economics.png)
 
-*measured default-arm outcomes only · blue paid, orange free · ★ inference-valid · 27 evidenced models (14 paid, 13 free) · 4 inference-valid marked ★*
-> **Caveat.** A $0 row is a free price or a PAID sub-cent mean; both draw as a hatched floor, not a bar.
-**Reading.** Panel A: per canonical identity, the mean measured cost per task on a log axis. A $0.0000 row — whether a genuinely free channel or a paid model whose mean rounds to zero — is drawn as a hatched floor stub at the left of the axis, because a log axis has no width for a zero bar. Panel B: the same identity's measured pass rate with a 95% Wilson interval, same row order, so cost and quality read across one line. Blue is a paid channel, orange a free one, and a star marks the four inference-valid models.
+*measured default-arm outcomes only · blue paid, orange free · ★ inference-valid · 27 evidenced models (13 paid, 14 free) · 4 inference-valid marked ★ · 34 named · 27 evidenced (≥1 measured outcome) · 23 invalid-with-outcome*
+> **Caveat.** Panel A draws dots, not bars — a log axis reads position. Free $0 and paid sub-floor rows are separate hatched markers.
+**Reading.** Panel A: per canonical identity, the mean measured cost per task on a log axis. Each priced row is a dot at its cost — a dot carries position, the one thing a log axis reads honestly, where a bar's length would encode log(cost) and misstate every ratio. A `$0.0000 free` row (a genuinely free channel) and a `<$0.000001 paid` row (a paid mean that rounds below the axis floor) are distinct hatched stubs in a fixed column at the left, not bars and not each other. Panel B: the same identity's measured pass rate with a 95% Wilson interval, same row order, so cost and quality read across one line. Blue is a paid channel, orange a free one, and a star marks the inference-valid models.
 
 **What to look for.** Find the identities that are both cheap and high-pass: the free channel's rows sit far left, but their intervals are wide because their coverage is thin. The four starred rows are the ones the router may actually serve.
 
-**Terms.** *measured cost* — the mean `real_cost` over that identity's committed default-arm cells — what was billed, not list price *pass rate* — passes over measured default-arm cells, with a 95% Wilson interval
+**Terms.** *measured cost* — the mean `real_cost` over that identity's committed default-arm cells — what was billed, not list price *pass rate* — passes over measured default-arm cells, with a 95% Wilson interval *evidenced* — a canonical identity with at least one committed measured default-arm outcome (Performance.n > 0); a named identity with no measured outcome is drawn as an empty band and is not a claim that the model is weak
 
 **Notes.** Rows with no committed cell are absent: this canvas is a measurement, and a model with nothing measured has no point to draw.
 deepseek-v4-flash: 70.8% on n=219, $0.0080/task, paid, VALID
@@ -1036,7 +1112,6 @@ deepseek-v4-pro: 85.1% on n=201, $0.1376/task, paid, VALID
 glm-5.2: 57.1% on n=84, $0.3429/task, paid, VALID
 kimi-k3: 85.5% on n=117, $0.5159/task, paid, VALID
 claude-fable-5.1: 90.9% on n=22, $0.0726/task, paid, collection-only promo probe — never enabled or routed
-deepseek-v4.1-flash: 95.0% on n=20, $0.0000/task, paid, collection-only promo probe — never enabled or routed
 glm-5.3: 100.0% on n=13, $0.3542/task, paid, collection-only promo probe — never enabled or routed
 glm-5.3-flash: 95.1% on n=41, $0.0000/task, paid, collection-only promo probe — never enabled or routed
 gpt-5-mini: 54.5% on n=200, $0.0285/task, paid, not in the live pool — benchmark-only, triage DROP
@@ -1045,6 +1120,7 @@ gpt-6-astra: 100.0% on n=4, $0.2294/task, paid, collection-only promo probe — 
 kimi-k2.5: 49.6% on n=121, $0.1249/task, paid, not in the live pool — benchmark-only, triage DROP
 qwen3.7-plus: 43.7% on n=87, $0.0801/task, paid, not in the live pool — benchmark-only, triage DROP
 qwen3.8-27b: 52.4% on n=42, $0.0034/task, paid, collection-only promo probe — never enabled or routed
+deepseek-v4.1-flash: 95.0% on n=20, $0.0000/task, free, collection-only free channel — never enabled or routed
 gemini-flash-lite-latest: 0.0% on n=1, $0.0000/task, free, collection-only free channel — never enabled or routed
 glm-4.7-flash: 100.0% on n=1, $0.0000/task, free, collection-only free channel — never enabled or routed
 granite-4.0-h-micro: 0.0% on n=1, $0.0000/task, free, collection-only free channel — never enabled or routed
@@ -1058,24 +1134,24 @@ muse-glimmer-30b: 0.0% on n=1, $0.0000/task, free, collection-only free channel 
 nemotron-3-nano-omni-30b-a3b-reasoning: 33.3% on n=3, $0.0000/task, free, collection-only free channel — never enabled or routed
 nemotron-3.5-lightning: 20.0% on n=15, $0.0000/task, free, collection-only free channel — never enabled or routed
 step-3.7-flash: 60.0% on n=20, $0.0000/task, free, collection-only free channel — never enabled or routed
+
 **Limits.** Free-channel rows are cheap by price and thin by coverage; a wide interval is a coverage gap, not a quality estimate. Mean cost is over measured cells only and is not the list price the strategy figures rank on.
 
-<!-- n: evidenced=27, free=13, valid=4 --><!-- generated-by: benchmark.routing.figures.universe -->
+<!-- n: evidenced=27, free=14, valid=4 --><!-- generated-by: benchmark.routing.figures.universe -->
 ### Outside the inference pool: what the other measured models deliver {#fig-invalid-models}
 
 ![Outside the inference pool: what the other measured models deliver](assets/figures/routing/invalid_models.png)
 
-*inference-invalid on committed evidence · not selected for routing, not erased · 23 inference-invalid evidenced models (10 paid, 13 free) · the four inference-valid models are on model_validity.png*
+*inference-invalid on committed evidence · not selected for routing, not erased · 23 inference-invalid evidenced models (9 paid, 14 free) · 34 named · 27 evidenced (≥1 measured outcome) · 23 invalid-with-outcome · the 4 inference-valid models are on the model-validity figure*
 > **Caveat.** Invalid means not selected on this evidence — not that the model is weak.
-**Reading.** Every evidenced model that fails at least one inference criterion, on two axes. Panel A: verified-challenge coverage, with the measured-cell count printed. Panel B: measured pass rate with a 95% Wilson interval, the mean billed cost per task printed beside it. Blue is a paid channel, orange a free one. Each row carries its first failing reason in the notes below.
+**Reading.** Every evidenced model that fails at least one inference criterion, on two axes. Panel A: verified-challenge coverage, with the measured-cell count printed; a row covering nothing draws a hatched zero stub, not a missing bar. Panel B: measured pass rate with a 95% Wilson interval, the mean billed cost per task printed beside it. A row with fewer than the provisional cell floor is drawn hatched and faded in both panels, so a thin sample is never read as a full measurement. Blue is a paid channel, orange a free one. Each row carries its first failing reason in the notes below.
 
 **What to look for.** Read this page as the boundary of the inference pool: these models have real measured outcomes, some of them on hundreds of cells, and the reason each is outside is printed rather than implied. A dominated benchmark model and a collection-only probe are not the same kind of absence.
 
-**Terms.** *inference-invalid* — fails at least one of: live pool, triage KEEP, capability rank measured, coverage >= K cells, a paid channel. The first failing reason is named per row.
+**Terms.** *inference-invalid* — fails at least one of: live pool, triage KEEP, capability rank measured, coverage >= K cells, a paid channel. The first failing reason is named per row. *evidenced* — a canonical identity with at least one committed measured default-arm outcome (Performance.n > 0); a named identity with no measured outcome is drawn as an empty band and is not a claim that the model is weak
 
-**Notes.** The predicate and the first-failing reason are not restated here — they are read from benchmark.routing.model_validity, the same source model_validity.png draws.
+**Notes.** The predicate and the first-failing reason are not restated here — they are read from benchmark.routing.model_validity, the same source the model-validity figure draws.
 claude-fable-5.1: collection-only promo probe — never enabled or routed — 22/500 challenges, 22 cells, paid, capability not-ranked, triage not-triaged
-deepseek-v4.1-flash: collection-only promo probe — never enabled or routed — 20/500 challenges, 20 cells, paid, capability not-ranked, triage not-triaged
 glm-5.3: collection-only promo probe — never enabled or routed — 13/500 challenges, 13 cells, paid, capability not-ranked, triage not-triaged
 glm-5.3-flash: collection-only promo probe — never enabled or routed — 41/500 challenges, 41 cells, paid, capability not-ranked, triage not-triaged
 gpt-5-mini: not in the live pool — benchmark-only, triage DROP — 200/500 challenges, 200 cells, paid, capability measured, triage DROP
@@ -1084,6 +1160,7 @@ gpt-6-astra: collection-only promo probe — never enabled or routed — 4/500 c
 kimi-k2.5: not in the live pool — benchmark-only, triage DROP — 121/500 challenges, 121 cells, paid, capability measured, triage DROP
 qwen3.7-plus: not in the live pool — benchmark-only, triage DROP — 87/500 challenges, 87 cells, paid, capability measured, triage DROP
 qwen3.8-27b: collection-only promo probe — never enabled or routed — 42/500 challenges, 42 cells, paid, capability not-ranked, triage not-triaged
+deepseek-v4.1-flash: collection-only free channel — never enabled or routed — 20/500 challenges, 20 cells, free, capability not-ranked, triage not-triaged
 gemini-flash-lite-latest: collection-only free channel — never enabled or routed — 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged
 glm-4.7-flash: collection-only free channel — never enabled or routed — 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged
 granite-4.0-h-micro: collection-only free channel — never enabled or routed — 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged
@@ -1097,6 +1174,7 @@ muse-glimmer-30b: collection-only free channel — never enabled or routed — 1
 nemotron-3-nano-omni-30b-a3b-reasoning: collection-only free channel — never enabled or routed — 3/500 challenges, 3 cells, free, capability not-ranked, triage not-triaged
 nemotron-3.5-lightning: collection-only free channel — never enabled or routed — 13/500 challenges, 15 cells, free, capability not-ranked, triage not-triaged
 step-3.7-flash: collection-only free channel — never enabled or routed — 20/500 challenges, 20 cells, free, capability not-ranked, triage not-triaged
+
 **Limits.** A live slot with no committed measurement is flagged invalid here but is a coverage gap, not evidence of domination; collect it and the verdict can change. Free-channel rows were collected under a different campaign and their intervals are wide from thin coverage, not from measured weakness.
 
-<!-- n: free=13, invalid_evidenced=23 --><!-- generated-by: benchmark.routing.figures.universe -->
+<!-- n: free=14, invalid_evidenced=23 --><!-- generated-by: benchmark.routing.figures.universe -->

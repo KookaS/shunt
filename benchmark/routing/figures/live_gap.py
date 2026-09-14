@@ -183,8 +183,9 @@ SPEC = FigureSpec(
         # `TotalCost_cacheaware` while this one stays on the naive `TotalCost` sum, so the same
         # strategy carries two different prices under one name and a reader lining the two
         # figures up was silently comparing cost models rather than strategies.
-        "This axis is the NAIVE per-task cost — the raw sum of what each attempt was billed, "
-        "repriced only when the subtitle says so. cost_quality_frontier.png ranks on the "
+        "This axis is TOTAL SPEND over the shared scored task set, at NAIVE prices — the raw "
+        "sum of what each attempt was billed, repriced only when the subtitle says so. "
+        "cost_quality_frontier.png ranks on the "
         "CACHE-AWARE total instead, which prices a repeat-model discount the naive sum does "
         "not. The two are different cost models, so a span read off this figure is NOT "
         "comparable with one read off that one: a cascade that re-hits one model is cheaper "

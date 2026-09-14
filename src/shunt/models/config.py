@@ -120,6 +120,14 @@ UNDISCLOSED: Final[str] = "UNDISCLOSED"
 # hosted namesake on a cost axis — the figures split on this field.
 ServingMode = Literal["hosted", "local"]
 
+# The LISTING's billing ENTITLEMENT, independent of any observed charge: what the channel is,
+# not what a given cell happened to cost. A `free` listing may still bill (a promo window that
+# lapsed); a `paid` listing may run for $0 inside a declared promo window. The census reads
+# this field (a paid listing anywhere makes the identity paid); the per-row observed `channel`
+# in results.csv is the accounting view. Optional at the schema level so example fragments and
+# tests need not carry it; the SH019 gate requires it on every committed registry/overlay row.
+Billing = Literal["free", "paid"]
+
 # A parameter count is either a vendor-published integer or the honest absence of one. The
 # literal exists so the two are never confused with a MISSING field: `total_params: null`
 # would read as "nobody filled this in", while UNDISCLOSED records that we looked and the
@@ -218,6 +226,13 @@ class ModelEntry(BaseModel):
     # The bare canonical identity, mirrored on `model_id`/`version` in the overlay for readers
     # that expect a single conventional field. Unused by routing.
     model: str | None = None
+    # The listing's billing ENTITLEMENT — what the channel is, independent of any observed
+    # charge. `paid` ranks/prices normally; `free` marks a promo/collection listing whose
+    # harvested rows can legitimately carry real_cost==0. See `Billing`.
+    billing: Billing | None = None
+    # Why this listing carries the `billing` value it does, where the value is not obvious —
+    # a promo window that partially billed, an allowance-limited free plan. Short prose.
+    billing_note: str | None = None
     # Model identity: a genuine provider model change (new weights) is a NEW
     # registry id, not a version bump. Optional so unpriced example fragments stay
     # versionless, but required once `pricing` makes the model benchmarkable —
@@ -273,6 +288,9 @@ class ModelConfig(BaseModel):
     lane: str | None = None
     # The bare canonical identity (mirror of the overlay's `model`/`version`); informational.
     model: str | None = None
+    # The listing's billing ENTITLEMENT (see `Billing`); None when the row predates the field.
+    billing: Billing | None = None
+    billing_note: str | None = None
     provider: str
     version: str | None = None
     base_url: str
@@ -332,6 +350,8 @@ def resolve_models(registry: Registry) -> dict[str, ModelConfig]:
             model_id=entry.model_id,
             lane=entry.lane,
             model=entry.model,
+            billing=entry.billing,
+            billing_note=entry.billing_note,
             provider=entry.provider,
             version=entry.version,
             base_url=expand_env_vars(provider.base_url),

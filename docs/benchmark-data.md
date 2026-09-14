@@ -223,6 +223,35 @@ The report stage regenerates the routing plots into `docs/assets/figures/routing
 CSVs into `benchmark/routing/reports/`. Each stage is also runnable on its own as a debug
 entrypoint (`make benchmark-live`, `make offline-replay`, `make routing-report`).
 
+### The model catalogue
+
+The report writes `benchmark/routing/reports/model_catalog.csv`: one row per **canonical
+weights identity** — the `model_version` slug, so the same weights served over several channel
+listings are one row and a provider prefix or `-free` marker is never a name. It is the
+machine-readable face of the inference-valid census the routing figures draw, so the CSV and the
+canvases cannot disagree about which models clear the bar.
+
+Columns: `model`, `channel` (`paid`/`free`), `providers`, `status`, `first_failing`, `cells`
+(measured default-arm cells), `covered`/`corpus` (verified challenges), `pass_rate`, `wilson_lo`,
+`wilson_hi`, `mean_cost`, `total_params`, `active_params`, `serving_mode`, and the `live`,
+`triage`, `capability` flags.
+
+`status` is one of:
+
+| Status | Meaning |
+|---|---|
+| `valid` | clears every criterion — the models the router may serve |
+| `no-evidence` | no measured cell in either channel |
+| `free-only` | a free channel serves it and no paid one does |
+| `insufficient` | a paid identity below the K-cell floor |
+| `invalid:<criterion>` | adequately covered but fails `live`, `triage` or `capability` |
+
+The criteria and first-failing reason come from `benchmark.routing.model_validity`; the pass
+rates, Wilson intervals and mean costs from `benchmark.routing.model_universe`. The catalogue is
+derived (regenerated on every report run, never hand-edited); the
+[model relevance figure](routing.md#fig-model-relevance) and
+[model validity figure](routing.md#fig-model-validity) draw the same census.
+
 ### Escalation evaluation
 
 The escalation detector has its own offline eval, producing its own metrics and plots
