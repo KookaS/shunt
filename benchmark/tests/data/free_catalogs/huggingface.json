@@ -1,0 +1,19 @@
+{
+  "data": [
+    {
+      "id": "moonshotai/Kimi-K3",
+      "providers": [
+        {
+          "status": "live",
+          "is_free": true,
+          "pricing": {"input": 0, "output": 0}
+        },
+        {
+          "status": "live",
+          "is_free": false,
+          "pricing": {"input": 3.0, "output": 15.0}
+        }
+      ]
+    }
+  ]
+}

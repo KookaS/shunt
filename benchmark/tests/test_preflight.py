@@ -12,7 +12,7 @@ import litellm
 import pytest
 
 from benchmark.config import CapabilityRank, RankedModel
-from benchmark.runner import infer, ladder_collect, run_matrix
+from benchmark.runner import infer, ladder_collect, lane_scheduler, run_matrix
 
 RANK: Final[CapabilityRank] = CapabilityRank(
     ordered=[RankedModel("c0", "a", 0, "measured")], evidence={}
@@ -129,3 +129,160 @@ def test_run_ladder_refuses_before_any_cell(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(ladder_collect, "_sampled_tasks", lambda: ["t1"])
 
     assert ladder_collect.run_ladder(live=True) == 2  # refused, no cells started
+
+
+# --- preflight_api_probe: the five-way classification ---------------------------------
+
+
+def _probe(monkeypatch: pytest.MonkeyPatch, exc: BaseException | None) -> infer.PreflightOutcome:
+    _stub_target(monkeypatch)
+    _stub_completion(monkeypatch, raises=exc)
+    return infer.preflight_api_probe()
+
+
+def test_probe_classifies_success_as_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _probe(monkeypatch, None).kind == "ok"
+
+
+def test_probe_classifies_auth_as_unusable(monkeypatch: pytest.MonkeyPatch) -> None:
+    outcome = _probe(monkeypatch, _auth())
+    assert outcome.kind == "unusable"
+    assert outcome.disables
+
+
+def test_probe_classifies_429_as_rate_limited_and_keeps_a_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outcome = _probe(monkeypatch, _rate_limit())
+    assert outcome.kind == "rate_limited"
+    assert outcome.quarantines
+    assert outcome.usable  # a throttle is not a disable
+
+    with_header = _rate_limit()
+    with_header.headers = {"Retry-After": "45"}
+    assert _probe(monkeypatch, with_header).retry_after == 45.0
+
+
+def test_probe_classifies_a_404_as_model_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    exc = litellm.exceptions.NotFoundError(
+        message="model not found: please check the model", model="c0", llm_provider="deepseek"
+    )
+    outcome = _probe(monkeypatch, exc)
+    assert outcome.kind == "unavailable"
+    assert outcome.disables
+
+
+def test_probe_classifies_a_plan_gated_403_as_unavailable_not_a_dead_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    response = httpx.Response(403, request=httpx.Request("POST", "https://example.test/v1"))
+    exc = litellm.exceptions.PermissionDeniedError(
+        message="Model is not available on the Workers Free plan",
+        model="c0",
+        llm_provider="cloudflare",
+        response=response,
+    )
+    outcome = _probe(monkeypatch, exc)
+    assert outcome.kind == "unavailable", "a plan gate is a model gap, not invalid credentials"
+
+
+def test_probe_leaves_a_transient_blip_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    outcome = _probe(monkeypatch, Exception("502 bad gateway"))
+    assert outcome.kind == "transient"
+    assert outcome.usable
+    assert not outcome.disables and not outcome.quarantines
+
+
+# --- preflight_free_lanes: per-lane fault tolerance -----------------------------------
+
+
+def _ok(_lane: str) -> infer.PreflightOutcome:
+    return infer.PreflightOutcome("ok", "healthy")
+
+
+def test_a_dead_lane_does_not_kill_a_sibling_good_lane(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The fleet-wide abort bug: provider A's dead lane must not take provider A's good lane
+    # (or any other lane) down with it.
+    def probe(lane: str) -> infer.PreflightOutcome:
+        return infer.PreflightOutcome("unusable", "dead key") if lane == "dead" else _ok(lane)
+
+    report = run_matrix.preflight_free_lanes(True, ["dead", "good"], probe=probe)
+    assert not report.refused
+    assert report.usable == ["good"]
+    assert "dead" in report.disabled
+    assert "unusable" in report.disabled["dead"]
+
+
+def test_the_fleet_aborts_only_when_no_lane_remains_usable() -> None:
+    report = run_matrix.preflight_free_lanes(
+        True, ["a", "b"], probe=lambda _lane: infer.PreflightOutcome("unavailable", "retired")
+    )
+    assert report.refused
+    assert report.disabled.keys() == {"a", "b"}
+
+
+def test_a_429_quarantines_only_that_lane() -> None:
+    lanes = {lane: lane_scheduler.LaneLimits(rpm=10, rpd=100) for lane in ("throttled", "fine")}
+    sched = lane_scheduler.LaneScheduler(limits=lanes)
+
+    def probe(lane: str) -> infer.PreflightOutcome:
+        if lane == "throttled":
+            return infer.PreflightOutcome("rate_limited", "429", retry_after=60.0)
+        return _ok(lane)
+
+    report = run_matrix.preflight_free_lanes(
+        True, ["throttled", "fine"], scheduler=sched, probe=probe
+    )
+    assert not report.refused
+    assert set(report.usable) == {"throttled", "fine"}  # a throttle still leaves a lane
+    assert "throttled" in report.quarantined
+    assert sched.lane_state("throttled").quarantined_until is not None
+    assert sched.lane_state("fine").disabled_reason is None
+
+
+def test_a_disabled_lane_is_recorded_on_the_scheduler_for_persistence() -> None:
+    sched = lane_scheduler.LaneScheduler(limits={"dead": lane_scheduler.LaneLimits()})
+    report = run_matrix.preflight_free_lanes(
+        True,
+        ["dead"],
+        scheduler=sched,
+        probe=lambda _lane: infer.PreflightOutcome("unusable", "invalid api key"),
+    )
+    assert report.refused
+    state = sched.lane_state("dead")
+    assert state.disabled_reason is not None
+    assert "unusable" in state.disabled_reason
+    assert "invalid api key" in state.disabled_reason
+
+
+def test_a_persisted_disabled_lane_is_never_re_probed() -> None:
+    sched = lane_scheduler.LaneScheduler(
+        limits={lane: lane_scheduler.LaneLimits() for lane in ("known-dead", "good")}
+    )
+    sched.disable("known-dead", "unusable: dead key")
+    probed: list[str] = []
+
+    def probe(lane: str) -> infer.PreflightOutcome:
+        probed.append(lane)
+        return _ok(lane)
+
+    report = run_matrix.preflight_free_lanes(
+        True, ["known-dead", "good"], scheduler=sched, probe=probe
+    )
+    assert probed == ["good"]  # the known-dead lane costs no call
+    assert report.usable == ["good"]
+    assert report.disabled["known-dead"] == "unusable: dead key"
+
+
+def test_a_non_live_sweep_uses_the_static_admission_without_probing() -> None:
+    probed: list[str] = []
+
+    def probe(lane: str) -> infer.PreflightOutcome:
+        probed.append(lane)
+        return _ok(lane)
+
+    report = run_matrix.preflight_free_lanes(False, ["a", "b"], probe=probe)
+    assert report.usable == ["a", "b"]
+    assert probed == []

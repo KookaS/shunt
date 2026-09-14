@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Final
 from benchmark import plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
 from benchmark.routing._live_pool import packaged_live_pool, packaged_rank_shortlist
+from benchmark.routing.model_universe import canonical_label
 from benchmark.routing.scripts import ladder_evidence
 
 if TYPE_CHECKING:
@@ -232,7 +233,8 @@ def _draw_evidence(ax: Axes, rows: list[Rung], base: str) -> None:
         ax.plot([rung.delta], [y], "o", color=rung.colour, ms=8, zorder=4)
     ax.set_yticks(list(range(len(rows))))
     ax.set_yticklabels(
-        [f"{r.target}\n{r.price_multiple:.1f}x base · n={r.n}" for r in rows], fontsize=8
+        [f"{canonical_label(r.target)}\n{r.price_multiple:.1f}x base · n={r.n}" for r in rows],
+        fontsize=8,
     )
     ax.text(
         0.0,
@@ -357,23 +359,31 @@ def _draw_jump(ax: Axes, start_y: float, end_y: float) -> None:
 
 def _annotations(rows: list[Rung], payload: dict[str, Any], shortlist: int) -> Annotations:
     """Every fact on this figure derived from the rows — no target, price or verdict retyped."""
-    visited = [r.target for r in rows if r.visited]
-    skipped = [r.target for r in rows if r.live and not r.visited]
-    not_live = [r.target for r in rows if not r.live]
+    visited = [canonical_label(r.target) for r in rows if r.visited]
+    skipped = [canonical_label(r.target) for r in rows if r.live and not r.visited]
+    not_live = [canonical_label(r.target) for r in rows if not r.live]
     helpful_skipped = [
-        r.target for r in rows if r.live and not r.visited and r.verdict == "NET-HELPFUL"
+        canonical_label(r.target)
+        for r in rows
+        if r.live and not r.visited and r.verdict == "NET-HELPFUL"
     ]
     facts = [
-        f"base {payload['base_model']} · rank_shortlist={shortlist} visits "
+        f"base {canonical_label(payload['base_model'])} · rank_shortlist={shortlist} visits "
         f"{len(visited)} of {len(skipped) + len(visited)} live targets",
-        "visited: " + ", ".join(f"{r.target} ({r.delta:+.3f})" for r in rows if r.visited),
+        "visited: "
+        + ", ".join(f"{canonical_label(r.target)} ({r.delta:+.3f})" for r in rows if r.visited),
         "skipped: "
-        + ", ".join(f"{r.target} ({r.delta:+.3f})" for r in rows if r.live and not r.visited),
+        + ", ".join(
+            f"{canonical_label(r.target)} ({r.delta:+.3f})"
+            for r in rows
+            if r.live and not r.visited
+        ),
     ]
     if not_live:
         facts.append("not live (registry only): " + ", ".join(not_live))
     notes = tuple(
-        f"{r.target} at {r.price_multiple:.1f}x base: n={r.n}, helps {r.helps}, hurts "
+        f"{canonical_label(r.target)} at {r.price_multiple:.1f}x base: n={r.n}, helps {r.helps}, "
+        f"hurts "
         f"{r.hurts}, delta {r.delta:+.4f} [{r.ci95[0]:+.4f}, {r.ci95[1]:+.4f}], exact null "
         f"[{r.null_ci95[0]:+.4f}, {r.null_ci95[1]:+.4f}], p {p_text(r.p_value)}, {r.verdict}"
         for r in rows

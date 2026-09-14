@@ -402,6 +402,50 @@ def _encode(name: str, on_front: bool) -> tuple[str, str, float, bool, int]:
     return (_PARETO, "o", 135.0, True, 5) if on_front else (_OTHER, "o", 100.0, False, 4)
 
 
+def _compact_key(ax: Axes, drawn: set[str]) -> None:
+    """A two-to-three entry class key, repeated on the sparse panels.
+
+    Panels C and E sit far from panel A's full key, and a reader comparing markers across the
+    canvas should not have to scroll back to decode a fill. This is the subset of classes the
+    figure actually carries, at a size that fits the free corner.
+    """
+    classes = {classify(n).cls for n in drawn}
+    entries: list[tuple[str, str, bool, str]] = [
+        (_PARETO, "o", True, "frontier"),
+        (_OTHER, "o", False, "dominated"),
+    ]
+    if StrategyClass.BLOCKED in classes:
+        entries.append((_BLOCKED, "s", False, "blocked"))
+    if StrategyClass.CONTROL in classes:
+        entries.append((_OTHER, "X", False, "control"))
+    if StrategyClass.BOUND in classes:
+        entries.append((_OTHER, "*", False, "bound"))
+    handles = [
+        ax.scatter(
+            [],
+            [],
+            s=45,
+            marker=marker,
+            facecolors=colour if filled else "none",
+            edgecolors=colour,
+            linewidths=0.8 if filled else 1.4,
+            label=label,
+        )
+        for colour, marker, filled, label in entries
+    ]
+    ax.legend(
+        handles=handles,
+        fontsize=5.8,
+        loc="lower right",
+        frameon=True,
+        framealpha=0.92,
+        handletextpad=0.3,
+        borderpad=0.3,
+        labelspacing=0.25,
+        ncols=2,
+    )
+
+
 def _draw_panel(
     ax: Axes,
     dim: Dimension,
@@ -409,6 +453,9 @@ def _draw_panel(
     front: dict[str, bool],
     ylim: tuple[float, float],
     tie: float | None,
+    *,
+    x_margin: float = 0.18,
+    compact_key: bool = False,
 ) -> list[str]:
     """One quality-vs-dimension plane, with that dimension's own frontier drawn on it."""
     labels: list[LabelPoint] = []
@@ -463,12 +510,17 @@ def _draw_panel(
     ax.tick_params(labelsize=7.5)
     ax.grid(color="#eeeeee", lw=0.6)
     ax.set_axisbelow(True)
-    ax.margins(x=0.18)
+    # Panels C and E are passed a wider margin: their cheapest marker sits hard against the
+    # left edge (Always-Frontier/Always-Cheap at x≈1), and a label centred on it needed room
+    # the default margin did not give, so it crowded the y-axis tick labels.
+    ax.margins(x=x_margin)
     # `margins` only REQUESTS an autoscale; the view limits stay stale until something
     # unstales them, and `transData` is not one of those things. The label ladder measures in
     # display pixels, so without this it places every name against the pre-margin transform —
     # which put one name off the panel edge and dropped it entirely.
     ax.autoscale_view()
+    if compact_key:
+        _compact_key(ax, {str(r["strategy"]) for r in rows})
     plot_frame.panel_label(ax, dim.panel)
     # `stack_labels`, not the offset search: several strategies share one pass rate here and
     # two of them are EXACTLY coincident on panel C, where every free slot is nearer some other
@@ -669,7 +721,19 @@ def render(ctx: ctxmod.RoutingContext) -> Path | None:
     tie_value, n_tied, _passes = _tie(rows)
     tie = tie_value if n_tied > 1 else None
     for ax, dim in zip(flat, DIMENSIONS, strict=False):
-        unplaced += _draw_panel(ax, dim, rows, front[dim.column], ylim, tie)
+        # The two panels whose leftmost marker crowds the axis get a wider margin and a
+        # repeated compact key; the crowded top row keeps the default so it does not shrink.
+        sparse = dim.panel.startswith(("C ", "E "))
+        unplaced += _draw_panel(
+            ax,
+            dim,
+            rows,
+            front[dim.column],
+            ylim,
+            tie,
+            x_margin=0.32 if sparse else 0.18,
+            compact_key=sparse,
+        )
     edge = _tie_edge_label(rows)
     if edge is not None and tie is not None:
         # THE RULE IS DATA, ITS LABEL IS NOT. The dotted line stays on the plane because seven

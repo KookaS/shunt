@@ -137,14 +137,26 @@ Attempt = BilledAttempt
 def complete_scored_matrix(matrix: dict) -> tuple[dict, ImputedMatrix | None]:
     """Complete ``matrix['results']`` to equal coverage under the monotone-ladder axiom.
 
-    Returns ``(matrix, ImputedMatrix)``, or raw + ``None`` when imputation is off / no ladder.
-    Only COMPLETE challenges survive; an open-UNKNOWN-band challenge is excluded entirely.
+    Returns ``(matrix, ImputedMatrix)``, or a containment-filtered matrix + ``None`` when
+    imputation is off / no ladder (a non-registry matrix whose models are all foreign is
+    returned untouched). Only COMPLETE challenges survive; an open-UNKNOWN-band challenge is
+    excluded entirely.
     """
-    # Off, or a non-registry matrix (a synthetic test slice whose models aren't the
-    # enabled ladder — nothing to complete from), reproduces raw-coverage scoring
-    # exactly. The completed matrix drops disabled/foreign models and fills every
-    # enabled model on every task, so all strategies score one equal-coverage set.
+    # Disabled/foreign models never reach a strategy, in EITHER branch. Imputation ON
+    # rebuilds over the enabled ladder and drops the rest; imputation OFF must apply the
+    # same containment, because matrix["results"] carries a row for every measured model
+    # and a strategy (the oracle above all) can select a model that was never enabled.
+    # A non-registry matrix (a synthetic test slice whose models aren't the enabled
+    # ladder) matches no branch's predicate and is returned untouched.
     if not config.impute_config().get("enabled", False):
+        results = matrix.get("results", {})
+        enabled = set(config.enabled_models())
+        if any(m in enabled for cells in results.values() for m in cells):
+            filtered = {
+                tid: {m: cell for m, cell in cells.items() if m in enabled}
+                for tid, cells in results.items()
+            }
+            return {**matrix, "results": filtered}, None
         return matrix, None
     rank = config.capability_rank()
     ranked = {r.model for r in rank.ordered}

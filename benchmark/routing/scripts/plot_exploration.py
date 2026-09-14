@@ -33,6 +33,7 @@ from benchmark.plot_frame import Annotations, FigureSpec  # noqa: E402
 from benchmark.routing import plot_style, summary  # noqa: E402
 from benchmark.routing.exploration_replay import ReplayReport, evaluate  # noqa: E402
 from benchmark.routing.figures import context as ctxmod  # noqa: E402
+from benchmark.routing.model_universe import canonical_label  # noqa: E402
 from shunt.router.policy import load_router_policy  # noqa: E402
 
 # `python -m` sets __name__ to "__main__", which would land in the figure
@@ -252,10 +253,39 @@ def _missing_concentration_limit(report: ReplayReport) -> list[str]:
     where = "outside the dense slice" if top_model not in report.slice_.models else "in the slice"
     return [
         f"THE DROPPED BASELINE CELLS ARE NOT A RANDOM SAMPLE: all {report.baseline_missing} "
-        f"unscorable exploit-only cells are {top_model}, a model {where} — so the "
+        f"unscorable exploit-only cells are {canonical_label(top_model)}, a model {where} — so the "
         "exploit-only arm is systematically missing that model's tasks, not a random "
         "subset. The overhead is therefore reported PAIRED, over only the tasks both "
         "arms scored."
+    ]
+
+
+def _nonlive_models(report: ReplayReport) -> list[str]:
+    """Slice models outside the shipped live pool — measured, never shortlisted."""
+    # The dense slice maximizes measured cells, not inference eligibility. A model outside the
+    # packaged router.yaml pool can still be the reason the slice is dense, so this is kept as
+    # a measured MECHANISM slice — but the reader must not take it for the live pool.
+    from benchmark.routing._live_pool import packaged_live_pool  # noqa: PLC0415
+    from benchmark.routing.model_universe import resolve_identity  # noqa: PLC0415
+
+    # Canonicalise both sides: the packaged pool entries resolve to their bare weights
+    # identity (`glm-5.2`) and the corpus slice keys on that same identity, so they compare
+    # equal.
+    live = {resolve_identity(m) for m in packaged_live_pool()}
+    return [m for m in report.slice_.models if resolve_identity(m) not in live]
+
+
+def _nonlive_slice_limit(report: ReplayReport) -> list[str]:
+    """Name slice models outside the shipped live pool — measured, never shortlisted."""
+    nonlive = _nonlive_models(report)
+    if not nonlive:
+        return []
+    return [
+        f"NOT IN THE LIVE POOL: {', '.join(canonical_label(m) for m in nonlive)} of the dense "
+        "slice is a registry/"
+        "benchmark-only model, measured here for mechanism but never shortlisted by the "
+        "shipped router. The exploration overhead is between these slice models; a "
+        "valid-only companion over the inference-valid subset is not drawn."
     ]
 
 
@@ -276,9 +306,10 @@ def _frontier_limit(report: ReplayReport) -> list[str]:
     absent = [m for m, _c in sorted(all_enabled, key=lambda t: -t[1]) if m not in slice_.models]
     return [
         f"NO FRONTIER ARM IN THIS SLICE: the dense sub-grid covers only "
-        f"{', '.join(slice_.models)} — the priciest model here is "
+        f"{', '.join(canonical_label(m) for m in slice_.models)} — the priciest model here is "
         f"{plot_style.usd(top_slice)}/Mtok against {plot_style.usd(top_enabled)} across all "
-        f"enabled models ({', '.join(absent)} are absent). The exploration overhead measured "
+        f"enabled models ({', '.join(canonical_label(m) for m in absent)} are absent). The "
+        f"exploration overhead measured "
         f"here is between CHEAP models and is a LOWER BOUND on the shipped policy's, where "
         f"an exploratory pull can land on the frontier model."
     ]
@@ -289,6 +320,13 @@ def _annotations(report: ReplayReport, budget_frac: float) -> Annotations:
     slice_ = report.slice_
     base, expl = report.baseline_pass_rate, report.exploration_pass_rate
     n_paired = _paired_tasks(report)
+    # The subtitle names every slice model, but a registry-only model must not read as a
+    # shortlisted one — so each that is not in the packaged live pool carries the marker.
+    model_list = ", ".join(canonical_label(m) for m in slice_.models)
+    nonlive = _nonlive_models(report)
+    marker = (
+        f" ({', '.join(f'{canonical_label(m)}: registry-only, not shortlisted' for m in nonlive)})"
+    )
     limits: list[str] = []
     if base.lo <= expl.hi and expl.lo <= base.hi:
         limits.append(
@@ -297,11 +335,12 @@ def _annotations(report: ReplayReport, budget_frac: float) -> Annotations:
             "difference separates the arms."
         )
     limits.extend(_frontier_limit(report))
+    limits.extend(_nonlive_slice_limit(report))
     limits.extend(_missing_concentration_limit(report))
     return Annotations(
         subtitle_facts=(
             f"dense slice {len(slice_.tasks)} tasks × {len(slice_.models)} models "
-            f"({', '.join(slice_.models)}), {n_paired} scored by both arms, "
+            f"({model_list}){marker if nonlive else ''}, {n_paired} scored by both arms, "
             f"{report.n_seeds} seeds",
             f"exploration bills {report.cost_multiple:.2f}× the exploit-only run "
             f"(worst seed {report.cost_multiple_worst_seed:.2f}×)",

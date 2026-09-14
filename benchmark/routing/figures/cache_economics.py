@@ -18,6 +18,7 @@ from benchmark import config, plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
 from benchmark.routing import cache_cost, integrity, plot_style
 from benchmark.routing.figures import context as ctxmod
+from benchmark.routing.model_universe import canonical_label, resolve_identity
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -150,19 +151,33 @@ def billed_shares(results_csv: Path) -> dict[str, tuple[float, int]]:
             continue
         if estimated <= 0:
             continue
-        bucket = totals[row["model"]]
+        # Key on the LANE: a row carries the bare weights identity in `model` and the channel
+        # listing in `lane`, while the drawn model list names the identity.
+        bucket = totals[str(row.get("lane") or row["model"])]
         bucket[0] += real
         bucket[1] += estimated
         bucket[2] += 1
     return {m: (r / e, int(n)) for m, (r, e, n) in totals.items() if e > 0}
 
 
+def _drawn_models(ctx: ctxmod.RoutingContext) -> list[str]:
+    """Price-ordered inference-valid models; every enabled model when no census was passed."""
+    if ctx.validity is None:
+        return ctx.models_by_price
+    # Compare by CANONICAL identity: a model list entry may be a channel listing
+    # (`z-ai/glm-5.3:free`) while the census keys on the bare weights identity (`glm-5.3`).
+    valid = {r.model for r in ctx.validity if r.valid}
+    drawn = [m for m in ctx.models_by_price if resolve_identity(m) in valid]
+    return drawn or ctx.models_by_price
+
+
 def model_rows(ctx: ctxmod.RoutingContext) -> list[ModelCache]:
-    """Per enabled model, the measured bill next to both cost models."""
+    """Per inference-valid model, the measured bill next to both cost models."""
     billed = billed_shares(config.results_csv_path())
-    prices = cache_cost.cache_prices(ctx.models_by_price)
+    drawn = _drawn_models(ctx)
+    prices = cache_cost.cache_prices(drawn)
     rows: list[ModelCache] = []
-    for model in ctx.models_by_price:
+    for model in drawn:
         share, n = billed.get(model, (float("nan"), 0))
         price = prices[model]
         rows.append(
@@ -194,7 +209,10 @@ def _panel_extent(rows: list[ModelCache]) -> float:
 def _draw_models(ax: Axes, rows: list[ModelCache]) -> None:
     ys = list(range(len(rows)))[::-1]
     extent = _panel_extent(rows)
-    xmax = extent * (1.0 + _GUTTER)
+    # The axis runs to 1.0 so the no-discount reference line is ON the plane. Left at the
+    # drawn extent the bars filled the panel but "1.0 means the invoice matched list price"
+    # had nowhere to be seen, and a share read without its 1.0 anchor is a bare ratio.
+    xmax = max(extent * (1.0 + _GUTTER), 1.02)
     for y, row in zip(ys, rows, strict=True):
         has_bill = row.billed_share == row.billed_share
         # The hit-rate band is UNCERTAINTY, not a peer series, so it is drawn subordinate:
@@ -232,15 +250,29 @@ def _draw_models(ax: Axes, rows: list[ModelCache]) -> None:
                 color="#333333",
             )
     ax.set_yticks(ys)
-    ax.set_yticklabels([r.model for r in rows], fontsize=8)
+    ax.set_yticklabels([canonical_label(r.model) for r in rows], fontsize=8)
     ax.set_xlim(0.0, xmax)
+    # Headroom above the top row for the reference annotation: at the default autoscale the
+    # limit came to ~3.17 and the label at the bar's top edge was clipped off the panel.
+    ax.set_ylim(-0.75, len(rows) + 0.15)
+    ax.axvline(1.0, color="#9e9e9e", ls=":", lw=1.1, zorder=1)
+    ax.annotate(
+        "1.0 = no discount",
+        xy=(1.0, len(rows) - 0.35),
+        xytext=(-4, 0),
+        textcoords="offset points",
+        fontsize=7,
+        ha="right",
+        va="center",
+        color="#666666",
+    )
     ax.set_xlabel(
         "share of the list-price bill actually paid (lower = bigger discount)",
         fontsize=9,
-        labelpad=18,
     )
     ax.barh([], [], color=_BILLED, label="measured: real_cost / estimated_cost")
     ax.plot([], [], "D", color=_REGISTRY, ms=6, label="registry cache price at the measured mix")
+    ax.plot([], [], color="#9e9e9e", ls=":", lw=1.1, label="list price (no discount)")
     ax.plot(
         [],
         [],
@@ -254,12 +286,16 @@ def _draw_models(ax: Axes, rows: list[ModelCache]) -> None:
     )
     # Below the axes, not inside it. At `center right` the frame sat on top of the gpt-5-mini
     # and kimi-k2.5 markers — every point in this panel is data, so there is no free interior.
+    # The axis TITLE stays closest to the axis and the key sits below it, the conventional
+    # order; the old `labelpad=18` dropped the title past the key and reversed the two.
     ax.legend(
         fontsize=6.5,
         loc="upper center",
-        bbox_to_anchor=(0.5, -0.055),
+        bbox_to_anchor=(0.5, -0.13),
         ncol=3,
         frameon=False,
+        columnspacing=1.0,
+        handletextpad=0.5,
     )
     ax.grid(axis="x", color="#eeeeee", lw=0.6)
     ax.set_axisbelow(True)
@@ -365,8 +401,8 @@ def _annotations(rows: list[ModelCache]) -> Annotations:
         else f"mean modelled share {mean_modelled:.2f}",
     ]
     notes = [
-        f"{r.model}: billed {r.billed_share:.3f} (n={r.n_rows}), registry predicts "
-        f"{r.registry_share:.3f} [discount {r.provenance}, input share "
+        f"{canonical_label(r.model)}: billed {r.billed_share:.3f} (n={r.n_rows}), "
+        f"registry predicts {r.registry_share:.3f} [discount {r.provenance}, input share "
         f"{r.input_share:.3f} {r.share_provenance}], hit-rate band "
         f"{r.share_at_hit_ceiling:.3f}–{r.share_at_hit_floor:.3f}"
         for r in rows

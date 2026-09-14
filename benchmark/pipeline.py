@@ -582,6 +582,7 @@ _ROUTING_ANALYSIS: Final[tuple[str, ...]] = (
     "benchmark.config",
     "benchmark.plot_frame",
     "benchmark.routing",
+    "benchmark.routing._live_pool",
     "benchmark.routing.cache_cost",
     "benchmark.routing.censoring",
     "benchmark.routing.context_cost",
@@ -591,15 +592,24 @@ _ROUTING_ANALYSIS: Final[tuple[str, ...]] = (
     "benchmark.routing.instrument_control",
     "benchmark.routing.integrity",  # the results.csv schema + the raw rep-0/all-rows readers
     "benchmark.routing.metrics",
+    "benchmark.routing.model_universe",  # the one canonical display name every model figure reads
+    "benchmark.routing.model_validity",  # the inference-valid predicate every model figure reads
     "benchmark.routing.plot_style",
     "benchmark.routing.repricing",  # the price sheet's only reader (naive cost axes)
     "benchmark.routing.scripts",
     "benchmark.routing.scripts.knn_nulls",
+    "benchmark.routing.scripts.ladder_evidence",
+    # `model_universe` reaches the curated identity map through `scan_free_models`, and the
+    # repricing path reaches the sheet reader; both are in the model figures' import closure,
+    # so a change to either can change a drawn model name or dollar without a data edit.
+    "benchmark.routing.scripts.refresh_price_sheet",
+    "benchmark.routing.scripts.scan_free_models",
     "benchmark.routing.selection_guard",
     "benchmark.routing.strategies",
     "benchmark.routing.strategies.knn",
     "benchmark.routing.strategies.oracle",
     "benchmark.routing.summary",
+    "benchmark.routing.triage",
     "benchmark.routing.validate",
     # The frame, the shared style helpers and the instrument adjudicator ship in the wheel;
     # benchmark/plot_frame.py, benchmark/routing/plot_style.py and benchmark/admissibility.py are
@@ -904,12 +914,16 @@ _REPORT_JOB: Final[FigureJob] = FigureJob(
         "complementarity.png",
         "cost_quality_frontier.png",
         "evidence_basis.png",
+        "invalid_models.png",
         "kill_gate.png",
         "ladder_rungs.png",
         "live_gap.png",
         "model_grid.png",
+        "model_validity.png",
         "oracle_gap.png",
         "pareto_dimensions.png",
+        "universe_coverage.png",
+        "universe_economics.png",
         # Drawn here, not by viz_knn, because it audits the SHIPPED strategies' picks.
         # viz_knn could only publish its kNN proxy's picks, which is how the report set
         # ended up quoting two different (cost, pass) pairs for one strategy name.
@@ -1008,7 +1022,7 @@ _INFERENCE_ANALYSIS: Final[tuple[str, ...]] = (
     "shunt.inspect.plot_style",
 )
 
-# The seven inference figures: the live router's own account, drawn from a seed-only store built
+# The eight inference figures: the live router's own account, drawn from a seed-only store built
 # from committed data. Its producer is benchmark-side (only the committed mode's inputs live
 # here); the drawing is shipped code. stage=FIGURES, so `--from figures` redraws it and records
 # its digest exactly as it does the standalone routing jobs.
@@ -1023,6 +1037,10 @@ _INFERENCE_FIGURES: Final[FigureJob] = FigureJob(
         "inference_policy.png",
         "inference_strata.png",
         "inference_unit_economics.png",
+        # The seed-only corpus publishes the family overview BESIDE the eight empty-state
+        # layouts; a live render publishes the eight and drops the overview. So the overview is
+        # optional and the measured eight are required.
+        "no_live_sessions.png",
     ),
     _figure_inputs(
         _ROUTING / "render_inference_figures.py",
@@ -1042,9 +1060,13 @@ _INFERENCE_FIGURES: Final[FigureJob] = FigureJob(
     # job's artifacts live.
     reports_dir=_REPO_ROOT / _INFERENCE_FIGURES_DIR,
     half="inference",
+    # A seed-only corpus publishes the family overview AND the eight measured drawings as
+    # empty-state placeholders; a live render publishes the eight and no overview. The overview
+    # is therefore the optional output, and the measured eight are required.
+    optional_outputs=("no_live_sessions.png",),
 )
 
-# The illustrative half: the same seven drawings over `demo_corpus`, a seeded resampling of 40
+# The illustrative half: the same eight drawings over `demo_corpus`, a seeded resampling of 40
 # measured live rows. It reports nothing about the router and no analysis reads it — the job
 # exists so the figures cannot outlive their generator. `demo_corpus.py` is named EXPLICITLY
 # among the inputs (it carries DEMO_SEED, so the seed is digested with it): without that row the

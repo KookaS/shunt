@@ -1,0 +1,16 @@
+# shunt-ci: probe
+# NVIDIA NIM — free developer credits over the hosted build API. Set
+# NVIDIA_NIM_API_KEY, then paste this into ~/.config/shunt/models.yaml.
+# See ../../docs/configuration.md.
+providers:
+  nvidia_nim:
+    base_url: https://integrate.api.nvidia.com/v1
+    api_key_env_var: NVIDIA_NIM_API_KEY
+    litellm_prefix: openai
+
+models:
+  nvidia-kimi-k3:
+    model_id: moonshotai/kimi-k3
+    provider: nvidia_nim
+    supports_streaming: true
+    supports_cache_control: false

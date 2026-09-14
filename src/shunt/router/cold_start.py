@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _COLD_START_MODEL = "deepseek-v4-flash"
-_DEFAULT_FALLBACK_MODELS: Final = ["zai-glm-5.2"]
+_DEFAULT_FALLBACK_MODELS: Final = ["glm-5.2"]
 
 
 class ColdStartStrategy:

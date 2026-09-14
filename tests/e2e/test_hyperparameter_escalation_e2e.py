@@ -128,7 +128,7 @@ def test_stale_window_retires_failures_outside_it(
         # 1 = jump straight past the mid-tier to the top rank (the whole point of the knob).
         pytest.param(1, -1, id="rank_shortlist=1"),
         # 3 (shipped) = walk the 3 cheapest ranks one at a time: from deepseek(0) the
-        # rank step's first target is zai-glm-5.2(1).
+        # rank step's first target is glm-5.2(1).
         pytest.param(3, 1, id="rank_shortlist=3"),
     ],
 )

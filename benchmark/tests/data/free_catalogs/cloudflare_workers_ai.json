@@ -1,0 +1,21 @@
+{
+  "success": true,
+  "result": [
+    {
+      "id": "5a8f7b1c-2d3e-4f50-9a1b-2c3d4e5f6a70",
+      "name": "@cf/openai/gpt-oss-120b",
+      "task": {"id": "text-generation", "name": "Text Generation"}
+    },
+    {
+      "id": "01bc2fb0-4bca-4598-b985-d258b4e1f3aa",
+      "name": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      "task": {"id": "text-generation", "name": "Text Generation"}
+    },
+    {
+      "id": "c0ffee00-1111-2222-3333-444455556666",
+      "name": "@cf/baai/bge-m3",
+      "task": {"id": "text-embeddings", "name": "Text Embeddings"}
+    }
+  ],
+  "result_info": {"count": 3, "page": 1, "per_page": 3, "total_count": 3}
+}

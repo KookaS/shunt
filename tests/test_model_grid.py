@@ -85,7 +85,7 @@ class TestZeroIsNotASmallNumber:
             source="a corpus",
             x_limitation="x is a list price",
         )
-        facts = grid_annotations(data, sized=2, hosted=0, local=0).subtitle_facts
+        facts = grid_annotations(data, sized=2).subtitle_facts
         assert any("1 at $0 (local) · 1 priced" in fact for fact in facts)
 
 
@@ -98,31 +98,9 @@ class TestAnnotations:
             source="s",
             x_limitation="x is a list price",
         )
-        notes = grid_annotations(data, sized=0, hosted=0, local=0).notes
+        notes = grid_annotations(data, sized=0).notes
         assert any("size UNDISCLOSED" in note for note in notes)
         assert any("fixed reference marker" in note for note in notes)
-
-    def test_an_all_empty_latency_panel_says_so_in_the_limits(self) -> None:
-        data = GridData(
-            rows=(_row(),),
-            x_label="x",
-            price_basis="b",
-            source="s",
-            x_limitation="x is a list price",
-        )
-        limits = grid_annotations(data, sized=1, hosted=0, local=0).limitations
-        assert any("Panels C and D are empty" in limit for limit in limits)
-
-    def test_latency_present_drops_the_empty_limit(self) -> None:
-        data = GridData(
-            rows=(_row(latency_s=(1.0, 2.0)),),
-            x_label="x",
-            price_basis="b",
-            source="s",
-            x_limitation="x is a list price",
-        )
-        limits = grid_annotations(data, sized=1, hosted=2, local=0).limitations
-        assert not any("Panels C and D are empty" in limit for limit in limits)
 
     def test_the_n_spread_is_stated_because_the_rows_are_unpaired(self) -> None:
         data = GridData(
@@ -132,7 +110,7 @@ class TestAnnotations:
             source="s",
             x_limitation="x is a list price",
         )
-        facts = grid_annotations(data, sized=2, hosted=0, local=0).subtitle_facts
+        facts = grid_annotations(data, sized=2).subtitle_facts
         assert any("n per model 21–198, unpaired" in fact for fact in facts)
 
 
@@ -199,7 +177,7 @@ class TestOutOfCorpusRows:
             source="s",
             x_limitation="x is a list price",
         )
-        ann = grid_annotations(data, sized=2, hosted=0, local=0)
+        ann = grid_annotations(data, sized=2)
         assert any(note.startswith("† outsider: ") and self.NOTE in note for note in ann.notes)
         # The per-row stat line carries the dagger too, so the two cannot be read as
         # two different rows.
@@ -214,7 +192,7 @@ class TestOutOfCorpusRows:
             source="s",
             x_limitation="x is a list price",
         )
-        limits = grid_annotations(data, sized=1, hosted=0, local=0).limitations
+        limits = grid_annotations(data, sized=1).limitations
         assert any("DAGGERED row (†)" in limit for limit in limits)
 
     def test_a_corpus_only_panel_says_nothing_about_daggers(self) -> None:
@@ -227,7 +205,7 @@ class TestOutOfCorpusRows:
             source="s",
             x_limitation="x is a list price",
         )
-        ann = grid_annotations(data, sized=1, hosted=0, local=0)
+        ann = grid_annotations(data, sized=1)
         assert not any("DAGGERED" in limit for limit in ann.limitations)
         assert dict(ann.counts)["external"] == 0
 
@@ -253,30 +231,32 @@ class TestBenchmarkAdapter:
         # A closed model is drawn, but never with an invented count.
         assert by_name["gpt-5-mini"].total_params is None
 
-    def test_the_source_line_names_a_cache_model_the_canvas_does_not_draw(self) -> None:
+    def test_the_source_line_delegates_excluded_models_to_the_validity_figure(self) -> None:
         # THE CAPTION MUST NOT CLAIM A SWEEP A FILTER NARROWED. The report hands this adapter
-        # a cache already scoped to `benchmark.yaml`'s enabled set, so a probe-only collection
-        # in `results.csv` never reaches the canvas. That drop is deliberate; a source line
-        # reading "the measured default-arm cells of results.csv" while it happened is not.
+        # a cache already scoped to the inference-valid set (`model_validity.filter_valid`), so
+        # a dominated, unmeasured or collection-only model never reaches the canvas. The
+        # excluded roster is drawn and explained in model_validity.png, so the source line
+        # points there rather than restating a wall of names.
         from types import SimpleNamespace
 
         from benchmark import config
+        from benchmark.routing import model_validity
         from benchmark.routing.figures import model_grid as adapter
 
-        enabled = set(config.enabled_models())
+        census = model_validity.validity_census()
+        valid = {r.model for r in census if r.valid}
         cache = config.load_results()
-        dropped = sorted({m for per_model in cache.values() for m in per_model} - enabled)
-        assert dropped, "the guard is vacuous with no unenabled model in the cache"
+        dropped = sorted({m for per_model in cache.values() for m in per_model} - valid)
+        assert dropped, "the guard is vacuous with no inference-invalid model in the cache"
         scoped = {
-            cid: {m: arms for m, arms in per_model.items() if m in enabled}
+            cid: {m: arms for m, arms in per_model.items() if m in valid}
             for cid, per_model in cache.items()
         }
-        data = adapter.build(SimpleNamespace(raw=scoped))  # type: ignore[arg-type]
+        data = adapter.build(SimpleNamespace(raw=scoped, validity=census))  # type: ignore[arg-type]
         assert data is not None
         assert {row.name for row in data.rows}.isdisjoint(dropped)
-        for name in dropped:
-            assert name in data.source
-        assert "not enabled in benchmark.yaml" in data.source
+        assert "model_validity.png" in data.source
+        assert "not enabled in benchmark.yaml" not in data.source
 
     def test_the_price_basis_names_the_measured_mix(self) -> None:
         from types import SimpleNamespace

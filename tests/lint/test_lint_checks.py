@@ -1251,3 +1251,68 @@ def test_sh014_honours_the_same_line_noqa(tmp_path: Path) -> None:
 
 def test_sh014_default_scan_of_this_repo_is_clean() -> None:
     assert _run("check_docs_links.py") == 0
+
+
+# --- SH018: an overlay row records a real list price, never $0 (HARD RULES 2 & 3) --------
+#
+# The gate is scoped to configs/free-tier/overlay.yaml ONLY; configs/free-tier/models.yaml
+# is the deliberate $0 smoke registry and must keep working. `test_..._default_..._clean`
+# proves that scope indirectly: models.yaml carries `input_cost_per_1m: 0` and would redden
+# this gate if the default target ever widened to include it.
+
+_VALID_OVERLAY = """\
+models:
+  lane-a:
+    model_id: x/y
+    provider: p
+    version: y
+    pricing:
+      input_cost_per_1m: 0.08
+      output_cost_per_1m: 0.20
+      price_source: https://models.dev/api.json
+      price_as_of: "2026-09-10"
+"""
+
+
+def _overlay_file(tmp_path: Path, body: str) -> Path:
+    f = tmp_path / "overlay.yaml"
+    f.write_text(body)
+    return f
+
+
+def test_sh018_accepts_a_precise_overlay_row(tmp_path: Path) -> None:
+    assert _run("check_free_registry_zero.py", str(_overlay_file(tmp_path, _VALID_OVERLAY))) == 0
+
+
+def test_sh018_fails_a_zero_input_price(tmp_path: Path) -> None:
+    body = _VALID_OVERLAY.replace("input_cost_per_1m: 0.08", "input_cost_per_1m: 0")
+    assert _run("check_free_registry_zero.py", str(_overlay_file(tmp_path, body))) == 1
+
+
+def test_sh018_fails_a_zero_output_price(tmp_path: Path) -> None:
+    body = _VALID_OVERLAY.replace("output_cost_per_1m: 0.20", "output_cost_per_1m: 0.0")
+    assert _run("check_free_registry_zero.py", str(_overlay_file(tmp_path, body))) == 1
+
+
+def test_sh018_fails_any_cache_read_rate(tmp_path: Path) -> None:
+    body = _VALID_OVERLAY.replace(
+        "      output_cost_per_1m: 0.20\n",
+        "      output_cost_per_1m: 0.20\n      cache_read_cost_per_1m: 0.02\n",
+    )
+    assert _run("check_free_registry_zero.py", str(_overlay_file(tmp_path, body))) == 1
+
+
+def test_sh018_fails_a_missing_price_source(tmp_path: Path) -> None:
+    body = _VALID_OVERLAY.replace("      price_source: https://models.dev/api.json\n", "")
+    assert _run("check_free_registry_zero.py", str(_overlay_file(tmp_path, body))) == 1
+
+
+def test_sh018_fails_a_missing_price_as_of(tmp_path: Path) -> None:
+    body = _VALID_OVERLAY.replace('      price_as_of: "2026-09-10"\n', "")
+    assert _run("check_free_registry_zero.py", str(_overlay_file(tmp_path, body))) == 1
+
+
+def test_sh018_default_scan_of_this_repo_is_clean() -> None:
+    # The default target is the real overlay; if it ever widened to models.yaml (which is
+    # $0 by design), this would fail — that is the scope guarantee.
+    assert _run("check_free_registry_zero.py") == 0

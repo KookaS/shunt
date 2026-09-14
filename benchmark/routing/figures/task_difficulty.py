@@ -16,6 +16,7 @@ from benchmark import plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
 from benchmark.routing import plot_style
 from benchmark.routing.figures import context as ctxmod
+from benchmark.routing.model_universe import canonical_label
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,9 +63,11 @@ SPEC = FigureSpec(
         "The right panel is NOT circular for the rule plotted — kNN decides before any "
         "outcome for this task exists — but it is not independent either: the neighbours it "
         "reads and the solving-model count it is plotted against come from one matrix.",
-        "'No enabled model solved it' counts the six models at their DEFAULT arms. "
-        "complementarity.png counts every sampled (model, arm) column instead, so its "
-        "solved-by-none figure is smaller — a different denominator, not a disagreement.",
+        "'No enabled model solved it' counts the inference-VALID benchmark models at their "
+        "DEFAULT arms (benchmark-only and collection-only models are excluded, because the live "
+        "router cannot pick them). complementarity.png counts every sampled (model, arm) column "
+        "instead, so its solved-by-none figure is smaller — a different denominator, not a "
+        "disagreement.",
     ),
 )
 
@@ -131,6 +134,15 @@ def _draw_bands(ax: Axes, counts: dict[int, int], unsolved: int) -> None:
     # sixteenth of it.
     ax.set_ylim(0, max(values) * 1.12)
     ax.set_ylabel("tasks", fontsize=9)
+    ax.legend(
+        handles=[
+            Patch(color=_BAND, label="solved by an enabled model"),
+            Patch(color=_UNSOLVED, label="no enabled model solved it"),
+        ],
+        fontsize=7,
+        loc="upper right",
+        frameon=False,
+    )
     ax.grid(axis="y", color="#eeeeee", lw=0.6)
     ax.set_axisbelow(True)
     plot_frame.panel_label(ax, "A · cheapest band that solves the task")
@@ -163,7 +175,7 @@ def _draw_allocation(
     # Patch handles, not empty `bar` calls: an empty bar draws nothing, so matplotlib
     # gave every legend entry the default colour and the key contradicted the stacks.
     handles = [
-        Patch(color=colours.get(model, "#9E9E9E"), label=model)
+        Patch(color=colours.get(model, "#9E9E9E"), label=canonical_label(model))
         for model in models_by_price
         if any(model in counter for counter in alloc.values())
     ]
@@ -192,8 +204,8 @@ def _annotations(
         e_top = alloc[easiest].most_common(1)
         if h_top and e_top:
             spread = (
-                f"hardest bucket ({hardest} solvers) mostly {h_top[0][0]}, easiest "
-                f"({easiest} solvers) mostly {e_top[0][0]}"
+                f"hardest bucket ({hardest} solvers) mostly {canonical_label(h_top[0][0])}, "
+                f"easiest ({easiest} solvers) mostly {canonical_label(e_top[0][0])}"
             )
     facts = [
         f"{total} scored tasks ({unscored} incomplete challenges excluded); "
@@ -205,7 +217,10 @@ def _annotations(
     return Annotations(
         subtitle_facts=tuple(facts),
         notes=tuple(f"band {b}: {n} tasks" for b, n in sorted(counts.items()))
-        + tuple(f"{n} solvers: {dict(sorted(c.items()))}" for n, c in sorted(alloc.items())),
+        + tuple(
+            f"{n} solvers: { {canonical_label(k): v for k, v in sorted(c.items())} }"
+            for n, c in sorted(alloc.items())
+        ),
         counts=(("tasks", total), ("unsolved", unsolved), ("excluded", unscored)),
     )
 
@@ -215,16 +230,19 @@ def render(
 ) -> Path | None:
     """Draw task_difficulty.png from the band assignment and the router's picks."""
     results = ctx.completed.get("results", {})
-    counts, unsolved, unscored = band_histogram(results, ctx.tasks, bands, ctx.models_by_price)
+    # INFERENCE-FACING: bands, allocation and the solved-by-none count run over the
+    # inference-valid pool only. A benchmark-only model is not one the live router can pick.
+    models = ctx.inference_valid_models
+    counts, unsolved, unscored = band_histogram(results, ctx.tasks, bands, models)
     if not counts:
         return None
-    alloc = allocation_by_difficulty(chosen, results, ctx.models_by_price)
-    colours = plot_style.model_color_map(ctx.models_by_price)
+    alloc = allocation_by_difficulty(chosen, results, models)
+    colours = plot_style.model_color_map(models)
     size = plot_frame.WIDE
     fig, axes = plot_frame.subplots(size, 1, 2, width_ratios=(0.9, 1.15))
     _draw_bands(axes[0], counts, unsolved)
     if alloc:
-        _draw_allocation(axes[1], alloc, ctx.models_by_price, colours)
+        _draw_allocation(axes[1], alloc, models, colours)
     return plot_frame.save(
         fig,
         ctx.out_dir / "task_difficulty.png",

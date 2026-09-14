@@ -680,7 +680,7 @@ async def test_retry_then_fallback(router: ProxyRouter, session: Session) -> Non
 
         # deepseek-v4-flash is retried 2x, then the next model in the LIVE pool serves the
         # fallback response. That neighbour is deepseek-v4-pro since 2026-09-05, when pro
-        # joined router.yaml and priced in between flash and zai-glm-5.2 — `fallback_chain`
+        # joined router.yaml and priced in between flash and glm-5.2 — `fallback_chain`
         # walks rank neighbours outward, so inserting a model changes who answers here. The
         # pool is restricted the way the server restricts it, so only a router.yaml model
         # can be reached.

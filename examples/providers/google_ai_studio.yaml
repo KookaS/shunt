@@ -1,0 +1,16 @@
+# shunt-ci: probe
+# Google AI Studio — Gemini through the OpenAI-compatible surface. Set
+# GOOGLE_AI_STUDIO_API_KEY, then paste this into ~/.config/shunt/models.yaml.
+# See ../../docs/configuration.md.
+providers:
+  google_ai_studio:
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    api_key_env_var: GOOGLE_AI_STUDIO_API_KEY
+    litellm_prefix: openai
+
+models:
+  google-gemini-flash-latest:
+    model_id: gemini-flash-latest
+    provider: google_ai_studio
+    supports_streaming: true
+    supports_cache_control: false

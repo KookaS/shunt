@@ -80,20 +80,30 @@ class Finding:
     detail: str
 
 
+def _channel(row: dict[str, str]) -> str:
+    """The row's CHANNEL identity: ``lane``, or ``model`` for a pre-migration row.
+
+    ``model`` is now the bare canonical weights identity, so keying or registry-looking-up on
+    it would merge two channels that serve the same weights (a direct id and its ``-explabs``
+    mirror). ``lane`` is the channel, which is what the cache key and the registry lookup want.
+    """
+    return str(row.get("lane") or row.get("model") or "")
+
+
 def _key(row: dict[str, str], default_arms: dict[str, str] | None = None) -> str:
-    """Canonical cache key (challenge:model:arm), resolving the ``default`` alias to the
-    model's real default_arm id so the two spellings name the same cell (dup-evasion).
+    """Canonical cache key (challenge:lane:arm), resolving the ``default`` alias to the
+    lane's real default_arm id so the two spellings name the same cell (dup-evasion).
     """
     cid = row.get("challenge_id", "?")
-    model = row.get("model", "?")
+    channel = _channel(row) or "?"
     reasoning = row.get("reasoning") or integrity.DEFAULT_REASONING
     if reasoning == integrity.DEFAULT_REASONING and default_arms:
-        reasoning = default_arms.get(model, integrity.DEFAULT_REASONING)
+        reasoning = default_arms.get(channel, integrity.DEFAULT_REASONING)
     # The replicate index is PART of the key. A replicate is a second legitimate observation
     # of the same cell, so without it every replicate would land in one group and
     # `check_duplicate_keys` would report the file as fraudulent. Normalised through
     # `integrity.rep_index`, so a legacy blank and a freshly written "0" are ONE key, not two.
-    return f"{cid}:{model}:{reasoning}:{integrity.rep_index(row)}"
+    return f"{cid}:{channel}:{reasoning}:{integrity.rep_index(row)}"
 
 
 def _as_int(value: str) -> int | None:
@@ -130,14 +140,26 @@ def check_schema(row: dict[str, str]) -> list[Finding]:
     return out
 
 
+def _is_collection_only(model: str) -> bool:
+    """True for a collection-only free id: an ``-explabs`` catalog slug or an overlay row.
+
+    Collection-only ids are collectable through ``--extra-models`` and are never enabled, so a
+    results row naming one is a real measurement, not an unregistered-model fabrication. The
+    shipped registry does not carry them, so the registration check must admit them here.
+    """
+    return model.endswith(config.COLLECTION_SUFFIX) or model in config.free_registry_ids()
+
+
 def check_registered(row: dict[str, str], specs: dict[str, str], resolved: dict) -> list[Finding]:
-    """Challenge is a materialised spec; model is registered; reasoning is a known arm."""
+    """Challenge is a materialised spec; model is registered (or collection-only); arm known."""
     out: list[Finding] = []
-    cid, model = row.get("challenge_id", ""), row.get("model", "")
+    cid, model = row.get("challenge_id", ""), _channel(row)
     if cid not in specs:
         out.append(Finding(ERROR, "registered.unknown_challenge", _key(row), f"{cid!r}"))
     mc = resolved.get(model)
     if mc is None:
+        if _is_collection_only(model):
+            return out
         out.append(Finding(ERROR, "registered.unknown_model", _key(row), f"{model!r}"))
         return out
     reasoning = row.get("reasoning") or integrity.DEFAULT_REASONING
@@ -188,7 +210,7 @@ def _check_model_version_anchor(row: dict[str, str], versions: dict[str, str]) -
     # stored version that differs is a stale (re-run-signal) or fabricated row. Mismatch
     # is checked only when a current version is known — unregistered models are already
     # flagged by check_registered.
-    model = row.get("model", "")
+    model = _channel(row)
     if model not in versions:
         return []  # unregistered model — check_registered owns it; don't double-flag
     stored = row.get("model_version", "")
@@ -202,7 +224,7 @@ def _check_model_version_anchor(row: dict[str, str], versions: dict[str, str]) -
 
 def _check_arm_anchor(row: dict[str, str], resolved: dict) -> list[Finding]:
     """An EXPLICIT (non-default) reasoning arm must carry a matching arm_hash."""
-    model = row.get("model", "")
+    model = _channel(row)
     mc = resolved.get(model)
     reasoning = row.get("reasoning") or integrity.DEFAULT_REASONING
     if mc is None or mc.reasoning is None or reasoning == integrity.DEFAULT_REASONING:

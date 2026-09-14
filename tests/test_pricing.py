@@ -30,6 +30,49 @@ _UNPRICED_REGISTRY: Final = {
     "models": {"cheapo": {"model_id": "p/cheapo", "provider": "p"}},
 }
 
+# COLLECTION-ONLY (2026-09-06, free-tier probe): the nine `*-explabs` ids registered for the
+# Experiential Labs $0 promotional channel. They must be priced (so `--extra-models` can
+# collect through them) but are deliberately NOT enabled in benchmark.yaml, NOT in router.yaml's
+# live pool, and never scored — the collection/analysis machinery excludes them by construction
+# (`run_matrix._extra_models` unions them at the run site only). Their list price is an
+# owner-directed recovered-list-price row that DISARMS the corpus accounting checks only while
+# a dated free window holds (see benchmark/routing/validate.py), and the channel reports no
+# cache-read rate and no reasoning bracket. The pricing censuses in
+# this file therefore exempt this documented set (same mechanism as the JUDGE/PROBE-only rows
+# below): a $0 promo row must never fail a "real quote" census that exists to keep genuinely
+# priced rows honest.
+COLLECTION_ONLY_MODELS: Final = frozenset(
+    {
+        "gpt-6-astra-explabs",
+        "claude-fable-5.1-explabs",
+        "gpt-5.6-luna-explabs",
+        "qwen3.8-27b-explabs",
+        "deepseek-v4-flash-explabs",
+        "kimi-k3-explabs",
+        "deepseek-v4-pro-explabs",
+        "glm-5.3-explabs",
+        "glm-5.3-flash-explabs",
+    }
+)
+
+# AVAILABLE-ONLY (2026-09-13, W1): the six bare-id models promoted into the shipped registry
+# under provider `explabs`. They are registered and priced so a user MAY select one by copying
+# it into router.yaml, but they are deliberately NOT in router.yaml's live pool and NOT in
+# benchmark.yaml's enabled set, so they never route by default and never score. They carry no
+# `cache_read_cost_per_1m` (the gateway shares a cache namespace across tenants — the free-overlay
+# HARD RULE 3), no `size` and no `reasoning` bracket: those are earned by a benchmark measurement,
+# not asserted. The pricing censuses below exempt this documented set exactly as they exempt the
+# JUDGE/PROBE-only rows.
+AVAILABLE_ONLY_MODELS: Final = frozenset(
+    {
+        "gpt-6-astra",
+        "claude-fable-5.1",
+        "gpt-5.6-luna",
+        "qwen3.8-27b",
+        "glm-5.3",
+    }
+)
+
 
 def _models() -> dict:
     """The priced models, as the benchmark sees them."""
@@ -57,6 +100,8 @@ class TestRequiredFields:
 
     def test_canonical_prices_are_positive_numbers(self):
         for name, info in _models().items():
+            if name in COLLECTION_ONLY_MODELS:
+                continue
             for key in ("input_cost_per_1m", "output_cost_per_1m"):
                 val = info[key]
                 assert isinstance(val, (int, float)) and val > 0, f"{name}.{key}={val!r}"
@@ -176,7 +221,7 @@ class TestRouteDerivation:
 
     EXPECTED = {
         "deepseek-v4-flash": "deepseek/deepseek-v4-flash",
-        "zai-glm-5.2": "openai/fireworks/glm-5.2",
+        "glm-5.2": "openai/fireworks/glm-5.2",
         "qwen3.7-plus": "openai/alibaba/qwen3.7-plus",
         "gpt-5-mini": "openai/openai/gpt-5-mini",
         "kimi-k2.5": "openai/moonshot/kimi-k2.5",
@@ -200,6 +245,8 @@ class TestCachingGate:
 
     def test_every_registry_model_has_cache_read_pricing(self):
         for name in _models():
+            if name in COLLECTION_ONLY_MODELS or name in AVAILABLE_ONLY_MODELS:
+                continue
             assert config.model_has_cache(name), f"{name} has no cache-read discount"
 
     def test_all_enabled_models_pass_the_caching_gate(self):
@@ -281,7 +328,7 @@ class TestEnabledModelsList:
 
     def test_price_sort_is_preserved(self, monkeypatch):
         # enabled_models() sorts by total list price ascending (name tie-break).
-        self._load(monkeypatch, ["kimi-k3", "deepseek-v4-flash", "gpt-5-mini", "zai-glm-5.2"])
+        self._load(monkeypatch, ["kimi-k3", "deepseek-v4-flash", "gpt-5-mini", "glm-5.2"])
         ordered = config.enabled_models()
         costs = [config.cost_per_1m(m) for m in ordered]
         assert costs == sorted(costs)
@@ -310,12 +357,17 @@ class TestReasoningConfigsAccessor:
     # bracket now would silently re-alias those measured rows to an arm they never ran
     # (`config._alias_legacy_reasoning`), so the honest state is no bracket at all. Like
     # JUDGE_ONLY_MODELS these are absent from router.yaml and benchmark.yaml's model lists.
-    PROBE_ONLY_MODELS: Final = frozenset({"zai-glm-5.3-flash"})
+    PROBE_ONLY_MODELS: Final = frozenset({"glm-5.3-flash"})
 
     def test_every_registry_model_has_a_reasoning_block(self):
         cfgs = config.reasoning_configs()
         for name in _models():
-            if name in self.JUDGE_ONLY_MODELS or name in self.PROBE_ONLY_MODELS:
+            if (
+                name in COLLECTION_ONLY_MODELS
+                or name in AVAILABLE_ONLY_MODELS
+                or name in self.JUDGE_ONLY_MODELS
+                or name in self.PROBE_ONLY_MODELS
+            ):
                 continue
             assert cfgs.get(name) is not None, f"{name} missing reasoning block"
 

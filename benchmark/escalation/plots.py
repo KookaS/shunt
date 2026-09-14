@@ -19,12 +19,13 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 
 import numpy as np
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Patch, Rectangle
 from matplotlib.transforms import Bbox
 
 from benchmark.escalation import metrics, policy_eval
 from benchmark.escalation.policies import ARM_ESCALATE
 from benchmark.plot_frame import MUTED, Annotations, FigureSpec, panel_label
+from benchmark.routing import model_universe
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -67,7 +68,7 @@ _DETECTS_BOX: Final[tuple[str, str]] = ("DETECTS (per-step, eval-only)", "OK")
 _VALUE_CLAIM: Final[str] = "VALUE (session cadence, observational)"
 _CAUSAL_BOX: Final[tuple[str, str]] = (
     "CAUSAL VALUE AT THE TRIGGER",
-    "not identified: P(escalate)=0",
+    "not identified: no logged escalation (P(escalate)=0)",
 )
 # What the VALUE box says when the corpus carries no session-cadence contrast at all. Not "OK":
 # an unmeasured claim and a supported one must never render the same.
@@ -86,7 +87,7 @@ def session_value_verdict(sc: SessionCadenceReport | None) -> str:
         return "interval spans zero"
     unbeaten = _unbeaten_baselines(sc)
     if unbeaten:
-        return "not beaten: " + ", ".join(c.name.replace("_", "-") for c in unbeaten)
+        return "not beaten: " + ", ".join(_SHORT_ARM.get(c.name, c.name) for c in unbeaten)
     return "OK"
 
 
@@ -354,8 +355,9 @@ OPERATING_POINT_SPEC = FigureSpec(
         "the policy escalated and among those it left alone — for BOTH counting modes. The left "
         "pair is the configuration the product actually ships, which fires on essentially every "
         "run: its escalated bar sits on the dashed base rate and its not-escalated arm holds so "
-        "few runs that no rate can be read off it, so it is drawn as a hatched 'undefined' box "
-        "rather than as a measured 0.000. The right pair is the same rule with the reproduction "
+        "few runs that no rate can be read off it, so it is drawn as a short hatched baseline "
+        "placeholder rather than as a measured 0.000. The right pair is the same rule with the "
+        "reproduction "
         "phase excluded. Intervals are the central 95% of the same challenge-bootstrap resamples, "
         "so the two arms of a pair are paired draw-for-draw. Right: the CANONICAL (edit-gated) "
         "cell's AUROC against TWO nulls — the family-wise max-over-cells challenge-block null "
@@ -527,15 +529,17 @@ def _draw_arms(ax: Axes, as_shipped: PolicyCell | None, canonical: PolicyCell) -
 
 
 def _draw_undefined_arm(ax: Axes, position: float, n: int) -> None:
-    """An arm below the reporting floor: a hatched box over the whole range, never a bar."""
-    # A one-row arm rendered 0/1 = 0.000 as a full-looking measurement on the committed figure.
-    # Height 1.0 spans every value the rate could take, which is exactly what "undefined" means
-    # here, and the hatch plus the label make it unreadable as a point estimate.
+    """An arm below the reporting floor: a baseline placeholder, never a full-height bar."""
+    # A full-height box read as a measured 100%: it spanned every value the rate could take,
+    # which is the opposite of "no rate is read off this arm". The placeholder is a short
+    # hatched stub on the baseline, with the label lifted clear, so the eye sees an absence
+    # rather than a bar.
+    height = 0.035
     ax.add_patch(
         Rectangle(
             (position - 0.275, 0.0),
             0.55,
-            1.0,
+            height,
             facecolor="none",
             edgecolor=_UNDEFINED,
             hatch="///",
@@ -544,15 +548,13 @@ def _draw_undefined_arm(ax: Axes, position: float, n: int) -> None:
     )
     ax.text(
         position,
-        0.5,
+        height + 0.03,
         f"undefined\n(n={n})",
         ha="center",
-        va="center",
+        va="bottom",
         fontsize=9,
         color=_UNDEFINED,
         fontweight="bold",
-        # The label sits ON the hatch, which is the point — but hatch strokes through 9pt text
-        # make it unreadable, so it gets its own opaque backing.
         bbox={"facecolor": "white", "edgecolor": "none", "pad": 2.0},
     )
 
@@ -702,12 +704,12 @@ def policy_sweep(
     header = [
         "n",
         "stale",
-        "A fired",
+        "A (as-shipped) fired",
         "A P(fail)",
         "A 95% CI",
         "A AUROC",
         "A len-only",
-        "B fired",
+        "B (edit-gated) fired",
         "B P(fail)",
         "B 95% CI",
         "B AUROC",
@@ -823,7 +825,7 @@ def _sweep_limits(
 
 
 SESSION_VALUE_SPEC = FigureSpec(
-    title="Escalating to the top-two models beats a cheap retry, but not always-frontier or random",
+    title="Escalating beats a cheap retry, but not Always-Frontier or Random-Escalate",
     reading=(
         "Read on EVERY trajectory in the corpus, not the per-step-stamped subset the other "
         "escalation figures score: a session outcome comes off the run header, so a run without "
@@ -893,7 +895,10 @@ def session_value(sc: SessionCadenceReport, axes: Sequence[Axes]) -> Annotations
             f"lift {lift} · paired difference {sc.diff_estimate:+.3f} "
             f"[{sc.diff_ci[0]:+.3f}, {sc.diff_ci[1]:+.3f}]",
             *(
-                ("baselines not beaten: " + ", ".join(c.name for c in _unbeaten_baselines(sc)),)
+                (
+                    "baselines not beaten: "
+                    + ", ".join(_SHORT_ARM.get(c.name, c.name) for c in _unbeaten_baselines(sc)),
+                )
                 if _unbeaten_baselines(sc)
                 else ()
             ),
@@ -941,7 +946,7 @@ def _arm_fact(sc: SessionCadenceReport) -> tuple[str, ...]:
         return (f"policy under test: {sc.policy}",)
     if not sc.frontier_models:
         return ()
-    named = ", ".join(sc.frontier_models)
+    named = ", ".join(canonical_model_name(m) for m in sc.frontier_models)
     return (f"escalate arm = the top-{len(sc.frontier_models)} models by price ({named})",)
 
 
@@ -951,7 +956,7 @@ def _arm_terms(sc: SessionCadenceReport) -> tuple[tuple[str, str], ...]:
     # names itself in the bar, so the vocabulary definition does not apply.
     if sc.policy != ARM_ESCALATE or not sc.frontier_models:
         return ()
-    named = ", ".join(sc.frontier_models)
+    named = ", ".join(canonical_model_name(m) for m in sc.frontier_models)
     return (
         (
             "frontier",
@@ -969,22 +974,35 @@ def _ladder_notes(sc: SessionCadenceReport) -> tuple[str, ...]:
     other = [m for m in sc.ladder_visits if m not in sc.frontier_models]
     sentence = (
         f"the shipped ladder (rank_shortlist={sc.rank_shortlist}) walks "
-        f"{' -> '.join(sc.ladder_visits)} over the shipped pool's price order: of the "
-        f"escalate arm it reaches {', '.join(reached) or 'nothing'}"
+        f"{' -> '.join(canonical_model_name(m) for m in sc.ladder_visits)} over the shipped "
+        f"pool's price order: of the escalate arm it reaches "
+        f"{', '.join(canonical_model_name(m) for m in reached) or 'nothing'}"
     )
     if never:
-        sentence += f", and never reaches {', '.join(never)}"
+        sentence += f", and never reaches {', '.join(canonical_model_name(m) for m in never)}"
     if other and reached and reached[0] != sc.ladder_visits[0]:
-        sentence += f", stepping through {', '.join(other)} first"
+        sentence += f", stepping through {', '.join(canonical_model_name(m) for m in other)} first"
     return (sentence,)
 
 
+# The canonical arm names, shared with the routing half's vocabulary. Spelling them the same
+# way on every canvas and in every note is what stops "frontier" on one page from being read as
+# the routing half's single-most-expensive-model `Always-Frontier` on another.
 _SHORT_ARM: Final[dict[str, str]] = {
     "escalate": "escalate",
-    "cheap_retry": "retry",
-    "always_frontier": "frontier",
-    "always_cheap": "cheap",
-    "random_escalate": "random",
+    "cheap_retry": "Cheap-Retry",
+    "always_frontier": "Always-Frontier",
+    "always_cheap": "Always-Cheap",
+    "random_escalate": "Random-Escalate",
+}
+
+# The Panel A x-tick spelling of the same canonical names, broken at the hyphen so four
+# multi-word labels do not collide on one line. The drawn string stays canonical; only the
+# line break differs, and only on this panel.
+_ARM_TICK: Final[dict[str, str]] = {
+    "always_frontier": "Always-\nFrontier",
+    "always_cheap": "Always-\nCheap",
+    "random_escalate": "Random-\nEscalate",
 }
 
 
@@ -1035,7 +1053,7 @@ def _session_caveat(sc: SessionCadenceReport) -> str:
         return "The paired difference's 95% interval spans zero — no measured advantage here."
     unbeaten = _unbeaten_baselines(sc)
     if unbeaten:
-        named = ", ".join(c.name.replace("_", "-") for c in unbeaten)
+        named = ", ".join(_SHORT_ARM.get(c.name, c.name) for c in unbeaten)
         return (
             f"Observational, and the {_headline_noun(sc)} arm does not beat {named} — read panel C."
         )
@@ -1056,8 +1074,11 @@ def _draw_session_bars(ax: Axes, sc: SessionCadenceReport) -> None:
             sc.n_escalated,
             _OBSERVED,
         ),
-        ("cheap\nretry", sc.retry_rate, sc.retry_ci, sc.n_retried, _SHIPPED),
-        *((c.name.replace("_", "\n"), c.rate, c.ci, c.n, _NULL_CENTRE) for c in sc.comparisons),
+        ("Cheap-\nRetry", sc.retry_rate, sc.retry_ci, sc.n_retried, _SHIPPED),
+        *(
+            (_ARM_TICK.get(c.name, _SHORT_ARM.get(c.name, c.name)), c.rate, c.ci, c.n, _NULL_CENTRE)
+            for c in sc.comparisons
+        ),
     ]
     heights = [b[1] for b in bars]
     errors = [
@@ -1084,16 +1105,38 @@ def _draw_session_bars(ax: Axes, sc: SessionCadenceReport) -> None:
             ha="center",
             fontsize=9.5,
         )
-    ax.axhline(
-        sc.cheap_base_rate,
-        linestyle="--",
+    ax.axhline(sc.cheap_base_rate, linestyle="--", color=_NULL_CENTRE)
+    # In the EMPTY gap between the escalate and Cheap-Retry bars, split onto two lines so the
+    # string stays short enough to END BEFORE the tall Always-Frontier bar at x=2. The previous
+    # one-line label was centred with `get_yaxis_transform` (x in AXES fraction, not data as its
+    # comment claimed), which parked the tail of the string behind that bar's fill and whisker
+    # and hid the number the rule exists to name. `transData` keeps x in data coordinates, so
+    # x=0.9 is the middle of the free gap.
+    ax.text(
+        0.8,
+        sc.cheap_base_rate + 0.008,
+        f"cheap unconditional\nbase {sc.cheap_base_rate:.3f}",
+        ha="center",
+        va="bottom",
+        fontsize=7,
         color=_NULL_CENTRE,
-        label=f"cheap unconditional base {sc.cheap_base_rate:.3f}",
     )
     ax.set_ylabel("P(task resolved by the next session)")
     ax.set_ylim(0, 1)
     ax.tick_params(labelsize=_TICK_PT)
-    ax.legend(fontsize=_LEGEND_PT, loc="upper right")
+    # A TWO-item colour key: every bar is one of two things — the escalate arm under test, or a
+    # comparator it has to beat. The red/grey split is that distinction, and it is keyed here
+    # so a reader does not have to infer it from bar order.
+    ax.legend(
+        handles=[
+            Patch(facecolor=_OBSERVED, label="escalate arm under test"),
+            Patch(facecolor=_SHIPPED, label="comparator arm"),
+        ],
+        fontsize=_LEGEND_PT,
+        loc="upper right",
+        frameon=True,
+        framealpha=0.9,
+    )
     panel_label(ax, "A · resolution by next-session choice")
 
 
@@ -1151,7 +1194,10 @@ def _draw_baseline_differences(ax: Axes, sc: SessionCadenceReport) -> None:
     )
     ax.axvline(0.0, color=_NULL_CENTRE, linestyle="--", linewidth=1.2)
     ax.set_yticks(list(positions))
-    ax.set_yticklabels([f"{c.name.replace('_', ' ')}\nn={c.n}" for c in rows], fontsize=_TICK_PT)
+    ax.set_yticklabels(
+        [f"{_SHORT_ARM.get(c.name, c.name).replace(' ', '')}\nn={c.n}" for c in rows],
+        fontsize=_TICK_PT,
+    )
     for position, contrast in enumerate(rows):
         ax.text(
             contrast.diff_estimate,
@@ -1168,6 +1214,83 @@ def _draw_baseline_differences(ax: Axes, sc: SessionCadenceReport) -> None:
 
 
 # ------------------------------------------------------------- 5. corpus_and_coverage
+
+
+# The escalation trajectories are keyed on a CORPUS LANE ID (provider-prefixed listing), not on
+# a `model_version`, so the visible label has to be canonicalised as a string. These are the
+def canonical_model_name(label: str) -> str:
+    """Canonical display slug for an escalation lane label.
+
+    The ONE canonicaliser lives in `benchmark.routing.model_universe`: it resolves the lane to
+    the registry `version` identity through the committed corpora and `model_identity.yaml`,
+    then renders the display slug. The escalation half no longer keeps its own prefix table, so
+    a lane slug cannot disagree with the identity the routing half draws.
+    """
+    return model_universe.display_name(model_universe.resolve_identity(label))
+
+
+def canonical_display_labels(models: Sequence[str]) -> dict[str, str]:
+    """Canonical weights slug per lane — provider channel and promo marker stripped.
+
+    A slug is the model's IDENTITY, so two channels serving the same weights map to the same
+    label. The lanes are merged (not tagged) before drawing, so a repeated slug never
+    overprints two bars and no channel fragment (`-explabs`, `-free`) survives as a label.
+    """
+    return {model: canonical_model_name(model) for model in models}
+
+
+def _inference_valid_subjects(
+    coverages: Sequence[ModelCoverage], arms: Sequence[ModelArm]
+) -> tuple[list[ModelCoverage], list[ModelArm]]:
+    """Restrict the model-facing panels to the inference-valid identities.
+
+    Panel A/B name and compare models, so a benchmark-only or collection-only lane drawn beside
+    a served one implies an inference pool it is not in. The predicate is the routing half's
+    one census (`model_universe.valid_rows`), read here rather than re-derived. A caller with no
+    routing census keeps the full set rather than drawing an empty panel.
+    """
+    valid = {row.identity for row in model_universe.valid_rows()}
+    kept_cov = [c for c in coverages if model_universe.resolve_identity(c.model) in valid]
+    kept_arms = [a for a in arms if model_universe.resolve_identity(a.model) in valid]
+    return (kept_cov or list(coverages)), (kept_arms or list(arms))
+
+
+def _merge_coverages(coverages: Sequence[ModelCoverage]) -> list[ModelCoverage]:
+    """Collapse lanes that share a canonical slug into one row, summing their counts.
+
+    The canvas answers "how much of this MODEL carried per-step outcomes", so a channel split
+    is one subject, not two rows with the same name far apart. Order is re-derived from the
+    merged capture rate so a merge cannot leave the axis out of its natural worst-first order.
+    """
+    groups: dict[str, list[ModelCoverage]] = {}
+    order: list[str] = []
+    for coverage in coverages:
+        slug = canonical_model_name(coverage.model)
+        if slug not in groups:
+            order.append(slug)
+        groups.setdefault(slug, []).append(coverage)
+    merged: list[ModelCoverage] = []
+    for slug in order:
+        members = groups[slug]
+        head = members[0]
+        if len(members) == 1:
+            merged.append(head if head.model == slug else replace(head, model=slug))
+            continue
+        total = sum(m.n_trajectories for m in members)
+        failed = sum(round(m.terminal_failure_rate * m.n_trajectories) for m in members)
+        merged.append(
+            replace(
+                head,
+                model=slug,
+                n_trajectories=total,
+                n_steps=sum(m.n_steps for m in members),
+                n_failed_steps=sum(m.n_failed_steps for m in members),
+                n_steps_with_check_id=sum(m.n_steps_with_check_id for m in members),
+                terminal_failure_rate=(failed / total if total else 0.0),
+                n_stamped=sum(m.n_stamped for m in members),
+            )
+        )
+    return sorted(merged, key=lambda c: (c.capture_rate, c.model))
 
 
 @dataclass(frozen=True)
@@ -1212,8 +1335,9 @@ CORPUS_COVERAGE_SPEC = FigureSpec(
         "two ends coincide contributes no separation. C: the recurrence score's AUROC pooled, "
         "then computed WITHIN each model and WITHIN each challenge and pooled by comparable pairs "
         "— the drop between them is how much of the pooled number is the confound rather than the "
-        "score. D: the prefix risk model's admission waterfall at its reported depth, with the "
-        "admitted population's base failure rate against the corpus's."
+        "score. D: the prefix risk model's admission bars at its reported depth — how many "
+        "runs each filter removes and how many are admitted — with the admitted population's "
+        "base failure rate against the corpus's."
     ),
     goal=(
         "In C the within-strata bars must stay well above chance: if the pooled edge disappears "
@@ -1257,16 +1381,32 @@ def corpus_and_coverage(
     strat: StratifiedAuroc,
     admission: Admission | None,
     axes: Sequence[Axes],
+    *,
+    valid_only: bool = False,
 ) -> Annotations:
-    """Sample composition, per-model separation, stratified AUROC, and the prefix scope."""
+    """Sample composition, per-model separation, stratified AUROC, and the prefix scope.
+
+    With ``valid_only`` the MODEL-FACING panels (A stamping coverage, B per-model separation)
+    are restricted to the inference-valid identities; the corpus-level panels (C stratified
+    AUROC, D prefix admission) are unchanged, because their measured numbers are computed on
+    the full sampled corpus and cropping them would be a different experiment, not a scoped
+    view. The subtitle states both scopes so a reader never carries the A/B count onto C/D.
+    """
     ax_cov, ax_arms, ax_strat, ax_admit = axes
+    all_models = len(_merge_coverages(coverages))
+    if valid_only:
+        coverages, arms = _inference_valid_subjects(coverages, arms)
+    coverages = _merge_coverages(coverages)
     _draw_stamping(ax_cov, coverages)
     _draw_model_arms(ax_arms, arms)
     _draw_stratified(ax_strat, strat)
     _draw_admission(ax_admit, admission)
     total = sum(c.n_trajectories for c in coverages)
     stamped = sum(c.n_stamped for c in coverages)
-    facts = [f"{len(coverages)} models · {stamped}/{total} trajectories stamped"]
+    scope = "inference-valid" if valid_only else "sampled"
+    facts = [f"{len(coverages)} {scope} models · {stamped}/{total} trajectories stamped"]
+    if valid_only and all_models != len(coverages):
+        facts.append(f"panels C/D stay corpus-level over {all_models} sampled models")
     if admission is not None:
         facts.append(
             f"prefix depth {admission.depth} admits {admission.n_admitted}/"
@@ -1288,6 +1428,8 @@ def corpus_and_coverage(
         notes=(
             f"AUROC pooled {strat.pooled:.3f} · within-model {_rate(strat.within_model)} · "
             f"within-challenge {_rate(strat.within_challenge)}",
+            "Model labels are canonical weights slugs; the serving channel is a label, never "
+            "part of the name.",
         ),
         limitations=_coverage_limits(coverages),
         counts=(("models", len(coverages)), ("trajectories", total), ("stamped", stamped)),
@@ -1295,7 +1437,8 @@ def corpus_and_coverage(
 
 
 def _draw_stamping(ax: Axes, coverages: Sequence[ModelCoverage]) -> None:
-    names = [c.model for c in coverages]
+    labels = canonical_display_labels([c.model for c in coverages])
+    names = [labels[c.model] for c in coverages]
     shares = [c.n_stamped / c.n_trajectories if c.n_trajectories else 0.0 for c in coverages]
     intervals = [metrics.wilson_interval(c.n_stamped, c.n_trajectories) for c in coverages]
     errors = np.array(
@@ -1306,6 +1449,20 @@ def _draw_stamping(ax: Axes, coverages: Sequence[ModelCoverage]) -> None:
     )
     ax.barh(names, shares, xerr=errors, color=_SHIPPED, height=0.6, capsize=3)
     for index, cov in enumerate(coverages):
+        # A zero-coverage row drew a zero-width bar with a zero-width Wilson interval — a bare
+        # rule at the axis, which reads as a missing row rather than as a measured zero. A
+        # hatched stub marks it as a value, not an absence.
+        if cov.n_stamped == 0:
+            ax.barh(
+                index,
+                0.012,
+                left=0.0,
+                height=0.56,
+                color=_SHIPPED,
+                hatch="////",
+                edgecolor="white",
+                linewidth=0.0,
+            )
         ax.text(0.02, index, f"{cov.n_stamped}/{cov.n_trajectories}", va="center", fontsize=8)
     ax.set_xlabel("share of runs with per-step verified outcomes")
     ax.set_xlim(0, 1.05)
@@ -1325,7 +1482,8 @@ def _draw_model_arms(ax: Axes, arms: Sequence[ModelArm]) -> None:
         ax.plot([quiet, fired], [index, index], color=_FAINT, linewidth=2, zorder=1)
         ax.scatter([quiet], [index], color=_SHIPPED, zorder=2, s=34)
         ax.scatter([fired], [index], color=_OBSERVED, zorder=2, s=34)
-    ax.set_yticks(range(len(readable)), [f"{a.model} (n={a.n})" for a in readable])
+    labels = canonical_display_labels([a.model for a in arms])
+    ax.set_yticks(range(len(readable)), [f"{labels[a.model]} (n={a.n})" for a in readable])
     ax.scatter([], [], color=_SHIPPED, label="quiet", s=34)
     ax.scatter([], [], color=_OBSERVED, label="fired", s=34)
     ax.set_xlabel("P(run ultimately failed)")
@@ -1342,10 +1500,13 @@ def _draw_stratified(ax: Axes, strat: StratifiedAuroc) -> None:
         ("within challenge", strat.within_challenge),
     ]
     drawn = [(name, value) for name, value in bars if value is not None]
+    # ONE colour: the three bars are the SAME quantity (the recurrence score's AUROC) under
+    # three rankings, and their x tick labels name the strata. A red/orange/grey scheme keyed
+    # nothing that the labels did not, so it implied a category channel that is not there.
     ax.bar(
         [name for name, _ in drawn],
         [value for _, value in drawn],
-        color=[_OBSERVED, "#EF6C00", _SHIPPED][: len(drawn)],
+        color=_OBSERVED,
         width=0.55,
     )
     for index, (_name, value) in enumerate(drawn):
@@ -1359,23 +1520,21 @@ def _draw_stratified(ax: Axes, strat: StratifiedAuroc) -> None:
     # honest rather than merely tidier. A bar at chance then has zero height, which is the
     # correct reading of "no separation". A below-chance value would be clipped by that anchor,
     # so the floor drops to zero whenever one appears, and the label follows it.
-    floor = _CHANCE if all(value >= _CHANCE for _name, value in drawn) else 0.0
-    anchored = floor == _CHANCE
+    anchored = all(value >= _CHANCE for _name, value in drawn)
+    # The floor sits a hair BELOW chance so the dashed chance rule lands INSIDE the panel.
+    # Anchored exactly at 0.5 the rule and the bottom spine were the same pixel, so the key
+    # named a line a reader could not see. A 0.02 offset does not inflate the confound drop.
+    floor = _CHANCE - 0.02 if anchored else 0.0
     ax.set_ylim(floor, 1.0)
     ax.set_ylabel(
-        "AUROC of the recurrence score — axis starts at chance 0.5"
+        "recurrence AUROC (floor just below chance 0.5)"
         if anchored
-        else "AUROC of the recurrence score — axis starts at 0",
+        else "recurrence AUROC (floor at 0)",
         fontsize=8.5,
     )
     ax.tick_params(labelsize=_TICK_PT)
     ax.legend(fontsize=_LEGEND_PT, loc="upper right")
     panel_label(ax, "C · does the edge survive the strata; bar height is skill above chance")
-
-
-# Axes-fraction centre of the waterfall's second column ("too short"), which is the one region
-# of that panel no bar reaches: four categories over a [-0.5, 3.5] view puts column 1 at 0.375.
-_ADMISSION_NOTE_X = 0.375
 
 
 def _draw_admission(ax: Axes, admission: Admission | None) -> None:
@@ -1384,38 +1543,42 @@ def _draw_admission(ax: Axes, admission: Admission | None) -> None:
         ax.text(0.5, 0.5, "no prefix depth was estimable", ha="center", va="center", color=MUTED)
         return
     labels = ["stamped", "too short", "anti-leak\nmargin", "admitted"]
+    # Counts from the baseline, not a hanging waterfall. The old form drew "too short" as a
+    # 17-tall bar floating at ~900 and "anti-leak margin" from the axis — two decrements drawn
+    # on two different baselines, so the step a reader read off each bar was not its label.
     values = [
         admission.n_stamped,
-        -admission.n_too_short,
-        -admission.n_by_margin,
+        admission.n_too_short,
+        admission.n_by_margin,
         admission.n_admitted,
     ]
-    bottoms = [0, admission.n_stamped - admission.n_too_short, admission.n_admitted, 0]
     colours = [_SHIPPED, _UNDEFINED, _UNDEFINED, _OBSERVED]
-    ax.bar(labels, [abs(v) for v in values], bottom=bottoms, color=colours, width=0.6)
+    ax.bar(labels, values, color=colours, width=0.6)
     for index, value in enumerate(values):
         ax.text(
             index,
-            bottoms[index] + abs(value) + admission.n_stamped * 0.015,
-            f"{abs(value)}",
+            value + admission.n_stamped * 0.015,
+            f"{value}",
             ha="center",
             fontsize=9,
         )
-    ax.set_ylabel("trajectories")
+    ax.set_ylabel("trajectories on the reported basis")
     ax.set_ylim(0, admission.n_stamped * 1.16)
     ax.tick_params(labelsize=_TICK_PT)
-    # In the "too short" column's own empty space. That column's bar is ten trajectories tall, so
-    # everything below it is blank by construction — no opaque backing needed, and an opaque
-    # backing here would punch a hole through whichever bar it drifted onto.
+    # In the "too short" column's own empty space (its bar is ~0.02 of the axis, so everything
+    # above it is blank). Center it on that column in DATA coordinates: an axes-fraction x
+    # drifted with the panel width and let the note's left glyphs run under the stamped bar.
+    # The y stays in axes fraction, below the anti-leak bar's count label, so no opaque backing
+    # is needed and the text cannot touch either tall bar.
     ax.text(
-        _ADMISSION_NOTE_X,
-        0.40,
+        1.0,
+        0.20,
         f"admitted base rate {admission.admitted_base_rate:.3f}\nvs corpus "
         f"{admission.corpus_base_rate:.3f}",
-        transform=ax.transAxes,
+        transform=ax.get_xaxis_transform(),
         ha="center",
         va="center",
-        fontsize=8.5,
+        fontsize=8.0,
         color=_OBSERVED,
     )
     panel_label(ax, f"D · prefix admission at depth {admission.depth}")

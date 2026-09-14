@@ -36,7 +36,7 @@ from tests.fake_embedder import FakeEmbedder
 # Cheap model (cold-start default) and the mid model the hard task escalates to.
 # Both must be in the live pool (router.yaml models:).
 _CHEAP = "deepseek-v4-flash"
-_MID = "zai-glm-5.2"
+_MID = "glm-5.2"
 
 # Two task texts, each a cluster of its own vector (FakeEmbedder is deterministic per
 # text, so every seed of one text lands on the same point and a query of the SAME text

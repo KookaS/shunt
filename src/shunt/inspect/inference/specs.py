@@ -489,7 +489,8 @@ MODEL_GRID: Final[FigureText] = FigureText(
         "root of the active parameter count, the marker edge says hosted or local, and hue is "
         "the coarse total-size band. Panel B: a hollow mark at total parameters and a filled "
         "mark at active parameters, the rule between them being the mixture-of-experts "
-        "sparsity gap. Panels C and D: per-call latency, hosted and local on separate axes."
+        "sparsity gap. The former latency panels are retired: no committed row carries a "
+        "sample, so they drew nothing and claimed nothing."
     ),
     goal=(
         "Compare this canvas with the benchmark half's. The two draw the same three panels "
@@ -535,6 +536,72 @@ MODEL_GRID: Final[FigureText] = FigureText(
     ),
 )
 
+# The family OVERVIEW a seed-only corpus publishes, alongside the eight measured drawings. The
+# eight are kept as INCOMPLETE LAYOUTS: real titles, subtitles and axes over the seeded corpus,
+# with every live-only panel drawn as an honest empty state, so the page shows what each figure
+# will become the moment live traffic arrives and a later render has nothing to re-derive. They
+# are not results: the seeded reference bands are the committed benchmark corpus, the live
+# panels are empty, and every canvas is stamped `awaiting live sessions`. The populated layout
+# is on the demo half, over an invented corpus watermarked `SYNTHETIC — NOT MEASURED`.
+NO_LIVE_SESSIONS: Final[FigureText] = FigureText(
+    name="no_live_sessions",
+    title="No live router sessions yet",
+    subtitle="the outcome store holds seeded (benchmark-replayed) sessions only",
+    caveat="Nothing here is a router measurement — every canvas waits on live sessions.",
+    reading=(
+        "The outcome store this figure family reads has been seeded but has never served live "
+        "traffic. A seeded row was replayed into the store by the benchmark seeder; it carries "
+        "the `bench:` session-id prefix and `selection_rule_used = benchmark_seed`, so it says "
+        "what the benchmark paid and decided, not what the router did. The eight measured "
+        "drawings — strata, cost, unit economics, neighbourhood, policy, escalation, model grid "
+        "and off-policy value — are published below as INCOMPLETE LAYOUTS rather than withheld: "
+        "each draws its real title, subtitle and axes, the seeded reference band is the real "
+        "committed benchmark corpus, and every live-only panel states its own emptiness. They "
+        "are placeholders awaiting live sessions, not results, and each is stamped so on its "
+        "face. They complete in place, unchanged, once the store holds live traffic."
+    ),
+    goal=(
+        "Read the count in the subtitle, not the shape: with live n=0 none of the eight panels "
+        "below can answer an operational question about the router. Read them as the layout "
+        "those figures take once a rig has served traffic, and read every live panel as empty "
+        "rather than as a zero."
+    ),
+    definitions=(
+        (
+            "seeded row",
+            "a benchmark session replayed into the outcome store by the seeder, id-prefixed "
+            "`bench:`, never served by the router to real traffic",
+        ),
+        (
+            "live row",
+            "a session the router actually served; the only population that can measure it",
+        ),
+    ),
+    notes=(
+        "The eight drawings below are kept as incomplete layouts on purpose, not published as "
+        "results: withdrawing them left the page with no layout to complete when live traffic "
+        "arrives. Each carries the same `live n=0` state and is stamped `awaiting live "
+        "sessions`, so an empty panel cannot be read as a rendering failure or a measurement.",
+        "The seeded reference bands on strata, unit economics, policy and model grid are real "
+        "committed benchmark data, drawn grey and hatched; they are a reference for shape, never "
+        "a live result and never a stand-in for the empty live panels.",
+        # RECONCILE THE WORD, not the number. This page's `seeded` and the demo page's `seeded`
+        # are different corpora that happen to share a word, so a reader carrying the count from
+        # one to the other reads a discrepancy that is not one. The demo corpus is synthetic and
+        # fixed at 250 seeded rows; this page's count is the real replayed store in the subtitle.
+        "`seeded` names two different corpora: the count in this subtitle is the real "
+        "benchmark-replayed outcome store, while the demo page's seeded band (its own "
+        "250-session synthetic corpus) is invented for illustration — the two counts are "
+        "different corpora and must not be compared.",
+    ),
+    limitations=(
+        "The seeded corpus is real committed benchmark data and the stratum census is real, but "
+        "it is a property of the benchmark, not of the live router.",
+        "Nothing on this page may be quoted as a live router result; every live panel is empty "
+        "until the store serves traffic, at which point the same figures draw it unchanged.",
+    ),
+)
+
 FIGURES: Final[tuple[FigureText, ...]] = (
     STRATA,
     COST,
@@ -545,3 +612,8 @@ FIGURES: Final[tuple[FigureText, ...]] = (
     MODEL_GRID,
     OPE,
 )
+
+# What a docs page is built from: the family overview plus the eight measured drawings.
+# `docs_sections` filters by manifest presence, so a seed-only corpus emits all nine (overview
+# first, then the eight empty-state layouts) and a live corpus emits the eight alone.
+DOC_FIGURES: Final[tuple[FigureText, ...]] = (NO_LIVE_SESSIONS, *FIGURES)

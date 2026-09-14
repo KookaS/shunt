@@ -106,6 +106,91 @@ def _empty(ax: Axes, message: str) -> None:
     )
 
 
+def _empty_axes(  # noqa: PLR0913 (one keyword per axis attribute a panel may hand over)
+    ax: Axes,
+    message: str,
+    *,
+    ylabel: str | None = None,
+    xlabel: str | None = None,
+    xticks: Sequence[float] | None = None,
+    xticklabels: Sequence[str] | None = None,
+    xrotation: float = 0.0,
+    yticks: Sequence[float] | None = None,
+    yticklabels: Sequence[str] | None = None,
+    ylim: tuple[float, float] | None = None,
+) -> None:
+    """An EMPTY panel drawn as a real axes: frame, ticks, labels, and no data at all.
+
+    Distinct from `_empty` on purpose. A measure-only panel that happens to hold no live
+    rows must still show the axes it will fill, or the canvas reads as a render that failed
+    rather than a layout awaiting data. Nothing here fabricates a value: no bar, point or
+    line is drawn, and every tick label is a real category (a window, a rung, a cohort) or an
+    axis locator. `_empty`'s dashed prose frame stays for a panel that is not an axes at all.
+    """
+    if ylabel is not None:
+        ax.set_ylabel(ylabel)
+    if xlabel is not None:
+        ax.set_xlabel(xlabel)
+    if xticks is not None:
+        ax.set_xticks(list(xticks))
+    if xticklabels is not None:
+        ax.set_xticklabels(
+            list(xticklabels),
+            rotation=xrotation,
+            ha="right" if xrotation else "center",
+            fontsize=8,
+        )
+    if yticks is not None:
+        ax.set_yticks(list(yticks))
+    if yticklabels is not None:
+        ax.set_yticklabels(list(yticklabels), fontsize=8)
+    if ylim is not None:
+        ax.set_ylim(*ylim)
+    ax.text(
+        0.5,
+        0.5,
+        "\n".join(textwrap.wrap(message, _EMPTY_WRAP)),
+        transform=ax.transAxes,
+        ha="center",
+        va="center",
+        fontsize=9.0,
+        color=plot_frame.MUTED,
+        style="italic",
+    )
+
+
+def draw_no_live_sessions(
+    out_dir: Path, view: idata.StrataData, provenance: Provenance | None
+) -> Path:
+    """The seed-only corpus's family overview, published beside the eight empty-state layouts."""
+    size = plot_frame.WIDE
+    fig = plot_frame.new_figure(size)
+    ax = fig.subplots()
+    _empty(
+        ax,
+        f"no live sessions in this corpus (live n={view.n_live}) — the eight measured figures "
+        "are published as incomplete layouts, not results: five draw the real seeded benchmark "
+        "reference band, the rest are empty awaiting live data; the populated layout is on the "
+        "synthetic demo page",
+    )
+    extra = Annotations(
+        subtitle_facts=(
+            f"seeded n={view.n_seeded}",
+            f"live n={view.n_live}",
+            "populated layout: docs/inference-demo.md (SYNTHETIC — NOT MEASURED)",
+        ),
+        counts=(("seeded", view.n_seeded), ("live", view.n_live)),
+    )
+    return plot_frame.save(
+        fig,
+        out_dir / specs.NO_LIVE_SESSIONS.filename,
+        _spec(specs.NO_LIVE_SESSIONS),
+        extra=extra,
+        provenance=provenance,
+        size=size,
+    )
+
+
 def _stratum_handle(colour: str, label: str, *, hatched: bool, drawn: bool) -> Patch:
     """One legend key per stratum — an ABSENT one is named, never silently dropped."""
     # A legend that loses its "live" key reads as a figure that only ever had one series, and a
@@ -381,7 +466,13 @@ def draw_cost(out_dir: Path, view: idata.CostData, provenance: Provenance | None
 def _cost_by_model(ax: Axes, view: idata.CostData) -> None:
     models = sorted({m for _label, agg in view.windows for m, _n, _t in agg.by_model})
     if not models:
-        _empty(ax, f"no live sessions in this corpus (n={view.n_live}) — nothing to cost")
+        _empty_axes(
+            ax,
+            f"no live sessions in this corpus (n={view.n_live}) — nothing to cost",
+            ylabel="live inference cost (USD)",
+            xlabel="model",
+            xticks=[],
+        )
     else:
         # HUE ENCODES THE WINDOW, and nothing else. It used to encode the MODEL while the window
         # rode on alpha and the legend explained only the window — so the three legend swatches
@@ -413,7 +504,14 @@ def _cost_coverage(ax: Axes, view: idata.CostData) -> None:
     known = [agg.n_cost_known for _label, agg in view.windows]
     unknown = [agg.n_cost_unknown for _label, agg in view.windows]
     if not any(known) and not any(unknown):
-        _empty(ax, "no live sessions, so cost coverage is undefined (0 known, 0 unknown)")
+        _empty_axes(
+            ax,
+            "no live sessions, so cost coverage is undefined (0 known, 0 unknown)",
+            ylabel="live sessions",
+            xticks=range(len(labels)),
+            xticklabels=labels,
+            ylim=(0.0, 1.0),
+        )
     else:
         ax.bar(labels, known, color=OKABE_ITO[2], label="cost reported", edgecolor="white")
         ax.bar(
@@ -435,7 +533,13 @@ def _cost_coverage(ax: Axes, view: idata.CostData) -> None:
 
 def _cost_cumulative(ax: Axes, view: idata.CostData) -> None:
     if not view.cumulative:
-        _empty(ax, "no live spend recorded in this corpus")
+        _empty_axes(
+            ax,
+            "no live spend recorded in this corpus",
+            ylabel="cumulative live cost (USD)",
+            xlabel="session timestamp",
+            xticks=[],
+        )
     else:
         ax.plot(
             _dates([when for when, _total in view.cumulative]),
@@ -484,6 +588,11 @@ def _economics_models(view: idata.UnitEconomicsData) -> list[str]:
     return sorted({row.model for row in (*view.seeded, *view.live)})
 
 
+def _economics_labels(view: idata.UnitEconomicsData) -> dict[str, str]:
+    """Raw arm -> canonical display slug, the single map both F3 panels draw from."""
+    return {row.model: row.label for row in (*view.seeded, *view.live)}
+
+
 def _economics_rate(ax: Axes, view: idata.UnitEconomicsData) -> None:
     models = _economics_models(view)
     if not models:
@@ -492,6 +601,7 @@ def _economics_rate(ax: Axes, view: idata.UnitEconomicsData) -> None:
         return
     seeded = {row.model: row for row in view.seeded}
     live = {row.model: row for row in view.live}
+    labels = _economics_labels(view)
     handles: list[Patch] = []
     for offset, (source, colour, label) in enumerate(
         ((seeded, _SEED_GREY, "seeded (replayed)"), (live, None, "live"))
@@ -503,7 +613,9 @@ def _economics_rate(ax: Axes, view: idata.UnitEconomicsData) -> None:
     # Hatching already means "replayed seeded row" on every figure in this family, so it
     # cannot also mean "provisional" here — one channel, one meaning. Provisionality goes on
     # the tick label instead.
-    _bar_labels(ax, [_provisional_mark(model, seeded, live) for model in models])
+    _bar_labels(
+        ax, [_provisional_mark(model, labels.get(model, model), seeded, live) for model in models]
+    )
     ax.set_ylabel("verified-success rate")
     ax.set_ylim(0.0, 1.28)
     ax.legend(handles=handles, fontsize=8, frameon=False, loc="upper right")
@@ -514,12 +626,13 @@ def _economics_rate(ax: Axes, view: idata.UnitEconomicsData) -> None:
 
 def _provisional_mark(
     model: str,
+    label: str,
     seeded: dict[str, idata.ModelEconomics],
     live: dict[str, idata.ModelEconomics],
 ) -> str:
     """Append * where either stratum's cell rests on fewer than the provisional floor."""
     counts = [source[model].n_labeled for source in (seeded, live) if model in source]
-    return f"{model} *" if any(is_provisional(n) for n in counts if n) else model
+    return f"{label} *" if any(is_provisional(n) for n in counts if n) else label
 
 
 def _rate_series(
@@ -560,6 +673,7 @@ def _yerr(rows: list[idata.ModelEconomics]) -> list[list[float]]:
 
 def _economics_cost(ax: Axes, view: idata.UnitEconomicsData) -> None:
     models = _economics_models(view)
+    labels = _economics_labels(view)
     seeded = {row.model: row.cost_per_success for row in view.seeded}
     live = {row.model: row.cost_per_success for row in view.live}
     drawn = [m for m in models if seeded.get(m) is not None or live.get(m) is not None]
@@ -591,12 +705,17 @@ def _economics_cost(ax: Axes, view: idata.UnitEconomicsData) -> None:
                 )
             handles.append(_stratum_handle(colour, label, hatched=hatched, drawn=bool(present)))
         ax.set_yticks(range(len(drawn)))
-        ax.set_yticklabels(drawn, fontsize=7)
+        ax.set_yticklabels([labels.get(m, m) for m in drawn], fontsize=7)
         ax.set_ylim(-1.0, len(drawn) - 0.2)
         ax.set_xlabel("cost per verified success (USD)")
         ax.legend(handles=handles, fontsize=8, frameon=False, loc="lower right")
     live_n = sum(1 for m in models if live.get(m) is not None)
-    plot_frame.panel_label(ax, f"B · cost per verified success (live models: {live_n})")
+    # The panel draws the UNION of both strata, so "live models: {live_n}" undercounted the rows
+    # a reader can count on the axis. Name the union, and the live subset beside it.
+    plot_frame.panel_label(
+        ax,
+        f"B · cost per verified success ({len(drawn)} seeded+live models; {live_n} live)",
+    )
 
 
 # ------------------------------------------------------------- F4 neighbourhood
@@ -752,11 +871,26 @@ def _policy_share(ax: Axes, view: idata.PolicyData, palette: dict[str, str]) -> 
         models = sorted({m for _when, counts in view.live_series for m in counts})
         times = _dates([when for when, _counts in view.live_series])
         series = [[counts.get(m, 0.0) for _w, counts in view.live_series] for m in models]
-        ax.stackplot(times, *series, labels=models, colors=[palette[m] for m in models])
+        ax.stackplot(
+            times,
+            *series,
+            labels=[view.labels.get(m, m) for m in models],
+            colors=[palette[m] for m in models],
+        )
         ax.set_ylim(0.0, 1.0)
         ax.set_ylabel("live model share")
         _date_axis(ax)
-        ax.legend(fontsize=7, frameon=False, loc="upper left")
+        # OPAQUE, because this legend sits on the filled share stack rather than on white: with
+        # `frameon=False` the model names competed with the bands behind them. The legend still
+        # overlays data, but its box is now solid so the key is readable.
+        ax.legend(
+            fontsize=7,
+            loc="upper left",
+            frameon=True,
+            framealpha=1.0,
+            facecolor="white",
+            edgecolor="#cccccc",
+        )
         plot_frame.panel_label(ax, "A · live model share over time")
         return
     _policy_seed_band(ax, view, palette)
@@ -807,7 +941,7 @@ def _policy_seed_band(ax: Axes, view: idata.PolicyData, palette: dict[str, str])
         handles=[
             Patch(facecolor=palette[m], hatch=_PROVISIONAL_HATCH, edgecolor="white") for m in names
         ],
-        labels=names,
+        labels=[view.labels.get(m, m) for m in names],
         fontsize=6.5,
         frameon=False,
         ncol=2,
@@ -865,7 +999,7 @@ def _policy_propensity(ax: Axes, view: idata.PolicyData, palette: dict[str, str]
         )
         ax.axvline(view.thresholds.propensity_epsilon, color=_ALARM, linestyle="--", linewidth=0.9)
         ax.set_yticks(range(len(names)))
-        ax.set_yticklabels(names, fontsize=7)
+        ax.set_yticklabels([view.labels.get(m, m) for m in names], fontsize=7)
         ax.set_xlabel("mean selection propensity")
     plot_frame.panel_label(ax, "C · propensity support vs the exploration floor")
 
@@ -911,10 +1045,17 @@ def draw_escalation(
 
 
 def _esc_rate(ax: Axes, view: idata.EscalationData) -> None:
+    labels = [label for label, _n, _total in view.rates]
     if not any(total for _label, _n, total in view.rates):
-        _empty(ax, f"no live sessions in this corpus (n={view.n_live})")
+        _empty_axes(
+            ax,
+            f"no live sessions in this corpus (n={view.n_live})",
+            ylabel="escalation rate",
+            xticks=range(len(labels)),
+            xticklabels=labels,
+            ylim=(0.0, 0.1),
+        )
     else:
-        labels = [label for label, _n, _total in view.rates]
         rates = [n / total if total else 0.0 for _label, n, total in view.rates]
         ax.bar(labels, rates, color=OKABE_ITO[1], edgecolor="white", width=0.55)
         for index, (_label, n, total) in enumerate(view.rates):
@@ -933,8 +1074,17 @@ def _esc_rate(ax: Axes, view: idata.EscalationData) -> None:
 
 
 def _esc_rungs(ax: Axes, view: idata.EscalationData) -> None:
+    tokens = [token for token, _n in view.rungs]
     if not any(n for _token, n in view.rungs):
-        _empty(ax, "no escalation fired in this corpus — no rung was climbed")
+        _empty_axes(
+            ax,
+            "no escalation fired in this corpus — no rung was climbed",
+            ylabel="sessions",
+            xticks=range(len(tokens)),
+            xticklabels=tokens,
+            xrotation=20.0,
+            ylim=(0.0, 1.0),
+        )
     else:
         ax.bar(
             [token for token, _n in view.rungs],
@@ -952,10 +1102,16 @@ def _esc_holds(ax: Axes, view: idata.EscalationData) -> None:
     # The derived bar is drawn hatched and last, beside the five tokens rather than among them:
     # it is INFERRED from a voided exploration record, not read from a token the engine wrote.
     entries = [*view.holds, *view.unknown_holds, (specs.UNDELIVERABLE_LABEL, view.n_undeliverable)]
+    labels = [label for label, _n in entries]
     if not any(n for _label, n in entries):
-        _empty(ax, "no live hold recorded — escalation never ran on a flagged boundary here")
+        _empty_axes(
+            ax,
+            "no live hold recorded — escalation never ran on a flagged boundary here",
+            xlabel="live sessions (lower bound — see the figure's limitations)",
+            yticks=range(len(labels)),
+            yticklabels=labels,
+        )
     else:
-        labels = [label for label, _n in entries]
         colours = [OKABE_ITO[0]] * (len(entries) - 1) + [_SEED_GREY]
         hatches = [None] * (len(entries) - 1) + [_PROVISIONAL_HATCH]
         for index, (label, count) in enumerate(entries):
@@ -975,9 +1131,17 @@ def _esc_holds(ax: Axes, view: idata.EscalationData) -> None:
 
 
 def _esc_outcomes(ax: Axes, view: idata.EscalationData) -> None:
+    cohorts = [name for name, _s, _n in view.outcomes]
     labeled = [(name, s, n) for name, s, n in view.outcomes if n]
     if not labeled:
-        _empty(ax, "no verified outcome on either cohort in this corpus")
+        _empty_axes(
+            ax,
+            "no verified outcome on either cohort in this corpus",
+            ylabel="verified-success rate",
+            xticks=range(len(cohorts)),
+            xticklabels=cohorts,
+            ylim=(0.0, 1.15),
+        )
     else:
         names = [name for name, _s, _n in labeled]
         rates = [s / n for _name, s, n in labeled]
@@ -1099,7 +1263,7 @@ def _status(leg: idata.LegEstimates) -> str:
 def _ope_routing(ax: Axes, view: idata.OpeData) -> None:
     leg = view.routing
     if not leg.identified:
-        _refusal(ax, [leg], view.diagnostics[0])
+        _refusal(ax, [leg], view.diagnostics[0], xticklabels=_estimator_ticks([leg]))
     else:
         _value_bars(ax, [leg])
         _on_policy_line(ax, leg)
@@ -1122,7 +1286,12 @@ def _ope_routing(ax: Axes, view: idata.OpeData) -> None:
 def _ope_escalation(ax: Axes, view: idata.OpeData) -> None:
     always, never = view.escalation
     if not always.identified:
-        _refusal(ax, [always, never], view.diagnostics[1])
+        _refusal(
+            ax,
+            [always, never],
+            view.diagnostics[1],
+            xticklabels=_estimator_ticks([always, never]),
+        )
     else:
         _value_bars(ax, [always, never], contrast=True)
         ax.set_ylabel(_VALUE_AXIS)
@@ -1130,13 +1299,24 @@ def _ope_escalation(ax: Axes, view: idata.OpeData) -> None:
 
 
 def _refusal(
-    ax: Axes, legs: Sequence[idata.LegEstimates], diagnostics: idata.LegDiagnostics
+    ax: Axes,
+    legs: Sequence[idata.LegEstimates],
+    diagnostics: idata.LegDiagnostics,
+    *,
+    xticklabels: Sequence[str] | None = None,
 ) -> None:
     """Print the estimator's own reason where the bars would be — this IS the result."""
     # Not `_empty`: an empty panel says "nothing happened here", and something did happen — the
     # estimator was asked and refused, in words that name the condition that failed. Quoting the
     # reason verbatim is what stops the next reader re-deriving a bar from the same logs.
-    _frame(ax)
+    # The axes are the REAL ones the values would occupy, so a refusal reads as a plot panel
+    # that declined to draw rather than a text slide: y label, category ticks and a 0..1
+    # frame, with no bar, point or line admitted.
+    ax.set_ylabel(_VALUE_AXIS)
+    ax.set_ylim(0.0, 1.0)
+    if xticklabels is not None:
+        ax.set_xticks(range(len(xticklabels)))
+        ax.set_xticklabels(list(xticklabels), fontsize=8)
     reasons = list(dict.fromkeys(leg.estimate.reason for leg in legs))
     body = "\n\n".join("\n".join(textwrap.wrap(reason, _REFUSAL_WRAP)) for reason in reasons)
     ax.text(
@@ -1206,6 +1386,13 @@ def _bar_label(legs: Sequence[idata.LegEstimates], leg: idata.LegEstimates, name
     if len(legs) == 1:
         return _EST_LABELS[name]
     return f"{_EST_LABELS[name]}\n{_POLICY_LABELS.get(leg.policy, leg.policy)}"
+
+
+def _estimator_ticks(legs: Sequence[idata.LegEstimates]) -> list[str]:
+    """The category ticks the identified panel would draw, so a refusal keeps the same layout."""
+    return [
+        _bar_label(legs, leg, name) for leg in legs for name in ESTIMATORS if name in leg.quotable
+    ]
 
 
 def _append_contrast(
@@ -1293,7 +1480,14 @@ def _on_policy_line(ax: Axes, leg: idata.LegEstimates) -> None:
 def _ope_weights(ax: Axes, view: idata.OpeData) -> None:
     drawn = [diagnostics for diagnostics in view.diagnostics if diagnostics.weights]
     if not drawn:
-        _empty(ax, "no usable importance weight in this corpus — nothing was randomized to weight")
+        _empty_axes(
+            ax,
+            "no usable importance weight in this corpus — nothing was randomized to weight",
+            xlabel=f"importance weight (clipped at {idata.WEIGHT_CLIP:g})",
+            ylabel="fraction of usable rows at or below w",
+            xticks=[],
+            ylim=(0.0, 1.05),
+        )
     else:
         for index, diagnostics in enumerate(drawn):
             total = len(diagnostics.weights)

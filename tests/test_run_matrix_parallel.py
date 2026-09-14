@@ -354,7 +354,7 @@ class TestIncrementalCheckpoint:
 
         def keys(path):
             rows = _read_csv_rows(path)
-            return sorted((r["challenge_id"], r["model"], r["reasoning"]) for r in rows)
+            return sorted((r["challenge_id"], r["lane"], r["reasoning"]) for r in rows)
 
         pkeys = keys(parallel_out)
         assert len(pkeys) == 8 == len(set(pkeys))  # no lost/dup rows under concurrency
@@ -605,7 +605,7 @@ class TestChallengeMajorOrdering:
     def _coverage(self, rows) -> dict[str, set[str]]:
         cov: dict[str, set[str]] = {}
         for r in rows:
-            cov.setdefault(r["challenge_id"], set()).add(r["model"])
+            cov.setdefault(r["challenge_id"], set()).add(r["lane"])
         return cov
 
     def test_group_by_challenge_preserves_order_and_reunites_splits(self):
@@ -738,7 +738,7 @@ class TestCheckpointResumability:
         # Upsert, not append: still 4 unique rows, and an identical re-run supersedes
         # nothing (no history file at all).
         disk = _read_csv_rows(out)
-        keys = {(r["challenge_id"], r["model"], r["reasoning"]) for r in disk}
+        keys = {(r["challenge_id"], r["lane"], r["reasoning"]) for r in disk}
         assert len(disk) == 4 == len(keys)
         assert not history.exists()
 

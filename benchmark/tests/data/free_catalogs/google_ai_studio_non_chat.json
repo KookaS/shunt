@@ -1,0 +1,42 @@
+{
+  "models": [
+    {
+      "name": "models/gemini-flash-latest",
+      "displayName": "Gemini Flash Latest",
+      "inputTokenLimit": 1048576,
+      "supportedGenerationMethods": ["generateContent", "countTokens"],
+      "outputModalities": ["text"]
+    },
+    {
+      "name": "models/gemini-2.5-flash-exp",
+      "displayName": "Gemini Flash Exp",
+      "inputTokenLimit": 1048576,
+      "supportedGenerationMethods": ["generateContent"],
+      "outputModalities": ["image"]
+    },
+    {
+      "name": "models/gemini-2.5-flash-preview-tts",
+      "displayName": "Gemini TTS Preview",
+      "inputTokenLimit": 8192,
+      "supportedGenerationMethods": ["generateContent"]
+    },
+    {
+      "name": "models/gemini-2.5-computer-use-preview-10-2025",
+      "displayName": "Computer Use Preview",
+      "inputTokenLimit": 131072,
+      "supportedGenerationMethods": ["generateContent"]
+    },
+    {
+      "name": "models/deep-research-pro-preview-12-2025",
+      "displayName": "Deep Research Pro",
+      "inputTokenLimit": 131072,
+      "supportedGenerationMethods": ["generateContent"]
+    },
+    {
+      "name": "models/aqa",
+      "displayName": "AQA",
+      "inputTokenLimit": 7168,
+      "supportedGenerationMethods": ["generateAnswer"]
+    }
+  ]
+}

@@ -78,7 +78,7 @@ def _cache(version_hash="h1", model_version="v1", image_digest="sha256:d1"):
 class TestResultsSchema:
     def test_reasoning_column_follows_model(self):
         fields = integrity.RESULTS_FIELDS
-        assert fields[:3] == ("challenge_id", "model", "reasoning")
+        assert fields[:4] == ("challenge_id", "model", "lane", "reasoning")
 
     def test_header_matches_expected_order(self):
         # SCHEMA LOCK. Every column here is APPEND-ONLY: legacy rows must keep parsing, so a
@@ -86,7 +86,7 @@ class TestResultsSchema:
         # `prompt_hash` are the replicate key plus the optional-column classes; changing this
         # line is how you notice you moved an existing column instead of appending.
         assert ",".join(integrity.RESULTS_FIELDS) == (
-            "challenge_id,model,reasoning,pass,cost,in_tok,out_tok,calls,"
+            "challenge_id,model,lane,reasoning,pass,cost,in_tok,out_tok,calls,"
             "version_hash,model_version,arm_hash,real_cost,estimated_cost,timeout_flag,"
             "image_digest,computed_at,stop_reason,step_limit,cost_limit,scaffold_version,"
             "sampling_hash,prompt_hash,"
@@ -133,7 +133,7 @@ class TestLoadResultsEmpty:
         header = ",".join(integrity.RESULTS_FIELDS)
         # A row that omits the reasoning value must reconstruct as "default"
         # (m1 is not a registry model, so the legacy literal is never aliased).
-        p.write_text(header + "\n" + "c1,m1,,True,0.1,10,2,1,h,v,,0.1,0.1,False\n")
+        p.write_text(header + "\n" + "c1,m1,m1,,True,0.1,10,2,1,h,v,,0.1,0.1,False\n")
         cell = config.load_results(p)["c1"]["m1"]["default"]
         assert cell["reasoning"] == "default"
         assert cell["pass"] is True
@@ -358,10 +358,10 @@ class TestParseCells:
 
     def test_parses_triples(self):
         assert run_matrix._parse_cells(
-            "sympy__sympy-17630:kimi-k3:max, pydata__xarray-7229:zai-glm-5.2:think"
+            "sympy__sympy-17630:kimi-k3:max, pydata__xarray-7229:glm-5.2:think"
         ) == [
             ("sympy__sympy-17630", "kimi-k3", "max"),
-            ("pydata__xarray-7229", "zai-glm-5.2", "think"),
+            ("pydata__xarray-7229", "glm-5.2", "think"),
         ]
 
     @pytest.mark.parametrize("bad", ["sympy__sympy-17630:kimi-k3", "a:b:c:d", "::", "a:b:"])
@@ -586,7 +586,8 @@ class TestAtomicWrite:
 
         monkeypatch.setattr(run_matrix.os, "replace", spy)
         run_matrix._write_raw_rows(self._rows(), path)
-        assert seen["src"].endswith("results.csv.tmp")
+        assert seen["src"].startswith(str(path))
+        assert seen["src"].endswith(".tmp")
         assert seen["dst"] == str(path)
 
 

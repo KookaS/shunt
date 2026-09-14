@@ -2,7 +2,7 @@
   "figures": {
     "inference_cost.png": {
       "caveat": null,
-      "data_digest": "17c49ecc94f567fc",
+      "data_digest": "295bab55f53e9ecf",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -41,7 +41,7 @@
     },
     "inference_escalation.png": {
       "caveat": "panel C covers ladder-evaluated holds only \u2014 a lower bound; `disabled` is unreachable live",
-      "data_digest": "17c49ecc94f567fc",
+      "data_digest": "295bab55f53e9ecf",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -80,7 +80,7 @@
     },
     "inference_model_grid.png": {
       "caveat": "Panel A's x axis is what the store was BILLED, so it is not the benchmark half's.",
-      "data_digest": "17c49ecc94f567fc",
+      "data_digest": "295bab55f53e9ecf",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -94,29 +94,23 @@
         "Rates are not paired: models were not served the same sessions, so a height difference between two rows is not a controlled comparison.",
         "Panel A's x axis is a MEASURED BILL \u2014 dollars per labeled session, off the store's own cost rows \u2014 not a list price, and not the benchmark half's axis. A model whose sessions are not all priced is left off the panel rather than plotted at a partial total.",
         "The $0 column and the log region are not one ruler. The gap between them is a break, and no distance across it is meaningful.",
-        "Hue is a coarse size band, not a capability measurement \u2014 panel B carries the exact counts, and a band is not evidence that its members behave alike.",
-        "Panels C and D are empty: no latency has been instrumented on any row. The column is MISSING, and nothing here should be read as a speed claim."
+        "Hue is a coarse size band, not a capability measurement \u2014 panel B carries the exact counts, and a band is not evidence that its members behave alike."
       ],
       "n": {
         "external": 0,
-        "latency_hosted": 0,
-        "latency_local": 0,
-        "models": 4,
-        "sized": 3,
-        "undisclosed": 1
+        "models": 2,
+        "sized": 2,
+        "undisclosed": 0
       },
       "notes": [
         "Panel A's x and the benchmark half's x are different quantities \u2014 billed dollars per session here, a blended list price per million tokens there. The two canvases share a shape, not an axis, and a model's horizontal position must never be carried between them.",
-        "gpt-5-mini: 39.8% on n=103 \u00b7 $0.0253 (measured $ per labeled session (log)) \u00b7 size UNDISCLOSED",
-        "kimi-k2.5: 52.5% on n=40 \u00b7 $0.1206 (measured $ per labeled session (log)) \u00b7 1000B total / 32B active",
-        "kimi-k3: 47.8% on n=90 \u00b7 $0.5349 (measured $ per labeled session (log)) \u00b7 2800B total / 104B active",
-        "zai-glm-5.2: 60.0% on n=25 \u00b7 $0.3376 (measured $ per labeled session (log)) \u00b7 753B total / 40B active",
-        "drawn at a fixed reference marker because no parameter count is published: gpt-5-mini"
+        "glm-5.2: 60.0% on n=25 \u00b7 $0.3376 (measured $ per labeled session (log)) \u00b7 753B total / 40B active",
+        "kimi-k3: 47.8% on n=90 \u00b7 $0.5349 (measured $ per labeled session (log)) \u00b7 2800B total / 104B active"
       ],
       "price_sheet": null,
-      "reading": "Panel A: each model the store holds a Tier-2 label for, at its mean billed dollars per labeled session (x, log \u2014 with a separate column at the left for locally-served models, whose marginal price is exactly zero and cannot sit on a log axis) against its verified-success rate (y), with Wilson 95% whiskers. Marker area follows the square root of the active parameter count, the marker edge says hosted or local, and hue is the coarse total-size band. Panel B: a hollow mark at total parameters and a filled mark at active parameters, the rule between them being the mixture-of-experts sparsity gap. Panels C and D: per-call latency, hosted and local on separate axes.",
+      "reading": "Panel A: each model the store holds a Tier-2 label for, at its mean billed dollars per labeled session (x, log \u2014 with a separate column at the left for locally-served models, whose marginal price is exactly zero and cannot sit on a log axis) against its verified-success rate (y), with Wilson 95% whiskers. Marker area follows the square root of the active parameter count, the marker edge says hosted or local, and hue is the coarse total-size band. Panel B: a hollow mark at total parameters and a filled mark at active parameters, the rule between them being the mixture-of-experts sparsity gap. The former latency panels are retired: no committed row carries a sample, so they drew nothing and claimed nothing.",
       "size": "wide_tall",
-      "subtitle": "the benchmark half's grid, redrawn over the outcome store \u2014 both strata, split stated below \u00b7 4 models over the outcome store's Tier-2-labeled sessions \u2014 209 live and 250 replayed from the benchmark corpus; 2 of 4 models drawn carry any live session \u00b7 0 at $0 (local) \u00b7 4 priced \u00b7 n per model 25\u2013103, unpaired task sets \u00b7 x = billed spend over labeled sessions, from the store's own cost rows",
+      "subtitle": "the benchmark half's grid, redrawn over the outcome store \u2014 both strata, split stated below \u00b7 2 models over the outcome store's Tier-2-labeled sessions \u2014 209 live and 250 replayed from the benchmark corpus; 1 of 2 models drawn carry any live session \u00b7 0 at $0 (local) \u00b7 2 priced \u00b7 n per model 25\u201390, unpaired task sets \u00b7 x = billed spend over labeled sessions, from the store's own cost rows",
       "terms": [
         [
           "verified success",
@@ -139,7 +133,7 @@
     },
     "inference_neighbourhood.png": {
       "caveat": null,
-      "data_digest": "17c49ecc94f567fc",
+      "data_digest": "295bab55f53e9ecf",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -177,7 +171,7 @@
     },
     "inference_ope.png": {
       "caveat": "off-policy value is NOT IDENTIFIED here \u2014 each panel prints the estimator\u2019s own refusal",
-      "data_digest": "17c49ecc94f567fc",
+      "data_digest": "295bab55f53e9ecf",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -230,7 +224,7 @@
     },
     "inference_policy.png": {
       "caveat": "the seed band is corpus composition, not a routing decision",
-      "data_digest": "17c49ecc94f567fc",
+      "data_digest": "295bab55f53e9ecf",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -268,7 +262,7 @@
     },
     "inference_strata.png": {
       "caveat": null,
-      "data_digest": "17c49ecc94f567fc",
+      "data_digest": "295bab55f53e9ecf",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -326,7 +320,7 @@
     },
     "inference_unit_economics.png": {
       "caveat": "the grey band is REPLAYED BENCHMARK outcomes, not live inference",
-      "data_digest": "17c49ecc94f567fc",
+      "data_digest": "295bab55f53e9ecf",
       "dpi": 150,
       "figsize": [
         13.0,

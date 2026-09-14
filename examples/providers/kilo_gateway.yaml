@@ -1,0 +1,25 @@
+# shunt-ci: skip
+# Kilo Gateway — an OpenAI-compatible gateway; the `:free` ids are the free subset.
+# The key is OPTIONAL: Kilo serves `:free` ids anonymously, identified by IP and rate-limited
+# (200 requests/hour/IP). Leave KILO_API_KEY unset for anonymous access, or set it to use a key;
+# either way only `:free` ids are on the free lane. `key_optional: true` records that an unset
+# key is not an auth failure, and `api_key_env_var` keeps the name litellm expects.
+# Set KILO_API_KEY (optional), then paste this into ~/.config/shunt/models.yaml.
+# See ../../docs/configuration.md.
+# NOTE (2026-09-10): host verified against the vendor docs — the OpenAI-compatible base is
+# https://api.kilo.ai/api/gateway (see https://kilocode.ai/docs/gateway/). The live keyless
+# probe stays SKIPPED until its auth-rejection signature is measured; opt in with
+# `# shunt-ci: probe` once it is.
+providers:
+  kilo_gateway:
+    base_url: https://api.kilo.ai/api/gateway
+    api_key_env_var: KILO_API_KEY
+    litellm_prefix: openai
+    key_optional: true
+
+models:
+  kilo-laguna-xs-2.1-free:
+    model_id: poolside/laguna-xs-2.1:free
+    provider: kilo_gateway
+    supports_streaming: true
+    supports_cache_control: false

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Final
 from benchmark.routing import censoring, integrity
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Collection, Mapping, Sequence
 
 # Violation codes — one per invariant (stable identifiers for reporting/tests).
 ACCOUNTING_HOLE: Final[str] = "ACCOUNTING_HOLE"
@@ -34,6 +34,7 @@ MALFORMED_OPTIONAL: Final[str] = "MALFORMED_OPTIONAL"
 MISSING_MEASUREMENT: Final[str] = "MISSING_MEASUREMENT"
 REPLICATE_MISKEYED: Final[str] = "REPLICATE_MISKEYED"
 BRACKET_OVER_COVERAGE: Final[str] = "BRACKET_OVER_COVERAGE"
+FREE_LANE_BILLED: Final[str] = "FREE_LANE_BILLED"
 
 # Promotional $0 windows: (model, first UTC date, last UTC date), both inclusive.
 # A model is priced at its REAL rate in the registry — so a future run is billed, gated by
@@ -41,11 +42,45 @@ BRACKET_OVER_COVERAGE: Final[str] = "BRACKET_OVER_COVERAGE"
 # collected inside the window keep a true real_cost of 0. Scoped by model AND by date, so
 # a paid run on the same id outside the window is still an ACCOUNTING_HOLE. Add a row only
 # with the provider's published promo dates; never to silence a harvesting failure.
+#
+# The GENERIC companion is the free-promo namespace: ANY model id ending in
+# `_COLLECTION_FREE_SUFFIX` with real_cost==0 is accepted (see `_is_collection_free_model`).
+# It exists because a dynamically-synthesized collection id has no hand-maintained dated
+# window, yet rides the same $0 umbrella. It is scoped to the namespace so a non-explabs
+# paid model with real_cost==0 STILL trips ACCOUNTING_HOLE — the negative control the $35
+# miss depends on — and the dated windows below stay as the per-id provenance record.
 _FREE_WINDOWS: Final[tuple[tuple[str, str, str], ...]] = (
     # OpenRouter listed z-ai/glm-5.3-flash (then stealth/ox-alpha) at $0 for this window;
     # the 41 committed cells all fall inside it. Price source in the registry entry.
-    ("zai-glm-5.3-flash", "2026-08-20", "2026-08-26"),
+    ("glm-5.3-flash", "2026-08-20", "2026-08-26"),
+    # Experiential Labs' free-tier promo: these *-explabs ids were genuinely $0 for
+    # this window; the 20 committed cells all fall inside it. Priced at real list price in
+    # the registry (reversible owner reprice 2026-09-07), so extend the window deliberately
+    # each day the promo continues — a real_cost==0 row outside it still trips ACCOUNTING_HOLE.
+    # Price source in each registry entry. The paid gpt-*-explabs rows are NOT listed here.
+    # Verified still genuinely free 2026-09-09 by live probe (umbrella free daily allowance —
+    # all models free): claude-fable-5.1-explabs returned to the free list after lapsing
+    # 2026-09-07; deepseek-v4-flash-explabs and qwen3.8-27b-explabs continue; the NEW
+    # kimi-k3-explabs id (collection-only row registered 2026-09-09) is free from 09-09,
+    # and deepseek-v4-pro-explabs / glm-5.3-explabs / glm-5.3-flash-explabs joined the
+    # umbrella the same day (live catalog read + bounded free probes).
+    # Each window below therefore ends 2026-09-09 (keep dated — never open-ended). kimi-k3-explabs
+    # and the three 09-09 additions have no committed rows yet; the windows let clean
+    # 09-09-collected real_cost==0 rows land.
+    ("claude-fable-5.1-explabs", "2026-09-06", "2026-09-09"),
+    ("deepseek-v4-flash-explabs", "2026-09-06", "2026-09-09"),
+    ("qwen3.8-27b-explabs", "2026-09-06", "2026-09-09"),
+    ("kimi-k3-explabs", "2026-09-09", "2026-09-09"),
+    ("deepseek-v4-pro-explabs", "2026-09-09", "2026-09-09"),
+    ("glm-5.3-explabs", "2026-09-09", "2026-09-09"),
+    ("glm-5.3-flash-explabs", "2026-09-09", "2026-09-09"),
 )
+
+# The free-promo collection namespace (see the generic companion note above). A row for ANY
+# `-explabs` id is free-promo provenance when real_cost==0, which admits a synthesized
+# collection id with no dated window while leaving a non-explabs paid model's zero-cost row
+# an ACCOUNTING_HOLE.
+_COLLECTION_FREE_SUFFIX: Final[str] = "-explabs"
 
 # Registry price fields (both the load_pricing and the _pricing_dict spellings).
 _PRICE_KEYS: Final[tuple[str, ...]] = (
@@ -336,7 +371,34 @@ def _in_free_window(model: str, computed_at: str) -> bool:
     return False
 
 
-def _check_accounting(row: dict, derived: str, pricing: dict) -> Violation | None:
+def _is_overlay_model(model: str) -> bool:
+    """True iff *model* is a row of the non-shipped free overlay registry (free-overlay id)."""
+    from benchmark import config  # noqa: PLC0415 (avoid a config<->validate import cycle)
+
+    return model in config.free_registry_ids()
+
+
+def _is_collection_free_model(
+    model: str, free_collection_models: Collection[str] | None = None
+) -> bool:
+    """True iff *model* is a free-promo collection lane.
+
+    With run provenance (``free_collection_models`` = the models admitted as free collection
+    lanes by the run that wrote the row), ONLY an explicitly-admitted lane qualifies — the
+    ``-explabs`` namespace and the overlay both contain PAID promo history, so the suffix
+    alone is not evidence a row rode a $0 lane. Without provenance (a plain corpus scan) the
+    namespace and the configured overlay are the only signal available, which keeps the
+    conservative ``real_cost==0`` accounting exemption for historical rows while leaving a
+    non-overlay paid model's zero-cost row an ACCOUNTING_HOLE.
+    """
+    if free_collection_models is not None:
+        return model in free_collection_models
+    return model.endswith(_COLLECTION_FREE_SUFFIX) or _is_overlay_model(model)
+
+
+def _check_accounting(
+    row: dict, derived: str, pricing: dict, free_collection_models: Collection[str] | None = None
+) -> Violation | None:
     """The $35 fingerprint: PAID model, calls>0, real_cost==0, and NOT censored."""
     # Censored rows (resource-limit stops) are EXEMPT: a reaped cell may have run
     # (calls>0) yet legitimately never harvested its cost, so a $0 censored row is
@@ -347,14 +409,46 @@ def _check_accounting(row: dict, derived: str, pricing: dict) -> Violation | Non
         return None
     if censoring.is_censored_reason(derived):
         return None
-    if not is_paid_model(str(row.get("model", "")), pricing):
+    model = str(row.get("lane") or row.get("model", ""))
+    if not is_paid_model(model, pricing):
         return None
-    if _in_free_window(str(row.get("model", "")), str(row.get("computed_at", ""))):
+    if _in_free_window(model, str(row.get("computed_at", ""))) or _is_collection_free_model(
+        model, free_collection_models
+    ):
         return None
     return Violation(
         Severity.ERROR,
         ACCOUNTING_HOLE,
-        f"paid model {row.get('model')!r} ran ({int(calls)} calls) but real_cost==0",
+        f"paid model {model!r} ran ({int(calls)} calls) but real_cost==0",
+    )
+
+
+def _check_free_lane_billed(
+    row: dict, free_collection_models: Collection[str] | None = None
+) -> Violation | None:
+    """The mirror of ACCOUNTING_HOLE: an admitted free lane that cost ANYTHING is a leak.
+
+    `_check_accounting` walls the forbidding case (a paid model that ran for $0). This walls
+    the opposite, the $0 interlock's failure mode: a lane we admitted as free-promo recorded a
+    positive real_cost, so the "free" channel billed. Unlike the accounting exemption, this
+    requires RUN PROVENANCE (``free_collection_models``): the ``-explabs`` namespace and the
+    overlay both hold legitimate PAID historical rows, so the suffix alone cannot prove a row
+    rode a $0 lane. A plain corpus scan (provenance ``None``) therefore never fires this wall;
+    the run that admitted a free lane passes that lane set and catches its leak at write time.
+    """
+    if free_collection_models is None:
+        return None
+    model = str(row.get("lane") or row.get("model", ""))
+    if not _is_collection_free_model(model, free_collection_models):
+        return None
+    real_cost = _num(row.get("real_cost"))
+    if real_cost is None or real_cost <= 0:
+        return None
+    return Violation(
+        Severity.ERROR,
+        FREE_LANE_BILLED,
+        f"free-lane model {model!r} was billed real_cost={real_cost} — a "
+        "collection-only lane must never cost money",
     )
 
 
@@ -386,8 +480,15 @@ def _check_suspicious(row: dict, derived: str) -> Violation | None:
     )
 
 
-def validate_row(row: dict, pricing: dict) -> list[Violation]:
-    """Every invariant violation on one results row (ERROR and WARN)."""
+def validate_row(
+    row: dict, pricing: dict, *, free_collection_models: Collection[str] | None = None
+) -> list[Violation]:
+    """Every invariant violation on one results row (ERROR and WARN).
+
+    ``free_collection_models`` is the run provenance of models admitted as free collection
+    lanes: pass it at write time so a billed free lane trips FREE_LANE_BILLED; a plain corpus
+    scan leaves it ``None`` and never infers a free lane from the ``-explabs`` suffix.
+    """
     derived = censoring.derive_stop_reason(
         passed=_bool(row.get("pass")),
         timeout_flag=_bool(row.get("timeout_flag")),
@@ -400,7 +501,8 @@ def validate_row(row: dict, pricing: dict) -> list[Violation]:
     out.extend(_check_latency_labels(row))
     out.extend(_check_schema(row, derived))
     for maybe in (
-        _check_accounting(row, derived, pricing),
+        _check_accounting(row, derived, pricing, free_collection_models),
+        _check_free_lane_billed(row, free_collection_models),
         _check_ranness(row, derived),
         _check_suspicious(row, derived),
     ):
@@ -409,11 +511,13 @@ def validate_row(row: dict, pricing: dict) -> list[Violation]:
     return out
 
 
-def validate_results(rows: list[dict], pricing: dict) -> ValidationReport:
+def validate_results(
+    rows: list[dict], pricing: dict, *, free_collection_models: Collection[str] | None = None
+) -> ValidationReport:
     """Validate every row; report each offending row with its violations."""
     offending: list[RowViolations] = []
     for index, row in enumerate(rows):
-        violations = validate_row(row, pricing)
+        violations = validate_row(row, pricing, free_collection_models=free_collection_models)
         if violations:
             offending.append(RowViolations(index, violations))
     return ValidationReport(total_rows=len(rows), offending=offending)
@@ -469,9 +573,15 @@ def require_measured(
     return [float(v) for v in values if v is not None]
 
 
-def enforce_row(row: dict, pricing: dict) -> None:
+def enforce_row(
+    row: dict, pricing: dict, *, free_collection_models: Collection[str] | None = None
+) -> None:
     """Raise DataIntegrityError on any ERROR violation (WARN does not abort)."""
-    errors = [v for v in validate_row(row, pricing) if v.severity is Severity.ERROR]
+    errors = [
+        v
+        for v in validate_row(row, pricing, free_collection_models=free_collection_models)
+        if v.severity is Severity.ERROR
+    ]
     if errors:
         raise DataIntegrityError(errors, row)
 

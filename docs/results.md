@@ -75,7 +75,7 @@ The two come apart, which is the whole reason routing might be worth doing:
 | qwen3.7-plus | 1.60 | 43.7% | 0.337–0.541 |
 | gpt-5-mini | 2.25 | 54.5% | 0.476–0.613 |
 | kimi-k2.5 | 3.60 | 49.6% | 0.408–0.584 |
-| zai-glm-5.2 | 5.80 | 57.1% | 0.465–0.672 |
+| glm-5.2 | 5.80 | 57.1% | 0.465–0.672 |
 | kimi-k3 | 18.00 | 84.5% | 0.766–0.901 |
 
 `deepseek-v4-flash` costs 5× less than `gpt-5-mini` and solves more. Price does
@@ -91,7 +91,7 @@ subset for reference); the current run's coverage varies:
 |---|---:|---:|---:|
 | deepseek-v4-flash | 68.9% | 44.6% | +24.3pp |
 | gpt-5-mini | 54.5% | 35.1% | +19.4pp |
-| zai-glm-5.2 | 57.1% | 51.4% | +5.8pp |
+| glm-5.2 | 57.1% | 51.4% | +5.8pp |
 | kimi-k2.5 | 49.6% | 43.2% | +6.3pp |
 | kimi-k3 | 84.5% | 77.0% | +7.5pp |
 | qwen3.7-plus | 43.7% | 41.9% | +1.8pp |
@@ -308,7 +308,7 @@ one task, and no configuration will ever do that here.
 the ladder; it does not score the models the ladder steps to. Those are measured
 one rung at a time, against the cheap base model, in
 [the ladder-rungs figure](routing.md#fig-ladder-rungs) — and on this corpus the
-shipped ladder now steps the rung the measurement supports (zai-glm-5.2) and still
+shipped ladder now steps the rung the measurement supports (glm-5.2) and still
 skips the best-measured rung (kimi-k3) on a price slot. Read the two together.
 
 ### The shipped default, and the routing model priced against it
@@ -915,12 +915,12 @@ after the agent's first edit, now clears its gate at `escalate_after_n=3`.
 
 **A data gap, reduced but not closed.** 253 of the committed corpus's trajectories once carried no
 per-step outcomes, so the recurrence trigger structurally could not fire on them
-— and three models (`kimi-k2.5`, `qwen3.7-plus`, `zai-glm-5.2`) sat at zero
+— and three models (`kimi-k2.5`, `qwen3.7-plus`, `glm-5.2`) sat at zero
 coverage entirely. Because stamping coverage tracked capture date and capture
 date correlates with model, model and coverage were confounded. Those runs have
 since been re-stamped offline by container replay at zero API cost: 723 of the committed
 corpus's trajectories now carry verified per-step outcomes. But coverage is NOT uniform:
-the two models that once sat at zero (`qwen3.7-plus` 47/65, `zai-glm-5.2` 16/31)
+the two models that once sat at zero (`qwen3.7-plus` 47/65, `glm-5.2` 16/31)
 still carry 3× the unstamped share of the other models, so stamping coverage still
 tracks the same model-correlated axis as before — reduced, not eliminated. The 99
 unstamped trajectories break down as: 23 whose captured state was

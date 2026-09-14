@@ -710,7 +710,7 @@ def test_unit_economics_says_its_band_is_replayed_and_its_live_claim_is_empty(
     assert specs.UNIT_ECONOMICS.title in texts
     assert specs.UNIT_ECONOMICS.caveat in texts
     assert any("live labeled sessions n=0" in text for text in texts)
-    assert "B · cost per verified success (live models: 0)" in texts
+    assert "B · cost per verified success (2 seeded+live models; 0 live)" in texts
 
 
 def test_neighbourhood_names_its_k_and_says_panel_c_is_empty_not_zero(
@@ -1287,3 +1287,51 @@ def test_a_long_strata_caveat_is_capped_rather_than_raising_in_the_frame() -> No
     assert len(capped) <= 120
     assert "more)" in capped
     assert figures._fit_caveat([]) is None
+
+
+def test_the_one_resolver_canonicalises_the_drawn_label_not_the_arm_key() -> None:
+    # The defect this pins: a stored label can carry a serving spelling (`serving-label-x`)
+    # that disagrees with the canonical identity, and every inference and demo panel drew that
+    # raw string, while `inference_model_grid` drew the bare weights identity. One resolver,
+    # applied once at read time, must make every label agree without rewriting the join key a
+    # measured count is grouped on.
+    row = idata._session_row(
+        {
+            "session_id": "live-1",
+            "timestamp": "2020-01-01T00:00:00+00:00",
+            "model_chosen": "serving-label-x",
+            "cost": 0.1,
+            "decision_provenance": None,
+        },
+        {},
+        {},
+        lambda name: {"serving-label-x": "glm-5.2"}.get(name, name),
+    )
+    assert row.model_chosen == "serving-label-x"  # the key is untouched
+    assert row.display_model == "glm-5.2"  # the drawn label is canonical
+
+
+def test_every_label_reading_carries_the_same_canonical_slug() -> None:
+    # Same arm, same string on all three readings: F1 panel C, F3's two panels and F5's
+    # legend/ticks read the resolved label, while each view keeps the raw key so no count moves.
+    row = idata.SessionRow(
+        session_id="live-1",
+        timestamp=None,
+        model_chosen="serving-label-x",
+        model_label="glm-5.2",
+        cost=1.0,
+        cost_known=True,
+        stratum=idata.LIVE,
+        selection_rule_used=None,
+        selection_propensity=None,
+        hold_reason=None,
+        rung=None,
+        undeliverable=False,
+        tier2_success=True,
+    )
+    econ = idata.unit_economics([row])
+    assert econ.live[0].model == "serving-label-x"
+    assert econ.live[0].label == "glm-5.2"
+    assert idata.policy([row]).labels["serving-label-x"] == "glm-5.2"
+    whole = dict(idata.cost([row]).windows)["all"]
+    assert [model for model, _n, _total in whole.by_model] == ["glm-5.2"]

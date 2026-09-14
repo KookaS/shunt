@@ -156,6 +156,70 @@ def test_unpriced_model_zero_cost_with_calls_is_not_flagged() -> None:
     assert ACCOUNTING_HOLE not in _codes(validate.validate_row(row, PRICING))
 
 
+def test_explabs_zero_cost_with_calls_is_free_promo_not_a_hole() -> None:
+    # A dynamically-synthesized collection id has no hand-maintained dated window; the
+    # `-explabs` namespace itself is free-promo provenance when real_cost==0.
+    row = _row(
+        **{
+            "model": "brand-new-catalog-model-explabs",
+            "model_version": "brand-new-catalog-model",
+            "real_cost": "0",
+            "calls": "7",
+            "stop_reason": "unsolved",
+            "pass": "False",
+        }
+    )
+    priced = {
+        **PRICING,
+        "brand-new-catalog-model-explabs": {"input_cost_per_1m": 1.0, "output_cost_per_1m": 2.0},
+    }
+    assert ACCOUNTING_HOLE not in _codes(validate.validate_row(row, priced))
+
+
+def test_non_explabs_paid_zero_cost_still_flags_accounting_hole() -> None:
+    # The negative control: the generic free-promo rule is scoped to `-explabs`, so a
+    # non-namespaced paid model that ran for $0 is still the $35 fingerprint.
+    row = _row(**{"real_cost": "0", "calls": "7", "stop_reason": "unsolved", "pass": "False"})
+    assert ACCOUNTING_HOLE in _codes(validate.validate_row(row, PRICING))
+
+
+# ── paid `-explabs` history is not a free lane on a plain corpus scan ─────────
+
+
+def test_paid_explabs_history_is_not_flagged_without_run_provenance() -> None:
+    # glm-5.3-explabs has genuinely PAID committed rows (~$4.60). A read-only corpus scan
+    # carries no run provenance, so the `-explabs` suffix must not be read as "free" and
+    # must not raise FREE_LANE_BILLED on measured history.
+    pricing = {
+        **PRICING,
+        "glm-5.3-explabs": {"input_cost_per_1m": 1.4, "output_cost_per_1m": 4.4},
+    }
+    row = _row(
+        model="glm-5.3-explabs",
+        model_version="glm-5.3",
+        real_cost="1.6804519999999998",
+        calls="9",
+    )
+    assert validate.FREE_LANE_BILLED not in _codes(validate.validate_row(row, pricing))
+    report = validate.validate_results([row], pricing)
+    assert report.error_count == 0
+
+
+def test_admitted_free_lane_billed_trips_free_lane_billed_with_provenance() -> None:
+    pricing = {
+        **PRICING,
+        "glm-5.3-explabs": {"input_cost_per_1m": 1.4, "output_cost_per_1m": 4.4},
+    }
+    row = _row(
+        model="glm-5.3-explabs",
+        model_version="glm-5.3",
+        real_cost="1.6804519999999998",
+        calls="9",
+    )
+    codes = _codes(validate.validate_row(row, pricing, free_collection_models={"glm-5.3-explabs"}))
+    assert validate.FREE_LANE_BILLED in codes
+
+
 # ── ran-ness ──────────────────────────────────────────────────────────────────
 
 
@@ -400,6 +464,42 @@ def test_cli_gate_exits_zero_on_clean(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setattr(config, "load", lambda *a, **k: None)
     code = vr.main(["--results", str(results)])
     assert code == 0
+
+
+def test_cli_gate_exits_zero_on_paid_explabs_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # (a) A fixture results.csv of PAID `-explabs` history must clear the read-only gate:
+    # measured history is legitimate even though the id rides the `-explabs` namespace.
+    results = tmp_path / "results.csv"
+    _write_csv(
+        results,
+        [
+            _row(
+                model="glm-5.3-explabs",
+                model_version="glm-5.3",
+                real_cost="1.6804519999999998",
+                calls="9",
+            ),
+            _row(
+                model="gpt-6-astra-explabs",
+                model_version="gpt-6-astra",
+                real_cost="0.400959",
+                calls="11",
+            ),
+        ],
+    )
+    pricing = {
+        **PRICING,
+        "glm-5.3-explabs": {"input_cost_per_1m": 1.4, "output_cost_per_1m": 4.4},
+        "gpt-6-astra-explabs": {"input_cost_per_1m": 10.0, "output_cost_per_1m": 50.0},
+    }
+    monkeypatch.setattr(config, "load_pricing", lambda *a, **k: pricing)
+    monkeypatch.setattr(config, "load", lambda *a, **k: None)
+    report, blocking = vr.gate(results, pricing)
+    assert report.error_count == 0
+    assert blocking is False
+    assert vr.main(["--results", str(results)]) == 0
 
 
 def test_cli_gate_zero_on_warn_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

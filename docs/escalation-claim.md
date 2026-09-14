@@ -67,7 +67,7 @@ fails:
 | instances the escalate arm acts on | 30 | `session_value.png.cost.naive.escalate.n_tasks_acted_on` |
 | escalate — USD per resolve above the always-cheap floor, on those 30 | 0.9069 | `session_value.png.cost.naive.escalate.usd_per_marginal_resolve` |
 | — its 95% interval | [0.6313, 1.3442] | `session_value.png.cost.naive.escalate.usd_per_marginal_resolve_ci95` |
-| the escalate arm's models | `zai-glm-5.2`, `kimi-k3` | `session_value.png.context.frontier_models` |
+| the escalate arm's models | `glm-5.2`, `kimi-k3` | `session_value.png.context.frontier_models` |
 
 ### Why there is no cost comparison here
 
@@ -236,9 +236,9 @@ mechanically rather than editorially (`run.canonical_deployability.reason`):
 
 **The escalate arm is not the shipped ladder.** The arm measured above is the two
 most expensive models in the corpus (`session_value.png.context.frontier_models`).
-The shipped ladder walks the reduced live pool — `deepseek-v4-pro → zai-glm-5.2 →`
+The shipped ladder walks the reduced live pool — `deepseek-v4-pro → glm-5.2 →`
 (a frontier slot) `→ jump over kimi-k3` (`ladder_rungs.png` panel B, at
-`escalation.rank_shortlist: 3`). So production reaches one arm member (zai-glm-5.2)
+`escalation.rank_shortlist: 3`). So production reaches one arm member (glm-5.2)
 and never the other (kimi-k3).
 Read the claim as the value of escalating *to that arm*, never as what a default
 install achieves.
@@ -253,7 +253,7 @@ overlaps (`benchmark/routing/reports/ladder_evidence.json`, `targets[]`):
 | `qwen3.7-plus` | 3.81× | 87 | +0.0345 | 0.51 | INDISTINGUISHABLE | no — not live |
 | `gpt-5-mini` | 5.36× | 190 | −0.1684 | 0.0 | **NET-HARMFUL** | no — not live |
 | `kimi-k2.5` | 8.57× | 121 | −0.0165 | 0.81 | INDISTINGUISHABLE | no — not live |
-| `zai-glm-5.2` | 13.81× | 84 | +0.1548 | 0.00098 | **NET-HELPFUL** | yes |
+| `glm-5.2` | 13.81× | 84 | +0.1548 | 0.00098 | **NET-HELPFUL** | yes |
 | `kimi-k3` | 42.86× | 110 | +0.2364 | 3e-06 | **NET-HELPFUL** | no |
 
 `p` is `targets[].p_value` as the file reports it; `gpt-5-mini`'s is a rounded
@@ -289,7 +289,7 @@ per-step number is read on the 917.
 Cost comes from the provider's billed `real_cost`
 (`session_value.png.cost_provenance.source`). Every one of the 1022 sessions joins
 to a cost (`...join.join_rate` = 1.0, `n_joined` = 1022 of `n_sessions` = 1022).
-That rate is per *session*; the underlying result table holds 1465 rows
+That rate is per *session*; the underlying result table holds 1601 rows
 (`...join.n_result_rows`), and no published key states the join grain, so read
 the 100% as session coverage and nothing finer.
 
@@ -348,7 +348,7 @@ and nothing on this page survives it.
   that passed; the always-frontier arm is single-shot. The cost axis is honest —
   every attempt is billed — but the quality axes are not the same kind of number.
 - **Per-model stamping is uneven** (`qwen3.7-plus` 47 of 65 trajectories,
-  `zai-glm-5.2` 16 of 31 — `corpus_and_coverage.png.coverage[]`), which is what
+  `glm-5.2` 16 of 31 — `corpus_and_coverage.png.coverage[]`), which is what
   [falsifier E6](#pre-registered-falsifiers-and-their-verdicts) was written
   against. E6 was run and did not fire; the coverage ladder is published with it.
 - **No difference statistic exists for the cost *ratios*.** The report now pairs
@@ -602,13 +602,13 @@ USD-per-marginal-resolve is still not estimated.
 
 **7. Ladder composition — the rung set is measured wrong.** The ladder ranks by
 price, and the price order is not the capability order: it used to buy `gpt-5-mini`
-(NET-HARMFUL) and skip `zai-glm-5.2` (NET-HELPFUL, and 3× cheaper than the rung
+(NET-HARMFUL) and skip `glm-5.2` (NET-HELPFUL, and 3× cheaper than the rung
 it jumped to). The pool change removed the dominated rungs, so the ladder now buys
-`zai-glm-5.2`, and adding `deepseek-v4-pro` put a NET-HELPFUL rung at the *cheapest*
+`glm-5.2`, and adding `deepseek-v4-pro` put a NET-HELPFUL rung at the *cheapest*
 step above the base — the first time price order and capability order agree at the
 bottom of the ladder. What remains is that the price order still skips `kimi-k3`
 (NET-HELPFUL, the best-measured rung) because a research-estimated frontier slot
-falls inside the shortlist, and that price order cannot see redundancy: `zai-glm-5.2`
+falls inside the shortlist, and that price order cannot see redundancy: `glm-5.2`
 now sits above a cheaper rung that already rescues all but 4 of the cases it does. A capability-ordered ladder is the obvious next step.
 The resolver that would order rungs by measured outcome rather than by list price
 exists but is not wired to the escalation path.

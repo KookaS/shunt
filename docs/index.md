@@ -178,8 +178,8 @@ trust rules: [Feedback](feedback.md).
 - [The escalation claim](escalation-claim.md) — what we do and do not assert about escalation, with its pre-registered falsifiers and their verdicts
 - [Escalation dataset](escalation-data-card.md) — what the escalation corpus is: provenance, census, known defects, access mechanics
 - [Reproducing the escalation eval](escalation-reproduction.md) — run the offline escalation eval from a fresh clone, and the numbers a correct run reproduces
-- [The live router](inference.md) — eight figures measuring the shipped router on its own outcome store
-- [The same eight figures, on invented data](inference-demo.md) — an illustrative render of those eight over a synthetic corpus, so the panels the measured page leaves empty can be read at all
+- [The live router](inference.md) — the eight live-router figures kept as incomplete layouts on a seed-only corpus, each stamped awaiting live sessions, and where the populated layout lives
+- [The same eight figures, on invented data](inference-demo.md) — the illustrative render of those eight over a synthetic corpus, so the layout is legible; nothing there is a measurement
 - [Results](results.md) — every measured routing, escalation, and inference number, with its caveats
 - [Research log](research-log.md) — published ideas we tested, and what held
 - [Benchmark](benchmark.md) — run the offline model-capability and routing evals

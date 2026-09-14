@@ -194,20 +194,20 @@ def test_the_arm_membership_and_the_shipped_ladder_are_recorded_not_implied() ->
         trajs.append(_session(inst, "qwen3.7-plus", resolved=False))
         trajs.append(_session(inst, "gpt-5-mini", resolved=False))
         trajs.append(_session(inst, "kimi-k2.5", resolved=False))
-        trajs.append(_session(inst, "zai-glm-5.2", resolved=True))
+        trajs.append(_session(inst, "glm-5.2", resolved=True))
         trajs.append(_session(inst, "kimi-k3", resolved=True))
     sc = session_eval.session_cadence(trajs)
     assert sc is not None
     # Six priced models present: cheapest is the base, the top two are the escalate arm.
     assert sc.cheap_models == ("deepseek-v4-flash",)
-    assert sc.frontier_models == ("zai-glm-5.2", "kimi-k3")
+    assert sc.frontier_models == ("glm-5.2", "kimi-k3")
     # The shipped shortlist walks the SHIPPED live pool (not the corpus's models): since
-    # deepseek-v4-pro joined the pool on 2026-09-04 it is the FIRST rung, then zai-glm-5.2 —
+    # deepseek-v4-pro joined the pool on 2026-09-04 it is the FIRST rung, then glm-5.2 —
     # the first arm member — then the jump to the top live rank, so it still never reaches
     # kimi-k3, the other half of the arm the figure scores.
     assert sc.rank_shortlist > 0
-    assert sc.ladder_visits == ("deepseek-v4-pro", "zai-glm-5.2", "claude-fable-5")
-    assert "zai-glm-5.2" in sc.ladder_visits
+    assert sc.ladder_visits == ("deepseek-v4-pro", "glm-5.2", "claude-fable-5")
+    assert "glm-5.2" in sc.ladder_visits
     assert "kimi-k3" not in sc.ladder_visits
     assert sc.to_dict()["context"]["shipped_ladder_visits"] == list(sc.ladder_visits)
 

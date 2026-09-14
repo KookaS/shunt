@@ -404,8 +404,14 @@ version control audits.
 ### Optional columns and replicates
 
 `RESULTS_FIELDS` declares nine append-only columns beyond the collection-param block, and the
-schema widened backward-compatibly: the file on disk still carries only the 22 columns written
-before them, because no run has yet emitted one. They fall in three classes, deliberately kept
+schema widened backward-compatibly: legacy rows (the 1265 written before the columns existed)
+carry none of them, while the committed corpus's 248 live cells carry the
+measurement/provenance ones the live runner emits — the 200 `deepseek-v4-pro` cells
+(measured 2026-09-02/04), including `cached_in_tok` backfilled on those cells from the
+archived per-turn usage, and 48 of the 50 collection-only `*-explabs` cells (measured
+2026-09-06/08 over the free-promo channel; 2 qwen3.8-27b-explabs rows carry none of the
+optional columns), with `cached_in_tok` present where the provider reported it.
+They fall in three classes, deliberately kept
 apart because they answer to different rules — and outside the replicate key, a column absent
 from a row means MISSING permanently, never zero.
 
@@ -549,7 +555,7 @@ interpolated — the same read-side rule the optional columns live under, enforc
 
 **On today's corpus the fallback is what fires, and that is the honest state.** 406 of the
 1104 completed cells carry no `in_tok`/`out_tok` at all — a pre-existing gap in the recorded
-corpus, concentrated in four of the six models (`qwen3.7-plus` and `zai-glm-5.2` 113/184 each,
+corpus, concentrated in four of the six models (`qwen3.7-plus` and `glm-5.2` 113/184 each,
 `kimi-k3` 89, `kimi-k2.5` 81) and the same gap that leaves `context_cost_n` at 170 of 184
 scored tasks. Every strategy's billed path touches at least one of them, so no strategy has a
 repriced total over the same task set as its recorded one, and `live_gap.png` renders at

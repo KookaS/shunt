@@ -1,0 +1,42 @@
+# shunt-ci: probe
+# Experiential Labs — an OpenAI-compatible gateway. Set EXPLABS_API_KEY,
+# then paste this into ~/.config/shunt/models.yaml. See ../../docs/configuration.md.
+#
+# The `explabs` provider is shipped in the registry for its AVAILABLE-only rows: the five
+# bare-id models below are registered and priced (list prices shown per row) but are absent
+# from router.yaml's live pool and benchmark.yaml's enabled set, so nothing routes or scores
+# them until a measurement earns it. DeepSeek/Kimi models reached through this gateway already
+# have direct registry rows, so they are deliberately not repeated here. The collection-only
+# `glm-5.3-flash` explabs channel lives in `configs/free-tier/overlay.yaml` instead.
+providers:
+  explabs:
+    base_url: https://api.experientiallabs.ai/v1
+    api_key_env_var: EXPLABS_API_KEY
+    litellm_prefix: openai
+
+models:
+  gpt-6-astra:
+    model_id: gpt-6-astra          # $10/M in, $50/M out
+    provider: explabs
+    supports_streaming: true
+    supports_cache_control: false
+  claude-fable-5.1:
+    model_id: claude-fable-5.1     # $10/M in, $50/M out
+    provider: explabs
+    supports_streaming: true
+    supports_cache_control: false
+  gpt-5.6-luna:
+    model_id: gpt-5.6-luna         # $0.20/M in, $1.20/M out
+    provider: explabs
+    supports_streaming: true
+    supports_cache_control: false
+  qwen3.8-27b:
+    model_id: qwen3.8-27b          # $0.32/M in, $2.40/M out
+    provider: explabs
+    supports_streaming: true
+    supports_cache_control: false
+  glm-5.3:
+    model_id: glm-5.3              # $1.40/M in, $4.40/M out
+    provider: explabs
+    supports_streaming: true
+    supports_cache_control: false

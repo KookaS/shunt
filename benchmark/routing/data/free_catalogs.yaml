@@ -1,0 +1,189 @@
+# PER-PROVIDER FACTS A FREE LISTING CANNOT CARRY — the input to `scan_free_models.py`.
+#
+# A listing entry from a provider catalogue knows its own id, context and (sometimes) price.
+# It does NOT know its channel's free-tier scope, its request caps, whether a card is needed,
+# or which catalog shape it arrived in. Those live here, seeded from a provider-catalogue survey
+# dated 2026-09-10.
+#
+# `catalog_shape` selects a normaliser:
+#   openai            -> data[] entries (OpenRouter, Requesty, Groq, SambaNova, NIM, Vercel,
+#                        OpenCode Zen, Kilo)
+#   google_ai_studio  -> models[] entries (name/inputTokenLimit/supportedGenerationMethods)
+#   cloudflare        -> result[] entries (name/task; name is the @cf/... slug, id is a UUID)
+#   promotions        -> promotions[] entries (Experiential Labs; slugs[] + `free`, per-org cap
+#                        and card requirement are listing facts)
+#
+# Watchlist gateways whose free subset the shapes cannot address are deliberately NOT scanned
+# here: `together` publishes no free marker in its OpenAI-shaped catalogue (an `all` filter
+# would claim its paid surface), and `cerebras` is a $5 trial, not a standing free tier. They
+# enter through the later admission probe instead.
+#
+# `free_filter` says which listings in that catalogue count as free. It is data, not a guess:
+#   {kind: zero_price}                 published price is $0 on every axis (OpenRouter, Requesty)
+#   {kind: all}                        the catalogue IS the free/dev surface (Groq, SambaNova,
+#                                      NIM, Google, Cloudflare)
+#   {kind: id_suffix, value: "-free"}  the id carries the marker (OpenCode Zen, Kilo)
+#   {kind: tag, value: free}           the listing carries a free tag (Vercel)
+#   {kind: promotion_free}             the promotion entry sets `free: true` (Experiential Labs)
+# A listing that no filter admits is not free and is not scanned.
+#
+# `user_agent` is an OPTIONAL per-provider request header. Some gateways reject the default
+# self-identifying probe UA (403/401) and answer a browser-like UA, so the UA is registry data
+# rather than a code constant. When absent the default probe UA is used, exactly as before.
+#
+# `free_tier.free_access: false` marks a provider whose listings are still SCANNED for
+# provenance but are not schedulable (the campaign's lane scheduler refuses them too). Every
+# snapshot row carries `schedulable`/`schedulable_reason` derived from this marker; the reason
+# is `access_note` when present.
+#
+# `verified_by` is one of probe | docs | unverified, per the plan's provenance table:
+#   probe     - a live in-tree probe observed the behaviour (Groq scope)
+#   docs      - the vendor publishes the number/mechanic (OpenRouter, Google, Cloudflare,
+#               Vercel)
+#   unverified- the vendor is silent, 404s, or was not surveyed (Requesty, SambaNova, NIM,
+#               OpenCode Zen, Kilo). Declaring "unknown" beats inventing a number: rpd/rpm
+#               are null, never a made-up value.
+#
+# `catalog_url` is a public machine-readable endpoint. `${VAR}` is expanded at scan time from
+# the environment and is NEVER written to a tracked file; a missing variable makes the channel
+# UNREACHABLE by name, never a request with a literal placeholder.
+#
+# `api_key_env` names the environment variable holding the channel's CATALOG credential. When
+# declared, the scan reads it from the environment and attaches the right header; an unset or
+# empty variable makes the channel UNREACHABLE by name, never an unauthenticated request that
+# would 401. The key VALUE is never written to a file or logged. `auth_style` selects the
+# header shape: `bearer` (default) is `Authorization: Bearer <key>`; `google` is
+# `x-goog-api-key: <key>`. A keyless public channel omits both fields and is fetched as before.
+#
+# Free listings rotate on a days-to-weeks timescale. `latest_free_models.json` tracks
+# first_seen/last_seen/withdrawn_at across scans so a vanished listing quiesces instead of
+# being deleted; re-verify `free_tier` before a measured run.
+
+schema: 1
+providers:
+  openrouter:
+    catalog_url: https://openrouter.ai/api/v1/models
+    catalog_shape: openai
+    free_filter: {kind: zero_price}
+    free_tier: {scope: per_account, rpd: 1000, rpm: 20, requires_card: false}
+    verified_as_of: "2026-09-10"
+    verified_by: docs
+  requesty:
+    catalog_url: https://router.requesty.ai/v1/models
+    catalog_shape: openai
+    free_filter: {kind: zero_price}
+    free_tier: {scope: per_account, rpd: 200, rpm: null, requires_card: false}
+    verified_as_of: "2026-09-10"
+    verified_by: unverified
+  groq:
+    catalog_url: https://api.groq.com/openai/v1/models
+    catalog_shape: openai
+    api_key_env: GROQ_API_KEY
+    free_filter: {kind: all}
+    free_tier: {scope: per_model, rpd: 1000, rpm: 30, requires_card: false}
+    verified_as_of: "2026-09-10"
+    verified_by: probe
+  sambanova:
+    catalog_url: https://api.sambanova.ai/v1/models
+    catalog_shape: openai
+    free_filter: {kind: all}
+    free_tier: {scope: per_account, rpd: 20, rpm: 20, requires_card: false}
+    verified_as_of: "2026-09-10"
+    verified_by: unverified
+  nvidia_nim:
+    catalog_url: https://integrate.api.nvidia.com/v1/models
+    catalog_shape: openai
+    free_filter: {kind: all}
+    free_tier: {scope: per_account, rpd: null, rpm: null, requires_card: false}
+    verified_as_of: "2026-09-10"
+    verified_by: unverified
+  vercel_ai_gateway:
+    catalog_url: https://ai-gateway.vercel.sh/v1/models
+    catalog_shape: openai
+    free_filter: {kind: tag, value: free}
+    free_tier: {scope: per_model, rpd: null, rpm: null, requires_card: true}
+    verified_as_of: "2026-09-11"
+    verified_by: probe
+  google_ai_studio:
+    catalog_url: https://generativelanguage.googleapis.com/v1beta/models
+    catalog_shape: google_ai_studio
+    api_key_env: GOOGLE_AI_STUDIO_API_KEY
+    auth_style: google
+    free_filter: {kind: all}
+    free_tier: {scope: per_project, rpd: null, rpm: null, requires_card: false}
+    verified_as_of: "2026-09-10"
+    verified_by: docs
+  cloudflare_workers_ai:
+    catalog_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/models/search
+    catalog_shape: cloudflare
+    api_key_env: CLOUDFLARE_API_TOKEN
+    free_filter: {kind: all}
+    free_tier: {scope: per_account, rpd: null, rpm: null, requires_card: false, neurons_per_day: 10000}
+    verified_as_of: "2026-09-10"
+    verified_by: docs
+  opencode_zen:
+    catalog_url: https://opencode.ai/zen/v1/models
+    catalog_shape: openai
+    free_filter: {kind: id_suffix, value: "-free"}
+    # The `-free` ids appear in the listing, but the API serves them only inside the OpenCode
+    # app/session (HTTP 400 MissingSessionID), never with a key — so the channel is scanned for
+    # provenance and REFUSED as a free lane by the scheduler's `free_access` marker.
+    free_tier:
+      scope: per_account
+      rpd: null
+      rpm: null
+      requires_card: true
+      free_access: false
+      access_note: >-
+        Free ids are app/session-gated (HTTP 400 MissingSessionID: "OpenCode's free tier can
+        only be used in OpenCode"), not access-served through the API; refused as a free lane.
+    verified_as_of: "2026-09-11"
+    verified_by: probe
+  kilo_gateway:
+    # Keyless catalog GET — no `api_key_env`, so the scan sends no Authorization header. The
+    # completions lane is anonymous too (`key_optional` on the provider row): leave KILO_API_KEY
+    # unset and only `:free` ids are served, identified by IP and rate-limited per hour.
+    catalog_url: https://api.kilo.ai/api/gateway/models
+    catalog_shape: openai
+    free_filter: {kind: id_suffix, value: ":free"}
+    free_tier: {scope: per_ip, rpd: null, rpm: null, requires_card: false}
+    verified_as_of: "2026-09-10"
+    verified_by: docs
+  explabs:
+    # Keyless public catalog GET (the promotions list is not key-gated). The free deals are a
+    # `promotions[]` shape, not the OpenAI `data[]` shape: `free: true` marks the promo, and the
+    # slugs are read from the payload each scan — never hardcoded. `requires_payment_method` and
+    # `per_org_cap_micro_usd` are recorded as listing facts; the umbrella's cap is a daily $5.
+    catalog_url: https://api.experientiallabs.ai/api/models
+    catalog_shape: promotions
+    free_filter: {kind: promotion_free}
+    free_tier: {scope: per_account, rpd: null, rpm: null, requires_card: true}
+    verified_as_of: "2026-09-11"
+    verified_by: probe
+
+# METADATA SOURCES — facts a listing cannot carry, keyed by a publisher-issued identifier.
+#
+# models.dev supplies release_date, limit, open_weights and the paid twin's list price. It is
+# a metadata source, NEVER an identity joiner: joining on its `id` would import someone else's
+# fuzzy match under our provenance. `provider_keys` scopes a match to ONE publisher, and the
+# join key is the publisher's OWN catalogue id (the listing id our vendor fetch carries).
+# `listing_aliases` is the curated override for a publisher whose id differs from the
+# models.dev key; a `modelsdev` pointer in `model_identity.yaml` does the same per identity.
+# An unreachable source leaves `release_date` null and the admission gate refuses that
+# listing — dates are never fabricated.
+metadata_sources:
+  modelsdev:
+    catalog_url: https://models.dev/api.json
+    provider_keys:
+      openrouter: openrouter
+      requesty: requesty
+      groq: groq
+      nvidia_nim: nvidia
+      vercel_ai_gateway: vercel
+      google_ai_studio: google
+      cloudflare_workers_ai: cloudflare-workers-ai
+      opencode_zen: opencode
+      kilo_gateway: kilo
+    listing_aliases: {}
+    verified_as_of: "2026-09-10"
+    verified_by: docs

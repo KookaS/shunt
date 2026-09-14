@@ -21,16 +21,25 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 from benchmark import config
 from benchmark.escalation import features, prefix_eval, schema
+from benchmark.routing import impute
+from benchmark.runner import swebench_specs
 
 _ABSENT: Final = "ABSENT"
 _THIN: Final = "THIN"
 _OK: Final = "OK"
+
+# A model may only be scheduled for a multimodal cell once it holds a real row for every
+# Verified text challenge. 1.0 is the strict reading of "done all of swebench text"; a
+# looser fraction is one deliberate edit here. The gate is a model ELIGIBILITY rule, not a
+# scope cut on the benchmark.
+MULTIMODAL_UNLOCK_FRACTION: Final[float] = 1.0
 
 # model -> (trajectories, scorable steps, trajectories admissible at the evaluated depth)
 Corpus = dict[str, tuple[int, int, int]]
@@ -95,6 +104,104 @@ def build_rows(pool: list[str], cells: dict[str, int], corpus: Corpus) -> list[M
 def unconfigured_models(pool: list[str], cells: dict[str, int], corpus: Corpus) -> list[str]:
     """Models carrying data that the config no longer enables — stale, not evaluated."""
     return sorted((set(cells) | set(corpus)) - set(pool))
+
+
+def _verified_challenge_ids() -> set[str]:
+    """The challenge ids in the materialised Verified spec store (500 when complete)."""
+    directory = config.challenge_dir(swebench_specs.SOURCE)
+    if not directory.is_dir():
+        return set()
+    return {path.stem for path in directory.glob("*.json")}
+
+
+def _covered_ids(path: Path) -> dict[str, set[str]]:
+    """model -> distinct challenge ids it holds a REAL row for in one results CSV.
+
+    A missing file is an empty corpus, never an error: the free corpus is absent from a
+    fresh checkout and its absence must not read as "no model holds any coverage". Zero-work
+    rows (aborted-collection residue) are excluded — the same predicate the identity-skip
+    uses: they never executed, so they cannot cover a challenge. Only a row with positive
+    work earns coverage.
+    """
+    if not path.exists():
+        return {}
+    import csv
+
+    covered: dict[str, set[str]] = {}
+    with open(path, newline="") as handle:
+        for row in csv.DictReader(handle):
+            if impute.is_zero_work(row):
+                continue
+            model = str(row.get("lane") or row.get("model") or "").strip()
+            cid = str(row.get("challenge_id") or "").strip()
+            if model and cid:
+                covered.setdefault(model, set()).add(cid)
+    return covered
+
+
+def verified_coverage_table() -> tuple[dict[str, int], int]:
+    """(per-model distinct Verified-challenge counts, size of the Verified corpus).
+
+    Reads the paid ``results.csv`` plus the separate ``results_free.csv``; a challenge id
+    outside the Verified spec store never counts, so a multimodal row cannot inflate text
+    coverage. Pure and deterministic — committed CSVs only, no network or model calls.
+    """
+    verified = _verified_challenge_ids()
+    covered: dict[str, set[str]] = {}
+    for path in (config.results_csv_path(), config.free_results_csv_path()):
+        for model, ids in _covered_ids(path).items():
+            covered.setdefault(model, set()).update(ids & verified)
+    return {model: len(ids) for model, ids in covered.items()}, len(verified)
+
+
+def verified_coverage(model: str) -> float:
+    """Fraction of the Verified corpus ``model`` holds a real row for (0.0 when absent)."""
+    counts, total = verified_coverage_table()
+    return counts.get(model, 0) / total if total else 0.0
+
+
+def verified_challenge_ids() -> set[str]:
+    """The Verified challenge ids in the materialised spec store (empty when not built)."""
+    return _verified_challenge_ids()
+
+
+def covered_ids_by_model() -> dict[str, set[str]]:
+    """model -> distinct Verified challenge ids it holds a REAL row for, both corpora.
+
+    The set-valued companion of :func:`verified_coverage_table`; the collector's priority
+    model needs the ids (to reason about marginal coverage), not just the counts. Same
+    predicate: zero-work rows never execute, so they never cover a challenge.
+    """
+    verified = _verified_challenge_ids()
+    covered: dict[str, set[str]] = {}
+    for path in (config.results_csv_path(), config.free_results_csv_path()):
+        for model, ids in _covered_ids(path).items():
+            covered.setdefault(model, set()).update(ids & verified)
+    return covered
+
+
+def multimodal_eligible(model: str) -> bool:
+    """Whether ``model`` clears the Verified-coverage gate to be scheduled multimodal."""
+    return verified_coverage(model) >= MULTIMODAL_UNLOCK_FRACTION
+
+
+def multimodal_gate_refusals(models: Iterable[str]) -> dict[str, str]:
+    """model -> named reason it is below the multimodal gate; empty when none are.
+
+    The collector consults this BEFORE scheduling: a below-gate model is skipped with the
+    reason, not run and left to fail inside the harness.
+    """
+    counts, total = verified_coverage_table()
+    refusals: dict[str, str] = {}
+    for model in models:
+        covered = counts.get(model, 0)
+        fraction = covered / total if total else 0.0
+        if fraction < MULTIMODAL_UNLOCK_FRACTION:
+            refusals[model] = (
+                f"Verified coverage {covered}/{total} ({fraction:.1%}) is below the "
+                f"multimodal gate {MULTIMODAL_UNLOCK_FRACTION:.0%}"
+            )
+    return refusals
 
 
 def format_report(rows: list[ModelRow], cell_floor: int, traj_floor: int, depth: int) -> str:

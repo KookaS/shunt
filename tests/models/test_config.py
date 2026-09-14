@@ -18,7 +18,9 @@ from shunt.models.config import (
     ReasoningConfig,
     Size,
     arm_api_params,
+    expand_env_vars,
     load_registry,
+    parse_registry,
     resolve_models,
     strict_yaml_load,
 )
@@ -36,7 +38,7 @@ DEFAULT_MODEL_NAMES: Final = [
     # Measured 2026-09-03/04 and promoted to the live pool (SH015 triage KEEP on both strata).
     "deepseek-v4-pro",
     "gpt-5-mini",
-    "zai-glm-5.2",
+    "glm-5.2",
     "kimi-k2.5",
     "kimi-k3",
     # Frontier escalation tail added 2026-07-19 (router-only; benchmark-disabled).
@@ -56,8 +58,39 @@ DEFAULT_MODEL_NAMES: Final = [
     # PROBE-ONLY (2026-08-26): the revealed identity of the retired stealth/ox-alpha.
     # Never served by the router, never in the benchmark's models list — registered so the
     # 41 cells collected during OpenRouter's $0 free window keep a priced registry row.
-    "zai-glm-5.3-flash",
+    "glm-5.3-flash",
+    # AVAILABLE-ONLY (2026-09-13, W1): the five bare-id models promoted into the shipped
+    # registry under provider `explabs`. Registered + priced so a user MAY select one by
+    # copying it into router.yaml, but deliberately absent from router.yaml's live pool and
+    # benchmark.yaml's enabled set — so they carry no size block and no reasoning bracket until
+    # a benchmark measurement earns them (see AVAILABLE_ONLY_MODELS below).
+    "gpt-6-astra",
+    "claude-fable-5.1",
+    "gpt-5.6-luna",
+    "qwen3.8-27b",
+    "glm-5.3",
 ]
+
+# COLLECTION-ONLY rows moved OUT of the shipped registry on 2026-09-10 (free-overlay policy)
+# into the non-shipped overlay registry (`configs/free-tier/overlay.yaml`). The shipped
+# registry
+# no longer holds any free/`-explabs` id, so this census exemption is empty by construction:
+# if a collection-only row ever reappears here, the free-model wall failed.
+COLLECTION_ONLY_MODELS: Final = frozenset()
+
+# AVAILABLE-ONLY (2026-09-13, W1): shipped, priced, but neither live (router.yaml) nor enabled
+# (benchmark.yaml). They are selectable only by explicit user config, so they never reach a
+# published size axis or an arm/scoring path; no size, no reasoning and no cache-read rate is
+# the documented, intended state (see the registry comment on those rows).
+AVAILABLE_ONLY_MODELS: Final = frozenset(
+    {
+        "gpt-6-astra",
+        "claude-fable-5.1",
+        "gpt-5.6-luna",
+        "qwen3.8-27b",
+        "glm-5.3",
+    }
+)
 
 
 class TestStrictYamlLoad:
@@ -100,6 +133,113 @@ class TestModelConfig:
         )
         assert cfg.supports_streaming is False
         assert cfg.supports_cache_control is True
+
+
+class TestBaseUrlEnvInterpolation:
+    def test_expand_env_vars_substitutes_a_set_variable(self, monkeypatch) -> None:
+        monkeypatch.setenv("CF_ACCOUNT_ID", "abc123")
+        assert (
+            expand_env_vars("https://api.example.com/accounts/${CF_ACCOUNT_ID}/v1")
+            == "https://api.example.com/accounts/abc123/v1"
+        )
+
+    def test_expand_env_vars_leaves_an_unset_variable_visible(self, monkeypatch) -> None:
+        monkeypatch.delenv("CF_ACCOUNT_ID", raising=False)
+        # Leaving the literal makes the miss visible in the resolved URL; blanking it would
+        # silently produce a wrong-but-parseable path.
+        assert (
+            expand_env_vars("https://api.example.com/accounts/${CF_ACCOUNT_ID}/v1")
+            == "https://api.example.com/accounts/${CF_ACCOUNT_ID}/v1"
+        )
+
+    def test_expand_env_vars_is_generic_over_names(self, monkeypatch) -> None:
+        monkeypatch.setenv("ANY_NAME_2", "x")
+        assert expand_env_vars("a/${ANY_NAME_2}/b/${OTHER}") == "a/x/b/${OTHER}"
+
+    def test_resolved_model_base_url_is_interpolated(self, monkeypatch) -> None:
+        monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct-42")
+        registry = parse_registry(
+            {
+                "providers": {
+                    "cloudflare_workers_ai": {
+                        "base_url": (
+                            "https://api.cloudflare.com/client/v4/accounts/"
+                            "${CLOUDFLARE_ACCOUNT_ID}/ai/v1"
+                        ),
+                        "api_key_env_var": "CLOUDFLARE_API_TOKEN",
+                        "litellm_prefix": "openai",
+                    }
+                },
+                "models": {
+                    "cf-model": {
+                        "model_id": "@cf/openai/gpt-oss-120b",
+                        "provider": "cloudflare_workers_ai",
+                    }
+                },
+            }
+        )
+        assert (
+            resolve_models(registry)["cf-model"].base_url
+            == "https://api.cloudflare.com/client/v4/accounts/acct-42/ai/v1"
+        )
+
+    def test_provider_base_url_stays_a_plain_string(self) -> None:
+        # No new field: the schema still rejects extras, so interpolation could not have
+        # been smuggled in as a structured field.
+        with pytest.raises(pydantic.ValidationError):
+            parse_registry(
+                {
+                    "providers": {
+                        "p": {
+                            "base_url": "https://p/v1",
+                            "api_key_env_var": "K",
+                            "litellm_prefix": "openai",
+                            "base_url_template": "nope",
+                        }
+                    },
+                    "models": {},
+                }
+            )
+
+
+class TestKeyOptionalProvider:
+    """`key_optional` marks an anonymous free lane and threads onto the resolved model."""
+
+    def test_key_optional_threads_from_provider_to_model_config(self) -> None:
+        registry = parse_registry(
+            {
+                "providers": {
+                    "kilo_gateway": {
+                        "base_url": "https://api.kilo.ai/api/gateway",
+                        "api_key_env_var": "KILO_API_KEY",
+                        "litellm_prefix": "openai",
+                        "key_optional": True,
+                    }
+                },
+                "models": {
+                    "kilo-laguna-xs-2.1-free": {
+                        "model_id": "poolside/laguna-xs-2.1:free",
+                        "provider": "kilo_gateway",
+                    }
+                },
+            }
+        )
+        assert resolve_models(registry)["kilo-laguna-xs-2.1-free"].key_optional is True
+
+    def test_key_optional_defaults_to_false_when_omitted(self) -> None:
+        registry = parse_registry(
+            {
+                "providers": {
+                    "groq": {
+                        "base_url": "https://api.groq.com/openai/v1",
+                        "api_key_env_var": "GROQ_API_KEY",
+                        "litellm_prefix": "openai",
+                    }
+                },
+                "models": {"m": {"model_id": "x", "provider": "groq"}},
+            }
+        )
+        assert resolve_models(registry)["m"].key_optional is False
 
 
 class TestModelPoolLoad:
@@ -293,13 +433,13 @@ class TestFallbackChain:
     def test_self_first_then_rank_neighbours(self) -> None:
         pool = ModelPool()
         # qwen3.7-plus (1.60) sits mid-registry; its nearest neighbours by total price are
-        # deepseek-v4-pro (1.305) then gpt-5-mini (2.25), with zai-glm-5.3-flash (0.65) and
-        # deepseek-v4-flash (0.42) further out. This ranks the whole registry, probe- and
-        # judge-only rows included — the server restricts to the policy's live list before
-        # serving (`proxy/server.py`), which is what keeps a probe-only row out of real routing.
+        # gpt-5.6-luna (1.40, a shipped AVAILABLE-only explabs row) then gpt-5-mini (2.25).
+        # The price-implied rank is over the whole registry; the server restricts to the
+        # policy's live list before serving (`proxy/server.py`), so a non-live row never
+        # enters real routing even though it ranks here.
         chain = pool.fallback_chain("qwen3.7-plus")
         assert chain[0] == "qwen3.7-plus"
-        assert set(chain[:3]) == {"qwen3.7-plus", "deepseek-v4-pro", "gpt-5-mini"}
+        assert set(chain[:3]) == {"qwen3.7-plus", "gpt-5.6-luna", "gpt-5-mini"}
         # Exhaustive and duplicate-free, whatever the pool holds.
         assert chain == list(dict.fromkeys(chain))
         assert set(chain) == set(pool.model_names())
@@ -418,13 +558,20 @@ class TestDefaultRegistryHasReasoning:
     # committed result rows carry the legacy `reasoning="default"` placeholder, and declaring
     # a bracket now would re-alias those measured rows to an arm they never ran (see
     # benchmark/config.py `_alias_legacy_reasoning`). Also absent from router.yaml/benchmark.yaml.
-    PROBE_ONLY_MODELS: Final = frozenset({"zai-glm-5.3-flash"})
+    PROBE_ONLY_MODELS: Final = frozenset({"glm-5.3-flash"})
+    # COLLECTION-ONLY rows (module-level COLLECTION_ONLY_MODELS) are exempt for the reason
+    # documented there: they ride a $0 free-promo channel, are never in router.yaml /
+    # benchmark.yaml's model lists, and never route or benchmark — so no bracket exists and
+    # none is wanted.
 
     def test_every_default_model_declares_a_reasoning_block(self) -> None:
         pool = ModelPool()
         for name in DEFAULT_MODEL_NAMES:
             model = pool.get_model(name)
             assert model is not None
+            if name in COLLECTION_ONLY_MODELS or name in AVAILABLE_ONLY_MODELS:
+                assert model.reasoning is None, f"{name} must stay reasoning-free"
+                continue
             if name in self.JUDGE_ONLY_MODELS or name in self.PROBE_ONLY_MODELS:
                 assert model.reasoning is None, f"{name} must stay reasoning-free"
                 continue
@@ -568,10 +715,14 @@ class TestSizeMetadata:
 
     def test_every_shipped_model_carries_sourced_size_and_serving_mode(self) -> None:
         # The registry is the figure's only size source; a row without provenance would put an
-        # unsourced number on a published axis.
+        # unsourced number on a published axis. COLLECTION_ONLY rows are exempt: they ride a
+        # $0 free-promo channel and are never in the shipped product roster, so they never
+        # reach a published size axis — no size block is the documented, intended state.
         registry = load_registry()
         for name, model in resolve_models(registry).items():
+            assert model.serving_mode in ("hosted", "local"), name
+            if name in COLLECTION_ONLY_MODELS or name in AVAILABLE_ONLY_MODELS:
+                continue
             assert model.size is not None, f"{name} declares no size"
             assert model.size.size_source.startswith("http"), name
             assert model.size.size_as_of, name
-            assert model.serving_mode in ("hosted", "local"), name

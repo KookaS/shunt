@@ -10,9 +10,9 @@
 # `POST /v1/chat/completions`, so a provider is DATA: a base_url, a key env var,
 # and a litellm prefix. No provider class, no factory.
 #
-# ONLY the providers a shipped model routes to live here — deepseek and requesty.
-# The wider provider catalog (openai, groq, xai, fireworks, …) lives in
-# examples/providers/*.yaml, copy-paste fragments the router never loads. The
+# ONLY the providers a shipped model routes to live here — requesty, deepseek,
+# openrouter and explabs. The wider provider catalog (openai, groq, xai, fireworks, …)
+# lives in examples/providers/*.yaml, copy-paste fragments the router never loads. The
 # keyless auth-rejection signatures used to validate wiring live once in
 # tools/provider_auth_signatures.yaml — validation metadata, not runtime config.
 providers:
@@ -31,6 +31,10 @@ providers:
     # examples/providers/openrouter.yaml: litellm dials OpenRouter directly and reads
     # OPENROUTER_API_KEY canonically, so `litellm_model_target` need not thread base_url.
     litellm_prefix: openrouter
+  explabs:
+    base_url: https://api.experientiallabs.ai/v1
+    api_key_env_var: EXPLABS_API_KEY
+    litellm_prefix: openai            # generic OpenAI-compatible surface, as `requesty`
 # ── models ───────────────────────────────────────────────────────────────────
 # Required core (model_id, provider, supports_streaming, supports_cache_control)
 # makes a model routable. The optional `pricing` block makes it benchmarkable AND
@@ -208,7 +212,7 @@ models:
         - id: high
           rank: 2
           api: {reasoning_effort: high}
-  zai-glm-5.2:
+  glm-5.2:
     model_id: fireworks/glm-5.2      # requesty's serving path, not the origin vendor
     provider: requesty
     version: glm-5.2
@@ -550,7 +554,7 @@ models:
       size_source: https://docs.anthropic.com/en/docs/about-claude/models/overview
       size_as_of: "2026-08-29"
       size_note: "Anthropic publishes no parameter counts."
-  zai-glm-5.3-flash:
+  glm-5.3-flash:
     model_id: z-ai/glm-5.3-flash
     provider: openrouter
     version: glm-5.3-flash
@@ -579,3 +583,108 @@ models:
       size_source: https://huggingface.co/zai-org/GLM-5.3-Flash
       size_as_of: "2026-08-29"
       size_note: "Model card introduction: 320B total parameters, 18B active; safetensors index 321,323,031,390."
+  # ── Experiential Labs — AVAILABLE-ONLY rows (W1, 2026-09-13) ──────────────────
+  # Registered + priced so a user MAY select them (copy one into router.yaml), but
+  # deliberately ABSENT from router.yaml's `models:` live pool and from
+  # benchmark/benchmark.yaml's `models:` enabled set, so nothing routes or scores them
+  # until a measurement earns it. List prices are the real paid-channel rates recovered
+  # from the 2026-09-07/09 free-tier probe (the overlay registry); `version` is a bare
+  # model identity (no provider prefix, no promo marker). No `cache_read_cost_per_1m`
+  # (the gateway shares a cache namespace across tenants, so a harvested cache rate would
+  # look measured without being so), no `size` and no `reasoning` bracket: those are earned
+  # by a benchmark measurement, not asserted here. `deepseek-v4-flash`, `kimi-k3` and
+  # `deepseek-v4-pro` already have direct registry rows and deliberately get no second
+  # explabs row.
+  gpt-6-astra:
+    model_id: gpt-6-astra
+    provider: explabs
+    version: gpt-6-astra
+    supports_streaming: true
+    supports_cache_control: false
+    serving_mode: hosted
+    pricing:
+      input_cost_per_1m: 10.0
+      output_cost_per_1m: 50.0
+      price_provider: explabs
+      price_source: https://platform.experientiallabs.ai/models/gpt-6-astra
+      price_as_of: "2026-09-07"
+      price_note: >-
+        Real list price of record, dated 2026-09-07: $10/M in, $50/M out. Recovered
+        from the three real paid cells in results.csv (real_cost 0.5167 total) — the
+        gateway billing solves exactly to these rates. No cache_read_cost_per_1m: the
+        gateway cache namespace is shared across tenants, so a harvested cache rate
+        would look measured without being so.
+  claude-fable-5.1:
+    model_id: claude-fable-5.1
+    provider: explabs
+    version: claude-fable-5.1
+    supports_streaming: true
+    supports_cache_control: false
+    serving_mode: hosted
+    pricing:
+      input_cost_per_1m: 10.0
+      output_cost_per_1m: 50.0
+      price_provider: explabs
+      price_source: https://platform.experientiallabs.ai/models/claude-fable-5.1
+      price_as_of: "2026-09-07"
+      price_note: >-
+        Real list price of record, dated 2026-09-07: $10/M in, $50/M out. The gateway
+        catalog's host_managed list (anthropic + openrouter rungs agree) for the
+        underlying claude-fable-5.1 model. No cache_read_cost_per_1m, for the shared
+        gateway-cache-namespace reason.
+  gpt-5.6-luna:
+    model_id: gpt-5.6-luna
+    provider: explabs
+    version: gpt-5.6-luna
+    supports_streaming: true
+    supports_cache_control: false
+    serving_mode: hosted
+    pricing:
+      input_cost_per_1m: 0.20
+      output_cost_per_1m: 1.20
+      price_provider: explabs
+      price_source: https://platform.experientiallabs.ai/models/gpt-5.6-luna
+      price_as_of: "2026-09-07"
+      price_note: >-
+        Real list price of record, dated 2026-09-07: $0.20/M in, $1.20/M out. The
+        gateway catalog's host_managed list (openrouter + openai rungs agree) AND
+        confirmed by the one real paid cell in results.csv (astropy, real_cost
+        0.007519) — billing solves exactly to these rates. No cache_read_cost_per_1m,
+        for the shared gateway-cache-namespace reason.
+  qwen3.8-27b:
+    model_id: qwen3.8-27b
+    provider: explabs
+    version: qwen3.8-27b
+    supports_streaming: true
+    supports_cache_control: false
+    serving_mode: hosted
+    pricing:
+      input_cost_per_1m: 0.32
+      output_cost_per_1m: 2.40
+      price_provider: explabs
+      price_source: https://platform.experientiallabs.ai/models/qwen3.8-27b
+      price_as_of: "2026-09-07"
+      price_note: >-
+        Real list price of record, dated 2026-09-07: $0.32/M in, $2.40/M out. The
+        gateway catalog's host_managed experiential-cloud rung for qwen3.8-27b (the
+        openrouter rung differs at $0.45/$3.20; the experiential-cloud rung is the rung
+        of record here). No cache_read_cost_per_1m, for the shared
+        gateway-cache-namespace reason.
+  glm-5.3:
+    model_id: glm-5.3
+    provider: explabs
+    version: glm-5.3
+    supports_streaming: true
+    supports_cache_control: false
+    serving_mode: hosted
+    pricing:
+      input_cost_per_1m: 1.4
+      output_cost_per_1m: 4.4
+      price_provider: explabs
+      price_source: https://platform.experientiallabs.ai/models/glm-5.3
+      price_as_of: "2026-09-09"
+      price_note: >-
+        Real list price of record, dated 2026-09-09: $1.40/M in, $4.40/M out. The
+        gateway platform's host_managed rung for glm-5.3, agreeing with the direct
+        fireworks/glm-5.2 rung's $1.40/$4.40. No cache_read_cost_per_1m, for the shared
+        gateway-cache-namespace reason.

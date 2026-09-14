@@ -85,7 +85,7 @@ CLUSTER_COLOR: Final[dict[str, str]] = {
 _HOSTED_EDGE: Final[str] = "#1a1a1a"
 _LOCAL_EDGE: Final[str] = "#B15928"
 _RULE: Final[str] = "#9a9a9a"
-_ZERO_LABEL: Final[str] = "$0 · local"
+_ZERO_LABEL: Final[str] = "$0 · local\n(not on log scale)"
 
 # Marker area in points², from `sqrt(active_params)` scaled into a readable band. The square
 # root is applied to the PARAMETER count and the result mapped to AREA, so perceived size
@@ -133,15 +133,21 @@ class GridRow:
     # None is UNDISCLOSED: the vendor publishes no figure and none is invented here.
     total_params: int | None
     active_params: int | None
-    # Per-call latency observations in seconds. Empty means MISSING — never zero, and never a
-    # panel drawn from no samples.
-    latency_s: tuple[float, ...] = ()
     # Set ONLY on a row whose outcome was measured outside the corpus named in
     # `GridData.source` — a different harness, a different task draw, or both. Such a row is
     # not cell-for-cell comparable with the rest of the panel, so it is drawn with a dagger on
     # its label and this sentence is printed beside it. None means the row came from the
     # corpus and needs no qualification.
     provenance_note: str | None = None
+    # The rendered name, when it differs from the join KEY `name`. A corpus/overlay row keys
+    # on a channel listing but displays the bare weights identity; the live half leaves this
+    # None because its store key already IS the canonical served name.
+    label: str | None = None
+
+    @property
+    def display(self) -> str:
+        """The row's rendered name: the canonical label when set, else the key."""
+        return self.label or self.name
 
     @property
     def is_external(self) -> bool:
@@ -283,7 +289,7 @@ def _label(row: GridRow) -> str:
     # already spoken for, and a fifth visual encoding would compete with one of them for the
     # same glance. The dagger is inert until a reader looks for it, and the note under the
     # canvas says exactly what it means.
-    return f"{row.name} †" if row.is_external else row.name
+    return f"{row.display} †" if row.is_external else row.display
 
 
 # ------------------------------------------------------------------ panel A
@@ -333,6 +339,10 @@ def _draw_operating_frontier(
             anchor = (x, row.rate * 100)
             offset = label_offset(anchor, placed, forced_below=row.wilson[1] * 100 >= ceiling)
             placed.append((anchor, offset))
+            # A label moved off the default slot sits nearer a NEIGHBOUR's marker than its own,
+            # so it gets a thin leader back to the rung it names. Without it `qwen3.5-35b-a3b`
+            # beside `deepseek-v4-flash` reads as labelling the corpus marker.
+            moved = offset != _LABEL_OFFSETS[0]
             ax.annotate(
                 _label(row),
                 anchor,
@@ -342,6 +352,11 @@ def _draw_operating_frontier(
                 va="top" if offset < 0 else "baseline",
                 fontsize=6.6,
                 color=plot_frame.INK,
+                arrowprops=(
+                    {"arrowstyle": "-", "color": _RULE, "lw": 0.6, "shrinkA": 1.0, "shrinkB": 3.0}
+                    if moved
+                    else None
+                ),
             )
 
     ax_zero.set_xlim(-0.6, 0.6)
@@ -398,6 +413,39 @@ def _draw_operating_frontier(
     lo = max(0.0, min(lows) - 13.0)
     hi = min(100.0, max(highs + rates) + 9.0)
     return lo, hi
+
+
+def _draw_break(ax_zero: Axes, ax_log: Axes) -> None:
+    """Mark the x-axis interruption explicitly: slash pairs at the gap, plus a label.
+
+    The dashed vertical rules alone read as spines, so a reader could take the $0 column and
+    the log region for one continuous ruler. The conventional double-slash sits ON the axis
+    at the gap and the gutter carries the word.
+    """
+    for ax, edge in ((ax_zero, 1.0), (ax_log, 0.0)):
+        for shift in (-0.045, 0.045):
+            ax.plot(
+                [edge + shift - 0.03, edge + shift + 0.03],
+                [-0.04, 0.04],
+                transform=ax.transAxes,
+                color=_RULE,
+                linewidth=1.2,
+                clip_on=False,
+                zorder=6,
+            )
+    # The gutter between the two axes, vertically centred, so it cannot be mistaken for a tick.
+    ax_log.text(
+        -0.045,
+        0.5,
+        "axis break",
+        transform=ax_log.transAxes,
+        rotation=90,
+        ha="center",
+        va="center",
+        fontsize=6.6,
+        color=plot_frame.MUTED,
+        clip_on=False,
+    )
 
 
 def _panel_a_key(ax: Axes, rows: Sequence[GridRow]) -> None:
@@ -513,34 +561,17 @@ def _draw_size_ladder(ax: Axes, rows: Sequence[GridRow]) -> int:
     return drawn
 
 
-# ------------------------------------------------------------------ panel C
-
-
-def _draw_latency(ax: Axes, rows: Sequence[GridRow], mode: str) -> int:
-    """One serving population's per-call latency. Hosted and local never share an axis."""
-    subset = [r for r in rows if r.serving_mode == mode and r.latency_s]
-    if not subset:
-        _empty(ax, f"no {mode} latency measured — the column is blank, not zero")
-        return 0
-    ordered = sorted(subset, key=lambda r: sum(r.latency_s) / len(r.latency_s))
-    ax.boxplot(
-        [list(r.latency_s) for r in ordered],
-        vert=False,
-        widths=0.55,
-        showfliers=False,
-    )
-    ax.set_yticks(range(1, len(ordered) + 1))
-    ax.set_yticklabels([r.name for r in ordered], fontsize=7.2)
-    ax.set_xlabel(f"{mode} latency per call (s)", fontsize=8.5)
-    ax.grid(visible=True, axis="x", alpha=0.22, linewidth=0.6)
-    ax.tick_params(labelsize=7.5)
-    return len(ordered)
-
-
 # ------------------------------------------------------------------ assembly
+#
+# THE LATENCY PANELS ARE RETIRED. The schema instruments per-call latency, but no committed
+# corpus row carries a sample, so two of the four panels drew an empty dashed frame on every
+# render — a panel that says nothing on four figures. The claims they supported (hosted vs
+# local speed) are statements this corpus cannot make; when a corpus carries latency the panels
+# can return as a deliberate addition. The measurements are not lost: the columns live in
+# `results.csv` and `benchmark/runner/infer.py` records them at collection time.
 
 
-def grid_annotations(data: GridData, *, sized: int, hosted: int, local: int) -> Annotations:
+def grid_annotations(data: GridData, *, sized: int) -> Annotations:
     """Subtitle facts and notes derived from the rows actually drawn."""
     rows = data.rows
     free = [r for r in rows if r.x is None]
@@ -571,10 +602,10 @@ def grid_annotations(data: GridData, *, sized: int, hosted: int, local: int) -> 
     if undisclosed:
         notes.append(
             "drawn at a fixed reference marker because no parameter count is published: "
-            + ", ".join(sorted(r.name for r in undisclosed))
+            + ", ".join(sorted(r.display for r in undisclosed))
         )
     for row in sorted(external, key=lambda r: r.name):
-        notes.append(f"† {row.name}: {row.provenance_note}")
+        notes.append(f"† {row.display}: {row.provenance_note}")
     limitations = [
         data.x_limitation,
         "The $0 column and the log region are not one ruler. The gap between them is a break, "
@@ -593,11 +624,6 @@ def grid_annotations(data: GridData, *, sized: int, hosted: int, local: int) -> 
             "row. Its note below states the harness, the sample, how far that sample overlaps "
             "this corpus, and the verdict ceiling."
         )
-    if hosted == 0 and local == 0:
-        limitations.append(
-            "Panels C and D are empty: no latency has been instrumented on any row. The "
-            "column is MISSING, and nothing here should be read as a speed claim."
-        )
     return Annotations(
         subtitle_facts=tuple(facts),
         notes=tuple(notes),
@@ -607,8 +633,6 @@ def grid_annotations(data: GridData, *, sized: int, hosted: int, local: int) -> 
             ("sized", sized),
             ("undisclosed", len(undisclosed)),
             ("external", len(external)),
-            ("latency_hosted", hosted),
-            ("latency_local", local),
         ),
     )
 
@@ -624,35 +648,33 @@ def render(
     size = plot_frame.WIDE_TALL
     fig = plot_frame.new_figure(size)
     axd = fig.subplot_mosaic(
-        [["a_zero", "a_log", "b"], ["c_hosted", "c_hosted", "c_local"]],
+        [["a_zero", "a_log", "b"]],
         width_ratios=(0.42, 2.55, 2.35),
         # A visible gutter between the $0 column and the log region: the break marks say the
         # two are not one ruler, and the gap is what makes that legible at a glance.
         gridspec_kw={"wspace": 0.22},
-        height_ratios=(2.1, 0.85),
     )
     axd["a_zero"].sharey(axd["a_log"])
-    plot_frame.panel_label(axd["a_zero"], "A · operating frontier")
+    # The letter labels the WHOLE panel A, so it sits over the wide log region, not the narrow
+    # $0 column — over the column it read as a title for that column alone.
+    plot_frame.panel_label(axd["a_log"], "A · operating frontier")
     plot_frame.panel_label(axd["b"], "B · size ladder")
-    plot_frame.panel_label(axd["c_hosted"], "C · latency, hosted")
-    plot_frame.panel_label(axd["c_local"], "D · latency, local")
 
     if data.rows:
         ylo, yhi = _draw_operating_frontier(axd["a_zero"], axd["a_log"], data.rows, data.x_label)
         axd["a_log"].set_ylim(ylo, yhi)
         _panel_a_key(axd["a_log"], data.rows)
+        _draw_break(axd["a_zero"], axd["a_log"])
     else:
         _empty(axd["a_zero"], "")
         _empty(axd["a_log"], "no model in this corpus carries a verified outcome")
     sized = _draw_size_ladder(axd["b"], data.rows)
-    hosted = _draw_latency(axd["c_hosted"], data.rows, "hosted")
-    local = _draw_latency(axd["c_local"], data.rows, "local")
 
     return plot_frame.save(
         fig,
         path,
         spec,
-        extra=grid_annotations(data, sized=sized, hosted=hosted, local=local),
+        extra=grid_annotations(data, sized=sized),
         provenance=provenance,
         size=size,
     )

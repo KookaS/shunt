@@ -49,6 +49,45 @@ def _auth() -> litellm.exceptions.AuthenticationError:
     )
 
 
+def _quota_429() -> litellm.exceptions.RateLimitError:
+    # A typed 429 whose body ALSO says "exceeded your current quota" (Google/Requesty free tier).
+    return litellm.exceptions.RateLimitError(
+        message="Error code: 429 - You exceeded your current quota, please check your plan",
+        model="m",
+        llm_provider="google_ai_studio",
+    )
+
+
+def _model_gone_404() -> litellm.exceptions.NotFoundError:
+    return litellm.exceptions.NotFoundError(
+        message="please check the model you provided", model="m", llm_provider="requesty"
+    )
+
+
+def _transient_400() -> litellm.exceptions.BadRequestError:
+    # Cloudflare Workers AI surfaces an upstream 5xx as a 400 with an "Internal Server Error"
+    # body (code 3030). That is retryable, not a permanent model failure.
+    return litellm.exceptions.BadRequestError(
+        message="Error code: 400 - AiError: Internal Server Error (b7537f2c)",
+        model="cf-qwen3-30b-a3b-fp8",
+        llm_provider="cloudflare",
+    )
+
+
+def _permanent_400() -> litellm.exceptions.BadRequestError:
+    return litellm.exceptions.BadRequestError(
+        message="Error code: 400 - Bad input: oneOf at '/' not met",
+        model="m",
+        llm_provider="openai",
+    )
+
+
+def _service_unavailable() -> litellm.exceptions.ServiceUnavailableError:
+    return litellm.exceptions.ServiceUnavailableError(
+        message="Error code: 503 - temporarily unavailable", model="m", llm_provider="openai"
+    )
+
+
 class TestErrorTaxonomy:
     """Three classes: model-refusal (permanent) vs API-unusable (systemic) vs transient."""
 
@@ -61,8 +100,27 @@ class TestErrorTaxonomy:
         for msg in ("Error 402: Insufficient Balance", "You exceeded your current quota"):
             assert infer._is_api_unusable(Exception(msg)), msg
 
+    def test_no_payment_method_message_is_api_unusable(self) -> None:
+        # SambaNova's free lanes return "payment method is required" as a generic body; a
+        # permanent no-payment lane must abort, not be classified transient and kept.
+        for msg in (
+            "Payment method is required to use this endpoint",
+            "No payment method on file",
+            "Please add a payment method",
+        ):
+            assert infer._is_api_unusable(Exception(msg)), msg
+
     def test_rate_limit_is_not_api_unusable(self) -> None:
         assert not infer._is_api_unusable(_rate_limit())  # plain 429 is transient, not unusable
+
+    def test_quota_429_precedence_is_rate_limit_not_api_unusable(self) -> None:
+        # The 429 body says "exceeded your current quota", a FRAGMENT in the api-unusable set,
+        # so the raw predicate still flags it. The CLASSIFIER must rank the typed throttle first:
+        # permanently disabling the lane here took google-gemini-flash-latest and
+        # requesty-gemma-4-31b-it offline, when the scheduler should have quarantined them.
+        assert infer.is_rate_limited(_quota_429())
+        with pytest.raises(litellm.exceptions.RateLimitError):
+            infer._reraise_classified("iid", "m", _quota_429())
 
     def test_content_policy_is_not_api_unusable(self) -> None:
         assert not infer._is_api_unusable(_cpv())  # a refusal is a model failure, not systemic
@@ -71,9 +129,58 @@ class TestErrorTaxonomy:
         with pytest.raises(infer.ApiUnusableError):
             infer._reraise_classified("iid", "m", _auth())
 
+    def test_model_unavailable_is_not_api_unusable(self) -> None:
+        assert infer._is_model_unavailable(_model_gone_404())
+        assert not infer._is_api_unusable(_model_gone_404())
+
+    def test_reraise_model_unavailable_becomes_model_unavailable(self) -> None:
+        with pytest.raises(infer.ModelUnavailableError):
+            infer._reraise_classified("iid", "m", _model_gone_404())
+
+    def test_reraise_model_agreement_403_becomes_model_unavailable(self) -> None:
+        # Cloudflare returns the agreement gate as a generic APIError (not PermissionDenied);
+        # the body signature must still classify it so the lane disables instead of looping.
+        exc = RuntimeError("APIError: Error code: 403 - Model Agreement: submit the prompt 'agree'")
+        assert infer._is_model_unavailable(exc)
+        with pytest.raises(infer.ModelUnavailableError):
+            infer._reraise_classified("iid", "m", exc)
+
     def test_reraise_content_policy_becomes_permanent(self) -> None:
         with pytest.raises(infer.PermanentModelError):
             infer._reraise_classified("iid", "m", _cpv())
+
+    def test_transient_internal_server_400_is_not_permanent(self) -> None:
+        # Cloudflare's upstream "Internal Server Error" arrives wrapped in a 400. Tombstoning it
+        # as a permanent model failure records a poison row and re-runs the lane; it must instead
+        # re-raise unchanged so the cell stays MISSING and is retried.
+        exc = _transient_400()
+        assert infer.is_transient_upstream_error(exc)
+        with pytest.raises(litellm.exceptions.BadRequestError):
+            infer._reraise_classified("iid", "m", exc)
+
+    def test_transient_high_demand_400_is_not_permanent(self) -> None:
+        exc = litellm.exceptions.BadRequestError(
+            message=(
+                "Error code: 400 - This model is experiencing high demand. Please try again later"
+            ),
+            model="m",
+            llm_provider="openai",
+        )
+        assert infer.is_transient_upstream_error(exc)
+        with pytest.raises(litellm.exceptions.BadRequestError):
+            infer._reraise_classified("iid", "m", exc)
+
+    def test_genuinely_permanent_400_still_becomes_permanent(self) -> None:
+        # The carve-out is narrow: a malformed-request 400 has no transient marker and keeps the
+        # deterministic PermanentModelError classification.
+        assert not infer.is_transient_upstream_error(_permanent_400())
+        with pytest.raises(infer.PermanentModelError):
+            infer._reraise_classified("iid", "m", _permanent_400())
+
+    def test_transient_upstream_predicate_covers_throttles_and_5xx(self) -> None:
+        assert infer.is_transient_upstream_error(_service_unavailable())
+        assert infer.is_transient_upstream_error(_rate_limit())
+        assert not infer.is_transient_upstream_error(_model_gone_404())
 
     def test_reraise_unknown_error_propagates_unchanged(self) -> None:
         # An unclassified error is NOT swallowed into a fake failure — it re-raises as-is.
@@ -85,7 +192,9 @@ class TestErrorTaxonomy:
         infer._harden_model_retries(model)
         # A dead key aborts on the first call (retrying it is pointless), like content-policy.
         assert litellm.exceptions.AuthenticationError in model.abort_exceptions
-        assert litellm.exceptions.RateLimitError not in model.abort_exceptions  # still retried
+        # A 429 is also aborted at the scaffold layer — not because it is permanent, but because
+        # the lane scheduler quarantines it with jitter/Retry-After instead of tenacity's ladder.
+        assert litellm.exceptions.RateLimitError in model.abort_exceptions
 
 
 class TestHardenRetries:
@@ -98,8 +207,9 @@ class TestHardenRetries:
         assert litellm.exceptions.BadRequestError in model.abort_exceptions
         # The shared class attribute must be untouched (per-instance change only).
         assert LitellmModel.abort_exceptions == before
-        # A transient class must NOT be swept into the abort list.
-        assert litellm.exceptions.RateLimitError not in model.abort_exceptions
+        # A 429 aborts the scaffold's own retry so the lane scheduler owns its backoff; without
+        # this, tenacity retries it up to 10x, the retry storm the free campaign log showed.
+        assert litellm.exceptions.RateLimitError in model.abort_exceptions
 
     def test_no_attr_is_a_noop(self) -> None:
         infer._harden_model_retries(object())  # must not raise
@@ -128,7 +238,9 @@ class TestHardenRetries:
                     raise _cpv()
         assert calls["n"] == 5
 
-    def test_transient_still_retried_then_succeeds(self, monkeypatch) -> None:
+    def test_transient_5xx_still_retried_then_succeeds(self, monkeypatch) -> None:
+        # A genuine transient (5xx) is still retried by the scaffold: only 429 moved to the
+        # lane scheduler, so resilience to a momentary server blip is preserved.
         monkeypatch.setattr(time, "sleep", lambda *_: None)
         model = _FakeModel()
         infer._harden_model_retries(model)
@@ -138,10 +250,24 @@ class TestHardenRetries:
             with attempt:
                 calls["n"] += 1
                 if calls["n"] < 3:
-                    raise _rate_limit()
+                    raise _service_unavailable()
                 result = "ok"
         assert result == "ok"
         assert calls["n"] == 3  # retried twice, then succeeded — retries preserved
+
+    def test_rate_limit_aborts_first_attempt_no_tenacity_storm(self, monkeypatch) -> None:
+        # Contrast the 5xx case: a 429 is NOT tenacity-retried (the storm fix), so it surfaces
+        # on the first attempt for the lane scheduler to quarantine.
+        monkeypatch.setattr(time, "sleep", lambda *_: None)
+        model = _FakeModel()
+        infer._harden_model_retries(model)
+        calls = {"n": 0}
+        with pytest.raises(litellm.exceptions.RateLimitError):
+            for attempt in retry(logger=_LOG, abort_exceptions=model.abort_exceptions):
+                with attempt:
+                    calls["n"] += 1
+                    raise _quota_429()
+        assert calls["n"] == 1
 
 
 class _FakeEnv:
@@ -244,6 +370,24 @@ class TestRunLiveCellRecordsFailures:
         monkeypatch.setattr(infer, "generate_patch_live", _raise)
         with pytest.raises(infer.ApiUnusableError):
             infer.run_live_cell("psf__requests-1142", "m", work_dir=tmp_path, run_id="r")
+
+
+class TestScaffoldModelKwargs:
+    """The live model kwargs must not inherit litellm's num_retries=3 client-side storm."""
+
+    def test_num_retries_defaults_to_zero(self, monkeypatch) -> None:
+        # litellm's completion() does `kwargs.pop("num_retries", 3)`; an absent value made every
+        # live call retry a throttled lane up to 3x before the lane scheduler saw it.
+        monkeypatch.setattr(config, "arm_api_params", lambda model, arm: {})
+        kwargs = infer._scaffold_model_kwargs(
+            "m", "default", {"drop_params": True}, {"api_base": "http://x"}
+        )
+        assert kwargs["num_retries"] == 0
+
+    def test_a_declared_retry_count_is_preserved(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "arm_api_params", lambda model, arm: {"num_retries": 5})
+        kwargs = infer._scaffold_model_kwargs("m", "default", {}, {})
+        assert kwargs["num_retries"] == 5
 
 
 class TestStepLimitAndBounds:

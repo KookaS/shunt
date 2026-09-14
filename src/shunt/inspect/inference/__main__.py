@@ -23,7 +23,7 @@ from shunt.inspect.inference import (
 def _parse(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m shunt.inspect.inference",
-        description="Render the seven inference figures from the live outcome store.",
+        description="Render the eight inference figures from the live outcome store.",
     )
     parser.add_argument(
         "--out-dir",

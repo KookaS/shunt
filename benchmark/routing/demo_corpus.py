@@ -1,6 +1,6 @@
 """A seeded synthetic corpus that populates the inference figures — illustration, never evidence."""
 
-# WHAT THIS IS. The seven inference figures are drawn from the owner's live outcome store, which
+# WHAT THIS IS. The eight inference figures are drawn from the owner's live outcome store, which
 # on 2026-08-18 held 40 live sessions — too few for a reader to see what any panel is SHAPED
 # like. This module mints a few hundred sessions that a reader can look at instead. It answers
 # "what does F3 look like when it has data", and nothing else.
@@ -23,7 +23,7 @@
 # stratum, escalation holds, the undeliverable hold, a frontier arm, escalated successes — are
 # INVENTED outright, and live in their own tuples (`_INVENTED_ATOMS`, `_SEED_ATOMS`) with their
 # own comments. A panel drawn to CONTRAST two regimes teaches nothing when one of them is
-# structurally empty, which is what a live-only corpus made of six of the seven figures.
+# structurally empty, which is what a live-only corpus made of six of the eight figures.
 #
 # HOW THE MEASURED SHAPE IS PRESERVED. The 40 measured live rows below are the empirical
 # distribution for the DRAWN half, resampled JOINTLY with replacement: one draw takes a whole
@@ -402,7 +402,7 @@ def _undeliverable() -> _LiveAtom:
 
 
 # THESE ROWS ARE INVENTED. Nothing below was measured — not the counts, not the costs, not the
-# pass/fail split. They exist because six of the seven figures draw a CONTRAST, and the 40
+# pass/fail split. They exist because six of the eight figures draw a CONTRAST, and the 40
 # measured rows in `_ATOMS` contain only one side of each: no hold was ever recorded, no session
 # ever escalated to a frontier model, and every escalated session failed. A panel whose second
 # series is structurally zero teaches a reader the degenerate case, which is the defect this
@@ -471,7 +471,7 @@ _SEED_ATOMS: Final[tuple[_SeedArm, ...]] = (
     _SeedArm("kimi-k2.5", 40, 21, 0.121673),
     _SeedArm("qwen3.7-plus", 40, 17, 0.080656),
     _SeedArm("kimi-k3", 30, 25, 0.548696),
-    _SeedArm("zai-glm-5.2", 25, 15, 0.347076),
+    _SeedArm("glm-5.2", 25, 15, 0.347076),
 )
 
 

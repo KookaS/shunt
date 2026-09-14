@@ -259,6 +259,28 @@ def _draw_band(ax: Axes, band: list[tuple[str, StrategyClass, float, float]]) ->
     # lower label inside the canvas instead of clipped by the axis.
     ax.set_ylim(-1.25, len(band) - 0.25)
     ax.set_xlabel("total spend at the bound's quality (USD, log)", fontsize=9)
+    # The class key lives ON this panel, not only in panel B's y labels: panel A is the price
+    # ladder and a reader must be able to name a dot's class without leaving it.
+    handles = [
+        ax.scatter(
+            [],
+            [],
+            s=70,
+            marker="o",
+            facecolors=_CLASS_COLOUR[cls],
+            edgecolors=_CLASS_COLOUR[cls],
+            label=f"{cls.value} — {_ROLE[cls]}",
+        )
+        for cls in (
+            StrategyClass.LIVE,
+            StrategyClass.BLOCKED,
+            StrategyClass.CONTROL,
+            StrategyClass.BOUND,
+        )
+        if any(row[1] is cls for row in band)
+    ]
+    if handles:
+        ax.legend(handles=handles, fontsize=6.8, loc="lower right", frameon=True, framealpha=0.9)
     ax.grid(axis="x", color="#eeeeee", lw=0.6)
     ax.set_axisbelow(True)
     plot_frame.panel_label(ax, "A · what the bound's quality costs, by class")

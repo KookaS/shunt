@@ -19,6 +19,7 @@ from benchmark import plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
 from benchmark.routing import metrics, plot_style
 from benchmark.routing.figures import context as ctxmod
+from benchmark.routing.model_universe import canonical_label
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,6 +63,9 @@ SPEC = FigureSpec(
     notes=(
         "Both axes are in price order and rows are the CHOSEN model, so a cell below the "
         "diagonal is over-provisioning by construction rather than by convention.",
+        "The grid is scoped to the inference-VALID models — the live pool clear of the "
+        "coverage/triage/capability floor. Benchmark-only and collection-only models are named "
+        "on model_validity.png and invalid_models.png; a choice outside this pool is not drawn.",
     ),
     limitations=(
         "Cheapest-sufficient is read off the coverage-completed matrix, so a task whose "
@@ -130,9 +134,11 @@ def _draw_grid(ax: Axes, audit: Audit, panel_width_in: float) -> None:
     ax.set_xticks(range(n))
     ax.set_yticks(range(n))
     # Full names. Splitting on the first hyphen collapsed kimi-k2.5 and kimi-k3 into two
-    # identical "kimi" ticks, which is worse than a long label.
-    ax.set_xticklabels(audit.models, fontsize=6.5)
-    ax.set_yticklabels(audit.models, fontsize=6.5)
+    # identical "kimi" ticks, which is worse than a long label. The label is the canonical
+    # bare identity; `audit.models` stays the join key for the grid indices.
+    labels = [canonical_label(m) for m in audit.models]
+    ax.set_xticklabels(labels, fontsize=6.5)
+    ax.set_yticklabels(labels, fontsize=6.5)
     ax.set_xlabel("cheapest model that solved it", fontsize=9)
     ax.set_ylabel("model the router chose", fontsize=9)
     # A cell may carry a printed count only when it is physically wide enough to hold one.
@@ -232,7 +238,11 @@ def render(ctx: ctxmod.RoutingContext, chosen: dict[str, str]) -> Path | None:
     """Draw routing_decision_audit.png from the kNN selection rule's per-task picks."""
     if not chosen:
         return None
-    audit = build_audit(chosen, ctx.completed.get("results", {}), ctx.models_by_price)
+    # INFERENCE-FACING: the comparison runs over the inference-valid pool only. A benchmark-only
+    # model (qwen3.7-plus, gpt-5-mini, kimi-k2.5) is not one the live router can pick, so
+    # including it here would compare a serving decision against a model that can never serve.
+    models = ctx.inference_valid_models
+    audit = build_audit(chosen, ctx.completed.get("results", {}), models)
     if audit.decided == 0:
         return None
     size = plot_frame.WIDE

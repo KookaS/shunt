@@ -264,9 +264,20 @@ def _draw_regret(ax: Axes, finals: dict[str, float], cis: dict[str, tuple[float,
     ax.set_yticks(ys)
     ax.set_yticklabels(names, fontsize=7.5)
     lo, hi = min(finals.values()), max(finals.values())
+    # SYMLOG, not linear: regret runs from 0 (Oracle) to ~58, so on a linear axis every row
+    # but the last four is an invisible sliver — the panel ranked them but could not show
+    # WHERE they sit. The region below 2 is drawn linear (a log axis cannot hold Oracle's 0),
+    # the tail above it logarithmically, and the axis label says so.
+    ax.set_xscale("symlog", linthresh=2.0, linscale=1.0)
     ax.set_xlim(min(lo * 1.2, -0.4), hi * 1.22)
     ax.axvline(0.0, color="#bbbbbb", lw=0.8, zorder=1)
-    ax.set_xlabel("cumulative regret vs the hindsight oracle (lower is better)", fontsize=9)
+    # TWO LINES, because the one-line label ran past panel B's right edge and its tail
+    # ("...symlog, linear below 2)") collided with panel C's rotated gamma ticks. Wrapping halves
+    # the width so it stays inside its own panel's gutter.
+    ax.set_xlabel(
+        "cumulative regret vs the hindsight oracle\n(lower is better; symlog, linear below 2)",
+        fontsize=9,
+    )
     _regret_legend(ax, names, finals)
     ax.grid(axis="x", color="#eeeeee", lw=0.6)
     ax.set_axisbelow(True)

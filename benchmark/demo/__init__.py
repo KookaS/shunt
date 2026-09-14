@@ -1,4 +1,4 @@
-"""The illustrative demo figure half — the same seven drawings, on a corpus that is invented."""
+"""The illustrative demo figure half — the same eight drawings, on a corpus that is invented."""
 
 # A half of its own, and that is the whole design. `benchmark/routing/demo_corpus.py` mints a
 # corpus that is a resampling of 40 measured live rows; nothing drawn from it is evidence. SH009

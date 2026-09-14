@@ -1,0 +1,196 @@
+name: Free-model scan ($0, read-only by default)
+
+# WHAT THIS DOES. Runs the discovery-refresh loop: fetches the free-tier providers' PUBLIC
+# model-listing endpoints, rebuilds the facts-only snapshot
+# `benchmark/routing/data/latest_free_models.json`, derives the identity proposal, and (on
+# dispatch) merges the ADMITTED listings into `configs/free-tier/overlay.yaml`. Every request is
+# a GET of a public catalogue — no benchmark prompt is sent and no model completion runs or
+# bills — so the refresh is $0 and safe to leave on a timer.
+#
+# THE LOOP IS ONE ENTRYPOINT. `python -m benchmark.routing.scripts.refresh_free_campaign`:
+# `--dry-run` scans, ranks the runnable set by `collection_priority`, and writes nothing
+# tracked; `--write` additionally rewrites the snapshot, the proposal and the overlay, then
+# prints the ordered runnable set for the campaign scheduler.
+#
+# WHY THE SCHEDULE IS A DRY RUN AND THE DISPATCH IS NOT. A scheduled run must not move a
+# tracked file under a `contents: read` token, so it writes the snapshot (and the identity
+# proposal it derives from it) to a build artifact instead: a reviewer reads a diff rather
+# than discovering a silent change. A `workflow_dispatch` run performs the write itself —
+# still artifact-only, because `contents: read` also means the job cannot push; the owner
+# downloads the artifact and commits the regenerated overlay deliberately.
+#
+# WHY SIX HOURS. Free listings rotate on a days-to-weeks timescale, so the interval bounds how
+# quickly a newly admitted model enters the runnable set. Six hours sits inside the requested
+# 4–12 h range. The interval is this one cron line: `*/4` for every four hours, `*/12` for
+# twice a day.
+#
+# WHY OPT-IN (no `push:` / `pull_request:`). This job depends on third-party APIs and a
+# real secret. On a push it would redden unrelated commits whenever a provider is down,
+# moves its catalogue URL, or drops its free tier — the same failure the sibling provider
+# workflows are structured to keep off the PR path.
+#
+# SECRETS. Only a channel whose catalogue needs a credential reads one; each name below is
+# the `api_key_env` declared for that channel in `benchmark/routing/data/free_catalogs.yaml`
+# (`CLOUDFLARE_ACCOUNT_ID` is templated into Cloudflare's catalogue URL). A key that is not
+# set arrives empty and its channel is reported UNREACHABLE by name — no request is sent
+# with a placeholder, and no key value is ever logged or written to a file. Every other
+# channel (OpenRouter, Requesty, Vercel, SambaNova, NIM, OpenCode Zen, Kilo) is a keyless
+# public GET, so add a provider here only by adding its `api_key_env` and a same-named
+# repository secret.
+#
+# SHAPE REGRESSION. The scanner compares each channel's listing count with the previous
+# snapshot. A channel that fell to zero when it previously served listings is a
+# SHAPE_REGRESSION — how a scanner silently rots into a no-op — and the check step below
+# annotates and fails the job so the zero is seen. A single listing going away is ordinary
+# withdrawal (recorded `withdrawn_at`), not a regression, and does not fail. An UNREACHABLE
+# channel is surfaced as a warning, not a failure: a deliberately unset secret must not
+# redden the schedule.
+
+on:
+  # A manual dispatch runs the full refresh — scan, propose, and merge the admitted listings
+  # into the overlay — and uploads the three regenerated files as artifacts for review. The
+  # job cannot push (`contents: read`); the owner commits the diff deliberately.
+  workflow_dispatch:
+  schedule:
+    # Every six hours at :23 past, off the top of the hour where scheduled runners pool.
+    # The interval is the knob described above; change it on this line only.
+    - cron: "23 */6 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  # One scan at a time so a dispatched write and the timer never race over the same
+  # snapshot. An in-flight run is never cancelled — a scan is cheap and loses nothing by
+  # finishing.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  scan:
+    name: scan free catalogues
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --extra dev --extra benchmark
+      - name: Refresh (dry-run on schedule, write on dispatch)
+        env:
+          # Only the channels whose catalogue declares an `api_key_env`, plus the account
+          # id templated into Cloudflare's URL. An unset secret is an empty string, which
+          # the scanner reports as UNREACHABLE by name — never a placeholder request.
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GOOGLE_AI_STUDIO_API_KEY: ${{ secrets.GOOGLE_AI_STUDIO_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          ART="${{ runner.temp }}/free-tier-scan"
+          mkdir -p "${ART}"
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+            echo "scheduled run — dry-run, nothing tracked is written"
+            # One scan: print the value-ordered runnable set, and drop the raw snapshot
+            # into the artifact (an untracked path) for the proposal step below.
+            uv run python -m benchmark.routing.scripts.refresh_free_campaign --dry-run \
+              --emit-snapshot "${ART}/latest_free_models.json" > "${ART}/runnable.json"
+          else
+            echo "dispatched run — scan + propose + apply"
+            uv run python -m benchmark.routing.scripts.refresh_free_campaign --write \
+              > "${ART}/runnable.json"
+            cp benchmark/routing/data/latest_free_models.json "${ART}/latest_free_models.json"
+            cp benchmark/routing/data/free_models_proposal.yaml "${ART}/free_models_proposal.yaml"
+            cp configs/free-tier/overlay.yaml "${ART}/overlay.yaml"
+          fi
+      - name: Derive the identity proposal (scheduled dry-run only)
+        # The dispatch write already emitted the proposal above; a dry run wrote nothing
+        # tracked, so re-derive the same document from the snapshot into the artifact.
+        if: github.event_name == 'schedule'
+        env:
+          SNAPSHOT: ${{ runner.temp }}/free-tier-scan/latest_free_models.json
+          PROPOSAL: ${{ runner.temp }}/free-tier-scan/free_models_proposal.yaml
+        run: |
+          uv run python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          import yaml
+
+          from benchmark.routing.scripts import scan_free_models as scan
+
+          snapshot = json.loads(Path(os.environ["SNAPSHOT"]).read_text())
+          identity = scan.load_identity(scan.IDENTITY_PATH)
+          proposal = scan.propose(snapshot, identity, snapshot["scan_as_of"])
+          Path(os.environ["PROPOSAL"]).write_text(
+              yaml.safe_dump(proposal, sort_keys=False, allow_unicode=True)
+          )
+          PY
+      - name: Surface unreachable channels and shape regressions
+        # Always runs so a failure in the scan still reports what did land. It reads the
+        # snapshot only; a genuinely absent listing is ordinary withdrawal and is counted,
+        # never failed on.
+        if: always()
+        env:
+          SNAPSHOT: ${{ runner.temp }}/free-tier-scan/latest_free_models.json
+        run: |
+          if [ ! -f "${SNAPSHOT}" ]; then
+            echo "::warning title=No snapshot::the scan produced no snapshot to inspect"
+            exit 0
+          fi
+          uv run python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          snapshot = json.loads(Path(os.environ["SNAPSHOT"]).read_text())
+          channels = snapshot.get("channels") or {}
+          unreachable = sorted(
+              name
+              for name, info in channels.items()
+              if str((info or {}).get("status", "")).startswith("UNREACHABLE")
+          )
+          regressions = list(snapshot.get("shape_regressions") or [])
+          listings = snapshot.get("listings", [])
+          active = [row for row in listings if not row.get("withdrawn_at")]
+          withdrawn = [row for row in listings if row.get("withdrawn_at")]
+          for name in unreachable:
+              status = (channels[name] or {}).get("status", "")
+              print(f"::warning title=Unreachable channel::{name}: {status}")
+          for name in regressions:
+              print(
+                  f"::error title=Shape regression::{name} returned zero listings "
+                  "after previously serving some"
+              )
+          print(
+              f"scan summary: {len(active)} active listings, {len(withdrawn)} withdrawn, "
+              f"{len(unreachable)} unreachable channel(s), {len(regressions)} shape regression(s)"
+          )
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a") as handle:
+                  handle.write("### Free-model scan\n\n")
+                  handle.write(f"- active listings: {len(active)}\n")
+                  handle.write(f"- withdrawn listings: {len(withdrawn)}\n")
+                  handle.write(f"- unreachable channels: {', '.join(unreachable) or 'none'}\n")
+                  handle.write(f"- shape regressions: {', '.join(regressions) or 'none'}\n")
+          if regressions:
+              raise SystemExit(1)
+          PY
+      - name: Upload the scan artifact
+        # `if: always()` keeps the proposal/snapshot available even when the check above
+        # failed, which is exactly when a reviewer wants them.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: free-model-scan
+          path: ${{ runner.temp }}/free-tier-scan/
+          retention-days: 14
+          if-no-files-found: warn

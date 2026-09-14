@@ -186,6 +186,55 @@ class TestTheBracketIsDrawnOnDeployableEscalatingRowsOnly:
         assert fig._bracket_extent(rows, {"kNN-semantic-cascade"}) == 200.0
 
 
+class TestTheMagnifiedWindowHoldsEveryBracketItDraws:
+    """The window's own contract: no bracket it draws may run off its right edge."""
+
+    def test_a_bracket_bearing_neighbour_inside_the_window_is_contained(self):
+        # The defect this guards: the window was derived from the marker-overlap crowd, so a
+        # bracket-bearing row the padding had pulled inside was drawn but not accounted for,
+        # and its dashed rule ran off the panel edge with no legible `full`. These are the
+        # committed corpus's own numbers — Session-Cascade's bracket ends inside the crowd's
+        # window, while kNN-semantic-cascade's $28.80 end sits just past where the crowd alone
+        # would stop, which is why the derivation has to follow the window it actually draws.
+        rows = [
+            _row("Always-Cheap", 1.48, 75.14),
+            _row("Price-Cascade", 22.27, 97.24),
+            _row("Session-Cascade", 23.40, 97.24, context_cost_alpha_10=26.68),
+            _row("kNN-difficulty-cascade", 23.70, 97.24),
+            _row("Difficulty-Band-cascade", 23.70, 97.24),
+            _row("kNN-semantic-cascade", 25.66, 97.24, context_cost_alpha_10=28.80),
+            _row("Always-Frontier", 94.37, 95.03),
+        ]
+        figure, axes, notes = _compose(rows)
+        assert _magnified(notes), _levels(notes)
+        window = axes[-1].get_xlim()
+        drawn = [r for r in fig._bracket_rows(rows) if window[0] <= fig._cost(r) <= window[1]]
+        assert {str(r["strategy"]) for r in drawn} == {
+            "Session-Cascade",
+            "kNN-semantic-cascade",
+        }
+        for row in drawn:
+            assert fig._num(row, "context_cost_alpha_10") <= window[1], row["strategy"]
+        plt.close(figure)
+
+    def test_a_bracket_on_a_row_outside_the_window_is_never_dragged_in(self):
+        # The complement: widening follows the markers the window HOLDS, not every bracket on
+        # the canvas. A bracket-bearing row whose marker sits outside stays outside — else the
+        # magnification would swallow the separable neighbour it deliberately leaves out.
+        rows = [
+            _row("Always-Cheap", 1.48, 75.14),
+            _row("Session-Cascade", 23.40, 97.24, context_cost_alpha_10=26.68),
+            _row("kNN-difficulty-cascade", 23.70, 97.24),
+            _row("Difficulty-Band-cascade", 23.70, 97.24),
+            _row("kNN-semantic-cascade", 40.0, 97.24, context_cost_alpha_10=60.0),
+            _row("Always-Frontier", 94.37, 95.03),
+        ]
+        figure, axes, notes = _compose(rows)
+        assert _magnified(notes), _levels(notes)
+        assert axes[-1].get_xlim()[1] < 40.0
+        plt.close(figure)
+
+
 def _render(rows: list[dict], out: Path) -> dict:
     """Render the whole figure into `out` and return the manifest row it recorded."""
     assert fig.render(_context(rows, out)) is not None

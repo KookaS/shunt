@@ -1,9 +1,9 @@
-"""Render the demo figure family: the seven inference drawings over an invented corpus."""
+"""Render the demo figure family: the eight inference drawings over an invented corpus."""
 
-# WHY THIS EXISTS. `docs/inference.md` is drawn from a seed-only store with no live rows, so
-# five of its seven panels are empty and a reader who has never seen a populated one cannot
-# tell what the page is for. This module draws the same seven over `demo_corpus`, so the shapes
-# are legible. It answers "what does F3 look like when it has data", and nothing else.
+# WHY THIS EXISTS. `docs/inference.md` is drawn from a seed-only store with no live rows, so its
+# eight figures are incomplete layouts — a reader who has never seen a populated one cannot tell
+# what the page is for. This module draws the same eight over `demo_corpus`, so the shapes are
+# legible. It answers "what does F3 look like when it has data", and nothing else.
 #
 # WHAT KEEPS IT HONEST. Four fences, none of them a caption:
 #   * `Family(watermark=...)` stamps every canvas through `plot_frame.save` — the one door a
@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Final
 
 from benchmark.routing import demo_corpus
+from benchmark.routing.model_universe import canonical_label
 from shunt.db.store import OutcomeStore
 from shunt.inspect.inference import Family, render
 from shunt.inspect.inference.estimators import InstrumentInadmissibleError
@@ -61,7 +62,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint: build the demo corpus, draw the seven figures, return the exit code."""
+    """CLI entrypoint: build the demo corpus, draw the eight figures, return the exit code."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     args = _build_parser().parse_args(argv)
     out_dir = args.out_dir if args.out_dir is not None else CANONICAL_PLOTS_DIR
@@ -74,7 +75,13 @@ def main(argv: list[str] | None = None) -> int:
             # The demo's own clock. `demo_corpus` anchors every timestamp to a fixed date, so
             # without this the 7d/30d panels would be a function of the wall clock: they would
             # thin toward empty and the committed PNGs would go DRIFTED on the calendar alone.
-            render(store, out_dir, family=DEMO, now=demo_corpus.DEMO_NOW)
+            render(
+                store,
+                out_dir,
+                family=DEMO,
+                now=demo_corpus.DEMO_NOW,
+                label_of=canonical_label,
+            )
         except InstrumentInadmissibleError as exc:
             print(f"INADMISSIBLE: {exc}", file=sys.stderr)
             return 1

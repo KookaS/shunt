@@ -104,7 +104,7 @@ Per model:
 | kimi-k2.5 | 111 | 99 | 12 | 0.892 |
 | kimi-k3 | 59 | 54 | 5 | 0.915 |
 | qwen3.7-plus | 65 | 51 | 14 | 0.785 |
-| zai-glm-5.2 | 31 | 21 | 10 | 0.677 |
+| glm-5.2 | 31 | 21 | 10 | 0.677 |
 | **Total** | **1022** | **917** | **105** | **0.897** |
 <!-- generated-by: benchmark.escalation.run_eval -->
 
@@ -116,7 +116,7 @@ This is the section the page exists for. Read it before quoting any escalation n
 
 105 of 1022 trajectories carry no per-step verified outcomes and are dropped from every
 per-step figure. The drop is **not uniform**: it ranges from 6.3% of `gpt-5-mini` runs
-to 32.3% of `zai-glm-5.2` runs (see the table above). Stamping coverage tracks capture
+to 32.3% of `glm-5.2` runs (see the table above). Stamping coverage tracks capture
 *date*, capture date tracks *model*, so model and coverage are confounded on this corpus
 and cannot be separated from within it. Any per-step result is therefore measured on a
 population whose composition differs from the corpus's by model. <!-- generated-by: benchmark.escalation.run_eval -->

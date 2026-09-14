@@ -2,7 +2,7 @@
   "figures": {
     "inference_cost.png": {
       "caveat": "no live sessions in this corpus \u2014 every panel is empty, not zero",
-      "data_digest": "ce84eec25d9e73fb",
+      "data_digest": "3e049a803c502cfe",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -41,7 +41,7 @@
     },
     "inference_escalation.png": {
       "caveat": "panel C covers ladder-evaluated holds only \u2014 a lower bound; `disabled` is unreachable live",
-      "data_digest": "ce84eec25d9e73fb",
+      "data_digest": "3e049a803c502cfe",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -80,7 +80,7 @@
     },
     "inference_model_grid.png": {
       "caveat": "Panel A's x axis is what the store was BILLED, so it is not the benchmark half's.",
-      "data_digest": "ce84eec25d9e73fb",
+      "data_digest": "3e049a803c502cfe",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -94,13 +94,10 @@
         "Rates are not paired: models were not served the same sessions, so a height difference between two rows is not a controlled comparison.",
         "Panel A's x axis is a MEASURED BILL \u2014 dollars per labeled session, off the store's own cost rows \u2014 not a list price, and not the benchmark half's axis. A model whose sessions are not all priced is left off the panel rather than plotted at a partial total.",
         "The $0 column and the log region are not one ruler. The gap between them is a break, and no distance across it is meaningful.",
-        "Hue is a coarse size band, not a capability measurement \u2014 panel B carries the exact counts, and a band is not evidence that its members behave alike.",
-        "Panels C and D are empty: no latency has been instrumented on any row. The column is MISSING, and nothing here should be read as a speed claim."
+        "Hue is a coarse size band, not a capability measurement \u2014 panel B carries the exact counts, and a band is not evidence that its members behave alike."
       ],
       "n": {
         "external": 0,
-        "latency_hosted": 0,
-        "latency_local": 0,
         "models": 4,
         "sized": 3,
         "undisclosed": 1
@@ -109,12 +106,12 @@
         "Panel A's x and the benchmark half's x are different quantities \u2014 billed dollars per session here, a blended list price per million tokens there. The two canvases share a shape, not an axis, and a model's horizontal position must never be carried between them.",
         "deepseek-v4-flash: 68.9% on n=190 \u00b7 $0.0092 (measured $ per labeled session (log)) \u00b7 284B total / 13B active",
         "deepseek-v4-pro: 85.0% on n=200 \u00b7 $0.1373 (measured $ per labeled session (log)) \u00b7 size UNDISCLOSED",
+        "glm-5.2: 57.1% on n=84 \u00b7 $0.3429 (measured $ per labeled session (log)) \u00b7 753B total / 40B active",
         "kimi-k3: 84.5% on n=110 \u00b7 $0.5487 (measured $ per labeled session (log)) \u00b7 2800B total / 104B active",
-        "zai-glm-5.2: 57.1% on n=84 \u00b7 $0.3429 (measured $ per labeled session (log)) \u00b7 753B total / 40B active",
         "drawn at a fixed reference marker because no parameter count is published: deepseek-v4-pro"
       ],
       "price_sheet": null,
-      "reading": "Panel A: each model the store holds a Tier-2 label for, at its mean billed dollars per labeled session (x, log \u2014 with a separate column at the left for locally-served models, whose marginal price is exactly zero and cannot sit on a log axis) against its verified-success rate (y), with Wilson 95% whiskers. Marker area follows the square root of the active parameter count, the marker edge says hosted or local, and hue is the coarse total-size band. Panel B: a hollow mark at total parameters and a filled mark at active parameters, the rule between them being the mixture-of-experts sparsity gap. Panels C and D: per-call latency, hosted and local on separate axes.",
+      "reading": "Panel A: each model the store holds a Tier-2 label for, at its mean billed dollars per labeled session (x, log \u2014 with a separate column at the left for locally-served models, whose marginal price is exactly zero and cannot sit on a log axis) against its verified-success rate (y), with Wilson 95% whiskers. Marker area follows the square root of the active parameter count, the marker edge says hosted or local, and hue is the coarse total-size band. Panel B: a hollow mark at total parameters and a filled mark at active parameters, the rule between them being the mixture-of-experts sparsity gap. The former latency panels are retired: no committed row carries a sample, so they drew nothing and claimed nothing.",
       "size": "wide_tall",
       "subtitle": "the benchmark half's grid, redrawn over the outcome store \u2014 both strata, split stated below \u00b7 4 models over the outcome store's Tier-2-labeled sessions \u2014 0 live and 584 replayed from the benchmark corpus; 0 of 4 models drawn carry any live session \u00b7 0 at $0 (local) \u00b7 4 priced \u00b7 n per model 84\u2013200, unpaired task sets \u00b7 x = billed spend over labeled sessions, from the store's own cost rows",
       "terms": [
@@ -139,7 +136,7 @@
     },
     "inference_neighbourhood.png": {
       "caveat": "no live decisions in this corpus \u2014 panel C is empty, not zero",
-      "data_digest": "ce84eec25d9e73fb",
+      "data_digest": "3e049a803c502cfe",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -177,7 +174,7 @@
     },
     "inference_ope.png": {
       "caveat": "off-policy value is NOT IDENTIFIED here \u2014 each panel prints the estimator\u2019s own refusal",
-      "data_digest": "ce84eec25d9e73fb",
+      "data_digest": "3e049a803c502cfe",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -230,7 +227,7 @@
     },
     "inference_policy.png": {
       "caveat": "the seed band is corpus composition, not a routing decision",
-      "data_digest": "ce84eec25d9e73fb",
+      "data_digest": "3e049a803c502cfe",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -268,7 +265,7 @@
     },
     "inference_strata.png": {
       "caveat": "live stratum EMPTY (n=0) \u2014 every panel is the seeded import",
-      "data_digest": "ce84eec25d9e73fb",
+      "data_digest": "3e049a803c502cfe",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -326,7 +323,7 @@
     },
     "inference_unit_economics.png": {
       "caveat": "the grey band is REPLAYED BENCHMARK outcomes, not live inference",
-      "data_digest": "ce84eec25d9e73fb",
+      "data_digest": "3e049a803c502cfe",
       "dpi": 150,
       "figsize": [
         13.0,
@@ -361,6 +358,45 @@
         ]
       ],
       "title": "Cost per verified success, live traffic against the seeded reference band"
+    },
+    "no_live_sessions.png": {
+      "caveat": "Nothing here is a router measurement \u2014 every canvas waits on live sessions.",
+      "data_digest": "3e049a803c502cfe",
+      "dpi": 150,
+      "figsize": [
+        13.0,
+        6.0
+      ],
+      "generator": "shunt.inspect.inference:render",
+      "goal": "Read the count in the subtitle, not the shape: with live n=0 none of the eight panels below can answer an operational question about the router. Read them as the layout those figures take once a rig has served traffic, and read every live panel as empty rather than as a zero.",
+      "limitations": [
+        "The seeded corpus is real committed benchmark data and the stratum census is real, but it is a property of the benchmark, not of the live router.",
+        "Nothing on this page may be quoted as a live router result; every live panel is empty until the store serves traffic, at which point the same figures draw it unchanged."
+      ],
+      "n": {
+        "live": 0,
+        "seeded": 584
+      },
+      "notes": [
+        "The eight drawings below are kept as incomplete layouts on purpose, not published as results: withdrawing them left the page with no layout to complete when live traffic arrives. Each carries the same `live n=0` state and is stamped `awaiting live sessions`, so an empty panel cannot be read as a rendering failure or a measurement.",
+        "The seeded reference bands on strata, unit economics, policy and model grid are real committed benchmark data, drawn grey and hatched; they are a reference for shape, never a live result and never a stand-in for the empty live panels.",
+        "`seeded` names two different corpora: the count in this subtitle is the real benchmark-replayed outcome store, while the demo page's seeded band (its own 250-session synthetic corpus) is invented for illustration \u2014 the two counts are different corpora and must not be compared."
+      ],
+      "price_sheet": null,
+      "reading": "The outcome store this figure family reads has been seeded but has never served live traffic. A seeded row was replayed into the store by the benchmark seeder; it carries the `bench:` session-id prefix and `selection_rule_used = benchmark_seed`, so it says what the benchmark paid and decided, not what the router did. The eight measured drawings \u2014 strata, cost, unit economics, neighbourhood, policy, escalation, model grid and off-policy value \u2014 are published below as INCOMPLETE LAYOUTS rather than withheld: each draws its real title, subtitle and axes, the seeded reference band is the real committed benchmark corpus, and every live-only panel states its own emptiness. They are placeholders awaiting live sessions, not results, and each is stamped so on its face. They complete in place, unchanged, once the store holds live traffic.",
+      "size": "wide",
+      "subtitle": "the outcome store holds seeded (benchmark-replayed) sessions only \u00b7 seeded n=584 \u00b7 live n=0 \u00b7 populated layout: docs/inference-demo.md (SYNTHETIC \u2014 NOT MEASURED)",
+      "terms": [
+        [
+          "seeded row",
+          "a benchmark session replayed into the outcome store by the seeder, id-prefixed `bench:`, never served by the router to real traffic"
+        ],
+        [
+          "live row",
+          "a session the router actually served; the only population that can measure it"
+        ]
+      ],
+      "title": "No live router sessions yet"
     }
   },
   "half": "inference",

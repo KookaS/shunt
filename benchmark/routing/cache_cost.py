@@ -71,7 +71,7 @@ def _token_totals(results_csv: Path) -> dict[str, tuple[int, int]]:
     # replicates would reweight the share by how many times a cell happened to be re-run.
     totals: dict[str, list[int]] = {}
     for row in integrity.rep_zero_rows(results_csv):
-        bucket = totals.setdefault(row["model"], [0, 0])
+        bucket = totals.setdefault(str(row.get("lane") or row["model"]), [0, 0])
         bucket[0] += int(row.get("in_tok") or 0)
         bucket[1] += int(row.get("out_tok") or 0)
     return {m: (i, o) for m, (i, o) in totals.items()}

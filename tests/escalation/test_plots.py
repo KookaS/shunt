@@ -142,7 +142,7 @@ def test_the_value_box_is_derived_from_the_report_and_moves_with_it() -> None:
     assert plots.session_value_verdict(_session(low=0.24, high=0.58, comparisons=(won,))) == "OK"
     assert (
         plots.session_value_verdict(_session(low=0.24, high=0.58, comparisons=(beaten, won)))
-        == "not beaten: always-frontier"
+        == "not beaten: Always-Frontier"
     )
     # An interval spanning zero is not a value claim either, whatever the trivial arms did.
     assert plots.session_value_verdict(_session(low=-0.1, high=0.58, comparisons=(won,))) == (
@@ -172,7 +172,7 @@ def test_every_figure_carries_the_scope_strip_including_the_unidentified_claim()
     fig, ax = plt.subplots()
     plots.scope_strip(ax, "OK")
     texts = [t.get_text() for t in ax.texts]
-    assert any("not identified: P(escalate)=0" in t for t in texts)
+    assert any("not identified: no logged escalation (P(escalate)=0)" in t for t in texts)
     assert any("DETECTS" in t for t in texts)
     assert any("VALUE" in t for t in texts)
     assert not ax.axison
@@ -316,12 +316,12 @@ def test_the_sweep_keeps_the_interval_and_the_run_length_control_per_family() ->
     assert header == [
         "n",
         "stale",
-        "A fired",
+        "A (as-shipped) fired",
         "A P(fail)",
         "A 95% CI",
         "A AUROC",
         "A len-only",
-        "B fired",
+        "B (edit-gated) fired",
         "B P(fail)",
         "B 95% CI",
         "B AUROC",
@@ -459,8 +459,8 @@ def test_a_baseline_the_escalate_arm_loses_to_is_stated_not_buried_in_panel_c() 
     losing = _contrast("always_frontier", rate=0.73, diff=-0.108, ci=(-0.165, -0.056))
     fig, axes = _axes(3)
     ann = plots.session_value(_session(low=0.24, high=0.58, comparisons=(losing,)), axes)
-    assert ann.caveat is not None and "does not beat always-frontier" in ann.caveat
-    assert any("always_frontier" in fact for fact in ann.subtitle_facts)
+    assert ann.caveat is not None and "does not beat Always-Frontier" in ann.caveat
+    assert any("Always-Frontier" in fact for fact in ann.subtitle_facts)
     # Panel C draws one point per baseline arm, with zero marked so the sign is readable.
     assert axes[2].containers
     assert any(line.get_xdata()[0] == 0.0 for line in axes[2].lines)
@@ -474,9 +474,9 @@ def test_a_baseline_tied_within_its_interval_also_counts_as_not_beaten() -> None
     beaten = _contrast("always_cheap", rate=0.44, diff=0.185, ci=(0.006, 0.375))
     fig, axes = _axes(3)
     ann = plots.session_value(_session(low=0.24, high=0.58, comparisons=(tied, beaten)), axes)
-    assert ann.caveat is not None and "does not beat random-escalate" in ann.caveat
-    assert any("random_escalate" in fact for fact in ann.subtitle_facts)
-    assert not any("always_cheap" in fact for fact in ann.subtitle_facts)
+    assert ann.caveat is not None and "does not beat Random-Escalate" in ann.caveat
+    assert any("Random-Escalate" in fact for fact in ann.subtitle_facts)
+    assert not any("Always-Cheap" in fact for fact in ann.subtitle_facts)
     plt.close(fig)
 
 
@@ -802,7 +802,9 @@ def test_the_stratified_panel_anchors_its_axis_at_chance_and_labels_the_anchor()
     # anchored axis is honest only while it says where it starts.
     fig, axes = _axes(4)
     plots.corpus_and_coverage([], [], plots.StratifiedAuroc(0.778, 0.710, 0.717), None, axes)
-    assert axes[2].get_ylim()[0] == 0.5
+    # A hair below chance, so the dashed chance rule lands INSIDE the panel rather than on the
+    # spine; the offset is small enough that it does not inflate the confound drop.
+    assert axes[2].get_ylim()[0] == pytest.approx(0.48)
     assert "chance 0.5" in axes[2].get_ylabel()
     plt.close(fig)
 
@@ -813,7 +815,7 @@ def test_a_below_chance_stratified_bar_drops_the_axis_back_to_zero() -> None:
     fig, axes = _axes(4)
     plots.corpus_and_coverage([], [], plots.StratifiedAuroc(0.778, 0.431, 0.717), None, axes)
     assert axes[2].get_ylim()[0] == 0.0
-    assert "starts at 0" in axes[2].get_ylabel()
+    assert "floor at 0" in axes[2].get_ylabel()
     plt.close(fig)
 
 

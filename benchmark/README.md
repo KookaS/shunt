@@ -128,9 +128,17 @@ statuses below are the current audit of that contract:
   `capability_rank.K` routing cells, below which a model's capability rank is a price prior rather
   than a measurement, and `prefix_eval.MIN_ROWS` trajectories admissible at the shallowest
   evaluated depth. Add a model and the check says so on the next run. On the current corpus
-  `zai-glm-5.2` and `kimi-k3` are already `THIN` on escalation. **Caveat — it is a manual
+  `glm-5.2` and `kimi-k3` are already `THIN` on escalation. **Caveat — it is a manual
   gate** (`make model-coverage`), not wired into CI or pre-commit: it fires only when someone
   runs it, so "the collection is incomplete" is not yet a loud, automatic failure.
+- **YES — the multimodal eligibility gate.** `benchmark.model_coverage.verified_coverage(model)`
+  is the distinct share of the 500 Verified text challenges a model holds a real row for,
+  reading `results.csv` plus the separate `results_free.csv` (absent is an empty corpus, never
+  an error). `multimodal_eligible(model)` is true only at `MULTIMODAL_UNLOCK_FRACTION`
+  (default `1.0`; a looser value is one deliberate edit). When the configured manifest declares
+  the multimodal source, the collector refuses to schedule a cell for a below-gate model — by
+  name, before any container — so images follow completed text coverage instead of competing
+  with it. No model is above 40% today, so nothing runs.
 
 **What a code change costs to re-evaluate — $0.** Changing a routing strategy, the escalation
 regex, or a config default never invalidates `results.csv` or the escalation corpus. Routing
@@ -165,9 +173,10 @@ one half's staleness never decides another half's exit code (`make check-inferen
 `--half` is check-only and a hard `parser.error` on any other subcommand.
 
 The full figure-target list: `make routing-report` (routing half), `make escalation-eval`
-(escalation half), `make inference-figures` (the seven inference PNGs; `OUT=/tmp/x` diverts
-them plus the manifest to a scratch dir), `make demo-figures` (the seven ILLUSTRATIVE demo
-PNGs — synthetic, watermarked, evidence of nothing; same `OUT=` diversion),
+(escalation half), `make inference-figures` (the eight inference PNGs, plus the seed-only
+overview; `OUT=/tmp/x` diverts them plus the manifest to a scratch dir), `make demo-figures`
+(the eight ILLUSTRATIVE demo PNGs — synthetic, watermarked, evidence of nothing; same `OUT=`
+diversion),
 `make benchmark-figures` (the pipeline's `figures`
 stage — the **only** target that re-records the freshness manifest, so it is what certifies a
 newly-added or changed figure), `make check-figures` and `make check-inference-figures` (the

@@ -37,13 +37,13 @@ from tests.e2e.hyperparameter_helpers import (
     write_policy,
 )
 
-_MID = "zai-glm-5.2"
+_MID = "glm-5.2"
 _CHEAP = "deepseek-v4-flash"
 _FRONTIER = "claude-fable-5"
 
 
 def _seed_single_cluster_corpus(client: TestClient, *, n_a: int, n_b: int) -> None:
-    """Seed *n_a* zai-glm-5.2 successes on TASK_A and *n_b* on TASK_B (all one model)."""
+    """Seed *n_a* glm-5.2 successes on TASK_A and *n_b* on TASK_B (all one model)."""
     store = client.app.state.outcome_store
     for i in range(n_a):
         seed_outcome(
@@ -71,10 +71,10 @@ def _seed_single_cluster_corpus(client: TestClient, *, n_a: int, n_b: int) -> No
 @pytest.mark.parametrize(
     ("k", "expected_reason"),
     [
-        # k=1 returns a single neighbour (zai-glm-5.2) — fewer samples than min_samples=3,
+        # k=1 returns a single neighbour (glm-5.2) — fewer samples than min_samples=3,
         # so nothing qualifies and the router escalates to the cheapest untested model.
         pytest.param(1, "exploration_untested", id="k=1"),
-        # k=10 returns a qualifying neighbourhood of zai-glm-5.2 successes → cheapest wins.
+        # k=10 returns a qualifying neighbourhood of glm-5.2 successes → cheapest wins.
         pytest.param(10, "cheapest_above_threshold", id="k=10"),
     ],
 )
@@ -134,7 +134,7 @@ def test_success_rate_threshold_changes_eligibility(
     )
     with app_factory() as client:
         store = client.app.state.outcome_store
-        # TASK_A: 9 zai-glm-5.2 successes + 3 zai-glm-5.2 failures → weighted success 0.75.
+        # TASK_A: 9 glm-5.2 successes + 3 glm-5.2 failures → weighted success 0.75.
         for i in range(9):
             seed_outcome(
                 store,
@@ -199,8 +199,8 @@ def test_min_samples_gates_qualification(
         ),
     )
     with app_factory() as client:
-        # Exactly 20 zai-glm-5.2 outcomes: just enough to end cold start, and the whole
-        # neighbourhood is one zai-glm-5.2 group whose size is *min_samples*'s gate.
+        # Exactly 20 glm-5.2 outcomes: just enough to end cold start, and the whole
+        # neighbourhood is one glm-5.2 group whose size is *min_samples*'s gate.
         _seed_single_cluster_corpus(client, n_a=6, n_b=14)
         model, reason = parse_decision(
             post_completion(client, chat_body(content=TASK_A)).headers["X-Shunt-Decision"]

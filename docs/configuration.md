@@ -65,7 +65,8 @@ it. `.env` is gitignored; keep it that way.
 To find the variable for a provider, look at its `api_key_env_var` — in
 `src/shunt/config/models.yaml` for the three providers the registry declares
 (Requesty, DeepSeek, and OpenRouter, the last of which backs no model the router
-picks by default), or in that provider's `examples/providers/<name>.yaml` fragment
+picks by default), or in that provider's
+`examples/providers/<name>.yaml` fragment
 for the rest. `OPENAI_API_KEY` for OpenAI, `GROQ_API_KEY` for Groq, and so on. Two
 of the providers are aggregators — Requesty and OpenRouter — where one key reaches
 many vendors. Local models (Ollama, vLLM) need no key at all.
@@ -115,6 +116,19 @@ cache breakpoints. Claiming support that isn't there earns a 400 mid-request;
 claiming less than the truth just costs you the discount. Guess low.
 
 The `examples/providers/` directory has one of these per provider, ready to copy.
+
+A `base_url` may embed an environment variable as `${NAME}` — Cloudflare Workers AI's
+account-scoped endpoint is
+`https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1`. The value
+is substituted when the registry loads, so an account id stays out of the config file. An
+unset variable is left as the literal `${NAME}`, which makes the miss visible in the
+resolved URL instead of silently producing a wrong-but-parseable one.
+
+A provider row may also carry `key_optional: true`, which marks a free lane that answers
+requests with no key at all — Kilo Gateway's `:free` ids are the shipped example. Leave
+that provider's key variable unset and it still routes (Shunt sends a harmless placeholder
+rather than failing on auth); set the variable and the real key is used. The default is
+`false`, so every provider that needs a key still refuses to route without one.
 
 Adding a model to the registry makes it *known*, not *live*. To have the running
 router actually pick it, also add its name to `router.yaml`'s `models:` list — see
@@ -389,7 +403,7 @@ router:
   models:                 # live-routable models; each name must exist in the registry
     - deepseek-v4-flash
     - deepseek-v4-pro
-    - zai-glm-5.2
+    - glm-5.2
     - kimi-k3
     - gemini-3.1-pro
     - gpt-5.6-sol
@@ -426,7 +440,7 @@ router:
   strategy: knn_semantic_cascade
   models:
     - deepseek-v4-flash
-    - zai-glm-5.2
+    - glm-5.2
     - claude-opus-4-8   # the one frontier model this deployment allows
 ```
 
@@ -438,7 +452,7 @@ Shunt config | strategy=knn_semantic_cascade
 Shunt config | knn: k=20 success_rate_threshold=0.60 min_samples=3
 Shunt config | exploration: enabled=True budget_frac=0.15 conservative_alpha=0.10 ...
 Shunt config | budget: max_spend_usd=unlimited
-Shunt config | models: 0:deepseek-v4-flash, 1:deepseek-v4-pro, 2:zai-glm-5.2, 3:kimi-k3
+Shunt config | models: 0:deepseek-v4-flash, 1:deepseek-v4-pro, 2:glm-5.2, 3:kimi-k3
 Shunt config | session: inactivity_timeout=900s grace_period=120s retry_count=3
 ```
 
@@ -891,7 +905,7 @@ models:                 # enabled models; each name must exist in the registry
   - qwen3.7-plus
   - gpt-5-mini
   - kimi-k2.5
-  - zai-glm-5.2
+  - glm-5.2
   - kimi-k3
 ```
 

@@ -1,0 +1,673 @@
+schema: 1
+scan_as_of: '2026-09-11'
+confirmed:
+  kimi-k3:
+    tier: 2
+    evidence: model_identity.yaml:kimi-k3
+    content_hash: 333fe88a7ec4f767
+    listings:
+    - nvidia_nim:moonshotai/kimi-k3
+proposed:
+  deepseek-v4-flash-0731:
+    tier: 1
+    evidence: normalised slug deepseek-v4-flash-0731 shared by 2 listings
+    content_hash: f23f5c94a511be87
+    listings:
+    - cloudflare_workers_ai:@cf/deepseek-ai/deepseek-v4-flash-0731
+    - nvidia_nim:deepseek-ai/deepseek-v4-flash-0731
+  deepseek-v4-pro-0813:
+    tier: 1
+    evidence: normalised slug deepseek-v4-pro-0813 shared by 2 listings
+    content_hash: 561a3d3cce3d2700
+    listings:
+    - cloudflare_workers_ai:@cf/deepseek-ai/deepseek-v4-pro-0813
+    - nvidia_nim:deepseek-ai/deepseek-v4-pro-0813
+  dots-3-note-preview:
+    tier: 1
+    evidence: normalised slug dots-3-note-preview shared by 2 listings
+    content_hash: 69dddfa6787cfcda
+    listings:
+    - kilo_gateway:dots-studio/dots-3-note-preview:free
+    - openrouter:dots-studio/dots-3-note-preview:free
+  gemma-4-26b-a4b-it:
+    tier: 1
+    evidence: normalised slug gemma-4-26b-a4b-it shared by 3 listings
+    content_hash: d7c9bcc8d099fb5d
+    listings:
+    - cloudflare_workers_ai:@cf/google/gemma-4-26b-a4b-it
+    - google_ai_studio:gemma-4-26b-a4b-it
+    - openrouter:google/gemma-4-26b-a4b-it:free
+  gemma-4-31b-it:
+    tier: 1
+    evidence: normalised slug gemma-4-31b-it shared by 5 listings
+    content_hash: 5701199a62f2e0e2
+    listings:
+    - google_ai_studio:gemma-4-31b-it
+    - nvidia_nim:google/gemma-4-31b-it
+    - openrouter:google/gemma-4-31b-it:free
+    - requesty:google/gemma-4-31b-it
+    - sambanova:gemma-4-31B-it
+  gpt-oss-120b:
+    tier: 1
+    evidence: normalised slug gpt-oss-120b shared by 3 listings
+    content_hash: 214efbcd352cb72b
+    listings:
+    - cloudflare_workers_ai:@cf/openai/gpt-oss-120b
+    - groq:openai/gpt-oss-120b
+    - sambanova:gpt-oss-120b
+  gpt-oss-20b:
+    tier: 1
+    evidence: normalised slug gpt-oss-20b shared by 3 listings
+    content_hash: 6fed9db17a0d4faf
+    listings:
+    - cloudflare_workers_ai:@cf/openai/gpt-oss-20b
+    - groq:openai/gpt-oss-20b
+    - nvidia_nim:openai/gpt-oss-20b
+  inkling:
+    tier: 1
+    evidence: normalised slug inkling shared by 2 listings
+    content_hash: 754d154ba5302ffe
+    listings:
+    - kilo_gateway:thinkingmachines/inkling:free
+    - openrouter:thinkingmachines/inkling:free
+  inkling-small:
+    tier: 1
+    evidence: normalised slug inkling-small shared by 2 listings
+    content_hash: 5798a545c8406ab9
+    listings:
+    - kilo_gateway:thinkingmachines/inkling-small:free
+    - openrouter:thinkingmachines/inkling-small:free
+  kimi-k2-6:
+    tier: 1
+    evidence: normalised slug kimi-k2-6 shared by 2 listings
+    content_hash: 18807a4d30693288
+    listings:
+    - cloudflare_workers_ai:@cf/moonshotai/kimi-k2.6
+    - nvidia_nim:moonshotai/kimi-k2.6
+  laguna-s-2-1:
+    tier: 1
+    evidence: normalised slug laguna-s-2-1 shared by 2 listings
+    content_hash: f792c48439caacf1
+    listings:
+    - kilo_gateway:poolside/laguna-s-2.1:free
+    - openrouter:poolside/laguna-s-2.1:free
+  laguna-xs-2-1:
+    tier: 1
+    evidence: normalised slug laguna-xs-2-1 shared by 3 listings
+    content_hash: f6cc57c87ba3bd23
+    listings:
+    - kilo_gateway:poolside/laguna-xs-2.1:free
+    - nvidia_nim:poolside/laguna-xs-2.1
+    - openrouter:poolside/laguna-xs-2.1:free
+  lfm-2-5-2-6b:
+    tier: 1
+    evidence: normalised slug lfm-2-5-2-6b shared by 2 listings
+    content_hash: 0550a5a3282d538b
+    listings:
+    - kilo_gateway:liquid/lfm-2.5-2.6b:free
+    - openrouter:liquid/lfm-2.5-2.6b:free
+  ling-3-0-flash-fin:
+    tier: 1
+    evidence: normalised slug ling-3-0-flash-fin shared by 3 listings
+    content_hash: b3717fae434f2cce
+    listings:
+    - kilo_gateway:inclusionai/ling-3.0-flash-fin:free
+    - openrouter:inclusionai/ling-3.0-flash-fin:free
+    - vercel_ai_gateway:inclusionai/ling-3.0-flash-fin
+  ling-3-0-flash-fin-free:
+    tier: 1
+    evidence: normalised slug ling-3-0-flash-fin-free shared by 2 listings
+    content_hash: 26d46b6bc04f630e
+    listings:
+    - opencode_zen:ling-3.0-flash-fin-free
+    - vercel_ai_gateway:inclusionai/ling-3.0-flash-fin-free
+  ling-3-0-flash-sante:
+    tier: 1
+    evidence: normalised slug ling-3-0-flash-sante shared by 3 listings
+    content_hash: dc3504c17b30ce2a
+    listings:
+    - kilo_gateway:inclusionai/ling-3.0-flash-sante:free
+    - openrouter:inclusionai/ling-3.0-flash-sante:free
+    - vercel_ai_gateway:inclusionai/ling-3.0-flash-sante
+  ling-3-0-flash-vl:
+    tier: 1
+    evidence: normalised slug ling-3-0-flash-vl shared by 2 listings
+    content_hash: dd0a2c34d03b1e8f
+    listings:
+    - kilo_gateway:inclusionai/ling-3.0-flash-vl:free
+    - openrouter:inclusionai/ling-3.0-flash-vl:free
+  llama-3-2-11b-vision:
+    tier: 1
+    evidence: normalised slug llama-3-2-11b-vision shared by 2 listings
+    content_hash: 429c3f55498c4eb4
+    listings:
+    - cloudflare_workers_ai:@cf/meta/llama-3.2-11b-vision-instruct
+    - nvidia_nim:meta/llama-3.2-11b-vision-instruct
+  lyria-3-clip-preview:
+    tier: 1
+    evidence: normalised slug lyria-3-clip-preview shared by 2 listings
+    content_hash: cb276a52e7750e9b
+    listings:
+    - google_ai_studio:lyria-3-clip-preview
+    - openrouter:google/lyria-3-clip-preview
+  lyria-3-pro-preview:
+    tier: 1
+    evidence: normalised slug lyria-3-pro-preview shared by 2 listings
+    content_hash: 44f390cd17c3287c
+    listings:
+    - google_ai_studio:lyria-3-pro-preview
+    - openrouter:google/lyria-3-pro-preview
+  muse-glimmer-30b:
+    tier: 1
+    evidence: normalised slug muse-glimmer-30b shared by 2 listings
+    content_hash: bc121d269aa3d187
+    listings:
+    - nvidia_nim:meta/muse-glimmer-30b
+    - requesty:nvidia/muse-glimmer-30b
+  nemotron-3-5-content-safety:
+    tier: 1
+    evidence: normalised slug nemotron-3-5-content-safety shared by 4 listings
+    content_hash: 699b10d361ad42d2
+    listings:
+    - kilo_gateway:nvidia/nemotron-3.5-content-safety:free
+    - nvidia_nim:nvidia/nemotron-3.5-content-safety
+    - openrouter:nvidia/nemotron-3.5-content-safety:free
+    - requesty:nvidia/nemotron-3.5-content-safety
+  nemotron-3-5-lightning:
+    tier: 1
+    evidence: normalised slug nemotron-3-5-lightning shared by 2 listings
+    content_hash: 0615e1cb20bff6b0
+    listings:
+    - kilo_gateway:nvidia/nemotron-3.5-lightning:free
+    - openrouter:nvidia/nemotron-3.5-lightning:free
+  nemotron-3-5-lightning-30b-a3b:
+    tier: 1
+    evidence: normalised slug nemotron-3-5-lightning-30b-a3b shared by 2 listings
+    content_hash: 2a9a61e103492ae9
+    listings:
+    - nvidia_nim:nvidia/nemotron-3.5-lightning-30b-a3b
+    - requesty:nvidia/nemotron-3.5-lightning-30b-a3b
+  nemotron-3-nano-omni-30b-a3b-reasoning:
+    tier: 1
+    evidence: normalised slug nemotron-3-nano-omni-30b-a3b-reasoning shared by 4 listings
+    content_hash: 20b04d505317396b
+    listings:
+    - kilo_gateway:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+    - nvidia_nim:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+    - openrouter:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+    - requesty:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+  nemotron-3-super-120b-a12b:
+    tier: 1
+    evidence: normalised slug nemotron-3-super-120b-a12b shared by 4 listings
+    content_hash: 9df29b86e5589c6b
+    listings:
+    - kilo_gateway:nvidia/nemotron-3-super-120b-a12b:free
+    - nvidia_nim:nvidia/nemotron-3-super-120b-a12b
+    - openrouter:nvidia/nemotron-3-super-120b-a12b:free
+    - requesty:nvidia/nemotron-3-super-120b-a12b
+  nemotron-3-ultra-550b-a55b:
+    tier: 1
+    evidence: normalised slug nemotron-3-ultra-550b-a55b shared by 4 listings
+    content_hash: c1cbc06785d29ba9
+    listings:
+    - kilo_gateway:nvidia/nemotron-3-ultra-550b-a55b:free
+    - nvidia_nim:nvidia/nemotron-3-ultra-550b-a55b
+    - openrouter:nvidia/nemotron-3-ultra-550b-a55b:free
+    - requesty:nvidia/nemotron-3-ultra-550b-a55b
+  nex-n2-5-mini:
+    tier: 1
+    evidence: normalised slug nex-n2-5-mini shared by 2 listings
+    content_hash: 1f76608d7ef12487
+    listings:
+    - kilo_gateway:nex-agi/nex-n2.5-mini:free
+    - openrouter:nex-agi/nex-n2.5-mini:free
+  nex-n2-5-pro:
+    tier: 1
+    evidence: normalised slug nex-n2-5-pro shared by 2 listings
+    content_hash: c17a2f0d19619b36
+    listings:
+    - kilo_gateway:nex-agi/nex-n2.5-pro:free
+    - openrouter:nex-agi/nex-n2.5-pro:free
+  north-mini-code:
+    tier: 1
+    evidence: normalised slug north-mini-code shared by 2 listings
+    content_hash: 53fd10af662fdb13
+    listings:
+    - kilo_gateway:cohere/north-mini-code:free
+    - openrouter:cohere/north-mini-code:free
+  qwen3-8-27b:
+    tier: 1
+    evidence: normalised slug qwen3-8-27b shared by 2 listings
+    content_hash: 5e0e03f827e5a37a
+    listings:
+    - cloudflare_workers_ai:@cf/qwen/qwen3.8-27b
+    - groq:qwen/qwen3.8-27b
+dropped:
+- listing_id: 01564c52-8717-47dc-8efd-907a2ca18301
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 01bc2fb0-4bca-4598-b985-d2584a3f46c0
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 02c16efa-29f5-4304-8e6c-3d188889f875
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 06455e78-19f7-487b-93cd-c05a3dd07813
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 0e372c11-8720-46c9-a02d-666188a22dae
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 1161560b-87f9-4795-afb3-a905cf21bcf8
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 145337e7-cec3-4ebb-8e78-16ddfc75e580
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 15631501-2742-4346-a469-22fe202188a2
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 188a4e1e-253e-46d0-9616-0bf8c149763f
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 1f55679f-009e-4456-aa4f-049a62b4b6a0
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 200f0812-148c-48c1-915d-fb3277a94a08
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 2169496d-9c0e-4e49-8399-c44ee66bff7d
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 22338608-b54d-4f04-884e-ab06f3dbbf3e
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 2cbc033b-ded8-4e02-bbb2-47cf05d5cfe5
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 2d50837b-2dc7-4994-a690-a38e25c16d74
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 31690291-ebdc-4f98-bcfc-a44844e215b7
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 328adb49-4a7d-43e3-a2d5-802ae8100fe7
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 337170b7-bd2f-4631-9a57-688b579cf6d3
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 3ae8936e-593e-4fb2-85ee-95dd8a057588
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 4090e54c-eee4-4221-b410-10c1c0f92f17
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 41ca173f-72d5-4420-8915-49e835d2676e
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 429b9e8b-d99e-44de-91ad-706cf8183658
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 43dbadb4-2b0a-47e9-8479-34a49b971f1e
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 4edc7dfe-de78-4156-890c-85b79227694e
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 51b71d5b-8bc0-4489-a107-95e542b69914
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 57fbd08a-a4c4-411c-910d-b9459ff36c20
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 5cdffa8e-1b1e-48e8-85f1-ab9b943cdd32
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 60920ed4-cf72-449a-a0f3-a38456b78262
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 617e7ec3-bf8d-4088-a863-4f89582d91b5
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 6d52253a-b731-4a03-b203-cde2d4fae871
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 724608fa-983e-495d-b95c-340d6b7e78be
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 7276b330-b4ae-4662-81d1-3a8bea8368f8
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 7912c0ab-542e-44b9-b9ee-3113d226a8b5
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 7952d0cc-cb00-4e10-be02-667565c2ee0f
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 7a143886-c9bb-4a1c-be95-377b1973bc3b
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 7ed8d8e8-6040-4680-843a-aef402d6b013
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 7f797b20-3eb0-44fd-b571-6cbbaa3c423b
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 7f9a76e1-d120-48dd-a565-101d328bbb02
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 86b3e51a-4b05-43fa-a403-0f27821919d2
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 8a5d00bd-de28-4a28-b37a-ce46d01ebaeb
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 906a57fd-b018-4d6c-a43e-a296d4cc5839
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 95666467-f984-4211-b48a-7c246dd4adb7
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 9b9c87c6-d4b7-494c-b177-87feab5904db
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: 9e087485-23dc-47fa-997d-f5bfafc0c7cc
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: a226909f-eef8-4265-a3a0-90db0422762e
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: a2a2afba-b609-4325-8c41-5791ce962239
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: a9abaef0-3031-47ad-8790-d311d8684c6c
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: ad01ab83-baf8-4e7b-8fed-a0a219d4eb45
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: af274959-cb47-4ba8-9d8e-5a0a58b6b402
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: bc2b61f6-7eb3-4cdf-94f5-ffc128bd6aa4
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: c05fea67-c5a9-49ca-a7ab-446a0d62cb7a
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: c1c12ce4-c36a-4aa6-8da4-f63ba4b8984d
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: c29c7295-ff20-4b9b-bdcc-25136c19b21d
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: c5255b94-2161-4779-bd25-54f061829a2a
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: c58c317b-0c15-4bda-abb6-93e275f282d9
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: c837b2ac-4d9b-4d37-8811-34de60f0c44f
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: cb254e3b-372b-4d4e-8526-ada79940427a
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: cc80437b-9a8d-4f1a-9c77-9aaf0d226922
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: d9dc8363-66f4-4bb0-8641-464ee7bfc131
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: e580c765-810c-4da3-936c-a2808892f14c
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: e8e8abe4-a372-4c13-815f-4688ba655c8e
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: eaf31752-a074-441f-8b70-d593255d2811
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: eed32bc1-8775-4985-89ce-dd1405508ad8
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: f9f2250b-1048-4a52-9910-d0bf976616a1
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: fe8904cf-e20e-4884-b829-ed7cec0a01cb
+  provider: cloudflare_workers_ai
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: aqa
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: deep-research-max-preview-04-2026
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: deep-research-preview-04-2026
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: deep-research-pro-preview-12-2025
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: gemini-2.5-computer-use-preview-10-2025
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: gemini-2.5-flash-image
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: gemini-2.5-flash-native-audio-latest
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: gemini-2.5-flash-native-audio-preview-09-2025
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: gemini-2.5-flash-preview-tts
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: gemini-2.5-pro-preview-tts
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: gemini-3-pro-image
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: gemini-3-pro-image-preview
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: gemini-3.1-flash-image
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: gemini-3.1-flash-image-preview
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: gemini-3.1-flash-lite-image
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: gemini-3.1-flash-tts-preview
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: gemini-3.5-transcribe-live
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: gemini-embedding-001
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: gemini-embedding-2
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: gemini-embedding-2-preview
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: veo-3.1-fast-generate-preview
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: veo-3.1-generate-preview
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: veo-3.1-lite-generate-preview
+  provider: google_ai_studio
+  reason: withdrawn
+  last_seen: '2026-09-10'
+- listing_id: meta-llama/llama-prompt-guard-2-22m
+  provider: groq
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: meta-llama/llama-prompt-guard-2-86m
+  provider: groq
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: whisper-large-v3
+  provider: groq
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: whisper-large-v3-turbo
+  provider: groq
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: meta/llama-guard-4-12b
+  provider: nvidia_nim
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: nvidia/embed-qa-4
+  provider: nvidia_nim
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: nvidia/llama-3.1-nemotron-safety-guard-8b-v3
+  provider: nvidia_nim
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1
+  provider: nvidia_nim
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: nvidia/llama-nemotron-embed-vl-1b-v2
+  provider: nvidia_nim
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: nvidia/nemotron-3-embed-1b
+  provider: nvidia_nim
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: snowflake/arctic-embed-l
+  provider: nvidia_nim
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: fish-audio/s1
+  provider: vercel_ai_gateway
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: fish-audio/s1-free
+  provider: vercel_ai_gateway
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: fish-audio/s2-pro
+  provider: vercel_ai_gateway
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: fish-audio/s2-pro-free
+  provider: vercel_ai_gateway
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: fish-audio/s2.1-pro
+  provider: vercel_ai_gateway
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: fish-audio/s2.1-pro-free
+  provider: vercel_ai_gateway
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: fish-audio/transcribe-1
+  provider: vercel_ai_gateway
+  reason: withdrawn
+  last_seen: '2026-09-11'
+- listing_id: fish-audio/transcribe-1-free
+  provider: vercel_ai_gateway
+  reason: withdrawn
+  last_seen: '2026-09-11'

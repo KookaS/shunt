@@ -60,13 +60,13 @@ _JUDGE_RUNS: Final[dict[str, int]] = {
 }
 
 # Judges whose requesty one-shot surface cannot yield a label, with the measured reason.
-# zai-glm-5.2: `openai/fireworks/glm-5.2` returns ONLY `reasoning_content` — content is
+# glm-5.2: `openai/fireworks/glm-5.2` returns ONLY `reasoning_content` — content is
 # never emitted, at any max_tokens (verified 400..4000), with every thinking-disable
 # param (enable_thinking, thinking, reasoning_effort, reasoning) accepted-and-ignored.
 # The live benchmark only ever got text from glm through multi-turn agent loops. Skipped
 # loudly rather than fabricating labels from reasoning_content.
 _JUDGE_UNAVAILABLE: Final[dict[str, str]] = {
-    "zai-glm-5.2": (
+    "glm-5.2": (
         "requesty one-shot `openai/fireworks/glm-5.2` returns only reasoning_content, "
         "never content text (verified at max_tokens 400..4000 and with every "
         "thinking-disable param) — not usable as a one-shot judge"

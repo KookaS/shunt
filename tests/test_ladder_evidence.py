@@ -29,7 +29,7 @@ PINNED_ROWS: Final[dict[str, tuple[int, int, int, float, str]]] = {
     "qwen3.7-plus": (87, 6, 3, 0.0345, "INDISTINGUISHABLE"),
     "gpt-5-mini": (190, 4, 36, -0.1684, "NET-HARMFUL"),
     "kimi-k2.5": (121, 8, 10, -0.0165, "INDISTINGUISHABLE"),
-    "zai-glm-5.2": (84, 14, 1, 0.1548, "NET-HELPFUL"),
+    "glm-5.2": (84, 14, 1, 0.1548, "NET-HELPFUL"),
     "kimi-k3": (110, 29, 3, 0.2364, "NET-HELPFUL"),
 }
 
@@ -44,7 +44,7 @@ _PRICE_ORDER: Final = [
     "qwen3.7-plus",
     "gpt-5-mini",
     "kimi-k2.5",
-    "zai-glm-5.2",
+    "glm-5.2",
     "kimi-k3",
 ]
 

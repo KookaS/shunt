@@ -229,6 +229,19 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      # SH018 makes HARD RULES 2 and 3 of the non-shipped free overlay structural: every row
+      # under configs/free-tier/overlay.yaml records the paid twin's REAL list price (never
+      # $0) and declares no cache_read_cost_per_1m, with price_source / price_as_of present.
+      # Scope is overlay.yaml ONLY — configs/free-tier/models.yaml is the deliberate $0 smoke
+      # registry and must keep working. Whole-tree scan on a single fixed target
+      # (pass_filenames:false + always_run) so an unstaged $0 price cannot slip past.
+      # BLOCKING, the free-overlay pricing rule.
+      - id: sh018-free-registry-zero
+        name: SH018 free-overlay rows record a real price, never $0
+        entry: python tools/lint/check_free_registry_zero.py
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: sh013-workflow-timeouts
         name: SH013 every workflow job declares timeout-minutes
         entry: python tools/lint/check_workflow_timeouts.py

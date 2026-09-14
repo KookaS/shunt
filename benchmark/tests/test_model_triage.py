@@ -68,7 +68,7 @@ def test_real_triage_reproduces_committed_pool() -> None:
     rows = {r.model: r for r in triage.triage_default()}
     expected = {
         "deepseek-v4-flash": triage.VERDICT_KEEP,
-        "zai-glm-5.2": triage.VERDICT_KEEP,
+        "glm-5.2": triage.VERDICT_KEEP,
         "kimi-k3": triage.VERDICT_KEEP,
         "qwen3.7-plus": triage.VERDICT_DROP,
         "gpt-5-mini": triage.VERDICT_DROP,

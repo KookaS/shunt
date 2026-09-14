@@ -1,56 +1,56 @@
 {
   "bootstrap_iterations": 10000,
-  "cache_aware_ratio": 0.15309129291373624,
+  "cache_aware_ratio": 0.03796627680387227,
   "cache_aware_ratio_ci": {
-    "ci_lower": 0.09615491357162134,
-    "ci_upper": 0.21755277090578296,
-    "mean": 0.15309129291373624
+    "ci_lower": 0.015511029415248586,
+    "ci_upper": 0.06583024805324295,
+    "mean": 0.03796627680387227
   },
   "cache_control": {
-    "cache_aware": 50.9268114,
-    "naive": 50.9268114
+    "cache_aware": 5.5890432,
+    "naive": 5.5890432
   },
   "cache_oracle": {
-    "cache_aware": 21.042442036,
-    "naive": 21.042442036
+    "cache_aware": 1.199292484,
+    "naive": 1.199292484
   },
   "cache_router": {
-    "cache_aware": 7.7964514012000015,
-    "naive": 7.7964514012000015
+    "cache_aware": 0.2121951612,
+    "naive": 0.2121951612
   },
   "cost_delta": {
-    "ci_lower": -0.43548729780571427,
-    "ci_upper": -0.31609507629714284,
-    "mean": -0.37428023939428573
+    "ci_lower": -0.6099036182857144,
+    "ci_upper": -0.24366345085714286,
+    "mean": -0.42097310862857146
   },
   "cost_ratio": {
-    "ci_lower": 0.1165983946725535,
-    "ci_upper": 0.25914767964284297,
-    "mean": 0.18488434136226717
+    "ci_lower": 0.022596325545517843,
+    "ci_upper": 0.13932293198396026,
+    "mean": 0.07390979845600056
   },
   "coverage": {
-    "control_coverage": 0.5163043478260869,
-    "control_measured": 95,
+    "control_coverage": 0.5,
+    "control_measured": 10,
     "floor": 0.9,
-    "router_coverage": 0.8369565217391305,
-    "router_measured": 154,
+    "router_coverage": 1.0,
+    "router_measured": 20,
     "tripped": true
   },
   "exit_code": 1,
   "frontier_model": "kimi-k3",
   "impute_enabled": true,
-  "n": 184,
-  "n_scorable": 93,
-  "n_unscorable": 91,
-  "naive_ratio": 0.15309129291373624,
+  "n": 20,
+  "n_scorable": 10,
+  "n_unscorable": 10,
+  "naive_ratio": 0.03796627680387227,
   "pass_rate": {
-    "control": 175,
-    "router": 144
+    "control": 18,
+    "router": 16
   },
   "pass_rate_delta": {
-    "ci_lower": -0.25806451612903225,
-    "ci_upper": -0.10752688172043011,
-    "mean": -0.1827956989247312
+    "ci_lower": -0.4,
+    "ci_upper": 0.2,
+    "mean": -0.1
   },
   "task_seed": 42,
   "verdict": "UNTESTED",

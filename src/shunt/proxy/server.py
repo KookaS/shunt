@@ -292,7 +292,7 @@ def _log_missing_credentials(model_pool: ModelPool) -> None:
     missing: dict[str, list[str]] = {}
     for name in model_pool.model_names():
         model = model_pool.get_model(name)
-        if model is None:
+        if model is None or model.key_optional:
             continue
         if not os.environ.get(model.api_key_env_var):
             missing.setdefault(model.api_key_env_var, []).append(name)

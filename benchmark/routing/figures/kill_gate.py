@@ -192,7 +192,10 @@ def evidence_bases(ctx: ctxmod.RoutingContext, margin: float) -> list[Basis]:
     router, baseline = ctxmod.ROUTER_STRATEGY, ctxmod.BASELINE_STRATEGY
     gate_n = int(config.benchmark_params().get("n_default", 20))
     bases: list[Basis] = []
-    for label, measured_only in (("completed (imputed)", False), ("measured only", True)):
+    for label, measured_only in (
+        (f"pre-registered {router} · completed (imputed)", False),
+        (f"pre-registered {router} · measured only", True),
+    ):
         found = _basis(
             label,
             ctx.pass_map(router, measured_only=measured_only),
@@ -208,7 +211,7 @@ def evidence_bases(ctx: ctxmod.RoutingContext, margin: float) -> list[Basis]:
     r_all, b_all = ctx.pass_map(router), ctx.pass_map(baseline)
     sample = sorted(set(r_all) & set(b_all))[:gate_n]
     found = _basis(
-        f"gate sample (N={gate_n})",
+        f"pre-registered {router} · gate sample (N={gate_n})",
         {t: r_all[t] for t in sample},
         {t: b_all[t] for t in sample},
         ctx.cost_map(router),
@@ -237,6 +240,21 @@ def _default_basis(ctx: ctxmod.RoutingContext, margin: float) -> list[Basis]:
         margin,
     )
     return [found] if found is not None else []
+
+
+def _cost_row_label(label: str) -> str:
+    """Panel B's compact row label: panel A already carries the full identity.
+
+    The full `pre-registered kNN-semantic · measured only` widened the axes past the canvas
+    under constrained layout, failing SHUNT_PLOT_STRICT, so the strategy name is dropped here.
+    """
+    if label.startswith("pre-registered "):
+        _, _, rest = label.partition(" · ")
+        return f"pre-registered · {rest}"
+    default = ctxmod.DEFAULT_STRATEGY
+    if label.startswith(f"{default} —"):
+        return f"{default} (shipped default)"
+    return label
 
 
 def _draw_forest(ax: Axes, bases: list[Basis], margin: float) -> None:
@@ -314,7 +332,12 @@ def _draw_cost(ax: Axes, bases: list[Basis]) -> None:
             color="#444444",
         )
     ax.set_yticks(ys)
-    ax.set_yticklabels([])
+    # The rows are named here too, not only on panel A: panel B is read as a cost panel on
+    # its own, and an unlabelled ladder of seven-dollar gaps cannot say which arm each row is.
+    # A COMPACT label, because panel A already carries the full identity and the long form
+    # (`pre-registered kNN-semantic · measured only`) widened the axes past the canvas under
+    # constrained layout, failing SHUNT_PLOT_STRICT.
+    ax.set_yticklabels([_cost_row_label(b.label) for b in bases], fontsize=7)
     ax.set_xscale("log")
     ax.set_xlabel("total spend on that basis (USD, log)", fontsize=9)
     lo = min(min(b.router_cost, b.baseline_cost) for b in bases)
@@ -356,12 +379,14 @@ def _annotations(bases: list[Basis], margin: float, banner: str | None) -> Annot
     parts: list[str] = []
     if thin:
         pairs = "/".join(str(b.b + b.c) for b in thin)
+        verb = "rests" if len(thin) == 1 else "rest"
+        pair_noun = "pair" if pairs.isdigit() and int(pairs) == 1 else "pairs"
         parts.append(
-            f"{len(thin)} of {len(cleared)} row(s) clearing the bar rest on {pairs} "
-            "discordant pair(s)"
+            f"{len(thin)} of {len(cleared)} clearing the bar {verb} on {pairs} "
+            f"discordant {pair_noun}"
         )
     if inferior:
-        parts.append(f"{len(inferior)} of {len(bases)} rows: WORSE by more than the margin")
+        parts.append(f"{len(inferior)} of {len(bases)} rows are WORSE by more than the margin")
     if undecided:
         parts.append(f"{len(undecided)} of {len(bases)} bases cannot decide — quality UNKNOWN")
     # `plot_frame` REJECTS an over-long caveat, which would abort the render. Drop the

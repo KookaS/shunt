@@ -61,10 +61,51 @@ class MissingScaffoldCredentialError(RuntimeError):
     """The env var the scaffold config names holds no key at request time."""
 
 
+# A harmless NON-SECRET placeholder for an anonymous free lane whose env var is unset/empty.
+# Some providers (Kilo Gateway's `:free` ids) answer a keyless request with 200, but litellm
+# still needs a non-empty string to construct its client. This is a constant with no secret
+# value: the config still carries only the env-var NAME, and the placeholder is injected at
+# request time only, so it never reaches the serialised trajectory dump. Defined here, next to
+# the injection seam, as the one canonical value; `benchmark.runner.free_lane_probe` imports it.
+ANONYMOUS_API_KEY: Final[str] = "sk-anonymous-free-lane"
+
+
 class EnvKeyLitellmModelConfig(LitellmModelConfig):
     """``LitellmModelConfig`` plus the NAME of the env var holding the credential."""
 
     api_key_env_var: str | None = None
+    # True for an anonymous free lane: the env var being unset/empty is NOT a refusal — the
+    # harmless placeholder above is sent instead. False keeps the fail-closed
+    # ``MissingScaffoldCredentialError``. Threaded from the provider row via the scaffold
+    # overlay; it is metadata about the lane, never a credential.
+    key_optional: bool = False
+
+
+# Provider-specific metadata litellm attaches to response messages (e.g.
+# ``provider_specific_fields``, the ``reasoning_content`` trace). The scaffold replays its
+# message list verbatim on the next turn, and strict OpenAI-compatible providers (Groq) reject
+# each key with a 400. These are litellm-internal annotations the next request does not use, so
+# stripping them from the OUTGOING copy is safe — the reasoning trace is never re-submitted as
+# input by any supported provider.
+_UNSUPPORTED_MESSAGE_KEYS: Final[frozenset[str]] = frozenset(
+    {"provider_specific_fields", "reasoning_content", "reasoning"}
+)
+
+
+def _strip_unsupported_message_keys(value: Any) -> Any:
+    """Recursively drop unsupported provider-metadata keys from an outgoing message payload."""
+    # Rebuilds dicts/lists instead of mutating, so the scaffold's own trajectory (and the
+    # message-list dump it persists) keeps the metadata litellm attached — only the request
+    # copy is cleaned. Content, roles and tool_calls pass through byte-for-byte otherwise.
+    if isinstance(value, dict):
+        return {
+            key: _strip_unsupported_message_keys(item)
+            for key, item in value.items()
+            if key not in _UNSUPPORTED_MESSAGE_KEYS
+        }
+    if isinstance(value, list):
+        return [_strip_unsupported_message_keys(item) for item in value]
+    return value
 
 
 class EnvKeyLitellmModel(LitellmModel):
@@ -101,12 +142,18 @@ class EnvKeyLitellmModel(LitellmModel):
 
     def _credential_kwargs(self) -> dict[str, str]:
         name = getattr(self.config, "api_key_env_var", None)
-        if not name:
-            # No name declared: litellm resolves the provider's own canonical env var itself
-            # (the `deepseek/`-style routes), so there is nothing to inject.
-            return {}
-        key = os.environ.get(name)
+        key = os.environ.get(name) if name else None
         if not key:
+            if getattr(self.config, "key_optional", False):
+                # Anonymous free lane: the provider admits a keyless request, so a harmless
+                # constant keeps litellm's client construction happy without inventing a
+                # credential. Never a billed path — `key_optional` is set only on a provider
+                # that answers 200 without a key.
+                return {CREDENTIAL_KWARG: ANONYMOUS_API_KEY}
+            if not name:
+                # No name declared: litellm resolves the provider's own canonical env var
+                # itself (the `deepseek/`-style routes), so there is nothing to inject.
+                return {}
             raise MissingScaffoldCredentialError(
                 f"scaffold model {self.config.model_name!r} needs ${name}, which is unset"
             )
@@ -115,7 +162,10 @@ class EnvKeyLitellmModel(LitellmModel):
     def _query(self, messages: list[dict[str, str]], **kwargs: Any) -> Any:
         # Caller kwargs last so an explicit per-call override still wins.
         started = time.perf_counter()
-        response = super()._query(messages, **{**self._credential_kwargs(), **kwargs})
+        # Sanitize only the OUTGOING copy: litellm puts provider-specific metadata on the
+        # assistant messages it returns, and a strict provider 400s if the scaffold replays it.
+        outgoing = _strip_unsupported_message_keys(messages)
+        response = super()._query(outgoing, **{**self._credential_kwargs(), **kwargs})
         # Deliberately after the call returns, and deliberately not in a `finally`: a raised
         # call must record nothing (see `call_latencies_s`).
         self._timed(started)
@@ -145,6 +195,7 @@ def credential_free_model_block(
     model_kwargs: Mapping[str, Any],
     *,
     api_key_env_var: str | None,
+    key_optional: bool = False,
 ) -> dict[str, Any]:
     """The scaffold's ``model`` config block, with the credential replaced by its env-var name."""
     if CREDENTIAL_KWARG in model_kwargs and not api_key_env_var:
@@ -160,6 +211,9 @@ def credential_free_model_block(
         "cost_tracking": "ignore_errors",
         "model_class": MODEL_CLASS_PATH,
         "api_key_env_var": api_key_env_var,
+        # Metadata about the lane, NOT a credential: it authorises the placeholder at request
+        # time. Carrying it costs nothing and keeps the blind path visible in the dump.
+        "key_optional": key_optional,
     }
     assert_credential_free(block)
     return block

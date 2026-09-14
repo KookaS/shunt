@@ -1,0 +1,66 @@
+schema: 1
+weights:
+  default_importance: 0.5
+  frontier_importance: 1.0
+  recency_bonus: 0.05
+  recency_window_days: 90
+  lane_cost_epsilon: 0.01
+  stop_min_cells: 20
+  stop_confidence: 0.95
+importance:
+  kimi-k3: 10.0
+  deepseek-v4-pro: 9.5
+  claude-fable-5.1: 9.0
+  gpt-6-astra: 9.0
+  gpt-5.6-luna: 8.5
+  nemotron-3-ultra-550b-a55b: 7.0
+  deepseek-v3.1: 7.0
+  minimax-m2.7: 6.5
+  glm-5.3: 6.5
+  qwen3.8-27b: 6.0
+  nemotron-3-super-120b-a12b: 5.5
+  kimi-k2.5: 5.0
+  gemini-flash-latest: 5.0
+  qwen3.7-plus: 4.5
+  glm-5.2: 4.0
+  llama-3.3-70b-instruct: 3.0
+  gpt-oss-120b: 3.0
+  deepseek-v4-flash: 2.5
+  nemotron-3.5-lightning: 2.5
+  glm-5.3-flash: 2.0
+  laguna-s-2.1: 2.0
+  laguna-xs-2.1: 1.5
+  step-3.7-flash: 1.5
+  nemotron-3-nano-omni-30b-a3b-reasoning: 1.0
+  gemma-4-31b-it: 1.0
+  gemini-flash-lite-latest: 1.0
+  ling-3-0-flash-fin: 1.0
+  ling-3-0-flash-sante: 1.0
+  muse-glimmer-30b: 1.0
+  qwen3.6-27b: 0.8
+  gpt-oss-20b: 0.8
+frontier:
+- kimi-k3
+- deepseek-v4-pro
+- claude-fable-5.1
+- gpt-6-astra
+- gpt-5.6-luna
+- nemotron-3-ultra-550b-a55b
+- deepseek-v3.1
+- minimax-m2.7
+- glm-5.3
+- qwen3.8-27b
+- nemotron-3-super-120b-a12b
+- kimi-k2.5
+- gemini-flash-latest
+- qwen3.7-plus
+- glm-5.2
+not_worth:
+  gpt-5-mini: 'Measured DROP on the routine frontier: dominated by cheaper measured
+    models and it adds no new Verified challenge coverage, so further cells buy nothing.'
+vision:
+- claude-fable-5.1
+- gpt-6-astra
+- gpt-5.6-luna
+- gemini-flash-latest
+- gemini-flash-lite-latest

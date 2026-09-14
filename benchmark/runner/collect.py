@@ -29,7 +29,12 @@ from benchmark.routing import integrity
 from benchmark.routing.metrics import discriminating_set
 from benchmark.runner import image_version, infer, swebench_specs
 from benchmark.runner.calibration import DEFAULT_SALT
-from benchmark.runner.run_matrix import _has_keys, collect_phase, preflight_refuses
+from benchmark.runner.run_matrix import (
+    _apply_multimodal_gate,
+    _has_keys,
+    collect_phase,
+    preflight_refuses,
+)
 from benchmark.runner.sampling import AUDIT_SALT, in_frontier_audit
 from shunt.secrets import load_dotenv_file
 
@@ -168,6 +173,12 @@ def run_collect(
     )
     models_a = phase_a_models(phase_a_mode)
     models_c = frontier_models(include_high)
+    # Owner eligibility gate: a multimodal manifest may not schedule a model that has not
+    # completed the Verified text corpus. A text source is a no-op.
+    models_a, refusals_a = _apply_multimodal_gate(source, models_a)
+    models_c, refusals_c = _apply_multimodal_gate(source, models_c)
+    for model, reason in {**refusals_a, **refusals_c}.items():
+        print(f"  REFUSING multimodal cells for {model}: {reason}")
     live = live and _has_keys()
     # SAFETY: never spend real money with un-pinned placeholder sizing constants — the
     # audit_fraction/margin must be pinned from live data first (docs/benchmark.md), else

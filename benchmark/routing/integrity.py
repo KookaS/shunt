@@ -123,13 +123,18 @@ STALENESS_ANCHORS: Final[tuple[str, ...]] = (
 )
 
 # Full results.csv header, original outcome columns first for backward-compat.
-# ``reasoning`` follows ``model`` and, together with them, forms the cache key:
-# (challenge_id, model, reasoning). Legacy rows carry the literal
-# "default" and alias-resolve to their model's declared default_arm at read time
-# (`config.load_results` / `config.default_arm_ids`).
+# ``lane`` follows ``model`` and is the CHANNEL identity: the overlay row's KEY (e.g.
+# ``glm-5.3-explabs``), which names the provider channel the row was collected on. It is not
+# the overlay row's ``lane`` field — that field is the raw wire id (e.g. ``glm-5.3``).
+# ``model`` is the bare canonical weights identity. The cache key is
+# ``(challenge_id, lane, reasoning, rep)`` — keying on ``model`` would collide the same weights
+# served on two channels (e.g. a direct id and its `-explabs` mirror). ``reasoning`` follows
+# them; legacy rows carry the literal "default" and alias-resolve to their model's declared
+# default_arm at read time (`config.load_results` / `config.default_arm_ids`).
 RESULTS_FIELDS: Final[tuple[str, ...]] = (
     "challenge_id",
     "model",
+    "lane",
     "reasoning",
     "pass",
     "cost",

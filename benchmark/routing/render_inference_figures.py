@@ -2,7 +2,7 @@
 
 # Benchmark-side because only the committed mode's inputs live here: the LFS seed bundle and
 # `docs_corpus`, which seeds a store from committed data alone. The DRAWING is all shipped code
-# (`shunt.inspect.inference`), which is what lets the same seven figures render inside the rig
+# (`shunt.inspect.inference`), which is what lets the same eight figures render inside the rig
 # container, where no `benchmark/` exists — there the entry point is
 # `python -m shunt.inspect.inference` instead.
 #
@@ -10,7 +10,7 @@
 #
 #   no --out-dir   the COMMITTED docs figures. Seed-only, deterministic, no network and no live
 #                  rig; the only mode that may touch the committed manifest.
-#   --out-dir X    the same seven, drawn from whatever `SHUNT_DATA_DIR` points at (seed rows and
+#   --out-dir X    the same eight, drawn from whatever `SHUNT_DATA_DIR` points at (seed rows and
 #                  live rows alike). `Family.manifest_for()` diverts the manifest to
 #                  `X/../figures.json` so a scratch render cannot dirty the committed one.
 
@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 from benchmark.routing import docs_corpus
+from benchmark.routing.model_universe import canonical_label
 from shunt.db.store import OutcomeStore
 from shunt.inspect.inference import CANONICAL_PLOTS_DIR, render
 from shunt.inspect.inference.estimators import InstrumentInadmissibleError
@@ -50,14 +51,16 @@ def _store_for(out_dir: Path | None) -> OutcomeStore:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint: render the seven figures; returns the process exit code."""
+    """CLI entrypoint: render the eight figures; returns the process exit code."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     args = _build_parser().parse_args(argv)
     out_dir = args.out_dir if args.out_dir is not None else CANONICAL_PLOTS_DIR
 
     store = _store_for(args.out_dir)
     try:
-        render(store, out_dir)
+        # THE ONE canonical resolver: the committed figures draw the registry `version`
+        # identity (`glm-5.2`), never a publisher-prefixed channel listing (`z-ai/glm-5.3:free`).
+        render(store, out_dir, label_of=canonical_label)
     except InstrumentInadmissibleError as exc:
         # F7 refuses BEFORE a canvas exists, so the family is incomplete and the exit must say
         # so: a zero here would let a half-drawn set reach the SH009 manifest gate as "rendered".

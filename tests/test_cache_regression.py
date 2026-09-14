@@ -114,13 +114,20 @@ class TestRealCacheSecondRun:
         # future live runs adding models to results.csv.
         config.load()
         hashes = integrity.all_hashes()
-        versions = integrity.model_versions()
         cache = config.load_results()
         tasks = sorted(hashes.keys())
         assert tasks, "expected materialised swebench specs"
 
         present_models = sorted({m for cell in cache.values() for m in cell})
         assert present_models, "expected committed results in the cache"
+        # The second run registers the collection-only lanes it schedules (the run site does
+        # this through `register_collection_models`), so their channel->identity versions are
+        # known. Without it a collection lane keys against "unknown" and looks stale.
+        previous_pricing = config._pricing
+        config._pricing = None
+        config.register_collection_models(present_models)
+        versions = integrity.model_versions()
+        config._pricing = previous_pricing
         # The set of (challenge, model, arm) cells that ACTUALLY have a committed
         # row (a model may be partially covered by design — e.g. claude-opus-4-6
         # runs one challenge; and a cell may hold more than one arm going forward).
