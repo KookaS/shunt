@@ -71,8 +71,8 @@ capture = ["cryptography>=43"]
 benchmark = [
     "matplotlib>=3.9",
     # scikit-learn/scipy are BENCHMARK-only (PCA, cosine similarity, the
-    # McNemar binomtest). They were in the core dependency list, so every
-    # `pip install shunt-router` pulled ~100 MB the shipped router never imports:
+    # McNemar binomtest). They were in the core dependency list, so every install
+    # pulled ~100 MB the shipped router never imports:
     # `grep -r sklearn src/` is empty. scipy was undeclared anywhere, surviving
     # only as a transitive of scikit-learn.
     "scikit-learn>=1.5",
@@ -90,9 +90,9 @@ inspect = ["matplotlib>=3.9"]
 [project.urls]
 Homepage = "https://github.com/KookaS/shunt"
 Repository = "https://github.com/KookaS/shunt"
-# The package is explained almost entirely by its docs — a PyPI page that does not
-# link to them sends the reader nowhere. Issues is the only inbound channel a PyPI
-# visitor can reach without first finding the repo.
+# The package is explained almost entirely by its docs — package metadata that does
+# not link to them sends the reader nowhere. Issues is the only inbound channel a new
+# user can reach without first finding the repo.
 Documentation = "https://kookas.github.io/shunt/"
 Issues = "https://github.com/KookaS/shunt/issues"
 
@@ -102,7 +102,7 @@ shunt = "shunt.cli:main"
 [tool.setuptools.packages.find]
 # shunt is the shipped product (src layout). The benchmark eval harness lives at
 # repo root and is deliberately NOT shipped in the wheel — it is dev/CI-only.
-# Keeping it out of `include` means `pip install shunt-router` ships only the
+# Keeping it out of `include` means `pip install .` ships only the
 # product: no top-level `benchmark` package, no matplotlib pull, and no bundled
 # benchmark runtime data to go missing. Tests import the harness via the repo
 # root on sys.path (see [tool.pytest.ini_options].pythonpath below); running it

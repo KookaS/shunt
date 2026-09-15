@@ -23,7 +23,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 from sklearn.metrics.pairwise import cosine_similarity
 
-from benchmark import config, plot_frame
+from benchmark import config, grouped_split, plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
 from benchmark.routing import plot_style, summary
 from benchmark.routing.figures import context as ctxmod
@@ -121,7 +121,7 @@ SPEC = FigureSpec(
             "success_rate_thresh",
             "neighbour pass-rate below which the router escalates off the cheap model",
         ),
-        ("min_samples", "min neighbours with a recorded outcome before the router trusts them"),
+        ("min_samples", "min MEASURED neighbours before the router trusts them"),
         (
             "cost at equal quality",
             "cheapest cell whose pass rate clears the best cell's 95% Wilson lower bound — "
@@ -133,16 +133,12 @@ SPEC = FigureSpec(
         "runs, never a TF-IDF proxy.",
         "The k grid is log-spaced. A uniform grid spends nearly all of its cells inside one "
         "regime and reports the same number on half of them.",
-        "READ PANEL B BEFORE PANEL A's WINNER. The selected cell sits at k=174 against n=181 "
-        "tasks, so the neighbourhood is the whole corpus: every task sees the same neighbours, "
-        "the kNN pick collapses to one constant model, and panel B marks it S — one model, "
-        "neither the cheapest nor the frontier. The configuration this sweep selects therefore "
-        "does no routing at all, which is the constant-policy falsifier, not a routing result.",
     ),
     limitations=(
-        "Folds split TASKS, not repositories, so an out-of-fold task can still sit next to a "
-        "sibling task from the same repo — this is a lower bound on optimism, not an "
-        "estimate of transfer to a new codebase (see embedding_signal.png's cross-repo panel).",
+        "Folds are grouped by REPOSITORY — an out-of-fold task never shares a repo with a task "
+        "in its own neighbour index — so the held-out number is transfer to an unseen codebase, "
+        "not an estimate inflated by same-repo siblings (see embedding_signal.png's cross-repo "
+        "panel).",
         "The S regime was added on 2026-09-05 and is not a new measurement: those cells were "
         "always single-model, and `_regime` simply could not see it. Every earlier render of "
         "this panel drew them green, as mixed allocation.",
@@ -221,6 +217,13 @@ def _vote_counts(
     counts: dict[str, list[int]] = {}
     for nidx in neighbours:
         for model_name, outcome in results_map[task_ids[nidx]].items():
+            # An IMPUTED cell is a monotone-ladder fill (impute.py `to_cell`),
+            # near-exclusively pass=True — not a verification. Exclude it from BOTH the
+            # pass vote and the min_samples count, matching tier_classifier/knn_cascade
+            # and the kNN row zeroing an imputed neighbour (knn.py). A raw matrix with no
+            # `imputed` key behaves as before (`.get(..., False)` == measured).
+            if outcome.get("imputed", False):
+                continue
             seen = counts.setdefault(model_name, [0, 0])
             seen[0] += 1
             seen[1] += 1 if outcome.get("pass", False) else 0
@@ -312,12 +315,6 @@ def imputed_share(results_map: dict, task_ids: list[str]) -> tuple[int, int]:
     """``(imputed cells, total cells)`` in the matrix this sweep is scored on."""
     cells = [c for tid in task_ids for c in results_map.get(tid, {}).values()]
     return sum(1 for c in cells if c.get("imputed")), len(cells)
-
-
-def fold_assignment(n: int, folds: int, seed: int = 42) -> np.ndarray:
-    """Deterministic fold id per task — the partition the outer-loop CV runs over."""
-    rng = np.random.default_rng(seed)
-    return rng.permutation(np.arange(n) % max(1, folds))
 
 
 def fixed_policy(model: str, task_ids: list[str], results_map: dict[str, dict]) -> dict:
@@ -441,6 +438,10 @@ def sweep_grid(  # noqa: PLR0913
         for k in ks:
             while taken < min(k, len(ranked)):
                 for model_name, outcome in results_map[task_ids[ranked[taken]]].items():
+                    # Same boundary rule as `_vote_counts`: an imputed pass is not a
+                    # verification, so it counts toward neither the vote nor min_samples.
+                    if outcome.get("imputed", False):
+                        continue
                     seen = counts.setdefault(model_name, [0, 0])
                     seen[0] += 1
                     seen[1] += 1 if outcome.get("pass", False) else 0
@@ -554,6 +555,7 @@ class SweepResult:
     grid: Grid
     n_tasks: int
     n_folds: int
+    seed: int
     in_sample: list[dict]
     fold_rows: list[dict]
     pooled: list[dict]
@@ -617,14 +619,20 @@ def run_sweep(  # noqa: PLR0913
     matrix: dict,
     grid: Grid,
     n_folds: int,
+    seed: int = grouped_split.DEFAULT_SEED,
 ) -> SweepResult:
-    """In-sample grid, out-of-fold grid, and a nested selection per fold."""
+    """In-sample grid, out-of-fold grid, and a nested REPO-GROUPED selection per fold."""
     n = len(task_ids)
     sims = _similarity(features)
     models = matrix["models"]
     frontier_model = max(models, key=lambda m: model_cost(m, matrix)) if models else ""
     cheapest = min(models, key=lambda m: model_cost(m, matrix)) if models else ""
-    fold_ids = fold_assignment(n, n_folds)
+    # WHOLE REPOS TO FOLDS. The outer and inner passes below both read this partition, so the
+    # configuration selected on the other folds is scored on a fold whose repos the selection
+    # never saw. `seed` is recorded on the result for reproduction.
+    tasks_meta = matrix.get("tasks", {})
+    repos = [grouped_split.repo_of_task(tid, tasks_meta.get(tid)) for tid in task_ids]
+    fold_ids = grouped_split.repo_grouped_fold_ids(repos, n_folds, seed=seed)
     folds = tuple(sorted({int(f) for f in fold_ids}))
 
     def pass_over(split: Split) -> list[dict]:
@@ -679,6 +687,7 @@ def run_sweep(  # noqa: PLR0913
         grid=grid,
         n_tasks=n,
         n_folds=len(folds),
+        seed=seed,
         in_sample=in_sample,
         fold_rows=fold_rows,
         pooled=pooled,
@@ -1094,9 +1103,40 @@ def _subtitle_facts(res: SweepResult) -> tuple[str, ...]:
     return tuple(facts)
 
 
+def _selected_cell_note(res: SweepResult) -> str:
+    """Panel B's reading of the SELECTED cell, derived from the row the subtitle quotes."""
+    # The note used to be a static string naming k=174, the cell one corpus happened to select.
+    # A regeneration moved the selection to k=20; the subtitle followed the data and the note did
+    # not, so the committed figure named one cell on its canvas and another in its notes. It is
+    # now read off `res.selected` — the same row `_subtitle_facts` prints — so the two cannot
+    # drift, and the whole-corpus collapse is asserted only when the selected neighbourhood
+    # really is the whole corpus.
+    sel = res.selected
+    n = res.n_tasks
+    k = int(sel["k"])
+    if k >= max(2, n - 1):
+        fate = (
+            "the neighbourhood is the whole corpus: every task sees the same neighbours, the "
+            "kNN pick collapses to one constant model, and panel B marks it S — one model, "
+            "neither the cheapest nor the frontier. The configuration this sweep selects "
+            "therefore does no routing at all, which is the constant-policy falsifier, not a "
+            "routing result."
+        )
+    else:
+        regime = _REGIME_LABELS[int(sel.get("_regime", MIXED_REGIME))]
+        fate = (
+            f"the neighbourhood is the {k} nearest tasks, and panel B classifies the cell as "
+            f"{regime}."
+        )
+    return (
+        f"READ PANEL B BEFORE PANEL A's WINNER. The selected cell sits at k={k} against "
+        f"n={n} tasks — {fate}"
+    )
+
+
 def _annotations(res: SweepResult) -> Annotations:
     """What the canvas no longer says: degeneracy, imputation, and which knob matters."""
-    notes: list[str] = []
+    notes: list[str] = [_selected_cell_note(res)]
     limits: list[str] = []
     reward_best = max(res.pooled, key=lambda r: r["Reward"])
     share = float(reward_best.get("frontier_share", 0.0))
@@ -1183,8 +1223,9 @@ def _data_limits(res: SweepResult) -> list[str]:
             f"({res.n_tasks} tasks x {per_task} ranked models — not the corpus-wide count in "
             f"evidence_basis.png) are monotone-IMPUTED rather than measured, and the "
             f"imputation is near-exclusively pass-filling, so it can almost never add a "
-            f"failure. The neighbourhood VOTES and the pass rates on this grid both read "
-            f"those synthetic passes — every quality number here is biased up"
+            f"failure. The neighbourhood VOTE excludes those imputed cells, but the pass "
+            f"rates on this grid still read those synthetic passes — every quality number "
+            f"here is biased up"
         )
     limits.append("Cost is model-price dependent — the selected cell moves when model prices move.")
     return limits
@@ -1337,6 +1378,10 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
 
 def _report(res: SweepResult) -> None:
     sel = res.selected
+    print(
+        f"\n=== SPLIT (repo-grouped nested) ===\n"
+        f"  {res.n_folds}-fold, seed={res.seed}, {res.n_tasks} tasks"
+    )
     print("\n=== SELECTION (out of fold) ===")
     print(
         f"  cost-at-equal-quality  k={sel['k']:>3} thresh={sel['success_rate_thresh']:.1f} "

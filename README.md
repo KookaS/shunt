@@ -134,7 +134,8 @@ Four things qualify that number, and they are in
 ## Quick start
 
 ```bash
-pip install shunt-router
+git clone https://github.com/KookaS/shunt.git
+cd shunt && pip install -e .    # source install — not yet on PyPI
 cd /path/to/your/repo    # not optional — see below
 shunt doctor    # prints your config and whether escalation can actually run
 shunt
@@ -147,10 +148,11 @@ model, the ladder never fires, and the saving above never happens. The router
 warns at boot and `shunt doctor` says so. This is also the step that arms
 test execution on that tree, so point it at a repo you trust.
 
-Or with Docker:
+Docker images are not published yet; build one from the checkout:
 
 ```bash
-docker run -p 127.0.0.1:8080:8080 --env-file .env ghcr.io/kookas/shunt-router
+docker build -t shunt-router .
+docker run -p 127.0.0.1:8080:8080 --env-file .env shunt-router
 ```
 
 Then point your agent at it. Claude Code, and any Anthropic-wire client:

@@ -106,11 +106,14 @@ which is False for all three and cannot tell them apart. Override the file by pu
 [configuration](configuration.md#tune-the-router).
 
 The same file configures an exploration layer (Thompson sampling over the kNN
-neighbourhood, bounded by a rolling exploration-cost budget), and it ships
-enabled. Exploration fires once the router has verified outcomes to be uncertain
-about. Verified outcomes accumulate automatically at session close (via off-wire
-test execution in the resolved `work_dir`), or manually via `shunt flag`.
-The knobs are live; exploration behaviour adapts as verified outcomes accumulate.
+neighbourhood, bounded by a rolling exploration-cost budget), and its block ships
+`enabled: true`. Under the shipped default (`session_cascade`) the layer is
+**inert**: it only perturbs a kNN pick, and the default never queries the
+neighbourhood. It fires only when `router.strategy` is `knn_semantic_cascade` and
+the router has verified outcomes to be uncertain about. Verified outcomes accumulate
+automatically at session close (via off-wire test execution in the resolved
+`work_dir`), or manually via `shunt flag`. The knobs are live; exploration behaviour
+adapts as verified outcomes accumulate.
 
 ## Modules
 
@@ -198,17 +201,21 @@ What the platform is built to support today.
 
 ## Running
 
-The package is published; install it directly.
+Install from source — the package is not yet published on PyPI:
 
 ```bash
-pip install shunt-router
+git clone https://github.com/KookaS/shunt.git
+cd shunt
+cp .env.example .env          # then add your provider keys
+pip install -e .              # or: uv sync — then `uv run shunt`
 shunt
 ```
 
-Or with uv: `uv run shunt`. Or with Docker:
+Or with Docker, building the image from the checkout:
 
 ```bash
-docker run -p 127.0.0.1:8080:8080 --env-file .env ghcr.io/kookas/shunt-router
+docker build -t shunt-router .
+docker run -p 127.0.0.1:8080:8080 --env-file .env shunt-router
 ```
 
 Config: `SHUNT_PORT`, `SHUNT_HOST`. Provider keys are read from environment

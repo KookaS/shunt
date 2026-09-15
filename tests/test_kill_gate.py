@@ -303,11 +303,11 @@ class TestComputeCacheCostsPerTaskScoping:
         # task has a single attempt, so no discount applies anywhere and the cache-aware total
         # equals the naive total. (The old flat implementation banked 2 spurious discounts.)
         decisions = [
-            _d("t1", "kimi-k3", True, 10.0),
-            _d("t2", "kimi-k3", True, 10.0),
-            _d("t3", "kimi-k3", True, 10.0),
+            _d("t1", "glm-5.2", True, 10.0),
+            _d("t2", "glm-5.2", True, 10.0),
+            _d("t3", "glm-5.2", True, 10.0),
         ]
-        pricing = {"kimi-k3": {"input_cost_per_1m": 3.0, "output_cost_per_1m": 15.0}}
+        pricing = {"glm-5.2": {"input_cost_per_1m": 1.4, "output_cost_per_1m": 4.4}}
         naive, cache_aware = kill_gate.compute_cache_costs(decisions, pricing)
         assert naive == pytest.approx(30.0)
         assert cache_aware == pytest.approx(naive)  # no between-task discount
@@ -315,12 +315,16 @@ class TestComputeCacheCostsPerTaskScoping:
     def test_within_task_repeat_still_banks_its_discount(self):
         # Two attempts WITHIN one task on the same model are one session: the second attempt's
         # prefix is still warm, so the discount fires (this is the cascade case the model exists
-        # to price — it must not be removed by the scoping fix).
+        # to price — it must not be removed by the scoping fix). `glm-5.2` carries
+        # `cache_read_cost_per_1m: 0.14` against `input_cost_per_1m: 1.4`, so the discount is
+        # legitimately bankable. The model is named by its merged bare-slug identity; the old
+        # `zai-glm-5.2` alias no longer exists in the registry, so it resolved to no row and
+        # banked nothing.
         decisions = [
-            _d("t1", "kimi-k3", True, 10.0),
-            _d("t1", "kimi-k3", True, 10.0),
+            _d("t1", "glm-5.2", True, 10.0),
+            _d("t1", "glm-5.2", True, 10.0),
         ]
-        pricing = {"kimi-k3": {"input_cost_per_1m": 3.0, "output_cost_per_1m": 15.0}}
+        pricing = {"glm-5.2": {"input_cost_per_1m": 1.4, "output_cost_per_1m": 4.4}}
         naive, cache_aware = kill_gate.compute_cache_costs(decisions, pricing)
         assert naive == pytest.approx(20.0)
         assert cache_aware < naive  # the in-session repeat is cheaper
@@ -328,8 +332,8 @@ class TestComputeCacheCostsPerTaskScoping:
     def test_control_arm_flat_sequence_no_longer_banks_spurious_discount(self):
         # The control arm: 20 consecutive same-model decisions (one per task). The flat
         # implementation banked 19 spurious discounts. Per-task scoping must produce NO discount.
-        decisions = [_d(f"t{i}", "kimi-k3", True, 10.0) for i in range(20)]
-        pricing = {"kimi-k3": {"input_cost_per_1m": 3.0, "output_cost_per_1m": 15.0}}
+        decisions = [_d(f"t{i}", "glm-5.2", True, 10.0) for i in range(20)]
+        pricing = {"glm-5.2": {"input_cost_per_1m": 1.4, "output_cost_per_1m": 4.4}}
         naive, cache_aware = kill_gate.compute_cache_costs(decisions, pricing)
         assert naive == pytest.approx(200.0)
         assert cache_aware == pytest.approx(naive)
@@ -884,12 +888,12 @@ class TestCacheCostScopingProperty:
     def test_a_tasks_cache_cost_is_invariant_to_the_other_tasks(self):
         # t1 holds the only within-task repeat — the only place a discount may fire.
         decisions = [
-            _d("t1", "kimi-k3", True, 10.0),
-            _d("t1", "kimi-k3", True, 10.0),
-            _d("t2", "kimi-k3", True, 10.0),
+            _d("t1", "glm-5.2", True, 10.0),
+            _d("t1", "glm-5.2", True, 10.0),
+            _d("t2", "glm-5.2", True, 10.0),
             _d("t3", "gpt-5-mini", True, 5.0),
         ]
-        pricing = {"kimi-k3": {"input_cost_per_1m": 3.0, "output_cost_per_1m": 15.0}}
+        pricing = {"glm-5.2": {"input_cost_per_1m": 1.4, "output_cost_per_1m": 4.4}}
         prices = kill_gate.cache_prices(sorted({d[1] for d in decisions} | set(pricing)))
         full = kill_gate._per_task_cache_costs(decisions, prices)
         t1_cost = full["t1"]

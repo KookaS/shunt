@@ -162,15 +162,17 @@ def test_committed_difficulty_pick_varies_on_the_measured_matrix() -> None:
     assert floors == Counter({0: 171, 1: 30})
 
 
-def test_committed_difficulty_pick_collapses_on_the_completed_matrix() -> None:
-    """And the SCORED view is degenerate for a measured reason, not a missing table.
+def test_committed_difficulty_pick_no_longer_collapses_on_the_completed_matrix() -> None:
+    """The SCORED view no longer opens cheap on every task once imputed votes are excluded.
 
-    `compute_strategy_rows` scores the monotone-ladder-COMPLETED matrix. Completion lifts
-    the cheap rung's neighbourhood pass rate from 0.689 to 0.751, clearing the 0.6 bar in
-    every neighbourhood, so the pick opens cheap on all 181 scored tasks and the row is
-    byte-identical to Always-Cheap / Session-Cascade. Pinning it here means a future change
-    that makes the rows vary — or that breaks the table — is a visible test failure rather
-    than a silently rewritten published number.
+    `compute_strategy_rows` scores the monotone-ladder-COMPLETED matrix. Completion once
+    lifted the cheap rung's neighbourhood pass rate from 0.689 to 0.751 by counting imputed
+    (near-all pass=True) fills as measured, clearing the 0.6 bar in every neighbourhood, so
+    the pick opened cheap on all 181 scored tasks. `tier_classifier.predict_model` now
+    excludes imputed cells from the vote AND the min_samples count (matching knn.py's 0.0
+    confidence), so the eight neighbourhoods whose MEASURED cheap pass rate falls below the
+    0.6 bar open one rung up instead. Pinning it here means a future change to the completed-
+    matrix pick is a visible failure rather than a silently rewritten published number.
     """
     completed, _imputed = complete_scored_matrix(_real_matrix())
     rungs = measured_models_by_price(completed)
@@ -178,7 +180,7 @@ def test_committed_difficulty_pick_collapses_on_the_completed_matrix() -> None:
     assert len(tasks) == 181
     assert all(rd.predicted_difficulty(tid) is not None for tid in tasks)
     picks = Counter(rd.RankerDifficultyStrategy().select(tid, {}, completed) for tid in tasks)
-    assert picks == Counter({rungs[0]: 181})
+    assert picks == Counter({rungs[0]: 173, rungs[1]: 8})
 
 
 def test_committed_defer_cascade_opens_high_on_the_scored_tasks() -> None:

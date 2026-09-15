@@ -189,6 +189,7 @@ red until `make benchmark-figures` runs.
 benchmark/
   admissibility.py             # Re-export shim over shunt.analysis.admissibility (the adjudicator ships in the wheel)
   model_coverage.py            # Per-model corpus coverage — flags enabled models the collection missed
+  grouped_split.py             # Repo-grouped, seeded fold assignment shared by the routing and escalation splits
   challenges/                  # Individual challenge files
     swebench_verified/         # SWE-bench Verified instance SPECS (500 instances, Python only)
     swebench_multimodal/       # SWE-bench Multimodal instance SPECS (102 instances, multi-language)
@@ -228,6 +229,9 @@ benchmark/
       threshold_sweep.py       # kNN hyperparameter held-out sweep + allocation panel
       viz_knn.py               # kNN neighbourhood / routing-map visualisations
     reports/                   # Derived intermediates (gitignored) except the tracked strategy_summary.csv; PNGs live in docs/assets/figures/routing/
+  escalation/                  # Escalation-detector evaluation (sibling of routing/)
+    cross_session_drift.py     # Cross-session drift detector — offline K-window scorer over session-close summaries
+    degenerate_repetition.py   # Degenerate-repetition-loop detector — offline scorer over runs of identical actions
   .gitignore
   README.md                    # This file
 ```

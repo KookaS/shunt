@@ -165,6 +165,78 @@ class TestThresholdSweepExcludesUnscorable:
         assert row["AvgPerf%"] == 100.0
 
 
+class TestThresholdSweepExcludesImputedVotes:
+    """U-2: an imputed (pass=True) neighbour must not count toward the success-rate
+    vote or satisfy min_samples — otherwise the synthetic pass endorses the cheap
+    model and the sweep selects on fabricated evidence."""
+
+    MODELS = {
+        "cheap-model": {"input_price": 0.1, "output_price": 0.1},
+        "frontier-model": {"input_price": 5.0, "output_price": 5.0},
+    }
+
+    def _fixture(self):
+        # t2 is the query. Its two neighbours: t0 is measured on cheap; t1's cheap
+        # cell is IMPUTED pass=True. With the imputation counted, cheap clears
+        # min_samples=2 and is chosen (it is cheapest). Excluded, cheap has only one
+        # measured observation and the rule must escalate to frontier, which clears
+        # the bar on two measured neighbours.
+        results_map = {
+            "t0": {
+                "cheap-model": {"pass": True, "cost": 1.0},
+                "frontier-model": {"pass": True, "cost": 10.0},
+            },
+            "t1": {
+                "cheap-model": {"pass": True, "cost": 1.0, "imputed": True},
+                "frontier-model": {"pass": True, "cost": 10.0},
+            },
+            "t2": {
+                "cheap-model": {"pass": True, "cost": 1.0},
+                "frontier-model": {"pass": True, "cost": 10.0},
+            },
+        }
+        task_ids = ["t0", "t1", "t2"]
+        # Near-identical embeddings so t2's two nearest neighbours are t0 and t1.
+        features = np.array([[1.0, 0.0], [1.0, 0.01], [0.99, 0.0]])
+        return task_ids, features, results_map
+
+    def test_vote_counts_path_excludes_imputed(self):
+        config.load(CONFIG_PATH)
+        task_ids, features, results_map = self._fixture()
+        chosen, _passed, _cost, _scored = threshold_sweep.knn_select(
+            2,
+            task_ids,
+            task_ids,
+            features,
+            results_map,
+            {"models": self.MODELS},
+            k=2,
+            success_rate_thresh=0.75,
+            min_samples=2,
+        )
+        assert chosen == "frontier-model"
+
+    def test_sweep_grid_inline_tally_excludes_imputed(self):
+        config.load(CONFIG_PATH)
+        task_ids, features, results_map = self._fixture()
+        row = threshold_sweep.evaluate_params(
+            task_ids,
+            task_ids,
+            features,
+            results_map,
+            {"models": self.MODELS},
+            k=2,
+            success_rate_thresh=0.75,
+            min_samples=2,
+            frontier_model="frontier-model",
+        )
+        # The query escalates to frontier; t0 also escalates and t1 stays on cheap, so
+        # two distinct models are in play. Counting the imputed vote collapses all
+        # three tasks to cheap (one model).
+        assert "frontier-model" in row["_alloc"]
+        assert row["n_models_used"] == 2
+
+
 class TestZeroEvidenceRows:
     """A strategy with no scorable task must never be certified Pareto-optimal,
     and a degenerate row set must fail loudly instead of crashing mid-report."""
@@ -226,19 +298,6 @@ class TestSweepSelectionIsNotRewardArgmax:
 
     def test_empty_rows_return_none(self):
         assert threshold_sweep.cost_at_equal_quality([]) is None
-
-    def test_folds_partition_every_task(self):
-        folds = threshold_sweep.fold_assignment(177, 5)
-        assert len(folds) == 177
-        assert set(folds.tolist()) == {0, 1, 2, 3, 4}
-        # Balanced to within one task, so no fold dominates the index.
-        counts = [int((folds == f).sum()) for f in range(5)]
-        assert max(counts) - min(counts) <= 1
-
-    def test_fold_assignment_is_deterministic(self):
-        a = threshold_sweep.fold_assignment(50, 5)
-        b = threshold_sweep.fold_assignment(50, 5)
-        assert a.tolist() == b.tolist()
 
 
 class TestSweepHeldOutRestrictsTheIndex:

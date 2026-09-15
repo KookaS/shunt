@@ -23,6 +23,7 @@ from benchmark.escalation.ope import (
     estimate_policy_value,
     rows_from_records,
 )
+from shunt.analysis.ope import ips_estimate
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -523,6 +524,44 @@ def _shuffled_rewards(rows: Sequence[ExplorationLogRow], seed: int = 0) -> list[
         for row in session:
             out.append(dataclasses.replace(row, reward=grade))
     return out
+
+
+def _shuffled_propensities(
+    rows: Sequence[ExplorationLogRow], seed: int = 0
+) -> list[ExplorationLogRow]:
+    """The SAME rows with the arm→propensity link permuted — what the IPS weights encode.
+
+    Unlike the reward null, the action and reward stay attached; only the propensity that
+    generated the arm is torn away and reassigned at random. That is the exact signal IPS
+    consumes, so a sound estimator must lose the planted value on these rows.
+    """
+    rng = random.Random(seed)
+    propensities = [row.propensity for row in rows]
+    rng.shuffle(propensities)
+    return [
+        dataclasses.replace(row, propensity=propensity)
+        for row, propensity in zip(rows, propensities, strict=True)
+    ]
+
+
+def test_ips_recovers_a_planted_value_and_loses_it_under_shuffled_propensities() -> None:
+    """IPS over a seeded synthetic log, plus its shuffled-propensity null.
+
+    The planted log escalates with probability 1-epsilon and passes at 0.7 on the escalate
+    arm (0.3 on hold). With the propensities that actually generated each arm, IPS toward
+    `always_escalate` recovers 0.7. Permuting propensities across rows severs the arm→weight
+    link, so the same estimator must no longer recover the planted value.
+    """
+    rows = _planted_log(n=3000)
+    recovered = ips_estimate(rows, always_escalate)
+    assert recovered is not None
+    assert recovered == pytest.approx(_PLANTED_ESCALATE_VALUE, abs=0.05)
+    # The null is over several independent permutations, so the verdict cannot rest on one
+    # lucky shuffle; each must land outside the positive control's recovery tolerance.
+    for seed in range(10):
+        shuffled = ips_estimate(_shuffled_propensities(rows, seed=seed), always_escalate)
+        assert shuffled is not None
+        assert abs(shuffled - _PLANTED_ESCALATE_VALUE) > 0.05, seed
 
 
 def test_the_estimator_recovers_a_planted_policy_value_within_its_interval() -> None:

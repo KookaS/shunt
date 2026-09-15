@@ -944,8 +944,9 @@ What the rest of the report means:
   fraction of the run — a fraction needs the total length, which is future information. And
   the **terminal step is excluded**, because the harness verdict is stamped onto it. Both are
   pinned by tests; see `benchmark/escalation/features.py`.
-- **Grouped cross-validation by challenge.** A challenge never appears in both train and test,
-  so the model cannot rediscover task identity through the fold boundary. **This guarded the
+- **Grouped cross-validation by repository.** Every challenge of a repository lands in the same
+  fold, so a held-out challenge never shares a repository with one in its index and the model
+  cannot rediscover task identity through the fold boundary. **This guarded the
   prefix model but not the task prior it was scored against:** the prior was built from the
   leave-one-out mean of each row's *own* challenge, so it read labels from its own test fold.
   The published prior AUROC has been retracted (see `results.md`). The comparison baseline is
@@ -993,8 +994,8 @@ router:
     trajectory_dir: null       # null ⇒ a local dir OUTSIDE the repo ($SHUNT_HOME/trajectories)
 ```
 
-When enabled it needs the `capture` extra (`pip install 'shunt-router[capture]'`) and an
-encryption key in `SHUNT_ESCALATION_KEY` (never commit it). Every free-text field is
+When enabled it needs the `capture` extra (`pip install -e '.[capture]'` from a source
+checkout) and an encryption key in `SHUNT_ESCALATION_KEY` (never commit it). Every free-text field is
 **redacted** of secrets and then **encrypted at rest** before anything is written; capture
 happens off the wire at the session boundary, never mid-turn, and never changes a routing
 decision. The captured files stay **local and git-ignored**.

@@ -412,7 +412,7 @@ def _inspect(args: argparse.Namespace) -> None:
     except ImportError:
         print(
             "shunt inspect needs the [inspect] extra — install it with: "
-            "pip install 'shunt-router[inspect]'"
+            "pip install -e '.[inspect]' from a source checkout"
         )
         sys.exit(1)
 

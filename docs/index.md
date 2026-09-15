@@ -42,10 +42,9 @@ loop feeds the **escalation** ladder rather than a per-task pick; switching to
 
 We tested the core idea (embed a task, find similar past tasks with known
 outcomes, pick the cheapest model that succeeded) offline before shipping it.
-On QA and reasoning-style workloads the embedding difficulty signal carries and
-there is routing headroom. On the agentic-coding workload we actually target it
-did **not** clear our viability bar: ranking hard tasks from easy ones off the
-prompt embedding came out near chance.
+On the agentic-coding workload we actually target it did **not** clear our
+viability bar: ranking hard tasks from easy ones off the prompt embedding came
+out near chance.
 
 That result used to rest on weaker evidence than it looked: the embedder was
 handed a 106-character identifier rather than the task's problem statement. The
@@ -85,32 +84,23 @@ cache-safe proxy nor the verify-and-escalate path depends on that signal.
 
 ## Quickstart
 
-The package is published; install it directly.
-
-```bash
-pip install shunt-router
-shunt
-```
-
-Or with Docker — `.env` carries your provider keys (copy `.env.example`), and the
-port is bound to loopback because Shunt holds those keys and does not authenticate
-its own clients:
-
-```bash
-docker run -p 127.0.0.1:8080:8080 --env-file .env ghcr.io/kookas/shunt-router
-```
-
-`docker compose up -d` does the same with a persistent volume for the outcome
-store, which is what the router learns from — see `docker-compose.yml`.
-
-**From source** — to run the cloned codebase directly (hacking on Shunt, or running
-unreleased code):
+The package is not yet published on PyPI; install from source:
 
 ```bash
 git clone https://github.com/KookaS/shunt.git
 cd shunt
 cp .env.example .env          # then add your provider keys
-uv run shunt                  # pinned deps from uv.lock
+pip install -e .              # or: uv sync — then `uv run shunt`
+shunt
+```
+
+Or with Docker — the image is not published yet, so build it from the checkout.
+`.env` carries your provider keys (copy `.env.example`), and the port is bound to
+loopback because Shunt holds those keys and does not authenticate its own clients:
+
+```bash
+docker build -t shunt-router .
+docker run -p 127.0.0.1:8080:8080 --env-file .env shunt-router
 ```
 
 `uv run shunt`, `python -m shunt`, and the installed `shunt` command are equivalent —
@@ -203,5 +193,5 @@ refusal is a fail rather than a near miss (see
 [Results](results.md#the-gates-current-verdict-is-untested-and-its-provisional-read-is-not-a-pass)).
 **It has not been passed.** The router does not ship unless and until this gate clears on a real workflow.
 
-Apache-2.0. Import as `shunt` (`shunt-router` on PyPI — `shunt` is taken).
+Apache-2.0. Import as `shunt`; the distribution is named `shunt-router`.
 </content>

@@ -20,7 +20,7 @@ from benchmark.escalation.ope import (
 )
 from shunt.db.store import OutcomeStore
 from shunt.router.engine import RouterEngine
-from shunt.router.escalation import EscalationConfig
+from shunt.router.escalation import EscalationConfig, ExplorationStream
 
 _SECRET = "sk-live-abcdefghijklmnop"
 _SECRET_CHECK_ID = f"/home/olivier/secretrepo/tests/test_auth.py::test_key[{_SECRET}]"
@@ -80,7 +80,9 @@ class _Embedder:
         return np.zeros(8, dtype=np.float32)
 
 
-def _engine(epsilon: float, seed: int | None = 5) -> RouterEngine:
+def _engine(
+    epsilon: float, seed: int | None = 5, stream: ExplorationStream | None = None
+) -> RouterEngine:
     return RouterEngine(
         model_pool=_Pool(),
         session_manager=_SessionManager(),
@@ -92,6 +94,7 @@ def _engine(epsilon: float, seed: int | None = 5) -> RouterEngine:
             exploration_epsilon=epsilon,
             exploration_seed=seed,
         ),
+        escalation_stream=stream,
         task_key_resolver=lambda _session: "repoA",
     )
 
@@ -134,6 +137,18 @@ def test_a_deterministic_engine_stamps_a_propensity_of_one() -> None:
     record = _flagged_provenance(_engine(0.0), "s3")["escalation_exploration"]
     assert record["propensity"] == 1.0
     assert record["randomized"] is False
+
+
+def test_an_injected_stream_overrides_the_config_seed_on_the_live_path() -> None:
+    # The non-zero path is runnable and pinnable: a caller can inject the exact stream the
+    # decisions draw from, and the recorded seed is the injected stream's, not the config's.
+    stream = ExplorationStream.from_seed(7)
+    record = _flagged_provenance(_engine(0.5, seed=999, stream=stream), "s3")[
+        "escalation_exploration"
+    ]
+    assert record["seed"] == 7
+    assert record["randomized"] is True
+    assert 0.0 < record["propensity"] < 1.0
 
 
 def test_the_record_round_trips_through_the_store_joined_to_the_verified_outcome(

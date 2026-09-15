@@ -237,6 +237,7 @@ class RouterEngine:
         neighbor_k: int = 20,
         trust_neighbors: bool = True,
         escalation: EscalationConfig | None = None,
+        escalation_stream: ExplorationStream | None = None,
         task_key_resolver: Callable[[object], str | None] | None = None,
         loop_health_alarm: Callable[[], bool] | None = None,
     ) -> None:
@@ -297,8 +298,10 @@ class RouterEngine:
         self._task_rank_floor: dict[str, int] = {}
         # The epsilon-greedy decision stream, built ONLY when the extra opt-in knob is set.
         # Seeded from config when given, else drawn once and recorded on every decision so a
-        # logged propensity stays auditable after the run.
-        self._escalation_stream = self._build_escalation_stream(escalation)
+        # logged propensity stays auditable after the run. An explicitly injected stream wins:
+        # the constructor seam exists so a caller can pin the draws (tests, a reproducible run)
+        # without reusing a seed from config.
+        self._escalation_stream = escalation_stream or self._build_escalation_stream(escalation)
 
     @staticmethod
     def _build_escalation_stream(config: EscalationConfig | None) -> ExplorationStream | None:

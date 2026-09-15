@@ -1,14 +1,14 @@
-# Deploy Shunt from the published image.
+# Deploy Shunt from a locally built image.
 #
 #   cp .env.example .env     # add the provider keys you use
-#   docker compose up -d
+#   docker compose up -d --build
 #
-# To run a build of your own checkout instead of the published image, add
-# `build: .` to the service — but note that also RETAGS your local
-# ghcr.io/kookas/shunt-router:latest as that build.
+# The image is not published; `build: .` builds it from this checkout and tags it
+# locally as shunt-router:latest.
 services:
   shunt:
-    image: ghcr.io/kookas/shunt-router:latest
+    build: .
+    image: shunt-router:latest
     # Loopback ONLY. Shunt holds your provider API keys in the request path and does
     # not authenticate its own clients, so a reachable port is spendable credit for
     # anyone who can reach it. Publish wider only behind something that authenticates:

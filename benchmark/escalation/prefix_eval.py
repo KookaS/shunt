@@ -113,10 +113,10 @@ from typing import TYPE_CHECKING, Final
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+from benchmark import grouped_split
 from benchmark.escalation import features, metrics
 
 if TYPE_CHECKING:
@@ -369,45 +369,15 @@ def leaked_task_prior(rows: Sequence[EvalRow], labels: Sequence[bool]) -> list[f
 def grouped_splits(
     labels: Sequence[bool], groups: Sequence[str]
 ) -> list[tuple[np.ndarray, np.ndarray]]:
-    """The ONE grouped, LABEL-STRATIFIED partition the prior and the risk model share."""
-    # Shared so the prior can never be fitted on rows the model treats as test: a prior estimated
-    # on a different partition would re-introduce exactly the leak this module now walls off.
-    #
-    # STRATIFIED, and that is not cosmetic — it is the fix for a confirmed artifact. Plain
-    # GroupKFold balances folds by SIZE and never looks at the label, so on this corpus its fold
-    # test base rates spanned 0.4239-0.5652 at depth 5 — a spread of 0.141 (0.153 at depth 10,
-    # 0.112 at depth 20). `prior_from_splits` hands every test row its TRAIN-fold base rate, which
-    # is the exact arithmetic complement of its own test-fold rate (measured Spearman -1.0000 at
-    # every depth, and still -1.0000 stratified — that part is arithmetic, not a defect). The prior
-    # column fed into the combined model was therefore a FOLD-ID PROXY carrying the test fold's own
-    # prevalence with a minus sign: it added zero within-fold discrimination (within-fold
-    # Spearman(prefix, combined) = 1.000000) while moving the POOLED AUROC by +0.13 — pure
-    # between-fold accounting sold as incremental skill. Stratifying on the label collapses the
-    # spread to 0.011 at depth 5 (0.012 / 0.030 at depths 10 / 20) and removes the artifact at
-    # source; what survives is small enough that the folded/pooled contrast below can police it.
-    #
-    # THERE IS NO FALLBACK, deliberately. An `except ValueError` used to degrade to plain
-    # GroupKFold here, on the stated grounds that StratifiedGroupKFold "refuses where GroupKFold did
-    # not — a single-class vector, or fewer members of the minority class than folds". Both claims
-    # are false of the installed sklearn (1.9.0): a single-class vector returns a partition
-    # silently, and one minority member against 5 folds returns one with a UserWarning. It DOES
-    # raise, but on a different and far smaller condition — "n_splits=N cannot be greater than the
-    # number of members in each class", i.e. a corpus with fewer rows than folds. Measured: an
-    # exhaustive sweep of every group partition x every label vector for n <= 7 (126 948
-    # configurations) raises on 13 728 of them, all at 2-7 rows; 200 000 randomized trials at
-    # n >= MIN_ROWS (40), base rates 0 to 1, raised none; and an instrumented run over the committed
-    # corpus at depths 5/10/20 counted 603 stratified splits and 0 raises. The branch was
-    # therefore unreachable through `evaluate_depth`, which returns None below MIN_ROWS = 40 — and
-    # it was invisible if ever taken: no log, no warning, no report field. A
-    # silent degrade to GroupKFold is strictly worse than a raised exception, because GroupKFold IS
-    # the artifact the stratification exists to remove, so the fallback would have restored the bug
-    # it was written to survive, unannounced. A genuine ValueError propagates.
-    y = np.asarray(labels, dtype=int)
-    n_splits = min(N_SPLITS, len(set(groups)))
-    if n_splits < _MIN_CLASSES:
-        return []
-    splitter = StratifiedGroupKFold(n_splits=n_splits)
-    return list(splitter.split(np.zeros((len(y), 1)), y, list(groups)))
+    """The ONE grouped, LABEL-STRATIFIED partition the prior and the risk model share.
+
+    Delegates to the shared repo-grouped helper so routing's threshold sweep and this half
+    cannot drift into two different partitions. The label-stratification rationale (a confirmed
+    fold-prevalence artifact that a size-only GroupKFold re-introduces) lives there.
+    """
+    # Kept as a function rather than a bare re-export so the public name and the N_SPLITS
+    # default stay pinned on THIS module's surface, where callers and tests already read them.
+    return grouped_split.stratified_grouped_splits(labels, groups, N_SPLITS)
 
 
 def prior_from_splits(
@@ -572,7 +542,10 @@ def _prepare(trajectories: Sequence[Trajectory], depth: int) -> _Prepared | None
     labels = [r.failed for r in rows]
     if len(rows) < MIN_ROWS or len(set(labels)) < _MIN_CLASSES:
         return None
-    groups = [r.group for r in rows]
+    # GROUP BY REPOSITORY, not the instance. `row.group` is the challenge (instance) id; the
+    # repository is derived from it here so an entire repo is held out rather than one challenge.
+    # Every trajectory of an instance shares its repo, so instance grouping survives composition.
+    groups = [grouped_split.repo_of(r.group) for r in rows]
     base = np.asarray([r.features for r in rows], dtype=float)
     # The same rank the `test_features.py` guard checks: [features | intercept] must span its own
     # column space, or a depth with 3 distinct rows (depth 5 today) reports an arithmetic AUROC.

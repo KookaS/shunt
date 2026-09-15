@@ -123,7 +123,7 @@ This file is the source for the GitHub release notes, so the two cannot disagree
   that never spends: it prints the store's census (embedded / labeled / tier-2, seeded vs live,
   `live cost` / `seeded cost` / `cost unknown`) and draws the neighbourhood figure for a prompt.
   matplotlib stays out of the core wheel, so the drawing lives behind a new **`inspect` extra**
-  (`pip install 'shunt-router[inspect]'`); without it the command exits with that instruction
+  (`pip install -e '.[inspect]'`); without it the command exits with that instruction
   rather than an ImportError traceback.
 - **The live router, measured — a new documentation half and seven new figures.**
   [`docs/inference.md`](docs/inference.md) judges the shipped router on its own outcome store rather
@@ -280,14 +280,14 @@ This file is the source for the GitHub release notes, so the two cannot disagree
 
 ## [0.1.0a1] — unreleased
 
-First published artifact. Everything below already worked in the repository; what is
-new is that you can now install it.
+First packaged artifact. Everything below already worked in the repository; what is
+new is that you can now install it from a checkout.
 
 ### Added
 
-- **Published distribution.** `pip install shunt-router` and
-  `ghcr.io/kookas/shunt-router`. Prior to this tag neither existed, while the docs
-  said otherwise.
+- **Packaging metadata.** `pip install -e .` from a checkout; the container image is
+  built locally from the `Dockerfile`. No distribution is published to PyPI and no
+  image to GHCR, so both install paths start from a clone.
 - **`shunt doctor`** — a read-only, non-spending install diagnosis: which provider
   keys resolve (presence only, never the value), how many models are routable (and how
   many have an open circuit breaker), whether the embedding weights are cached, whether
@@ -306,11 +306,7 @@ new is that you can now install it.
      contain — do not. A changelog that names an unshipped feature is the same
      defect as a README that says the package is published: it is checked by
      readers, not by tests. Two such entries were removed before this file was
-     first committed.
-     The "Published distribution" line above is the exception and not a violation:
-     publishing IS the release act this version number denotes, not a feature the
-     version contains. It becomes true at the moment the tag exists, which is the
-     same moment this section stops saying "unreleased". -->
+     first committed. -->
 
 
 ### Fixed

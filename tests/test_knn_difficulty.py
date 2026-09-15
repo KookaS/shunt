@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import pytest
 
 import benchmark.routing.strategies.knn_difficulty as kd
+from benchmark import config
+from benchmark.routing import run_eval
+from benchmark.routing.strategies._cascade_common import measured_models_by_price
 from benchmark.routing.strategies.knn_difficulty import (
     DifficultyBandCascadeStrategy,
     knnDifficultyCascadeStrategy,
@@ -195,3 +200,76 @@ class TestStrategies:
             DifficultyBandCascadeStrategy().name,
         }
         assert len(names) == 3
+
+
+# ---------------------------------------- committed judge table, real select(), no monkeypatch
+# Every test above runs under the `diff` fixture, which monkeypatches `difficulty` / `judge_cost`
+# with a planted table. The whole family would stay green if the committed
+# benchmark/routing/data/judge_difficulty.json became unreadable and every task fell through
+# the unlabelled path (cheapest model, floor 0) — a failure that reads exactly like the measured
+# result. These run the SHIPPED strategy objects over the committed table and pin counts
+# re-derived from it.
+
+
+def _committed_matrix() -> dict:
+    config.load()
+    return config.load_matrix()
+
+
+def _shipped(name: str) -> object:
+    return next(s for s in run_eval.get_strategies() if s.name == name)
+
+
+class TestCommittedJudgeTableCoverage:
+    """The family's real decision path over the committed judge table, not the planted `diff`."""
+
+    def test_committed_table_labels_every_committed_task(self) -> None:
+        # The table is derived one row per task that has a judge-probe artifact, so it covers
+        # the scored corpus but not a task the free-tier collection later added to results.csv
+        # without a probe (matplotlib__matplotlib-14623, the only unlabelled matrix task). Pin
+        # the coverage both ways: a table that failed to load would be empty and drop every
+        # label, while a table that lost a task would grow this set.
+        matrix = _committed_matrix()
+        assert len(kd._load_table()) == 200
+        unlabelled = {t for t in matrix["results"] if kd.difficulty(t) is None}
+        assert unlabelled == {"matplotlib__matplotlib-14623"}
+
+    def test_single_shot_pick_varies_on_the_committed_matrix(self) -> None:
+        """kNN-difficulty's real select() over the committed judge table.
+
+        Derivation: the shipped kNN-difficulty (k=20, threshold 0.6, min_samples=3) run over all
+        201 committed tasks routes to flash for 173 and pro for 28 — the 28 harder
+        neighbourhoods fail the cheap model's measured bar (the 173rd flash task is the
+        unlabelled one, which falls through to the cheapest rung). A missing or unreadable table
+        collapses every task to the unlabelled path and would pin a single model here.
+        """
+        matrix = _committed_matrix()
+        strategy = _shipped("kNN-difficulty")
+        picks = Counter(strategy.select(t, {}, matrix) for t in sorted(matrix["results"]))
+        assert picks == Counter({"deepseek-v4-flash": 173, "deepseek-v4-pro": 28})
+        assert strategy.judge_cost_total > 0.0
+
+    def test_cascade_floor_varies_on_the_committed_matrix(self) -> None:
+        """The cascade opens one rung up on the 28 tasks the committed table calls hard.
+
+        Derivation: `_initial_rank_floor` (the shipped pick over the committed judge table and
+        the price-ordered committed rungs) is {0: 173, 1: 28}; an unreadable table collapses the
+        floor distribution to {0: 201}.
+        """
+        matrix = _committed_matrix()
+        rungs = measured_models_by_price(matrix)
+        strategy = _shipped("kNN-difficulty-cascade")
+        floors = Counter(
+            strategy._initial_rank_floor(t, matrix, rungs) for t in sorted(matrix["results"])
+        )
+        assert floors == Counter({0: 173, 1: 28})
+
+    def test_band_cascade_floor_varies_on_the_committed_matrix(self) -> None:
+        """The band cascade's real floor over the committed judge table (same 173/28 split)."""
+        matrix = _committed_matrix()
+        rungs = measured_models_by_price(matrix)
+        strategy = _shipped("Difficulty-Band-cascade")
+        floors = Counter(
+            strategy._initial_rank_floor(t, matrix, rungs) for t in sorted(matrix["results"])
+        )
+        assert floors == Counter({0: 173, 1: 28})
