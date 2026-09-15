@@ -18,7 +18,7 @@
     }
   },
   "render_demo_figures": {
-    "inputs": "95e17b635861853cac52f560a8062b9b1a696e755a110d652158f6b3e7c5f71c",
+    "inputs": "ac6badd1847c42437909f93080dda0d9bea077d5c454922c7a61052f3faa0801",
     "outputs": {
       "inference_cost.png": "3dd574a07ea1eb71add4bcd84472318f10229e1e4591adc7ac00ff24e91afdaf",
       "inference_escalation.png": "193cfa295c50052e89b4e19890003c4e95d63d8e960eaf26cedc147cfa78f032",
@@ -31,7 +31,7 @@
     }
   },
   "render_inference_figures": {
-    "inputs": "e5c0fdbcccba9b9c5d045c2331eea425afdc67d9088dad475dcf027696d879ab",
+    "inputs": "dc0608f38e4ce409ef815ab4c8e33268a5a76427de25236d5439ae3ca0cebe34",
     "outputs": {
       "inference_cost.png": "b79ef33f13ab835acbd7659c0bf433bff687360831d04e85f027ffc706c6345b",
       "inference_escalation.png": "bb2f941d478824041b497e5164ad047027ee7bc35af8c02f4ca344a20e874ee2",
