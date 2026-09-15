@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Final
 
 import benchmark.runner.live_smoke as live_smoke
+from benchmark import config
 from benchmark.corpus_lock import atomic_write_text
 from shunt.models.config import ModelConfig
 
@@ -33,13 +34,40 @@ DEFAULT_RUN_ROOT: Final[Path] = (
 # ── gates (pure — unit-tested) ────────────────────────────────────────────────
 
 
-def free_tier_refusal(model: ModelConfig) -> str | None:
-    """Refuse unless *model* is verified $0 on OpenRouter, naming the failure.
+def _is_overlay_lane(model: ModelConfig) -> bool:
+    """True iff *model* names a row of the non-shipped free overlay registry."""
+    return model.name in config.free_registry_ids()
 
-    The auto-approval replaces the interactive confirmation only for a model
-    that cannot bill — every billing-relevant fact is asserted from the registry.
+
+def _overlay_lane_refusal(model: ModelConfig, model_id: str) -> str | None:
+    """An overlay lane is admitted on membership + provenance, NOT on a $0 list price."""
+    # HARD RULE 2 makes a nonzero list price REQUIRED here (a $0 row would rank as the pareto
+    # global minimum); the collection itself is $0-promo, which is the fact the smoke tests.
+    pricing = model.pricing
+    if pricing is None or not pricing.price_source or not pricing.price_as_of:
+        return (
+            f"refusing to run: overlay lane {model_id!r} lacks price provenance "
+            "(price_source / price_as_of) — its list price is not auditable"
+        )
+    if pricing.input_cost_per_1m <= 0 or pricing.output_cost_per_1m <= 0:
+        return (
+            f"refusing to run: overlay lane {model_id!r} does not record a real list price "
+            "(HARD RULE 2); the paid twin's published rate is required, never $0"
+        )
+    return None
+
+
+def free_tier_refusal(model: ModelConfig) -> str | None:
+    """Refuse unless *model* is a verified-$0 lane, naming the failure.
+
+    Two lanes share the $0 umbrella, so the shape has two consumers (the smoke and the
+    run-start pre-flight). A non-shipped overlay row records the paid twin's REAL list price
+    (HARD RULE 2), so it is admitted on membership + provenance; the legacy OpenRouter
+    `:free` lane is admitted only when its registry price is 0/0. Anything else would bill.
     """
     model_id = model.model_id or model.name
+    if _is_overlay_lane(model):
+        return _overlay_lane_refusal(model, model_id)
     if not model_id.endswith(FREE_MODEL_SUFFIX):
         return (
             f"refusing to run: served model {model_id!r} does not end in "

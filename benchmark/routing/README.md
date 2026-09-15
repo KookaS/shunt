@@ -18,6 +18,12 @@ routing/
     price_sheet.json          # Dated canonical prices (cheapest available today) per model and channel
     price_channels.yaml       # Hand-authored map of which listings are the same product (not auto-deduced)
     external_rungs.yaml       # Rungs measured OUTSIDE this corpus — model_grid.py's only external input, read by no router, ranker or gate
+    free_catalogs.yaml        # Per-provider free-tier facts (catalog shape, free filter, caps, provenance) — scan_free_models.py's input
+    latest_free_models.json   # Facts-only snapshot of discovered free listings (first_seen/withdrawn_at tracker), refreshed by scan_free_models.py
+    model_identity.yaml       # Curated bare-slug canonical identity map (raw listing aliases + deny)
+    model_priority.yaml       # Model-value allowlist + denylist + stop knobs for the free-tier collector
+    free_models_proposal.yaml # Reviewed identity proposal (confirmed/proposed/dropped) that --apply merges into the overlay
+    provider_limits.yaml      # Per-provider/lane admission limits (rpm/rpd/tpm/…) — the free-campaign scheduler's single registry
     seed/                     # LFS-tracked warm-start bundles (one .npz per embedder fingerprint + plain manifest.json)
   strategies/
     __init__.py               # Strategy protocol
@@ -36,9 +42,10 @@ routing/
   online_kill_gate.py         # The live paired monitor, anytime-valid, three arms
   sensitivity.py              # Minimum detectable effect — how weak a signal the corpus can see
   metrics.py                  # Metric definitions
+  collection_priority.py      # Free-tier collector's model-value priority, dedupe and stop rule
   repricing.py                # Reprices naive costs from a dated sheet (input to live_gap.png only)
-  report.py                   # Drives the 13 REPORT figures (derived from results.csv). The
-                              # routing half's manifest holds 18: these 13 plus the 5 standalone
+  report.py                   # Drives the 15 REPORT figures (derived from results.csv). The
+                              # routing half's manifest holds 20: these 15 plus the 5 standalone
                               # producers under scripts/ (cost_quality_headline, embedding_signal,
                               # exploration_cost, knn_calibration, sweep_regimes).
   figures/                    # One module per report figure; `context.py` loads the corpus once
@@ -53,6 +60,8 @@ routing/
     arm_manipulation.py       # Manipulation check FIRST, then the reasoning-arm contrast
     ladder_rungs.py           # What each escalation rung is measured to buy, beside the ladder
     live_gap.py               # The offline-to-live gap, repriced from the dated sheet
+    model_validity.py         # Every evidenced model x the inference-valid criteria, free channel included
+    model_relevance.py        # Pass-rate (Wilson) vs measured coverage, K floor, validity funnel
     pareto_dimensions.py      # One plane per dimension: frontier membership is axis-dependent
     model_grid.py             # Adapter only — price/size/outcome grid drawn by shunt.inspect.model_grid
   scripts/                    # Analysis + figure producers (read results.csv, write docs/assets/figures/routing/)
@@ -60,7 +69,10 @@ routing/
     consistency_probe.py      # Benchmark-internal consistency: replay same task/model, measure variance
     consistency_probe_metrics.py # Compute consistency metrics (variance, determinism tests)
     cost_quality_headline.py   # Four-point simplification of cost_quality_frontier.png for the front page
+    backfill_cached_tokens.py  # Dry-run/write backfill of cached_in_tok onto results.csv rows from archived message lists
     refresh_price_sheet.py      # Fetch current prices from OpenRouter / Requesty / HuggingFace, write data/price_sheet.json
+    scan_free_models.py        # Scan free-tier provider catalogues into data/latest_free_models.json; propose/apply free-overlay identities
+    refresh_free_campaign.py   # Scan → collection_priority filter → apply in one entrypoint; the free-model-scan workflow's --dry-run/--write loop
     derive_judge_difficulty.py # Generate judge_difficulty.json from judge probe outputs
     derive_judge_label_csv.py  # Generate the committed judge_difficulty.csv (per-task, per-judge) + label-quality gate
     derive_defer_labels.py     # Generate defer_labels.csv (cheap-fail per task) from measured results.csv cells
@@ -225,7 +237,7 @@ be scored against a fabricated price.
 | `pricing.input_cost_per_1m` / `.output_cost_per_1m` | Price, USD per 1M tokens (Requesty router listing) |
 | `pricing.cache_read_cost_per_1m` / `.cache_write_cost_per_1m` | Optional — cache-read/write rate where the provider lists one |
 | `pricing.price_provider` | Where the price is quoted from (`requesty` — the router listing) |
-| `pricing.price_source` | The pricing-listing URL the number came from |
+| `pricing.price_source` | Provenance for the price: the pricing-listing URL, or `catalog:<provider>` when the paid twin is absent from models.dev and the rate came from the provider's own catalogue |
 | `pricing.price_as_of` | Date the price was recorded |
 | `pricing.price_note` | Provenance note — the listing the rate came from + cache rates |
 | `version` | Stable model-version string (feeds `results.csv` `model_version` staleness); a model-level field, not a pricing field |
@@ -264,18 +276,19 @@ Header:
 challenge_id,model,reasoning,pass,cost,in_tok,out_tok,calls,version_hash,model_version,arm_hash,real_cost,estimated_cost,timeout_flag,image_digest,computed_at
 ```
 
-One row per **current** `(challenge, model, reasoning)` cell (the cache is upserted —
+One row per **current** `(challenge, lane, reasoning)` cell (the cache is upserted —
 one row per key; superseded rows move to the history log, below):
 
 | Column | Meaning |
 |--------|---------|
 | `challenge_id` | Instance id = spec file stem under `challenges/swebench_verified/` |
-| `model` | Model key (matches the model registry) |
+| `model` | The model's bare canonical identity (the convention's `canonical_slug`) |
+| `lane` | The channel/lane id the cell ran on (overlay row / registry name); the resume key is `(challenge_id, lane, reasoning, rep)` |
 | `reasoning` | Reasoning arm id (per-model effort level); `"default"` on legacy rows aliases to the model's default arm |
 | `arm_hash` | Hash of the arm's request params — a staleness anchor; a re-mapped arm recomputes |
 | `pass` / `cost` / `in_tok` / `out_tok` / `calls` | Verified outcome + token usage |
 | `version_hash` | SHA256 of the instance spec's canonical content **at compute time** (staleness anchor) |
-| `model_version` | The model's `version` field (from the registry) **at compute time** (staleness anchor) |
+| `model_version` | The model's bare canonical `version` **at compute time** (staleness anchor) |
 | `real_cost` | Actual measured cost (USD); equals `cost` for cached rows |
 | `estimated_cost` | Cost derived from the registry's prices × token counts |
 | `timeout_flag` | True if the run hit the per-cell timeout |
@@ -285,7 +298,7 @@ one row per key; superseded rows move to the history log, below):
 Sample row (after a live run):
 
 ```
-astropy__astropy-7166,deepseek-v4-flash,high,True,0.0239,65928,1078,6,fd811481…,deepseek-v4-flash,3c9a7e02…,0.0239,0.0239,False,sha256:9b0b13…,2026-07-15T12:00:00+00:00
+astropy__astropy-7166,deepseek-v4-flash,deepseek-v4-flash,high,True,0.0239,65928,1078,6,fd811481…,deepseek-v4-flash,3c9a7e02…,0.0239,0.0239,False,sha256:9b0b13…,2026-07-15T12:00:00+00:00
 ```
 
 ### Anchors, staleness & the run-twice-zero guarantee
@@ -476,6 +489,33 @@ avoid duplication:
 Consumers should load the matrix via `config.load_matrix(path)` rather than
 reading challenges.json directly, so `models` and `results` are stitched back
 in from their sources of truth.
+
+## Collection priority and the stop rule (`collection_priority.py`)
+
+The free-tier collector fans out over many provider lanes. When workers are fewer than
+runnable models, this module decides who gets the lanes — by **model value**, not novelty
+or cheapness. `data/model_priority.yaml` holds the explicit importance allowlist, the
+`not_worth` denylist, the vision list and the tunable weights; the module is the code that
+consumes them. The four module-level functions are the stable API the scheduler calls:
+
+| Function | Returns |
+|---|---|
+| `priority(identity)` | `importance * marginal_coverage / max(lane_cost, epsilon)` |
+| `worth_collecting(identity)` | `(keep, reason)` — the domination stop rule |
+| `runnable_benchmarks(identity)` | `["swebench_verified"]`, then `["swebench_multimodal"]`, else `[]` |
+| `duplicate_of(identity)` | the higher-priority channel already serving this identity, or `None` |
+
+`identity` is a bare canonical slug (the one true id per model — no provider prefix, no
+`-free`/`:free` marker). `importance` comes
+from the allowlist, with the measured capability rank as a fallback; `marginal_coverage`
+zeroes a duplicate identity and credits the remaining Verified challenges; `lane_cost` is
+the lane's measured cost per cell (`$0` for a free lane, so the quotient is large but
+bounded). `worth_collecting` returns `False` only after at least `stop_min_cells` (20 by
+default) completed cells, when a cheaper or higher-priority lane's pass-rate bootstrap CI
+is **strictly above** this lane's and the lane adds no new Verified challenge coverage.
+`release_date` is a bounded tie-break only: a freshly listed old model never outranks an
+explicitly higher-importance one. The rules are unit-tested over synthetic corpora in
+`benchmark/tests/test_collection_priority.py`.
 
 ## Data provenance
 

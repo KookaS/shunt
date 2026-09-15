@@ -2,10 +2,11 @@
 
 # `arm_monotonicity` reported flat pass-rate contrasts across reasoning arms and read as a
 # null result: "more reasoning effort does not help". On most of the pairs it is not a null
-# result, because the knob NEVER FIRED. Paired on co-measured tasks, the high arm spends
-# 0.78x to 1.08x the low arm's output tokens on deepseek, kimi-k2.5, qwen and zai — at or
-# below the noise of no change at all. Only gpt-5-mini's minimal/medium -> high steps show a
-# real manipulation, at 2.6-2.9x.
+# result, because the knob NEVER FIRED. Paired on co-measured tasks, the high arm's output
+# tokens stay at or below the low arm's on the pairs where nothing moved — at or below the
+# noise of no change at all — so a flat contrast there measures nothing. WHICH pairs actually
+# fired is DERIVED from the corpus at render time and printed on the canvas (title, subtitle,
+# caveat); no model or ratio is frozen into this comment.
 #
 # A treatment that was never applied cannot have a null effect; it has no effect to measure.
 # So the manipulation check is the FIRST panel and it gates the second: a row whose knob did
@@ -14,12 +15,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from benchmark import plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
 from benchmark.routing import metrics
 from benchmark.routing.figures import context as ctxmod
+from benchmark.routing.model_universe import canonical_label
 from benchmark.routing.plot_style import usd
 
 if TYPE_CHECKING:
@@ -34,7 +37,7 @@ _NO_CHANGE = "#B71C1C"
 NOT_A_NULL: str = "never fired — not a null"
 
 SPEC = FigureSpec(
-    title="Most reasoning knobs were never turned — the flat contrasts are unmeasured",
+    title="Reasoning knobs that never fired — the flat contrasts are unmeasured",
     reading=(
         "Left: the manipulation check. For each (model, low arm, high arm) pair, the ratio of "
         "mean output tokens on the tasks where BOTH arms ran. A knob that was turned moves "
@@ -71,7 +74,7 @@ SPEC = FigureSpec(
 
 
 def _label(row: dict) -> str:
-    return f"{row['model']}\n{row['low_arm']} → {row['high_arm']}"
+    return f"{canonical_label(row['model'])}\n{row['low_arm']} → {row['high_arm']}"
 
 
 def _draw_check(ax: Axes, rows: list[dict]) -> None:
@@ -94,6 +97,34 @@ def _draw_check(ax: Axes, rows: list[dict]) -> None:
     # struck through the ratio each row exists to report.
     ax.axvline(1.0, color=_NO_CHANGE, lw=1.3, zorder=1)
     ax.axvline(metrics.ARM_FIRED_RATIO, color=_FIRED, lw=1.0, ls="--", zorder=1)
+    # Both reference rules are named ON the canvas: the fire threshold is the test each row
+    # is judged against, and a bare dashed line cannot say what value it marks.
+    ax.annotate(
+        f"no change {1.0:g}×",
+        xy=(1.0, 0.99),
+        xycoords=("data", "axes fraction"),
+        xytext=(-4, 0),
+        textcoords="offset points",
+        fontsize=7,
+        ha="right",
+        va="top",
+        color=_NO_CHANGE,
+        zorder=6,
+        bbox=dict(facecolor="white", edgecolor="none", pad=0.6, alpha=0.85),
+    )
+    ax.annotate(
+        f"fire threshold {metrics.ARM_FIRED_RATIO:g}×",
+        xy=(metrics.ARM_FIRED_RATIO, 0.99),
+        xycoords=("data", "axes fraction"),
+        xytext=(4, 0),
+        textcoords="offset points",
+        fontsize=7,
+        ha="left",
+        va="top",
+        color=_FIRED,
+        zorder=6,
+        bbox=dict(facecolor="white", edgecolor="none", pad=0.6, alpha=0.85),
+    )
     ax.set_yticks(ys)
     ax.set_yticklabels([_label(r) for r in rows], fontsize=7)
     top = max(
@@ -155,10 +186,13 @@ def _annotations(
     rows: list[dict], pairs: dict[tuple[str, str, str], dict], totals: dict
 ) -> Annotations:
     fired = [r for r in rows if r["fired"]]
-    # Pool over the FIRED rows only. Pooling all nine put 392 pairs whose knob never moved
-    # into the headline, dragging a +8.5pp effect down to +1.7pp — the figure's title, its
+    # Pool over the FIRED rows only. Pooling every row put pairs whose knob never moved
+    # into the headline, dragging the fired effect down — the figure's title, its
     # greying and its caveat all exist to say those rows measure nothing, so the subtitle
-    # must not average them back in.
+    # must not average them back in. The never-fired count is DERIVED, never spelled out:
+    # the arm-pair set now follows the inference-valid models, so a hardcoded "nine" was
+    # wrong the moment the set changed.
+    never = len(rows) - len(fired)
     fired_keys = {(r["model"], r["low_arm"], r["high_arm"]) for r in rows if r["fired"]}
     fired_pairs = [pair for key, pair in pairs.items() if key in fired_keys]
     fired_totals = _pool(fired_pairs)
@@ -172,10 +206,12 @@ def _annotations(
             f"{int(fired_totals['n'])} co-measured pairs (exact McNemar "
             f"p={fired_totals['p']:.3f})"
         )
-    facts.append(
-        f"all nine pooled, including the seven that never fired: {totals['net_pp']:+.2f}pp "
-        f"on {int(totals['n'])} pairs"
+    pooled = (
+        f"all {len(rows)} pooled, including the {never} that never fired"
+        if never
+        else f"all {len(rows)} pooled"
     )
+    facts.append(f"{pooled}: {totals['net_pp']:+.2f}pp on {int(totals['n'])} pairs")
     caveat = (
         f"{len(rows) - len(fired)} of {len(rows)} rows show no manipulation — their flat "
         "contrasts are unmeasured, not null."
@@ -187,8 +223,8 @@ def _annotations(
         pair = pairs.get((row["model"], row["low_arm"], row["high_arm"]))
         state = "FIRED" if row["fired"] else NOT_A_NULL
         line = (
-            f"{row['model']} {row['low_arm']}→{row['high_arm']}: output-token ratio "
-            f"{row['out_tok_ratio']:.2f}x on n={row['n_pairs']} pairs — {state}"
+            f"{canonical_label(row['model'])} {row['low_arm']}→{row['high_arm']}: "
+            f"output-token ratio {row['out_tok_ratio']:.2f}x on n={row['n_pairs']} pairs — {state}"
         )
         if pair is not None:
             line += (
@@ -220,10 +256,20 @@ def render(ctx: ctxmod.RoutingContext, contrasts: list[dict], totals: dict) -> P
     fig, axes = plot_frame.subplots(size, 1, 2, width_ratios=(1.0, 1.0))
     _draw_check(axes[0], rows)
     _draw_contrast(axes[1], rows, pairs)
+    # The count is DERIVED, not frozen into the SPEC literal: a hardcoded "0 of 4" goes stale
+    # the moment the arm-pair set changes, and SH012 flags it as an unsourced result number.
+    fired = sum(1 for r in rows if r["fired"])
+    spec = replace(
+        SPEC,
+        title=(
+            f"{fired} of {len(rows)} reasoning knobs demonstrably fired — "
+            "the flat contrasts are unmeasured"
+        ),
+    )
     return plot_frame.save(
         fig,
         ctx.out_dir / "arm_manipulation.png",
-        SPEC,
+        spec,
         extra=_annotations(rows, pairs, totals),
         provenance=ctx.provenance(__name__),
         size=size,

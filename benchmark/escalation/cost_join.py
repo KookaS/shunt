@@ -94,7 +94,11 @@ def _priced_rows(results_csv: Path) -> tuple[dict[tuple[str, str, str], float], 
         raw = row.get("real_cost")
         if not raw:
             continue
-        prices[(row["challenge_id"], row["model"], row["reasoning"])] = float(raw)
+        # Key on the LANE: a trajectory id spells the channel listing it ran under
+        # (`glm-5.2`), while the post-migration `model` column is the bare weights identity
+        # (`glm-5.2`). A pre-migration row has no `lane`, and its `model` WAS the channel id.
+        model = str(row.get("lane") or row["model"] or "")
+        prices[(row["challenge_id"], model, row["reasoning"])] = float(raw)
     return (prices, n_rows, len(prices))
 
 

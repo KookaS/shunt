@@ -2,7 +2,8 @@
 # Both directions: how a bogus key is REJECTED (keyless), and the free endpoint a
 # real key is ACCEPTED on (positive_endpoint, --authenticated).
 #
-# One block per MEASURED provider (live, keyless, 2026-07-17). Keyed by provider
+# One block per MEASURED provider (live, keyless; each block carries its own
+# measured_as_of). Keyed by provider
 # name; connection facts (base_url) are NOT here — they live once in
 # examples/providers/<name>.yaml, the single owner. The probe merges a provider's
 # connection row (from the examples catalog) with its signature (from this file)
@@ -10,8 +11,11 @@
 # no auth rejection to measure.
 #
 # Fields per block: endpoint (default /v1/chat/completions), expect_status,
-# expect_body_pattern, measured_as_of — all for the KEYLESS rejection check. Plus
-# positive_endpoint for the AUTHENTICATED acceptance check (--authenticated,
+# expect_body_pattern, probe_model, measured_as_of — all for the KEYLESS rejection
+# check. `probe_model` names a real model id for a provider that validates the model
+# before auth (NIM, SambaNova), so its rejection is auth-shaped rather than a 404
+# indistinguishable from a wrong base_url; absent keeps the deliberately-bogus id.
+# Plus positive_endpoint for the AUTHENTICATED acceptance check (--authenticated,
 # secrets-gated): the GET-only, ALWAYS-FREE endpoint a real key must answer 200 on.
 # Default /v1/models; overridden where that is public (OpenRouter -> /v1/auth/key);
 # `null` where the provider has no free authenticated endpoint (Requesty), so its
@@ -77,3 +81,52 @@ fireworks:
   endpoint: /v1/models
   expect_status: [401]
   measured_as_of: "2026-07-17"
+explabs:
+  # Measured live, keyless (2026-09-06): the Experiential gateway rejects a missing
+  # key with 401 {"error":{"code":"invalid_key",...}} on both /v1/models and
+  # /v1/chat/completions. Keyed /v1/models returns 200 for free (the positive check).
+  expect_status: [401]
+  expect_body_pattern: invalid_key
+  measured_as_of: "2026-09-06"
+  positive_endpoint: /v1/models
+# Free-tier harvest providers (plan step 6). Each is an OpenAI-compatible bearer-token
+# surface; the blocks below are filled from the live keyless rejection, not assumed.
+google_ai_studio:
+  # Measured live, keyless (2026-09-10): the OpenAI-compatible surface answers a bogus
+  # key with 400 "Please pass a valid API key" (not 401). Its base_url lives under /openai/,
+  # NOT /v1, so the host-absolute endpoint carries no version segment.
+  endpoint: /chat/completions
+  expect_status: [400]
+  expect_body_pattern: valid API key
+  measured_as_of: "2026-09-10"
+  positive_endpoint: /models
+nvidia_nim:
+  # Measured live, keyless (2026-09-10): with a REAL model id and a bogus key, NIM answers
+  # 401 {"status":401,...,"Authentication failed"}. `/v1/models` is a public 200 catalog, so
+  # it cannot be the auth signal; a nonexistent model 404s before auth, hence probe_model.
+  expect_status: [401]
+  probe_model: moonshotai/kimi-k3
+  measured_as_of: "2026-09-10"
+vercel_ai_gateway:
+  # Measured live, keyless (2026-09-10): 401 on /v1/chat/completions.
+  expect_status: [401]
+  measured_as_of: "2026-09-10"
+sambanova:
+  # Measured live, keyless (2026-09-10): with a REAL model id and a bogus key, SambaNova
+  # answers 401 {"code":"invalid_api_key"}. `/v1/models` is public, and a nonexistent model
+  # 404s model_not_found before auth, hence probe_model.
+  expect_status: [401]
+  expect_body_pattern: invalid_api_key
+  probe_model: Meta-Llama-3.3-70B-Instruct
+  measured_as_of: "2026-09-10"
+opencode_zen:
+  # Measured live, keyless (2026-09-10): 401 on /v1/chat/completions.
+  expect_status: [401]
+  measured_as_of: "2026-09-10"
+# NOT here, with the measured reason:
+#   cloudflare_workers_ai — its base_url embeds ${CLOUDFLARE_ACCOUNT_ID}; without the account
+#     id the keyless probe cannot address the endpoint, and a signature would be invented.
+#     Re-measure and add it once the account id is available.
+#   kilo_gateway — host verified as https://api.kilo.ai/api/gateway (Kilo docs,
+#     https://kilocode.ai/docs/gateway/); the keyless auth-rejection signature is not yet
+#     measured, so it stays out. Re-measure and add it here once opted into the probe.

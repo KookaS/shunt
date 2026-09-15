@@ -23,8 +23,8 @@
 #   - CONNECTION facts (base_url) come from the examples catalog,
 #     examples/providers/<name>.yaml — the files a user copies. Only files whose
 #     line-1 marker is `# shunt-ci: probe` are probed (`local` is `skip`).
-#   - SIGNATURES (endpoint/expect_status/expect_body_pattern) come from
-#     tools/provider_auth_signatures.yaml, measured 2026-07-17 for 11 providers.
+#   - SIGNATURES (endpoint/expect_status/expect_body_pattern/probe_model) come from
+#     tools/provider_auth_signatures.yaml, each block carrying its own measured_as_of.
 # The runtime registry (src/shunt/config/models.yaml) is NEVER read here.
 #
 # WHY THE SIGNATURE IS PER-PROVIDER DATA: there is no universal shape. Most answer
@@ -50,7 +50,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
-from shunt.models.config import AuthProbe, parse_registry, strict_yaml_load
+from shunt.models.config import (
+    DEFAULT_PROBE_MODEL,
+    AuthProbe,
+    expand_env_vars,
+    parse_registry,
+    strict_yaml_load,
+)
 
 # The two data leaves, resolved relative to this script (tools/).
 _HERE: Final = Path(__file__).resolve().parent
@@ -158,7 +164,11 @@ def load_probe_targets(
             targets.append(
                 ProbeTarget(
                     name=name,
-                    base_url=provider.base_url,
+                    # A base_url may embed a per-account path segment (Cloudflare's
+                    # ${CLOUDFLARE_ACCOUNT_ID}); expand it from the environment so a live
+                    # probe hits the real URL. Unset -> the literal placeholder stays, which
+                    # the probe reports as unreachable rather than silently mis-probing.
+                    base_url=expand_env_vars(provider.base_url),
                     api_key_env_var=provider.api_key_env_var,
                     probe=sigs.get(name),
                 )
@@ -218,25 +228,27 @@ def probe_url(target: ProbeTarget) -> str:
     return _join_endpoint(target.base_url, probe.endpoint)
 
 
-def _request_body(url: str) -> bytes | None:
+def _request_body(url: str, model: str) -> bytes | None:
     """The POST payload for a chat/completions probe; None makes it a GET."""
     if not url.endswith("/chat/completions"):
         return None
     # A minimal, well-formed request: we want the auth layer to answer, not a
-    # schema validator. The model id is bogus on purpose — a provider that
-    # checks the model first (xAI, Fireworks) is handled by its body pattern.
+    # schema validator. The model defaults to a bogus id — a provider that checks
+    # the model first (xAI, Fireworks) is handled by its body pattern, and one that
+    # returns 404 for an unknown model (NIM, SambaNova) names a real id via the
+    # signature's `probe_model` so its rejection is auth-shaped instead.
     return json.dumps(
         {
-            "model": "shunt-probe-nonexistent-model",
+            "model": model,
             "messages": [{"role": "user", "content": "probe"}],
             "max_tokens": 1,
         }
     ).encode()
 
 
-def _fetch(url: str, timeout: float) -> tuple[int, str]:
+def _fetch(url: str, timeout: float, model: str) -> tuple[int, str]:
     """Send the bogus-key request; return (status, body) even for error statuses."""
-    return _send(url, api_key=BOGUS_API_KEY, body=_request_body(url), timeout=timeout)
+    return _send(url, api_key=BOGUS_API_KEY, body=_request_body(url, model), timeout=timeout)
 
 
 def probe_provider(target: ProbeTarget, *, timeout: float = DEFAULT_TIMEOUT_S) -> ProbeResult:
@@ -257,7 +269,7 @@ def probe_provider(target: ProbeTarget, *, timeout: float = DEFAULT_TIMEOUT_S) -
 
     url = probe_url(target)
     try:
-        status, body = _fetch(url, timeout)
+        status, body = _fetch(url, timeout, probe.probe_model or DEFAULT_PROBE_MODEL)
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         # Distinct from a wrong status: the host never answered at all. Bad DNS
         # and a closed port both land here, and neither says anything about auth.

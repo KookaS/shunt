@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from statistics import NormalDist
 from typing import TYPE_CHECKING, Any, Final
 
@@ -47,6 +47,31 @@ _DECISION_COLOR: Final[dict[str, str]] = {
     "inconclusive": _INCONCLUSIVE,
 }
 
+# The goal's last sentence quotes how many times the shipped default's bill is the
+# pre-registered arm's. That multiple is DERIVED from the same `Basis` rows the panels draw
+# (via `_default_vs_preregistered`), so a corpus move cannot leave a hardcoded "four" behind —
+# it was already wrong at 6.09x. When the derivation is unavailable the wording goes
+# non-numeric rather than guessing.
+_GOAL_HEAD: Final[str] = (
+    "Read both panels together, in that order. The left panel is the gate: a saving on "
+    "the right is only admissible once the left one is green. On the pre-registered rows "
+    "it is not — that arm's quality deficit is several times the margin and the whisker "
+    "excludes it on every basis, so the spend reduction beside it is bought at a loss that "
+    "was pre-registered as unacceptable rather than at equal quality. The bottom row is a "
+    "different arm and a different verdict: the shipped default clears the bar, "
+)
+_GOAL_TAIL: Final[str] = (
+    " the pre-registered arm's bill and still under half the baseline's. It was not "
+    "pre-registered, so read it as an observation, not as the gate being met."
+)
+
+
+def _goal_text(ratio: float | None) -> str:
+    """The goal prose, with the default/preregistered multiple derived when it is known."""
+    clears = "at several times" if ratio is None else f"at about {ratio:.1f} times"
+    return _GOAL_HEAD + clears + _GOAL_TAIL
+
+
 SPEC = FigureSpec(
     title="The pre-registered arm misses the 5pp bar on every basis; the shipped default clears it",
     reading=(
@@ -58,16 +83,7 @@ SPEC = FigureSpec(
         "data cannot tell. Right: the same tasks' total spend, baseline dot to router dot; a "
         "leftward arrow is a saving."
     ),
-    goal=(
-        "Read both panels together, in that order. The left panel is the gate: a saving on "
-        "the right is only admissible once the left one is green. On the pre-registered rows "
-        "it is not — that arm's quality deficit is several times the margin and the whisker "
-        "excludes it on every basis, so the spend reduction beside it is bought at a loss that "
-        "was pre-registered as unacceptable rather than at equal quality. The bottom row is a "
-        "different arm and a different verdict: the shipped default clears the bar, at four "
-        "times the pre-registered arm's bill and still under half the baseline's. It was not "
-        "pre-registered, so read it as an observation, not as the gate being met."
-    ),
+    goal=_goal_text(None),
     definitions=(
         (
             "the two router rows",
@@ -112,11 +128,11 @@ SPEC = FigureSpec(
         "operator can select.",
     ),
     limitations=(
-        "The cost panel is naive per-task cost. The gate's real criterion is cache-aware "
-        "cost, which the gate bootstraps per task — cache cost is scoped per task (one "
-        "task is one session), so a whole-task resample preserves within-task adjacency — "
-        "and publishes as a 90% CI in the tracked verdict artifact. See cache_economics.png "
-        "for how far the assumed hit rate moves that ratio.",
+        "The cost panel is TOTAL SPEND over the scored task set, at naive prices. The gate's "
+        "real criterion is cache-aware cost, which the gate bootstraps per task — cache cost is "
+        "scoped per task (one task is one session), so a whole-task resample preserves "
+        "within-task adjacency — and publishes as a 90% CI in the tracked verdict artifact. See "
+        "cache_economics.png for how far the assumed hit rate moves that ratio.",
     ),
 )
 
@@ -192,7 +208,10 @@ def evidence_bases(ctx: ctxmod.RoutingContext, margin: float) -> list[Basis]:
     router, baseline = ctxmod.ROUTER_STRATEGY, ctxmod.BASELINE_STRATEGY
     gate_n = int(config.benchmark_params().get("n_default", 20))
     bases: list[Basis] = []
-    for label, measured_only in (("completed (imputed)", False), ("measured only", True)):
+    for label, measured_only in (
+        (f"pre-registered {router} · completed (imputed)", False),
+        (f"pre-registered {router} · measured only", True),
+    ):
         found = _basis(
             label,
             ctx.pass_map(router, measured_only=measured_only),
@@ -208,7 +227,7 @@ def evidence_bases(ctx: ctxmod.RoutingContext, margin: float) -> list[Basis]:
     r_all, b_all = ctx.pass_map(router), ctx.pass_map(baseline)
     sample = sorted(set(r_all) & set(b_all))[:gate_n]
     found = _basis(
-        f"gate sample (N={gate_n})",
+        f"pre-registered {router} · gate sample (N={gate_n})",
         {t: r_all[t] for t in sample},
         {t: b_all[t] for t in sample},
         ctx.cost_map(router),
@@ -237,6 +256,35 @@ def _default_basis(ctx: ctxmod.RoutingContext, margin: float) -> list[Basis]:
         margin,
     )
     return [found] if found is not None else []
+
+
+def _default_vs_preregistered(bases: list[Basis]) -> float | None:
+    """The default arm's bill divided by the pre-registered arm's, from the drawn rows.
+
+    Uses the widest pre-registered row (the first one, `completed (imputed)`) — the same
+    `strategy_summary` cost the panels show beside the default's. None when either row is
+    absent or the pre-registered bill is zero, so the caller falls back to non-numeric prose.
+    """
+    default = next((b for b in bases if b.label.startswith(f"{ctxmod.DEFAULT_STRATEGY} —")), None)
+    prereg = next((b for b in bases if b.label.startswith("pre-registered")), None)
+    if default is None or prereg is None or prereg.router_cost <= 0:
+        return None
+    return default.router_cost / prereg.router_cost
+
+
+def _cost_row_label(label: str) -> str:
+    """Panel B's compact row label: panel A already carries the full identity.
+
+    The full `pre-registered kNN-semantic · measured only` widened the axes past the canvas
+    under constrained layout, failing SHUNT_PLOT_STRICT, so the strategy name is dropped here.
+    """
+    if label.startswith("pre-registered "):
+        _, _, rest = label.partition(" · ")
+        return f"pre-registered · {rest}"
+    default = ctxmod.DEFAULT_STRATEGY
+    if label.startswith(f"{default} —"):
+        return f"{default} (shipped default)"
+    return label
 
 
 def _draw_forest(ax: Axes, bases: list[Basis], margin: float) -> None:
@@ -314,7 +362,12 @@ def _draw_cost(ax: Axes, bases: list[Basis]) -> None:
             color="#444444",
         )
     ax.set_yticks(ys)
-    ax.set_yticklabels([])
+    # The rows are named here too, not only on panel A: panel B is read as a cost panel on
+    # its own, and an unlabelled ladder of seven-dollar gaps cannot say which arm each row is.
+    # A COMPACT label, because panel A already carries the full identity and the long form
+    # (`pre-registered kNN-semantic · measured only`) widened the axes past the canvas under
+    # constrained layout, failing SHUNT_PLOT_STRICT.
+    ax.set_yticklabels([_cost_row_label(b.label) for b in bases], fontsize=7)
     ax.set_xscale("log")
     ax.set_xlabel("total spend on that basis (USD, log)", fontsize=9)
     lo = min(min(b.router_cost, b.baseline_cost) for b in bases)
@@ -356,12 +409,14 @@ def _annotations(bases: list[Basis], margin: float, banner: str | None) -> Annot
     parts: list[str] = []
     if thin:
         pairs = "/".join(str(b.b + b.c) for b in thin)
+        verb = "rests" if len(thin) == 1 else "rest"
+        pair_noun = "pair" if pairs.isdigit() and int(pairs) == 1 else "pairs"
         parts.append(
-            f"{len(thin)} of {len(cleared)} row(s) clearing the bar rest on {pairs} "
-            "discordant pair(s)"
+            f"{len(thin)} of {len(cleared)} clearing the bar {verb} on {pairs} "
+            f"discordant {pair_noun}"
         )
     if inferior:
-        parts.append(f"{len(inferior)} of {len(bases)} rows: WORSE by more than the margin")
+        parts.append(f"{len(inferior)} of {len(bases)} rows are WORSE by more than the margin")
     if undecided:
         parts.append(f"{len(undecided)} of {len(bases)} bases cannot decide — quality UNKNOWN")
     # `plot_frame` REJECTS an over-long caveat, which would abort the render. Drop the
@@ -395,6 +450,9 @@ def render(ctx: ctxmod.RoutingContext) -> Path | None:
     bases = evidence_bases(ctx, margin)
     if not bases:
         return None
+    # Derive the default-to-pre-registered multiple from the rows just drawn, so the goal's
+    # prose cannot go stale against the corpus the way a hardcoded "four times" did.
+    spec = replace(SPEC, goal=_goal_text(_default_vs_preregistered(bases)))
     size = plot_frame.WIDE
     fig, axes = plot_frame.subplots(size, 1, 2, width_ratios=(1.45, 1.0))
     _draw_forest(axes[0], bases, margin)
@@ -404,7 +462,7 @@ def render(ctx: ctxmod.RoutingContext) -> Path | None:
     return plot_frame.save(
         fig,
         ctx.out_dir / "kill_gate.png",
-        SPEC,
+        spec,
         extra=_annotations(bases, margin, ctx.banner),
         provenance=ctx.provenance(__name__),
         size=size,

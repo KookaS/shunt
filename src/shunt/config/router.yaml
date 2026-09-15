@@ -82,7 +82,7 @@ router:
   # QUALITY axis is empty (the two arms differ in outcome on 0 of 48 instances, because wherever
   # escalation fires they are the same sessions), so it is context, not a claim. And the measured
   # arm is the
-  # corpus's two most expensive models (zai-glm-5.2, kimi-k3), which is NOT the ladder
+  # corpus's two most expensive models (glm-5.2, kimi-k3), which is NOT the ladder
   # rank_shortlist below walks. Escalation ships ON as a DESIGN choice — one decision per session,
   # cache-safe, bounded spend — not as a measured win.
   # See docs/escalation-claim.md (the scoped claim), docs/escalation.md and
@@ -220,7 +220,7 @@ router:
   # but a model absent from this list is known to the registry but NOT chosen for
   # live inference. Removing them also makes the price-ranked escalation ladder
   # approximately capability-ranked: the ladder steps deepseek-v4-flash ->
-  # deepseek-v4-pro -> zai-glm-5.2, a research-estimated frontier slot
+  # deepseek-v4-pro -> glm-5.2, a research-estimated frontier slot
   # (gemini-3.1-pro) sits inside the shortlist walk, and the jump to the top
   # rank SKIPS kimi-k3 (the best-measured rung) — the residual defect.
   # ADDED 2026-09-04: deepseek-v4-pro, on a full 200-cell measurement ($27.45).
@@ -233,7 +233,7 @@ router:
   # cache-safety surface. NOTE it is an always-on reasoning model (it emits
   # `reasoning_content` before `content`); only its default `high` arm is
   # verified live.
-  # zai-glm-5.2 STAYS despite being largely redundant with the cheaper, stronger
+  # glm-5.2 STAYS despite being largely redundant with the cheaper, stronger
   # deepseek-v4-pro (it rescues only 4 deepseek-v4-flash failures pro misses, out
   # of 49, at 3.3x the cost per rescue). Redundancy is not the triage rule's test:
   # glm-5.2 returns KEEP on its own escalation evidence (+15.5pp, p=9.8e-04), so it
@@ -254,7 +254,7 @@ router:
   models:
     - deepseek-v4-flash
     - deepseek-v4-pro
-    - zai-glm-5.2
+    - glm-5.2
     - kimi-k3
     - gemini-3.1-pro
     - gpt-5.6-sol

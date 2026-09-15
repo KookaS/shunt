@@ -153,13 +153,13 @@ def test_committed_difficulty_pick_varies_on_the_measured_matrix() -> None:
     picks = Counter(rd.RankerDifficultyStrategy().select(tid, {}, matrix) for tid in tasks)
     assert len(picks) > 1, "constant pick — the predicted-difficulty table is not reaching pick()"
     assert picks[rungs[0]] < len(tasks)
-    assert picks == Counter({rungs[0]: 170, rungs[1]: 30})
+    assert picks == Counter({rungs[0]: 171, rungs[1]: 30})
     floors = Counter(
         rd.RankerDifficultyCascadeStrategy()._initial_rank_floor(tid, matrix, rungs)
         for tid in tasks
     )
     assert set(floors) != {0}
-    assert floors == Counter({0: 170, 1: 30})
+    assert floors == Counter({0: 171, 1: 30})
 
 
 def test_committed_difficulty_pick_collapses_on_the_completed_matrix() -> None:

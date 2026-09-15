@@ -57,7 +57,7 @@ _NULL = "#9aa0a6"
 _CONTROL = "#009E73"
 
 SPEC = FigureSpec(
-    title="Real problem text carries no routable signal; a three-level human tag does",
+    title="Real problem text carries no routable signal; a human difficulty tag does",
     reading=(
         "Left: routing pass-rate against k. The solid blue line holds each task OUT of its "
         "own neighbour index (what a deployed router can do), the dashed orange line lets "
@@ -195,6 +195,19 @@ def _draw_transfer(ax: Axes, curve: knn_nulls.TransferCurve) -> None:
     ax.set_xticks(ks)
     ax.set_xticklabels([str(k) for k in ks], fontsize=7.5)
     ax.minorticks_off()
+    # The y-limit must HOLD the whole memorisation ceiling. Left to autoscale, the dashed
+    # orange curve's first point at k=2 can touch the top edge and read as clipped; the
+    # ceiling is the reference the embedding is read against, so it is never allowed off-canvas.
+    series = [
+        *(v * 100 for v in curve.memorisation),
+        *(v * 100 for v in curve.loo),
+        *(v * 100 for v in curve.null_hi),
+        *(v * 100 for v in curve.null_lo),
+        curve.best_constant * 100,
+    ]
+    lo, hi = min(series), max(series)
+    pad = (hi - lo) * 0.08 or 1.0
+    ax.set_ylim(lo - pad, hi + pad)
     ax.set_xlabel("k — past tasks voted over (log)", fontsize=9)
     ax.set_ylabel("routed pass rate (%)", fontsize=9)
     ax.legend(fontsize=7, loc="center right", frameon=False)

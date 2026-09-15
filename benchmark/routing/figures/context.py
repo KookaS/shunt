@@ -18,6 +18,7 @@ from benchmark.routing import repricing
 
 if TYPE_CHECKING:
     from benchmark.routing.impute import ImputedMatrix
+    from benchmark.routing.model_validity import ModelValidity
     from benchmark.routing.plot_style import RawResults
 
 # challenge_id -> (passed, cost, imputed)
@@ -75,6 +76,11 @@ class RoutingContext:
     # one: the sheet is optional, every consumer already handles its absence, and making the
     # field required would have turned "this figure does not reprice" into a constructor error.
     repriced_totals: dict[str, float | None] = field(default_factory=dict)
+    # The full model-validity census, computed once by the report and shared by every figure
+    # that has to say which models it may treat as inference-valid. Optional because a context
+    # built without it (a unit test, a standalone caller) is valid, and a figure with no census
+    # falls back to its own read rather than refusing to draw.
+    validity: list[ModelValidity] | None = None
 
     def provenance(self, generator: str, *, repriced: bool = False) -> plot_frame.Provenance:
         """Provenance for one figure; `repriced` stamps the price sheet that drew its cost."""
@@ -90,6 +96,28 @@ class RoutingContext:
 
     def row(self, name: str) -> dict[str, str] | None:
         return next((r for r in self.rows if r.get("strategy") == name), None)
+
+    @property
+    def inference_valid_models(self) -> list[str]:
+        """The price-ordered enabled models the validity census marks inference-valid.
+
+        The model-COMPARISON figures (the decision audit, the difficulty allocation) draw only
+        these: the rest are benchmark-only or collection-only and are named on model_validity /
+        invalid_models instead. Falls back to the full enabled order ONLY when no census is
+        present (a standalone caller degrades to the old behaviour rather than drawing an empty
+        grid). When the census IS present but nothing matches, the empty list is returned — the
+        old `scoped or list(...)` fallback re-admitted inference-invalid models, the exact
+        thing the filter exists to prevent.
+        """
+        if self.validity is None:
+            return list(self.models_by_price)
+        # Compare by CANONICAL identity: a model list entry may be a channel listing
+        # (`z-ai/glm-5.3:free`) while the census keys on the bare weights identity
+        # (`glm-5.3`). Resolving the name first keeps a valid model from being dropped.
+        from benchmark.routing import model_universe  # noqa: PLC0415 — avoid an import cycle
+
+        valid = {row.model for row in self.validity if row.valid}
+        return [m for m in self.models_by_price if model_universe.resolve_identity(m) in valid]
 
     def cells(self, name: str) -> tuple[StrategyCells, set[str]] | None:
         return self.by_strategy.get(name)
@@ -145,6 +173,7 @@ def build_context(  # noqa: PLR0913 (one argument per already-computed input; se
     banner: str | None,
     by_strategy: dict[str, tuple[StrategyCells, set[str]]],
     repriced_totals: dict[str, float | None] | None = None,
+    validity: list[ModelValidity] | None = None,
     manifest: Path = MANIFEST,
 ) -> RoutingContext:
     """Assemble the shared context; the price order is derived here so it is one order."""
@@ -163,5 +192,6 @@ def build_context(  # noqa: PLR0913 (one argument per already-computed input; se
         banner=banner,
         by_strategy=by_strategy,
         repriced_totals=dict(repriced_totals or {}),
+        validity=validity,
         digest=corpus_digest(completed or matrix, tasks),
     )

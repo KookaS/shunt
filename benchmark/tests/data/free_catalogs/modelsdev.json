@@ -1,0 +1,39 @@
+{
+  "openrouter": {
+    "id": "openrouter",
+    "models": {
+      "google/gemma-4-31b-it:free": {
+        "id": "google/gemma-4-31b-it:free",
+        "name": "Gemma 4 31B IT (free)",
+        "release_date": "2026-04-02",
+        "open_weights": true,
+        "limit": {"context": 262144, "output": 32768},
+        "cost": {"input": 0.09, "output": 0.34, "cache_read": 0.05}
+      },
+      "nvidia/nvidia-nemotron-3-nano-30b-a3b": {
+        "id": "nvidia/nvidia-nemotron-3-nano-30b-a3b",
+        "name": "Nemotron Nano",
+        "release_date": "2020-01-01",
+        "open_weights": true,
+        "limit": {"context": 131072, "output": 16384}
+      },
+      "unlisted/paid-model": {
+        "id": "unlisted/paid-model",
+        "name": "A paid model",
+        "release_date": "2026-01-01",
+        "cost": {"input": 1.0, "output": 2.0}
+      }
+    }
+  },
+  "groq": {
+    "id": "groq",
+    "models": {
+      "llama-3.3-70b-versatile": {
+        "id": "llama-3.3-70b-versatile",
+        "name": "Llama 3.3 70B",
+        "release_date": "2024-12-06",
+        "cost": {"input": 0.0, "output": 0.0}
+      }
+    }
+  }
+}

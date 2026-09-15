@@ -68,7 +68,9 @@ class _ScaffoldPatches:
         from benchmark.escalation import live_capture
 
         monkeypatch.setattr(
-            infer, "_load_instance", lambda iid: {"instance_id": iid, "problem_statement": "ps"}
+            infer,
+            "_instance_from_spec",
+            lambda spec: {"instance_id": spec.instance_id, "problem_statement": "ps"},
         )
         monkeypatch.setattr(infer, "litellm_model_target", lambda m: ("model-string", {}))
         monkeypatch.setattr(live_capture, "make_trajectory_id", lambda *a: "tid")

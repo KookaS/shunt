@@ -183,8 +183,9 @@ SPEC = FigureSpec(
         # `TotalCost_cacheaware` while this one stays on the naive `TotalCost` sum, so the same
         # strategy carries two different prices under one name and a reader lining the two
         # figures up was silently comparing cost models rather than strategies.
-        "This axis is the NAIVE per-task cost — the raw sum of what each attempt was billed, "
-        "repriced only when the subtitle says so. cost_quality_frontier.png ranks on the "
+        "This axis is TOTAL SPEND over the shared scored task set, at NAIVE prices — the raw "
+        "sum of what each attempt was billed, repriced only when the subtitle says so. "
+        "cost_quality_frontier.png ranks on the "
         "CACHE-AWARE total instead, which prices a repeat-model discount the naive sum does "
         "not. The two are different cost models, so a span read off this figure is NOT "
         "comparable with one read off that one: a cascade that re-hits one model is cheaper "
@@ -259,6 +260,28 @@ def _draw_band(ax: Axes, band: list[tuple[str, StrategyClass, float, float]]) ->
     # lower label inside the canvas instead of clipped by the axis.
     ax.set_ylim(-1.25, len(band) - 0.25)
     ax.set_xlabel("total spend at the bound's quality (USD, log)", fontsize=9)
+    # The class key lives ON this panel, not only in panel B's y labels: panel A is the price
+    # ladder and a reader must be able to name a dot's class without leaving it.
+    handles = [
+        ax.scatter(
+            [],
+            [],
+            s=70,
+            marker="o",
+            facecolors=_CLASS_COLOUR[cls],
+            edgecolors=_CLASS_COLOUR[cls],
+            label=f"{cls.value} — {_ROLE[cls]}",
+        )
+        for cls in (
+            StrategyClass.LIVE,
+            StrategyClass.BLOCKED,
+            StrategyClass.CONTROL,
+            StrategyClass.BOUND,
+        )
+        if any(row[1] is cls for row in band)
+    ]
+    if handles:
+        ax.legend(handles=handles, fontsize=6.8, loc="lower right", frameon=True, framealpha=0.9)
     ax.grid(axis="x", color="#eeeeee", lw=0.6)
     ax.set_axisbelow(True)
     plot_frame.panel_label(ax, "A · what the bound's quality costs, by class")

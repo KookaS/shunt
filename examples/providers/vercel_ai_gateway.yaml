@@ -1,0 +1,16 @@
+# shunt-ci: probe
+# Vercel AI Gateway — an OpenAI-compatible gateway with a free model subset.
+# Set VERCEL_AI_GATEWAY_API_KEY, then paste this into ~/.config/shunt/models.yaml.
+# See ../../docs/configuration.md.
+providers:
+  vercel_ai_gateway:
+    base_url: https://ai-gateway.vercel.sh/v1
+    api_key_env_var: VERCEL_AI_GATEWAY_API_KEY
+    litellm_prefix: openai
+
+models:
+  vercel-laguna-s-2.1-free:
+    model_id: poolside/laguna-s-2.1-free
+    provider: vercel_ai_gateway
+    supports_streaming: true
+    supports_cache_control: false

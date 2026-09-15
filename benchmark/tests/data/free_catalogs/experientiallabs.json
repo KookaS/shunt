@@ -1,0 +1,58 @@
+{
+  "models": [],
+  "promotions": [
+    {
+      "label": "qwen3.8-27b",
+      "slugs": ["qwen3.8-27b"],
+      "listed_slugs": ["qwen3.8-27b"],
+      "display_order": 0,
+      "free": false,
+      "badge_style": "allowance",
+      "percent_off": 50.0,
+      "per_org_cap_micro_usd": 0,
+      "cap_scope": "daily",
+      "requires_payment_method": true,
+      "requires_payment": true
+    },
+    {
+      "label": "deepseek-v4-flash",
+      "slugs": ["deepseek-v4-flash"],
+      "listed_slugs": ["deepseek-v4-flash"],
+      "display_order": 1,
+      "free": true,
+      "badge_style": "free",
+      "percent_off": 0.0,
+      "per_org_cap_micro_usd": 5000000,
+      "cap_scope": "daily",
+      "requires_payment_method": true,
+      "requires_payment": true
+    },
+    {
+      "label": "gpt-5.6-luna",
+      "slugs": ["gpt-5.6-luna"],
+      "listed_slugs": ["gpt-5.6-luna"],
+      "display_order": 2,
+      "free": true,
+      "badge_style": "free",
+      "percent_off": 0.0,
+      "per_org_cap_micro_usd": 5000000,
+      "cap_scope": "daily",
+      "requires_payment_method": false,
+      "expiration_date": "2026-09-30"
+    },
+    {
+      "label": "multi-slug-deal",
+      "slugs": ["free-a", "free-b"],
+      "listed_slugs": ["free-a", "free-b"],
+      "display_order": 3,
+      "free": true,
+      "badge_style": "free",
+      "per_org_cap_micro_usd": 1000000,
+      "cap_scope": "daily",
+      "requires_payment_method": false
+    }
+  ],
+  "total": 4,
+  "limit": 500,
+  "offset": 0
+}

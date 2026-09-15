@@ -93,7 +93,7 @@ def test_the_shipped_live_pool_excludes_the_dominated_models() -> None:
     # the strictly-dominated models are registry-only, not live.
     live = packaged_live_pool()
     assert "deepseek-v4-flash" in live
-    assert "zai-glm-5.2" in live
+    assert "glm-5.2" in live
     assert "kimi-k3" in live
     assert "qwen3.7-plus" not in live
     assert "gpt-5-mini" not in live
@@ -131,13 +131,13 @@ def test_the_walk_is_drawn_on_live_ranks_and_the_jump_passes_only_live_rows() ->
             _row("qwen3.7-plus", -0.05, 0.51, "INDISTINGUISHABLE"),
             _row("gpt-5-mini", -0.17, 0.0, "NET-HARMFUL"),
             _row("kimi-k2.5", -0.02, 0.81, "INDISTINGUISHABLE"),
-            _row("zai-glm-5.2", 0.15, 0.001, "NET-HELPFUL"),
+            _row("glm-5.2", 0.15, 0.001, "NET-HELPFUL"),
             _row("kimi-k3", 0.24, 0.0, "NET-HELPFUL"),
         ],
     }
     live = [
         "deepseek-v4-flash",
-        "zai-glm-5.2",
+        "glm-5.2",
         "gemini-3.1-pro",
         "kimi-k3",
         "gpt-5.6-sol",

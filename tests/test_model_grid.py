@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import yaml
 
+from shunt.inspect import model_grid as grid_drawer
 from shunt.inspect.model_grid import (
+    _LABEL_OFFSETS,
     CLUSTER_COLOR,
     CLUSTER_ORDER,
     GridData,
     GridRow,
     _near,
+    _size_axis_label,
     grid_annotations,
     label_offset,
     marker_area,
@@ -85,7 +90,7 @@ class TestZeroIsNotASmallNumber:
             source="a corpus",
             x_limitation="x is a list price",
         )
-        facts = grid_annotations(data, sized=2, hosted=0, local=0).subtitle_facts
+        facts = grid_annotations(data, sized=2).subtitle_facts
         assert any("1 at $0 (local) · 1 priced" in fact for fact in facts)
 
 
@@ -98,31 +103,9 @@ class TestAnnotations:
             source="s",
             x_limitation="x is a list price",
         )
-        notes = grid_annotations(data, sized=0, hosted=0, local=0).notes
+        notes = grid_annotations(data, sized=0).notes
         assert any("size UNDISCLOSED" in note for note in notes)
         assert any("fixed reference marker" in note for note in notes)
-
-    def test_an_all_empty_latency_panel_says_so_in_the_limits(self) -> None:
-        data = GridData(
-            rows=(_row(),),
-            x_label="x",
-            price_basis="b",
-            source="s",
-            x_limitation="x is a list price",
-        )
-        limits = grid_annotations(data, sized=1, hosted=0, local=0).limitations
-        assert any("Panels C and D are empty" in limit for limit in limits)
-
-    def test_latency_present_drops_the_empty_limit(self) -> None:
-        data = GridData(
-            rows=(_row(latency_s=(1.0, 2.0)),),
-            x_label="x",
-            price_basis="b",
-            source="s",
-            x_limitation="x is a list price",
-        )
-        limits = grid_annotations(data, sized=1, hosted=2, local=0).limitations
-        assert not any("Panels C and D are empty" in limit for limit in limits)
 
     def test_the_n_spread_is_stated_because_the_rows_are_unpaired(self) -> None:
         data = GridData(
@@ -132,7 +115,7 @@ class TestAnnotations:
             source="s",
             x_limitation="x is a list price",
         )
-        facts = grid_annotations(data, sized=2, hosted=0, local=0).subtitle_facts
+        facts = grid_annotations(data, sized=2).subtitle_facts
         assert any("n per model 21–198, unpaired" in fact for fact in facts)
 
 
@@ -177,9 +160,54 @@ class TestLabelPlacement:
         placed: list[tuple[tuple[float, float], float]] = []
         for anchor in [(0.150, 96.0), (0.152, 96.2), (0.154, 95.8)]:
             offset = label_offset(anchor, placed, forced_below=True)
+            assert offset is not None
             placed.append((anchor, offset))
         assert all(o < 0 for _a, o in placed)
         assert len({o for _a, o in placed}) == len(placed)
+
+    def test_eight_identical_anchors_get_eight_distinct_offsets(self) -> None:
+        # F10 regression. The ladder had six slots and returned its last one when exhausted,
+        # so the seventh clustered label printed on top of the sixth. A realistic cluster is a
+        # handful of rungs at one price and one rate, so eight must all land somewhere new.
+        cluster = [(0.150, 69.0 + 0.01 * i) for i in range(8)]
+        placed: list[tuple[tuple[float, float], float]] = []
+        for anchor in cluster:
+            offset = label_offset(anchor, placed, forced_below=False)
+            assert offset is not None
+            placed.append((anchor, offset))
+        offsets = [o for _a, o in placed]
+        assert len(set(offsets)) == 8, offsets
+
+    def test_the_ceiling_ladder_also_holds_eight(self) -> None:
+        # The ceiling case may only go DOWNWARDS, and it had three negative slots; a cluster of
+        # ceiling-height rows would collapse the fourth onto the third. The downward ladder is
+        # now as deep as the general one.
+        cluster = [(0.150, 96.0 + 0.01 * i) for i in range(8)]
+        placed: list[tuple[tuple[float, float], float]] = []
+        for anchor in cluster:
+            offset = label_offset(anchor, placed, forced_below=True)
+            assert offset is not None and offset < 0
+            placed.append((anchor, offset))
+        assert len({o for _a, o in placed}) == 8
+
+    def test_an_exhausted_ladder_returns_a_sentinel(self) -> None:
+        # Past the ladder the caller must route the name to the notes, never reuse a slot:
+        # a missing direct label is recoverable, an overprinted pair is not.
+        anchor = (0.150, 69.0)
+        placed: list[tuple[tuple[float, float], float]] = []
+        for _ in range(len(_LABEL_OFFSETS)):
+            offset = label_offset(anchor, placed, forced_below=False)
+            assert offset is not None
+            placed.append((anchor, offset))
+        assert label_offset(anchor, placed, forced_below=False) is None
+
+
+class TestSizeAxisLabel:
+    def test_the_scale_matches_the_axis_actually_drawn(self) -> None:
+        # F17: the label said "(log)" even for an all-UNDISCLOSED roster whose axis is linear.
+        assert "(log)" in _size_axis_label(log=True)
+        assert "(linear)" in _size_axis_label(log=False)
+        assert "hollow: total" in _size_axis_label(log=False)
 
 
 class TestOutOfCorpusRows:
@@ -199,7 +227,7 @@ class TestOutOfCorpusRows:
             source="s",
             x_limitation="x is a list price",
         )
-        ann = grid_annotations(data, sized=2, hosted=0, local=0)
+        ann = grid_annotations(data, sized=2)
         assert any(note.startswith("† outsider: ") and self.NOTE in note for note in ann.notes)
         # The per-row stat line carries the dagger too, so the two cannot be read as
         # two different rows.
@@ -214,7 +242,7 @@ class TestOutOfCorpusRows:
             source="s",
             x_limitation="x is a list price",
         )
-        limits = grid_annotations(data, sized=1, hosted=0, local=0).limitations
+        limits = grid_annotations(data, sized=1).limitations
         assert any("DAGGERED row (†)" in limit for limit in limits)
 
     def test_a_corpus_only_panel_says_nothing_about_daggers(self) -> None:
@@ -227,12 +255,34 @@ class TestOutOfCorpusRows:
             source="s",
             x_limitation="x is a list price",
         )
-        ann = grid_annotations(data, sized=1, hosted=0, local=0)
+        ann = grid_annotations(data, sized=1)
         assert not any("DAGGERED" in limit for limit in ann.limitations)
         assert dict(ann.counts)["external"] == 0
 
 
 class TestBenchmarkAdapter:
+    def test_the_committed_grid_renders_without_an_annotation_collision(
+        self, tmp_path: Path
+    ) -> None:
+        # F10/F11 end to end: the committed corpus puts the `-explabs` mirror of a model in
+        # the $0 column beside its paid row, so two rows share the label. The placement ladder
+        # must separate them, and the opted-in annotation audit must pass; before the fix this
+        # render raised LayoutError('deepseek-v4-pro' overlaps 'kimi-k3').
+        from types import SimpleNamespace
+
+        from benchmark import config
+        from benchmark.routing import model_validity
+        from benchmark.routing.figures import model_grid as adapter
+
+        evidence = model_validity.gather_evidence()
+        raw = model_validity.filter_valid(config.load_results(), evidence)
+        data = adapter.build(
+            SimpleNamespace(raw=raw, validity=model_validity.validity_census(evidence))  # type: ignore[arg-type]
+        )
+        assert data is not None
+        out = grid_drawer.render(tmp_path / "model_grid.png", data, adapter.SPEC)
+        assert out.exists()
+
     def test_the_grid_reads_measured_cells_and_the_registry(self) -> None:
         # The one end-to-end assertion that the two data sources meet correctly: the rate
         # comes from results.csv and the parameter counts from models.yaml.
@@ -253,30 +303,33 @@ class TestBenchmarkAdapter:
         # A closed model is drawn, but never with an invented count.
         assert by_name["gpt-5-mini"].total_params is None
 
-    def test_the_source_line_names_a_cache_model_the_canvas_does_not_draw(self) -> None:
+    def test_the_source_line_delegates_excluded_models_to_the_validity_figure(self) -> None:
         # THE CAPTION MUST NOT CLAIM A SWEEP A FILTER NARROWED. The report hands this adapter
-        # a cache already scoped to `benchmark.yaml`'s enabled set, so a probe-only collection
-        # in `results.csv` never reaches the canvas. That drop is deliberate; a source line
-        # reading "the measured default-arm cells of results.csv" while it happened is not.
+        # a cache already scoped to the inference-valid set (`model_validity.filter_valid`), so
+        # a dominated, unmeasured or collection-only model never reaches the canvas. The
+        # excluded roster is drawn and explained in the model-validity figure, so the source
+        # line points there rather than restating a wall of names.
         from types import SimpleNamespace
 
         from benchmark import config
+        from benchmark.routing import model_validity
         from benchmark.routing.figures import model_grid as adapter
 
-        enabled = set(config.enabled_models())
+        census = model_validity.validity_census()
+        valid = {r.model for r in census if r.valid}
         cache = config.load_results()
-        dropped = sorted({m for per_model in cache.values() for m in per_model} - enabled)
-        assert dropped, "the guard is vacuous with no unenabled model in the cache"
+        dropped = sorted({m for per_model in cache.values() for m in per_model} - valid)
+        assert dropped, "the guard is vacuous with no inference-invalid model in the cache"
         scoped = {
-            cid: {m: arms for m, arms in per_model.items() if m in enabled}
+            cid: {m: arms for m, arms in per_model.items() if m in valid}
             for cid, per_model in cache.items()
         }
-        data = adapter.build(SimpleNamespace(raw=scoped))  # type: ignore[arg-type]
+        data = adapter.build(SimpleNamespace(raw=scoped, validity=census))  # type: ignore[arg-type]
         assert data is not None
         assert {row.name for row in data.rows}.isdisjoint(dropped)
-        for name in dropped:
-            assert name in data.source
-        assert "not enabled in benchmark.yaml" in data.source
+        assert "model-validity figure" in data.source
+        assert "model_validity.png" not in data.source
+        assert "not enabled in benchmark.yaml" not in data.source
 
     def test_the_price_basis_names_the_measured_mix(self) -> None:
         from types import SimpleNamespace
@@ -374,6 +427,22 @@ class TestBenchmarkAdapter:
         assert adapter._external_rows(0.98), "the guard is vacuous with no external rung"
         empty_arm = {"challenge-1": {"deepseek-v4-flash": {}}}
         assert adapter.build(SimpleNamespace(raw=empty_arm)) is None  # type: ignore[arg-type]
+
+
+class TestSourceLine:
+    def test_the_dagger_rides_the_word_not_the_count(self) -> None:
+        # The count and the dagger were separate space-delimited tokens, so a wrap landed
+        # between them and orphaned the glyph ("plus 2 / t out-of-corpus").
+        from benchmark.routing.figures import model_grid as adapter
+
+        line = adapter._source_line(4, 2, None)
+        assert "2 out-of-corpus rung(s) (†)" in line
+        assert "2 † out-of-corpus" not in line
+
+    def test_no_external_rows_means_no_dagger_clause(self) -> None:
+        from benchmark.routing.figures import model_grid as adapter
+
+        assert "out-of-corpus" not in adapter._source_line(4, 0, None)
 
 
 class TestInferenceAdapter:

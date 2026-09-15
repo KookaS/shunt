@@ -11,7 +11,7 @@ figure captions that quote them.
 
 ## What is here
 
-- **`zai-glm-5.3-flash`, 41 trajectories** (2026-08-25 → 2026-08-26). The revealed identity
+- **`glm-5.3-flash`, 41 trajectories** (2026-08-25 → 2026-08-26). The revealed identity
   of the retired `stealth/ox-alpha`, collected during OpenRouter's $0 free window. The model
   is not in `benchmark.yaml`'s enabled set and is not routed by `router.yaml`, so it is not
   part of the six-model escalation study; folding 41 partial-coverage runs into it would have

@@ -36,6 +36,7 @@ from benchmark import plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
 from benchmark.routing import plot_style
 from benchmark.routing.figures import context as ctxmod
+from benchmark.routing.model_universe import canonical_label
 from benchmark.routing.plot_style import RawResults
 
 if TYPE_CHECKING:
@@ -53,6 +54,15 @@ _NONE = "#C62828"
 _MIN_ROW_PITCH_PT: float = 6.0
 _MIN_ROW_LABEL_PT: float = 4.0
 _MAX_ROW_LABEL_PT: float = 7.0
+
+# The tri-state legend hangs a FIXED number of points below the grid, not a fraction of its
+# height. At `-0.30 * height` a taller grid — which a short title band leaves behind — pushed
+# the legend below the canvas on the first layout pass, before constrained layout had settled;
+# the offset must not grow with the grid it sits under. The gap clears the ROTATED column
+# labels AND the axis caption below them: seven two-line labels at 5pt run ~50pt down, so the
+# old 46pt landed the legend on the caption and struck "columns — cheapest → priciest"
+# through. 92pt puts the legend under both.
+_LEGEND_GAP_PT: float = 92.0
 
 SPEC = FigureSpec(
     title="The split count is a LOWER bound on contestable tasks — unsampled cells can only add",
@@ -140,6 +150,10 @@ class Census:
     split: int
     all_pass: int
     none_pass: int
+    # Tasks no sampled column reached at all: they are in the corpus but carry no tri-state
+    # evidence, so the three measured slices sum to n_tasks - n_unmeasured. Shown so the
+    # slices reconcile to the corpus rather than silently dropping a task.
+    n_unmeasured: int
     coverage: np.ndarray
     columns: list[tuple[str, str]]
     grid: np.ndarray
@@ -174,11 +188,13 @@ def build_census(raw: RawResults, columns: list[tuple[str, str]]) -> Census:
             if row is not None:
                 grid[i, j] = 1.0 if row.get("pass") else 0.0
     split = 0
+    unmeasured = 0
     all_rows: list[int] = []
     none_rows: list[int] = []
     for i in range(len(tasks)):
         seen = grid[i, ~np.isnan(grid[i])]
         if seen.size == 0:
+            unmeasured += 1
             continue
         if seen.min() != seen.max():
             split += 1
@@ -193,12 +209,20 @@ def build_census(raw: RawResults, columns: list[tuple[str, str]]) -> Census:
         split=split,
         all_pass=len(all_rows),
         none_pass=len(none_rows),
+        n_unmeasured=unmeasured,
         coverage=np.sum(~np.isnan(grid), axis=0),
         columns=columns,
         grid=grid,
         all_pass_spread=_spread(grid, all_rows),
         none_pass_spread=_spread(grid, none_rows),
     )
+
+
+def legend_anchor_y(axes_height_in: float) -> float:
+    """Axes-fraction y for the legend's top, a fixed point gap below the grid."""
+    if axes_height_in <= 0:
+        return -0.30
+    return -_LEGEND_GAP_PT / (axes_height_in * 72.0)
 
 
 def row_label_step(n_tasks: int, axes_height_in: float) -> tuple[int, float]:
@@ -216,18 +240,25 @@ def _draw_grid(ax: Axes, census: Census, axes_height_in: float) -> None:
         bad=plot_style.TRISTATE_UNSAMPLED
     )
     ax.imshow(census.grid, cmap=cmap, aspect="auto", vmin=0, vmax=1, interpolation="nearest")
-    # No column tick labels. Thirteen (model, arm) names across four inches only fit
-    # rotated, and rotated ticks at 7pt are precisely what made the previous version
-    # unreadable. Panel B names every column, in the same order, at a readable size.
-    ax.set_xticks([])
+    # The seven (model, arm) columns ARE named here, rotated at 5pt: at seven columns they fit
+    # where thirteen would not, and a reader no longer has to carry the ordering across to
+    # panel B to know which column is which.
+    ax.set_xticks(range(census.n_cols))
+    ax.set_xticklabels(
+        [f"{canonical_label(m)}\n{a}" for m, a in census.columns],
+        rotation=90,
+        fontsize=5.0,
+        linespacing=1.0,
+    )
+    ax.tick_params(axis="x", length=0, pad=3.5)
     step, size = row_label_step(census.n_tasks, axes_height_in)
     ticks = list(range(0, census.n_tasks, step))
     ax.set_yticks(ticks)
     ax.set_yticklabels([""] * len(ticks), fontsize=size)
     ax.tick_params(axis="y", length=2, pad=1.5)
     ax.set_ylabel(f"{census.n_tasks} tasks, one row each", fontsize=8)
-    # Below the axes, in the strip the removed tick labels freed — a legend inside the
-    # grid would sit on top of real cells, and every cell here is data.
+    # The legend sits a fixed gap below the grid, not a fraction of its height, so a tall
+    # 500-row slice cannot push it off the canvas (see `_LEGEND_GAP_PT`).
     ax.legend(
         handles=[
             Patch(color=plot_style.TRISTATE_PASS, label="pass"),
@@ -235,12 +266,12 @@ def _draw_grid(ax: Axes, census: Census, axes_height_in: float) -> None:
             Patch(color=plot_style.TRISTATE_UNSAMPLED, label="never sampled"),
         ],
         loc="upper center",
-        bbox_to_anchor=(0.5, -0.005),
+        bbox_to_anchor=(0.5, legend_anchor_y(axes_height_in)),
         ncol=3,
         fontsize=7,
         frameon=False,
     )
-    ax.set_xlabel("columns, cheapest → priciest (named in panel B)", fontsize=8, labelpad=16)
+    ax.set_xlabel("columns, cheapest → priciest", fontsize=8, labelpad=2)
     plot_frame.panel_label(ax, "A · task × (model, arm), tri-state")
 
 
@@ -258,7 +289,7 @@ def _draw_coverage(ax: Axes, census: Census) -> None:
         )
         _ = col
     ax.set_yticks(ys)
-    ax.set_yticklabels([f"{m}\n{a}" for m, a in census.columns], fontsize=6.5)
+    ax.set_yticklabels([f"{canonical_label(m)}\n{a}" for m, a in census.columns], fontsize=6.5)
     ax.set_xlim(0, census.n_tasks * 1.3)
     ax.set_xlabel("tasks this column was measured on", fontsize=9)
     ax.grid(axis="x", color="#eeeeee", lw=0.6)
@@ -271,24 +302,42 @@ def _draw_census(ax: Axes, census: Census) -> None:
         ("not yet contested\n(every sampled column passed)", census.all_pass, _ALL),
         ("SPLIT — contestable", census.split, _SPLIT),
         ("solved by none", census.none_pass, _NONE),
+        ("no column sampled", census.n_unmeasured, "#9E9E9E"),
     ]
+    drawn = [(label, value, colour) for label, value, colour in parts if value > 0]
+    # Lay out the bars first, recording each slice's centre, so the two thin slices at the
+    # top cannot print their two-line labels on top of one another. A label pushed off its
+    # centre gets a thin leader back to the slice it names.
+    bars: list[tuple[str, int, str, float, float]] = []
     bottom = 0.0
-    for label, value, colour in parts:
-        ax.bar(0, value, bottom=bottom, width=0.5, color=colour, zorder=2)
-        ax.text(
-            0.30,
-            bottom + value / 2.0,
+    for label, value, colour in drawn:
+        bars.append((label, value, colour, bottom, bottom + value / 2.0))
+        bottom += value
+    gap = census.n_tasks * 0.09
+    label_y = [centre for *_rest, centre in bars]
+    for i in range(1, len(label_y)):
+        label_y[i] = max(label_y[i], label_y[i - 1] + gap)
+    for (label, value, colour, base, centre), y in zip(bars, label_y, strict=True):
+        ax.bar(0, value, bottom=base, width=0.5, color=colour, zorder=2)
+        ax.annotate(
             f"{label}\n{value} of {census.n_tasks}  ({value / max(census.n_tasks, 1):.0%})",
+            xy=(0.27, centre),
+            xytext=(0.30, y),
+            textcoords="data",
             fontsize=8,
             va="center",
             ha="left",
             color=colour,
+            arrowprops=(
+                {"arrowstyle": "-", "color": colour, "lw": 0.6, "shrinkA": 0.0, "shrinkB": 2.0}
+                if abs(y - centre) > 0.5
+                else None
+            ),
         )
-        bottom += value
     # Wide enough for the longest slice label ("every sampled column passed") to end inside
     # the axes. At 1.55 its closing bracket printed on top of the right spine.
     ax.set_xlim(-0.42, 2.05)
-    ax.set_ylim(0, census.n_tasks * 1.05)
+    ax.set_ylim(0, max(census.n_tasks * 1.05, label_y[-1] + gap * 0.7))
     ax.set_xticks([])
     ax.set_ylabel("tasks", fontsize=9)
     ax.grid(axis="y", color="#eeeeee", lw=0.6)
@@ -303,7 +352,8 @@ def _annotations(census: Census) -> Annotations:
     facts = [
         f"{census.n_tasks} tasks x {census.n_cols} columns, {census.n_sampled} of "
         f"{census.n_tasks * census.n_cols} cells sampled ({census.density:.1%})",
-        f"coverage {lo}/{census.n_tasks} ({lo_col[0]}) to {hi}/{census.n_tasks} ({hi_col[0]})",
+        f"coverage {lo}/{census.n_tasks} ({canonical_label(lo_col[0])}) to "
+        f"{hi}/{census.n_tasks} ({canonical_label(hi_col[0])})",
         f"contestable tasks in [{census.contestable_floor}, {census.contestable_ceiling}] of "
         f"{census.n_tasks} — {census.split} split is a FLOOR, not a ceiling",
     ]
@@ -320,7 +370,8 @@ def _annotations(census: Census) -> Annotations:
         ),
         notes=(
             f"solved by all: {census.all_pass}; split: {census.split}; solved by none: "
-            f"{census.none_pass}",
+            f"{census.none_pass}; no column sampled: {census.n_unmeasured} "
+            f"(the four slices sum to {census.n_tasks})",
             f"all {spread.n_with_unsampled} of {spread.n_rows} solved-by-all tasks still have "
             f"unsampled columns ({spread.lo} to {spread.hi} of {census.n_cols}, median "
             f"{spread.median:.0f}) — any one of them becomes contestable if an unsampled column "

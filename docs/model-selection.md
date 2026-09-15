@@ -24,7 +24,7 @@ actually does. The two strata have their own quality measure and their own front
   Quality is the change in resolve rate against that base on the paired overlap,
   with the exact paired-test p from the ladder evidence.
 
-A single marginal-rate bar would get the pool wrong, and `zai-glm-5.2` is the
+A single marginal-rate bar would get the pool wrong, and `glm-5.2` is the
 working example. On the routine stratum it is dominated: 57.1% at $5.80/Mtok sits
 well below the frontier. A marginal-only rule drops it. But as an escalation rung it
 is a different model — it resolves +0.1548 of the tasks the base failed, a net-helpful
@@ -66,7 +66,7 @@ nothing, so a flat rung — one that neither helps nor measurably hurts — stil
 |:---|---:|---:|---:|:---:|---:|---:|:---|:---|
 | deepseek-v4-flash | 0.42 | 190 | 68.9% | 62.1–75.1 | KEEP | — | — | KEEP |
 | deepseek-v4-pro | 1.30 | 200 | 85.0% | 79.4–89.3 | KEEP | +0.1526 | NET-HELPFUL | KEEP |
-| zai-glm-5.2 | 5.80 | 84 | 57.1% | 46.5–67.2 | DROP | +0.1548 | NET-HELPFUL | KEEP |
+| glm-5.2 | 5.80 | 84 | 57.1% | 46.5–67.2 | DROP | +0.1548 | NET-HELPFUL | KEEP |
 | gemini-3.1-pro | 14.00 | 0 | — | — | — | — | — | UNMEASURED-EXCEPTION |
 | kimi-k3 | 18.00 | 110 | 84.5% | 76.6–90.1 | KEEP | +0.2364 | NET-HELPFUL | KEEP |
 | claude-opus-4-8 | 30.00 | 0 | — | — | — | — | — | UNMEASURED-EXCEPTION |
@@ -96,9 +96,9 @@ the per-rung escalation numbers behind the esc columns are in
 [the ladder-rungs figure](routing.md#fig-ladder-rungs).
 
 This committed pool is also the rule's positive control. The rule must reproduce
-`deepseek-v4-flash` / `deepseek-v4-pro` / `zai-glm-5.2` / `kimi-k3` = KEEP and
+`deepseek-v4-flash` / `deepseek-v4-pro` / `glm-5.2` / `kimi-k3` = KEEP and
 `qwen3.7-plus` / `gpt-5-mini` / `kimi-k2.5` = DROP — and it does, on every run.
-`zai-glm-5.2` is the load-bearing case: dominated on the routine stratum, saved only
+`glm-5.2` is the load-bearing case: dominated on the routine stratum, saved only
 by the escalation one. `deepseek-v4-pro` is the opposite case and the only model in
 the table that clears **both** strata — it is the one row where the two halves of the
 rule agree, which is why it enters the ladder directly above the cheap base.
@@ -106,7 +106,7 @@ rule agree, which is why it enters the ladder directly above the cheap base.
 The rule is deliberately blind to one thing: **redundancy between two KEEP rungs.**
 Each candidate is scored against the cheap base alone, so a rung can keep its slot on
 its own escalation evidence while a cheaper, stronger rung already rescues nearly
-everything it would. That is now the `zai-glm-5.2` situation — on the 49
+everything it would. That is now the `glm-5.2` situation — on the 49
 `deepseek-v4-flash` failures where both ran, it rescues only 4 that `deepseek-v4-pro`
 misses, at 3.3× the cost per rescue. It keeps its slot because redundancy is not the
 test, and changing that is a rule change, not a table edit.
@@ -158,7 +158,7 @@ Read the table with these in hand.
   precisely because of this, but the band is still computed on those marginal rates.
 - **A KEEP is per-stratum.** The escalation bar is the paired ladder verdict on the
   committed corpus, so a model can earn a KEEP on the stratum it serves while being
-  dominated elsewhere — that is the `zai-glm-5.2` case. KEEP means *earns one of the
+  dominated elsewhere — that is the `glm-5.2` case. KEEP means *earns one of the
   two slots*, not *wins both*.
 - **A green SH015 exit is a relative statement, not an attestation of quality.**
   When `results.csv` is absent or empty, every model is `INSUFFICIENT-DATA` and the

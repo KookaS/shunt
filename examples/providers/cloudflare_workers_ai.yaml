@@ -1,0 +1,17 @@
+# shunt-ci: skip
+# Cloudflare Workers AI — the account-scoped OpenAI-compatible endpoint. Set
+# CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID, then paste this into
+# ~/.config/shunt/models.yaml. The account id is templated from the environment
+# (`${CLOUDFLARE_ACCOUNT_ID}`), never written literally. See ../../docs/configuration.md.
+providers:
+  cloudflare_workers_ai:
+    base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
+    api_key_env_var: CLOUDFLARE_API_TOKEN
+    litellm_prefix: openai
+
+models:
+  cf-gpt-oss-120b:
+    model_id: "@cf/openai/gpt-oss-120b"
+    provider: cloudflare_workers_ai
+    supports_streaming: true
+    supports_cache_control: false

@@ -136,7 +136,7 @@ def _unreachable_first_pick(pool: ModelPool, first_pick: str | None, source: str
     if first_pick is None:
         return None
     model = pool.get_model(first_pick)
-    if model is None or not model.api_key_env_var:
+    if model is None or model.key_optional or not model.api_key_env_var:
         return None
     if os.environ.get(model.api_key_env_var, "").strip():
         return None
@@ -160,11 +160,12 @@ def _credentials_check(pool: ModelPool, first_pick: str | None, pick_source: str
         model = pool.get_model(name)
         if model is None:
             continue
-        if model.api_key_env_var:
+        if model.api_key_env_var and not model.key_optional:
             needed.setdefault(model.api_key_env_var, []).append(name)
         else:
-            # A local/ollama-style provider declares no key. Counting it as MISSING made doctor
-            # exit 1 on a working install and print a bare ": MISSING" with no variable name.
+            # A local/ollama-style provider declares no key, and an anonymous free lane declares
+            # one that may be absent. Counting either as MISSING made doctor exit 1 on a working
+            # install and print a bare ": MISSING" with no variable name.
             keyless.append(name)
 
     lines = [f"(no key required): {', '.join(keyless)}"] if keyless else []

@@ -7,6 +7,7 @@ each check, and tests the boundary Layer 1 cannot enforce (motivating Layer 2).
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -121,6 +122,27 @@ class TestRegistered:
     def test_unknown_arm(self, valid_row):
         row = {**valid_row, "reasoning": "witchcraft", "arm_hash": ""}
         assert "registered.unknown_arm" in _rules(auth.verify_rows([row], _NOW))
+
+
+class TestCollectionOnlyRegistered:
+    """Collection-only free ids are legitimately registered; a bogus non-collection id is not."""
+
+    @pytest.fixture(autouse=True)
+    def _overlay(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        overlay = Path(__file__).resolve().parents[1] / "configs" / "free-tier" / "overlay.yaml"
+        monkeypatch.setattr(config, "_pricing", None)
+        monkeypatch.setattr(config, "_free_registry", None)
+        monkeypatch.setattr(config, "_free_registry_path_override", str(overlay))
+
+    @pytest.mark.parametrize("model", ["kimi-k3-explabs", "requesty-gemma-4-31b-it"])
+    def test_collection_only_model_is_registered(self, valid_row, model):
+        # A `-explabs` slug and a directory-style overlay row both pass; neither is in the
+        # shipped registry, so this pins the overlay/collection namespace acceptance.
+        assert auth.errors(auth.verify_rows([{**valid_row, "model": model}], _NOW)) == []
+
+    def test_bogus_non_collection_model_still_flagged(self, valid_row):
+        findings = auth.verify_rows([{**valid_row, "model": "gpt-9-ultra"}], _NOW)
+        assert "registered.unknown_model" in _rules(findings)
 
 
 class TestAnchors:

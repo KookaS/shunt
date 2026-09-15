@@ -214,10 +214,14 @@ class TestEscalation:
 
     def test_safe_fallback_on_the_real_pool_is_the_cheapest_model(self):
         # `_escalate` returns ranked_models()[0] — the cheapest model — when every model
-        # is tested and none qualifies. Over the full registry that is deepseek-v4-flash
-        # ($0.42/M total), the bottom rank.
+        # is tested and none qualifies. The pool is RESTRICTED to the live set: the
+        # unrestricted registry's bottom rank is a $0 promo channel (the `*-explabs` rows),
+        # which no engine pool ever routes over — the registry is narrowed to a live list
+        # before a RouterEngine is built. deepseek-v4-flash ($0.42/M total) is the bottom
+        # rank of the restricted pool.
         rule = SelectionRule()
         pool = ModelPool()
+        pool.restrict_to_live(["deepseek-v4-flash", "gpt-5-mini", "kimi-k3"])
         names = [m.name for m in pool.ranked_models()]
         neighbors = [
             _neighbor(n, outcome=False, cost=1.0, confidence=0.9) for n in names for _ in range(5)

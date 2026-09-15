@@ -14,6 +14,12 @@
         "p_fail_quiet": 0.1014
       },
       {
+        "model": "glm-5.2",
+        "n": 21,
+        "p_fail_fired": 0.7857,
+        "p_fail_quiet": 0.4286
+      },
+      {
         "model": "gpt-5-mini",
         "n": 266,
         "p_fail_fired": 0.53,
@@ -36,12 +42,6 @@
         "n": 51,
         "p_fail_fired": 0.8947,
         "p_fail_quiet": 0.6923
-      },
-      {
-        "model": "zai-glm-5.2",
-        "n": 21,
-        "p_fail_fired": 0.7857,
-        "p_fail_quiet": 0.4286
       }
     ],
     "counting_panels_b_c": "edit_gated",
@@ -65,6 +65,16 @@
         "n_steps_with_check_id": 3995,
         "n_trajectories": 200,
         "terminal_failure_rate": 0.15
+      },
+      {
+        "capture_rate": 1.0,
+        "model": "glm-5.2",
+        "n_failed_steps": 852,
+        "n_stamped": 21,
+        "n_steps": 1438,
+        "n_steps_with_check_id": 852,
+        "n_trajectories": 31,
+        "terminal_failure_rate": 0.6129
       },
       {
         "capture_rate": 1.0,
@@ -105,16 +115,6 @@
         "n_steps_with_check_id": 2262,
         "n_trajectories": 65,
         "terminal_failure_rate": 0.8615
-      },
-      {
-        "capture_rate": 1.0,
-        "model": "zai-glm-5.2",
-        "n_failed_steps": 852,
-        "n_stamped": 21,
-        "n_steps": 1438,
-        "n_steps_with_check_id": 852,
-        "n_trajectories": 31,
-        "terminal_failure_rate": 0.6129
       }
     ],
     "prefix_admission": {
@@ -143,11 +143,11 @@
     "stamped_share_by_model": {
       "deepseek-v4-flash": 0.9265,
       "deepseek-v4-pro": 0.87,
+      "glm-5.2": 0.6774,
       "gpt-5-mini": 0.9366,
       "kimi-k2.5": 0.8919,
       "kimi-k3": 0.9153,
-      "qwen3.7-plus": 0.7846,
-      "zai-glm-5.2": 0.6774
+      "qwen3.7-plus": 0.7846
     },
     "strata": [
       {
@@ -159,21 +159,21 @@
         "models": [
           "deepseek-v4-flash",
           "deepseek-v4-pro",
+          "glm-5.2",
           "gpt-5-mini",
           "kimi-k2.5",
           "kimi-k3",
-          "qwen3.7-plus",
-          "zai-glm-5.2"
+          "qwen3.7-plus"
         ],
         "n_stamped": 917,
         "null_auroc": {
           "beats_null": true,
           "n_permutations": 2000,
           "null_ci95": [
-            0.4631,
+            0.4654,
             0.536
           ],
-          "null_mean": 0.5,
+          "null_mean": 0.4998,
           "null_sd": 0.0183,
           "observed": 0.7312,
           "p_value": 0.0005
@@ -183,7 +183,7 @@
           "n_permutations": 2000,
           "null_ci95": [
             0.5,
-            0.5438
+            0.5432
           ],
           "null_mean": 0.5155,
           "null_sd": 0.0124,
@@ -194,11 +194,11 @@
           "beats_null": true,
           "n_permutations": 2000,
           "null_ci95": [
-            0.4866,
-            0.5501
+            0.4842,
+            0.5524
           ],
-          "null_mean": 0.5187,
-          "null_sd": 0.0166,
+          "null_mean": 0.5191,
+          "null_sd": 0.017,
           "observed": 0.7312,
           "p_value": 0.0005
         },
@@ -528,11 +528,11 @@
       "beats_null": true,
       "n_permutations": 2000,
       "null_ci95": [
-        0.477,
-        0.5435
+        0.4752,
+        0.5423
       ],
-      "null_mean": 0.5088,
-      "null_sd": 0.0173,
+      "null_mean": 0.5086,
+      "null_sd": 0.0175,
       "observed": 0.7821,
       "p_value": 0.0005
     },
@@ -577,9 +577,9 @@
           0.5026
         ],
         "null_mean": 0.5,
-        "null_sd": 0.002,
+        "null_sd": 0.0019,
         "observed": 0.5026,
-        "p_value": 0.2524
+        "p_value": 0.2454
       },
       "null_auroc_familywise": {
         "beats_null": false,
@@ -588,10 +588,10 @@
           0.5,
           0.5498
         ],
-        "null_mean": 0.5173,
-        "null_sd": 0.0137,
+        "null_mean": 0.5172,
+        "null_sd": 0.0136,
         "observed": 0.5026,
-        "p_value": 0.8806
+        "p_value": 0.8866
       },
       "null_auroc_length_stratified": {
         "beats_null": false,
@@ -600,10 +600,10 @@
           0.4979,
           0.5026
         ],
-        "null_mean": 0.5008,
-        "null_sd": 0.0018,
+        "null_mean": 0.5007,
+        "null_sd": 0.0017,
         "observed": 0.5026,
-        "p_value": 0.3988
+        "p_value": 0.3883
       },
       "p_fail_given_fired": 0.3665,
       "p_fail_given_not_fired": 0.0,
@@ -647,10 +647,10 @@
         "beats_null": true,
         "n_permutations": 2000,
         "null_ci95": [
-          0.4631,
+          0.4654,
           0.536
         ],
-        "null_mean": 0.5,
+        "null_mean": 0.4998,
         "null_sd": 0.0183,
         "observed": 0.7312,
         "p_value": 0.0005
@@ -660,7 +660,7 @@
         "n_permutations": 2000,
         "null_ci95": [
           0.5,
-          0.5438
+          0.5432
         ],
         "null_mean": 0.5155,
         "null_sd": 0.0124,
@@ -671,11 +671,11 @@
         "beats_null": true,
         "n_permutations": 2000,
         "null_ci95": [
-          0.4866,
-          0.5501
+          0.4842,
+          0.5524
         ],
-        "null_mean": 0.5187,
-        "null_sd": 0.0166,
+        "null_mean": 0.5191,
+        "null_sd": 0.017,
         "observed": 0.7312,
         "p_value": 0.0005
       },
@@ -1503,7 +1503,7 @@
       ],
       "frontier_after_fail_rate": 0.5667,
       "frontier_models": [
-        "zai-glm-5.2",
+        "glm-5.2",
         "kimi-k3"
       ],
       "n_frontier_after_fail": 60,
@@ -1511,7 +1511,7 @@
       "random_escalate_fire_rate": 0.625,
       "shipped_ladder_visits": [
         "deepseek-v4-pro",
-        "zai-glm-5.2",
+        "glm-5.2",
         "claude-fable-5"
       ],
       "shipped_rank_shortlist": 3
@@ -2014,6 +2014,14 @@
           "input_share": 0.9768,
           "input_share_provenance": "measured"
         },
+        "glm-5.2": {
+          "discount": 0.9,
+          "discount_provenance": "measured",
+          "hit_rate": 0.9,
+          "hit_rate_provenance": "assumed",
+          "input_share": 0.9464,
+          "input_share_provenance": "measured"
+        },
         "gpt-5-mini": {
           "discount": 0.9,
           "discount_provenance": "measured",
@@ -2045,14 +2053,6 @@
           "hit_rate_provenance": "assumed",
           "input_share": 0.946,
           "input_share_provenance": "measured"
-        },
-        "zai-glm-5.2": {
-          "discount": 0.9,
-          "discount_provenance": "measured",
-          "hit_rate": 0.9,
-          "hit_rate_provenance": "assumed",
-          "input_share": 0.9464,
-          "input_share_provenance": "measured"
         }
       },
       "currencies": {
@@ -2062,8 +2062,8 @@
       "join": {
         "join_rate": 1.0,
         "n_joined": 1022,
-        "n_result_rows": 1465,
-        "n_result_rows_with_real_cost": 1465,
+        "n_result_rows": 1601,
+        "n_result_rows_with_real_cost": 1601,
         "n_sessions": 1022
       },
       "source": "benchmark/routing/results.csv real_cost (provider-billed)"

@@ -1054,9 +1054,19 @@ class TestInferenceFigureJob:
                 continue
             assert not any(pkg == p or pkg in p.parents for p in job.inputs), job.name
 
-    def test_its_outputs_are_the_eight_committed_pngs(self) -> None:
+    def test_its_outputs_are_the_measured_eight_plus_the_no_live_overview(self) -> None:
+        """A seed-only corpus publishes the overview AND the eight empty-state layouts.
+
+        A live render publishes the eight and drops the overview, so the overview is the
+        optional output and the measured eight are required (see
+        `_INFERENCE_FIGURES.optional_outputs`).
+        """
         assert self._job.outputs == tuple(sorted(self._job.outputs))
-        assert len(self._job.outputs) == 8
-        assert all(o.startswith("inference_") and o.endswith(".png") for o in self._job.outputs)
+        measured = tuple(o for o in self._job.outputs if o.startswith("inference_"))
+        assert len(measured) == 8
+        assert all(o.endswith(".png") for o in measured)
+        assert "no_live_sessions.png" in self._job.outputs
+        assert set(self._job.required_outputs) == set(measured)
+        assert self._job.optional_outputs == ("no_live_sessions.png",)
         assert self._job.figures_dir.name == "inference"
         assert self._job.stage == pipeline.FIGURES

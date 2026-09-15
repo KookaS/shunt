@@ -121,7 +121,7 @@ def seed_exploration_corpus(store: OutcomeStore) -> None:
     """Write the deterministic verified corpus the exploration knobs read back."""
     # Mirrors tests/e2e/test_exploration.py: 24 Tier-2 sessions split between the two
     # live-pool models, both near the 0.6 success threshold (deepseek 9/12 passes,
-    # zai-glm-5.2 5/12), the pricier at cost 5.0 vs 1.0 — the precondition that lets the
+    # glm-5.2 5/12), the pricier at cost 5.0 vs 1.0 — the precondition that lets the
     # Thompson layer sometimes diverge from the greedy pick and end cold start (>=20
     # effective Tier-2).
     counter = 0
@@ -153,7 +153,7 @@ def seed_exploration_corpus(store: OutcomeStore) -> None:
     for i in range(12):
         add(f"seed-ds-{i}", "deepseek-v4-flash", 1.0, "success" if i < 9 else "failure")
     for i in range(12):
-        add(f"seed-glm-{i}", "zai-glm-5.2", 5.0, "success" if i < 5 else "failure")
+        add(f"seed-glm-{i}", "glm-5.2", 5.0, "success" if i < 5 else "failure")
 
 
 def reset_cold_start_env(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -120,7 +120,7 @@ def _point(rows: dict[str, dict[str, str]], name: str) -> tuple[float, float]:
 
 
 SPEC = FigureSpec(
-    title="Shunt's default matches the frontier baseline's quality at a third of the bill",
+    title="Shunt's default matches the frontier baseline's quality at a quarter of the bill",
     subtitle="",  # every fact on the band is derived; see `_annotations`
     caveat=(
         "Oracle is a hindsight bound, not a setting anyone can buy — and the scored tasks are "
@@ -277,7 +277,7 @@ def _draw(ax: Axes, rows: dict[str, dict[str, str]]) -> None:
     _label(
         ax,
         hero,
-        f"SHUNT (routed)\n{usd(hero[0])} · {hero[1]:.1f}% passed",
+        f"{HERO}\n{usd(hero[0])} · {hero[1]:.1f}% passed",
         (15, -6),
         "left",
         "top",
@@ -287,7 +287,7 @@ def _draw(ax: Axes, rows: dict[str, dict[str, str]]) -> None:
     _label(
         ax,
         baseline,
-        f"Frontier model on everything\n{usd(baseline[0])} · {baseline[1]:.1f}% passed",
+        f"{BASELINE}\n{usd(baseline[0])} · {baseline[1]:.1f}% passed",
         (0, 14),
         "right",
         "bottom",
@@ -297,7 +297,7 @@ def _draw(ax: Axes, rows: dict[str, dict[str, str]]) -> None:
     _label(
         ax,
         cheap,
-        f"Cheap model on everything\n{usd(cheap[0])} · {cheap[1]:.1f}% passed",
+        f"{CHEAP}\n{usd(cheap[0])} · {cheap[1]:.1f}% passed",
         (14, 0),
         "left",
         "center",
@@ -330,7 +330,10 @@ def _annotations(rows: dict[str, dict[str, str]]) -> Annotations:
     share = 100.0 * hero[0] / baseline[0]
     return Annotations(
         subtitle_facts=(
-            f"4 of {len(rows)} scored strategies, {n_tasks} scored tasks",
+            # The four drawn points are three strategies plus the Oracle hindsight bound, so the
+            # old "4 of 12 scored strategies" counted a bound that no router.strategy value can
+            # reproduce. Say the split rather than folding the bound into the strategy count.
+            f"3 strategies + 1 bound of {len(rows)} scored strategies, {n_tasks} scored tasks",
             f"{HERO} {usd(hero[0])} at {hero[1]:.1f}% vs {BASELINE} {usd(baseline[0])} "
             f"at {baseline[1]:.1f}% — {share:.0f}% of the bill",
             "cache-aware cost on a LINEAR axis; the full twelve-strategy plane is "

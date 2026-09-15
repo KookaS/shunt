@@ -47,7 +47,7 @@ from tests.e2e.helpers import (
 from tests.fake_embedder import FakeEmbedder
 
 _CHEAP: Final[str] = "deepseek-v4-flash"
-_MID: Final[str] = "zai-glm-5.2"
+_MID: Final[str] = "glm-5.2"
 _PROMPT: Final[str] = "Fix the build"
 _RNG_SEED: Final[int] = 15
 # The REAL numpy factory, captured before the test pins the module attribute — the pin
@@ -66,7 +66,7 @@ def _pinned_default_rng(*args: int) -> np.random.Generator:
 def _seed_corpus(store: OutcomeStore, embedder: FakeEmbedder) -> None:
     """Write the deterministic verified corpus the kNN neighbourhood reads back."""
     # 24 Tier-2 sessions split between the two models, both near the 0.6 success
-    # threshold (deepseek 9/12 passes, zai-glm-5.2 5/12), the pricier at cost 5.0 vs 1.0.
+    # threshold (deepseek 9/12 passes, glm-5.2 5/12), the pricier at cost 5.0 vs 1.0.
     # This is what lets the Thompson layer sometimes diverge from the greedy pick —
     # and it is the precondition exploration needs: cold-start ends at >= 20 effective
     # Tier-2 outcomes, so the engine reaches the exploration branch at all.

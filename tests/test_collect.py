@@ -55,7 +55,7 @@ class TestPhaseModels:
         assert collect.frontier_models(include_high=False) == ["kimi-k3"]
 
     def test_include_high_adds_the_high_tier(self):
-        assert collect.frontier_models(include_high=True) == ["kimi-k3", "zai-glm-5.2"]
+        assert collect.frontier_models(include_high=True) == ["kimi-k3", "glm-5.2"]
 
 
 class TestDeriveStrata:

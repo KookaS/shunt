@@ -51,8 +51,10 @@ _ENDPOINTS: Final[dict[str, str]] = {
 _PER_TOKEN_TO_PER_1M: Final[float] = 1_000_000.0
 
 
-def _fetch(url: str) -> Any:
-    request = urllib.request.Request(url, headers={"User-Agent": _UA})  # noqa: S310
+def _fetch(url: str, headers: dict[str, str] | None = None) -> Any:
+    """GET a JSON catalogue. `headers` are extra request headers; None is UA-only (unchanged)."""
+    request_headers = {"User-Agent": _UA, **(headers or {})}
+    request = urllib.request.Request(url, headers=request_headers)  # noqa: S310
     with urllib.request.urlopen(request, timeout=_TIMEOUT) as response:  # noqa: S310
         return json.loads(response.read())
 

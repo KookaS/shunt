@@ -1,0 +1,113 @@
+# Free-tier harvesting campaign config — $0 runs only.
+#
+# Usage:
+#   uv run python -m benchmark.runner.run_matrix \
+#     --config configs/free-tier/benchmark.yaml --strategy full --live \
+#     --free-registry configs/free-tier/overlay.yaml \
+#     --extra-models <overlay-id,...> --require-zero-cost
+#
+# `models:` is EMPTY BY DESIGN. Overlay rows are collection-only and
+# `config.enabled_models()` REFUSES any of them (the HARD WALL), so the free
+# lanes arrive solely through `--extra-models`. Enabling one here would leak it
+# into `capability_rank`, the pareto axes, the kill gate and the live pool.
+
+models: []
+
+paths:
+  challenges: routing/data/challenges.json
+  results_csv: routing/results_free.csv   # the free corpus, physically separate
+  challenge_store: challenges
+
+live:
+  step_limit: 150
+  # TRAP: `cost_limit: 0` DISABLES the scaffold cap, it does not cap at $0.
+  # mini-swe-agent's DefaultAgent.query (agents/default.py) is
+  #   `if 0 < self.config.step_limit <= self.n_calls or 0 < self.config.cost_limit <= self.cost`
+  # so a 0 limit never trips. A tiny POSITIVE cap is the interlock: a billed lane
+  # aborts the cell almost immediately, and the soft failure trips
+  # --max-consecutive-failures. Never set this to 0.
+  cost_limit: 0.01
+
+# Per-lane admission control for the free campaign. Each model is a lane (a cell is
+# (challenge, model, arm)), so `limits` names overlay channel ids and `unknown_limits`
+# covers any lane not listed. A lane's per-cell reservation is its own measured
+# p90(calls); the day bucket is persisted so a restart does not reset it. Absent this
+# block the runner builds no scheduler and behaviour is unchanged.
+lanes:
+  # A provider that publishes no limits is admitted at these conservative defaults,
+  # never an invented per-lane number (10 RPM / 100 RPD).
+  unknown_limits:
+    rpm: 10
+    rpd: 100
+  # Bound the blocked-lane stall, after which the batch yields and its cells stay MISSING
+  # for the next run.
+  stall_timeout_s: 900
+  limits:
+    # Groq's standing free plan: 30 RPM / 1,000 RPD (values VERIFIED).
+    groq-gpt-oss-120b:
+      rpm: 30
+      rpd: 1000
+    # OpenRouter's free tier: 20 RPM / 1,000 RPD (values VERIFIED).
+    openrouter-laguna-s-2.1-free:
+      rpm: 20
+      rpd: 1000
+    # Kilo anonymous free access: 200 requests/hour per IP (docs). ~3 RPM / 4,800 RPD.
+    kilo-step-3.7-flash-free:
+      rpm: 3
+      rpd: 4800
+    kilo-laguna-s-2.1-free:
+      rpm: 3
+      rpd: 4800
+
+benchmark:
+  seed: 42
+  sample_size: 3
+
+# Cross-provider concordance — the named cross-provider measurement. Dedupe by identity
+# stays the default (an extra whose `version` another channel already covers is skipped);
+# ONLY these channels are exempt, so one identity served by three providers yields one row
+# per channel at each named challenge (3 identities x 20 challenges x 3 providers = 180
+# cells). The channels were chosen because the overlay lists each identity under EXACTLY
+# three providers on different serving stacks (quantisation / templating / sampling) —
+# requesty/openrouter/sambanova, groq/sambanova/cloudflare, openrouter/vercel/kilo — which
+# is the comparison the measurement is about. Challenges are the first 20 of the campaign's
+# canonical nested order, round-robin across repositories.
+concordance:
+  fanout_cap: 3
+  challenges:
+    - astropy__astropy-14995
+    - django__django-10880
+    - matplotlib__matplotlib-25122
+    - mwaskom__seaborn-3187
+    - pallets__flask-5014
+    - psf__requests-1142
+    - pydata__xarray-4356
+    - pylint-dev__pylint-6903
+    - pytest-dev__pytest-7205
+    - scikit-learn__scikit-learn-14496
+    - sphinx-doc__sphinx-8621
+    - sympy__sympy-22714
+    - astropy__astropy-13453
+    - django__django-15563
+    - matplotlib__matplotlib-20826
+    - mwaskom__seaborn-3069
+    - psf__requests-6028
+    - pydata__xarray-3151
+    - pylint-dev__pylint-4604
+    - pytest-dev__pytest-7324
+  subset:
+    - identity: google/gemma-4-31b-it
+      channels:
+        - requesty-gemma-4-31b-it
+        - openrouter-gemma-4-31b-it-free
+        - sambanova-gemma-4-31b-it
+    - identity: openai/gpt-oss-120b
+      channels:
+        - groq-gpt-oss-120b
+        - sambanova-gpt-oss-120b
+        - cf-gpt-oss-120b
+    - identity: poolside/laguna-s-2.1
+      channels:
+        - openrouter-laguna-s-2.1-free
+        - vercel-laguna-s-2.1-free
+        - kilo-laguna-s-2.1-free

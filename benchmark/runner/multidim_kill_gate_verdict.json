@@ -22,7 +22,7 @@
     }
   ],
   "blockers": [
-    "coverage floor tripped in the offline gate (floor 0.9, control 0.5163043478260869, router 0.8369565217391305)"
+    "coverage floor tripped in the offline gate (floor 0.9, control 0.5, router 1.0)"
   ],
   "comparisons": [
     {
@@ -108,7 +108,7 @@
   "provisional_reason": "vs Always-Frontier: worse on sessions_mean, sessions_p95, cost_cv; vs Price-Cascade: worse on TotalCost_cacheaware, sessions_mean, sessions_p95",
   "provisional_verdict": "FAIL",
   "quality_margin_pp": 5.0,
-  "reason": "not adjudicable: coverage floor tripped in the offline gate (floor 0.9, control 0.5163043478260869, router 0.8369565217391305)",
+  "reason": "not adjudicable: coverage floor tripped in the offline gate (floor 0.9, control 0.5, router 1.0)",
   "router_arm": "kNN-semantic-cascade",
   "verdict": "UNTESTED"
 }

@@ -183,7 +183,9 @@ def _tier_cost_ceilings(results_path: Path) -> dict[str, float]:
                     cost = float(row.get("real_cost") or 0.0)
                 except ValueError:
                     continue
-                per_model.setdefault(str(row.get("model") or ""), []).append(cost)
+                per_model.setdefault(str(row.get("lane") or row.get("model") or ""), []).append(
+                    cost
+                )
     return {m: max(v) for m, v in per_model.items() if v}
 
 

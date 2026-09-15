@@ -14,7 +14,7 @@ models:                 # enabled models; a name must exist in the registry.
   - qwen3.7-plus
   - gpt-5-mini
   - kimi-k2.5
-  - zai-glm-5.2
+  - glm-5.2
   - kimi-k3
 
 strategies:
@@ -126,7 +126,7 @@ arm_sampling:
   # the comparison it protects is the one the triage frontier reads; lifting it would
   # buy arm coverage nobody has asked for. Their default arm is already the high-
   # reasoning one; other models still explore.
-  default_only_models: [zai-glm-5.2, kimi-k3, deepseek-v4-pro]
+  default_only_models: [glm-5.2, kimi-k3, deepseek-v4-pro]
 
 # Per-model REPLICATE depth: how many independent observations of each of a model's cells to
 # collect. Rep 0 is the canonical observation the scoring path reads; reps 1..R-1 are audit

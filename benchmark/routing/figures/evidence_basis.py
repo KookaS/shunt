@@ -133,6 +133,18 @@ def _draw_split(  # noqa: PLR0913 (one argument per drawn channel plus the share
     # panel A empty — nothing is plotted past $96 on an axis that ran to $200.
     ax.set_xlim(0, top * 1.42)
     ax.set_xlabel(label, fontsize=9)
+    # The two channels stacked in every bar, keyed on the panel itself: the strategy rows
+    # carry no legend and the blue/orange split is otherwise unexplained on A and B.
+    ax.legend(
+        handles=[
+            Patch(color=_MEASURED, label="measured"),
+            Patch(color=_IMPUTED, label="imputed (near-exclusively a pass)"),
+        ],
+        fontsize=7,
+        loc="lower right",
+        frameon=True,
+        framealpha=0.9,
+    )
     ax.grid(axis="x", color="#eeeeee", lw=0.6)
     ax.set_axisbelow(True)
 
@@ -151,7 +163,7 @@ def _draw_bands(ax: Axes, rows: list[dict]) -> None:
         ax.text(
             total * 1.03,
             y,
-            f"{real} real / {imputed} imp. / {unknown} unk.{flag}",
+            f"{real} / {imputed} / {unknown}{flag}",
             fontsize=7,
             va="center",
             color="#B71C1C" if imputed > real else "#333333",
@@ -161,7 +173,7 @@ def _draw_bands(ax: Axes, rows: list[dict]) -> None:
     top = max((int(r["real"]) + int(r["imputed"]) + int(r["unknown"]) for r in rows), default=1)
     # Same rule as the split panels: tight on the data, widened by measurement below.
     ax.set_xlim(0, top * 2.15)
-    ax.set_xlabel("cells in the band", fontsize=9)
+    ax.set_xlabel("cells in the band (real / imputed / unknown)", fontsize=9)
     ax.legend(
         handles=[
             Patch(color=_MEASURED, label="real"),
@@ -179,7 +191,7 @@ def _draw_bands(ax: Axes, rows: list[dict]) -> None:
     # wide this panel will be, so it cannot be shrunk to fit: when an eighth strategy row
     # widened panel A's category labels, the two narrower panels lost ~20px each and the
     # old 51-character label ran off the canvas, failing the strict layout audit.
-    plot_frame.panel_label(ax, "C · per band — where the fill concentrates")
+    plot_frame.panel_label(ax, "C · per band — fill concentration")
 
 
 def filled_outcomes(completed: dict) -> tuple[int, int]:

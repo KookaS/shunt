@@ -200,7 +200,7 @@ check-figures:
 # plot_style are), so inference-figure edits do not re-stale the routing/escalation figures.
 
 # The inference family: the LIVE ROUTER measured on its own outcome store, drawn by shipped
-# code under src/shunt/inspect/inference/ (the rig container renders the same seven with
+# code under src/shunt/inspect/inference/ (the rig container renders the same eight with
 # `python -m shunt.inspect.inference`, having no benchmark/ of its own). Two modes, and the
 # difference is the DATABASE, not the code:
 #
@@ -209,7 +209,7 @@ check-figures:
 #                                          seed-only docs corpus — deterministic, no network,
 #                                          no live rig — and the ONLY mode that may touch the
 #                                          committed manifest.
-#   make inference-figures OUT=/tmp/x      the same seven from whatever SHUNT_DATA_DIR points
+#   make inference-figures OUT=/tmp/x      the same eight from whatever SHUNT_DATA_DIR points
 #                                          at (seed + live rows), into /tmp/x, with the
 #                                          manifest diverted to /tmp/figures.json. Never
 #                                          touches the committed set.
@@ -225,7 +225,7 @@ inference-figures:
 check-inference-figures:
 	$(BENCH) benchmark.pipeline --check-figures --half inference $(ARGS)
 
-# The DEMO half: the same seven drawings over `benchmark/routing/demo_corpus.py`, a synthetic
+# The DEMO half: the same eight drawings over `benchmark/routing/demo_corpus.py`, a synthetic
 # corpus of 703 sessions (300 drawn from 40 measured atoms, 153 invented, 250 seeded). It exists
 # so `docs/inference-demo.md` can show what a populated panel looks like; NOTHING it draws is a
 # measurement, and every canvas is stamped `SYNTHETIC — NOT MEASURED` by the renderer rather than

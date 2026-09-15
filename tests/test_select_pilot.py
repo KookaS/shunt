@@ -10,17 +10,17 @@ def _r(**passes: bool) -> dict:
 class TestPriceBands:
     def test_bands_split_enabled_pool_into_thirds(self) -> None:
         # 7 enabled models, price ascending: deepseek-v4-flash, deepseek-v4-pro, qwen,
-        # gpt-5-mini, kimi-k2.5, zai-glm, kimi-k3 → cheap {deepseek-v4-flash,
+        # gpt-5-mini, kimi-k2.5, glm, kimi-k3 → cheap {deepseek-v4-flash,
         # deepseek-v4-pro}, mid {qwen, gpt-5-mini, kimi-k2.5}, escalation
-        # {zai-glm, kimi-k3}. deepseek-v4-pro joined the pool 2026-09-04 and prices into
+        # {glm, kimi-k3}. deepseek-v4-pro joined the pool 2026-09-04 and prices into
         # the cheap tercile, which pushed qwen3.7-plus up into mid.
         cheap, mid, escalation = _price_bands()
         assert cheap == {"deepseek-v4-flash", "deepseek-v4-pro"}
         assert mid == {"qwen3.7-plus", "gpt-5-mini", "kimi-k2.5"}
-        assert escalation == {"zai-glm-5.2", "kimi-k3"}
+        assert escalation == {"glm-5.2", "kimi-k3"}
 
     def test_escalation_band_is_the_top_price_tercile(self) -> None:
-        assert _escalation_models() == {"zai-glm-5.2", "kimi-k3"}
+        assert _escalation_models() == {"glm-5.2", "kimi-k3"}
 
     def test_buckets_are_disjoint_and_cover_the_enabled_pool(self) -> None:
         cheap, mid, escalation = _price_bands()
@@ -35,7 +35,7 @@ class TestPriceBands:
             "gpt-5-mini",
             "kimi-k2.5",
             "kimi-k3",
-            "zai-glm-5.2",
+            "glm-5.2",
         }
 
 
@@ -48,7 +48,7 @@ class TestClassifyPattern:
                 "gpt-5-mini": False,
                 "kimi-k2.5": False,
                 "kimi-k3": False,
-                "zai-glm-5.2": True,
+                "glm-5.2": True,
             }
         )
         assert classify_pattern("task-1", results) == "frontier-only"
@@ -61,7 +61,7 @@ class TestClassifyPattern:
                 "gpt-5-mini": False,
                 "kimi-k2.5": False,
                 "kimi-k3": False,
-                "zai-glm-5.2": False,
+                "glm-5.2": False,
             }
         )
         assert classify_pattern("task-1", results) == "other"

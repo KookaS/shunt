@@ -112,7 +112,7 @@ def _doc_per_model_rows() -> dict[str, tuple[int, int, int, float]]:
     rows: dict[str, tuple[int, int, int, float]] = {}
     for line in _doc_text().splitlines():
         m = re.fullmatch(
-            r"\|\s*([a-z0-9.\-]+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([\d.]+)\s*\|",
+            r"\|\s*([a-z0-9._\-]+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([\d.]+)\s*\|",
             line.strip(),
         )
         if m:

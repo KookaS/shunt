@@ -1,0 +1,16 @@
+# shunt-ci: probe
+# OpenCode Zen — OpenCode's own gateway; the `-free` ids are the free subset.
+# Set OPENCODE_API_KEY, then paste this into ~/.config/shunt/models.yaml.
+# See ../../docs/configuration.md.
+providers:
+  opencode_zen:
+    base_url: https://opencode.ai/zen/v1
+    api_key_env_var: OPENCODE_API_KEY
+    litellm_prefix: openai
+
+models:
+  opencode-deepseek-v4-flash-free:
+    model_id: deepseek-v4-flash-free
+    provider: opencode_zen
+    supports_streaming: true
+    supports_cache_control: false

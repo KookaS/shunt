@@ -23,6 +23,8 @@ from benchmark.routing import (
     figures,
     impute,
     metrics,
+    model_catalog,
+    model_validity,
     plot_style,
     repricing,
     selection_guard,
@@ -38,9 +40,12 @@ from benchmark.routing.figures import kill_gate as fig_kill_gate
 from benchmark.routing.figures import ladder_rungs as fig_ladder
 from benchmark.routing.figures import live_gap as fig_live_gap
 from benchmark.routing.figures import model_grid as fig_model_grid
+from benchmark.routing.figures import model_relevance as fig_relevance
+from benchmark.routing.figures import model_validity as fig_validity
 from benchmark.routing.figures import oracle_gap as fig_oracle
 from benchmark.routing.figures import pareto_dimensions as fig_pareto_dims
 from benchmark.routing.figures import task_difficulty as fig_difficulty
+from benchmark.routing.figures import universe as fig_universe
 from benchmark.routing.impute import ImputedMatrix
 from benchmark.routing.metrics import _reward, compute_cost_decomposition
 from benchmark.routing.plot_style import RawResults, row_real_cost, usd
@@ -1008,7 +1013,7 @@ def _load_raw_results() -> RawResults | None:
 def _only_enabled_models(raw: RawResults) -> RawResults:
     """Drop cells for models outside benchmark.yaml's enabled set."""
     # results.csv legitimately carries cells for models the benchmark does not evaluate — a
-    # probe-only collection such as zai-glm-5.3-flash's free window. The arm plots and the
+    # probe-only collection such as glm-5.3-flash's free window. The arm plots and the
     # Arm-oracle / Arm-bandit strategies read this cache directly, so without this filter such
     # a model becomes an extra complementarity column and a rung those strategies can pick,
     # scoring them on a model the router cannot serve and the benchmark never enabled. Every
@@ -1256,6 +1261,18 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     print()
 
     raw_results = _load_raw_results()
+    # ONE validity census for the whole report. The model-display figures draw only the
+    # inference-valid models (the predicate lives in benchmark.routing.model_validity); the
+    # strategy figures keep the full enabled matrix, because the strategy is their subject,
+    # not the model roster. The census is computed once and shared through the context.
+    validity_evidence = model_validity.gather_evidence()
+    validity = model_validity.validity_census(validity_evidence)
+    # The canonical catalogue is a generated report (reports/, gitignored), written from the
+    # SAME in-memory census the model figures draw, so the CSV and the canvases cannot disagree.
+    catalog = model_catalog.catalog_rows(validity_evidence)
+    print(f"  Model catalog : {model_catalog.write_catalog(out_dir, catalog)}")
+    if raw_results is not None:
+        raw_results = model_validity.filter_valid(raw_results, validity_evidence)
     matrix_for_plots = matrix
 
     # Complete the matrix ONCE and keep the completed copy: the measured-vs-projected
@@ -1286,12 +1303,21 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
         banner=banner,
         by_strategy=by_strategy,
         repriced_totals=repriced_totals,
+        validity=validity,
     )
 
     _step("Kill gate", fig_kill_gate.render(ctx) or "skipped (no paired arm)")
     _step("Ladder rungs", fig_ladder.render(ctx) or "skipped (no priced target)")
     _step("Cost/quality", fig_frontier.render(ctx) or "skipped (no cost)")
     _step("Pareto dimensions", fig_pareto_dims.render(ctx) or "skipped (no live row)")
+    _step("Model validity", fig_validity.render(ctx) or "skipped (no evidenced model)")
+    _step("Model relevance", fig_relevance.render(ctx) or "skipped (no evidenced model)")
+    _step("Universe coverage", fig_universe.render_coverage(ctx) or "skipped (no evidenced model)")
+    _step(
+        "Universe economics",
+        fig_universe.render_economics(ctx) or "skipped (no measured model)",
+    )
+    _step("Invalid models", fig_universe.render_invalid(ctx) or "skipped (no invalid model)")
     _step("Model grid", fig_model_grid.render(ctx) or "skipped (no measured model)")
     _step("Live gap", fig_live_gap.render(ctx) or "skipped (no bound row)")
     _step("Cache econ", fig_cache.render(ctx) or "skipped (no priced row)")

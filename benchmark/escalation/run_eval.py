@@ -1178,6 +1178,10 @@ def _draw_corpus(
         _stratified(report),
         _admission_panel(report),
         list(axes.flat),
+        # Panels A/B are model-facing, so they draw the inference-valid identities only; C/D
+        # are corpus-level and stay over the full sampled corpus so their measured AUROC and
+        # admission numbers are not silently recomputed on a narrower set.
+        valid_only=True,
     )
     plot_frame.save(
         fig,

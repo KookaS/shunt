@@ -227,7 +227,41 @@ def _build_arg_parser(
         default=cascade_p.get("max_tries", 3),
         help="Max models to try in the kNN-semantic-cascade (within-task) shortlist",
     )
+    ap.add_argument(
+        "--include-free-corpus",
+        action="store_true",
+        help="Exploratory view: merge the physically separate free corpus "
+        "(configs/free-tier/benchmark.yaml paths.results_csv) into the evaluation matrix. "
+        "A no-op with a clear message when that corpus is absent; the paid corpus remains "
+        "the pre-registered instrument.",
+    )
     return ap
+
+
+def _merge_free_corpus(matrix: dict, free_path: Path) -> tuple[int, int]:
+    """Merge the free corpus into *matrix*'s results; ``(new cells, new challenges)``.
+
+    Free channel ids are collection-only and never enabled, so they never enter a strategy's
+    pool — this widens the coverage view, not the model set. Absent/empty corpus → ``(0, 0)``.
+    """
+    if not free_path.exists():
+        return (0, 0)
+    free = config.load_results(free_path)
+    if not free:
+        return (0, 0)
+    flat = config.flatten_default_arm(free)
+    new_cells = 0
+    new_challenges = 0
+    results = matrix.setdefault("results", {})
+    for challenge_id, models in flat.items():
+        if challenge_id not in results:
+            new_challenges += 1
+        per_challenge = results.setdefault(challenge_id, {})
+        for model, row in models.items():
+            if model not in per_challenge:
+                new_cells += 1
+            per_challenge[model] = row
+    return (new_cells, new_challenges)
 
 
 def _print_effective_sample(tasks: list[str]) -> None:
@@ -535,6 +569,19 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     matrix_path = Path(args.matrix) if args.matrix else config.challenges_path()
     matrix = load_matrix(matrix_path)
+    if args.include_free_corpus:
+        free_path = config.free_results_csv_path()
+        added, new_challenges = _merge_free_corpus(matrix, free_path)
+        if added == 0 and new_challenges == 0:
+            print(
+                f"  --include-free-corpus: no free corpus at {free_path} — evaluating the "
+                "paid corpus only."
+            )
+        else:
+            print(
+                f"  --include-free-corpus: merged {added} free cell(s) across "
+                f"{new_challenges} new challenge(s) from {free_path}."
+            )
     tasks = sorted(matrix["results"].keys())
     tasks = config.sample_tasks(tasks, seed=args.seed)
     strategies = get_strategies(

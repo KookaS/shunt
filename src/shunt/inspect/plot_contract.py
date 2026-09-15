@@ -13,9 +13,12 @@
 # sync with a figure set that is about to change.
 #
 # WHAT IT CANNOT SEE, stated so nobody reads a pass as more than it is:
-#   * text-over-text INSIDE the axes (annotation labels colliding with each other or
-#     with data marks). An all-pairs check is O(n^2) on a 500-point scatter and
-#     false-positives wherever near-overlap is intentional.
+#   * text-over-text INSIDE the axes is checked only for a figure that opts in through
+#     `request_annotation_audit`. An all-pairs check is O(n^2) on a 500-point scatter and
+#     false-positives wherever near-overlap is intentional, so it is off by default; an
+#     opted-in figure (model_grid) fails the render on a real collision.
+#   * text-over-MARKER is still not checked: a direct label is deliberately placed near its
+#     own mark, so an unpadded text-vs-marker test would fire on every well-formed panel.
 #   * a legend covering data — same reason, and it fights matplotlib's own solver.
 #   * an artist with clip_on=True: it is excluded from get_tightbbox, so a label that
 #     was drawn but clipped to invisibility passes here.
@@ -31,18 +34,25 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, cast
 
 from matplotlib.table import Table
+from matplotlib.text import Text
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.backend_bases import RendererBase
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
-    from matplotlib.text import Text
     from matplotlib.transforms import BboxBase
 
 # Sub-pixel slack: matplotlib rounds device coordinates, and an artist sitting
 # exactly on a boundary is not a defect.
 _TOL_PX: Final[float] = 1.0
+
+# The figure attribute `request_annotation_audit` sets. Kept as a private constant so the
+# opt-in is one greppable name rather than a string spelled at two call sites.
+_ANNOTATION_AUDIT_ATTR: Final[str] = "_shunt_annotation_audit"
+# How much two direct labels must overlap (in both x and y) before it is a collision, not
+# two labels that merely share an edge. A pixel of rounding is not overprinting.
+_ANNOT_MIN_OVERLAP_PX: Final[float] = 1.0
 
 
 @dataclass(frozen=True)
@@ -128,6 +138,50 @@ def _audit_text_over_axes(fig: Figure, renderer: RendererBase) -> list[Violation
     return out
 
 
+def request_annotation_audit(fig: Figure) -> None:
+    """Opt a figure into the in-axes annotation-collision pass, run by `audit`.
+
+    Off by default: a legitimate dense panel can place labels a pixel apart on purpose, and
+    an all-pairs check would fail it. A figure whose direct labels MUST stay readable asks
+    for the check here. `plot_frame.save` runs `audit` under ``SHUNT_PLOT_STRICT=1`` (the test
+    suite and `make benchmark-figures`), so an opted-in collision fails the render rather than
+    shipping. Scope: text-over-text only — see the module header for why markers are excluded.
+    """
+    setattr(fig, _ANNOTATION_AUDIT_ATTR, True)
+
+
+def _text_extent(text: Text, renderer: RendererBase) -> BboxBase:
+    """A label's TEXT box, excluding an annotation's leader line.
+
+    `Annotation.get_window_extent` unions in its arrow, so two labels whose leaders happen to
+    cross would read as text-over-text. The base `Text` method measures the glyphs alone,
+    which is the collision a reader can actually see.
+    """
+    return Text.get_window_extent(text, renderer)
+
+
+def _annotation_overlaps(fig: Figure, renderer: RendererBase) -> list[Violation]:
+    """Direct labels inside one axes must not print on each other (opt-in, see above)."""
+    out: list[Violation] = []
+    for ax in fig.axes:
+        texts = [t for t in ax.texts if t.get_visible() and t.get_text()]
+        for index, first in enumerate(texts):
+            for second in texts[index + 1 :]:
+                if _intersects(
+                    _text_extent(first, renderer),
+                    _text_extent(second, renderer),
+                    tol=_ANNOT_MIN_OVERLAP_PX,
+                ):
+                    out.append(
+                        Violation(
+                            "annotation_overlap",
+                            f"{_snip(first.get_text())} overlaps "
+                            f"{_snip(second.get_text())} in axes {_label(ax)!r}",
+                        )
+                    )
+    return out
+
+
 def _audit_tables(fig: Figure, renderer: RendererBase) -> list[Violation]:
     """A table scaled past its axes is not clipped by matplotlib — it just overflows."""
     out: list[Violation] = []
@@ -195,6 +249,8 @@ def audit(fig: Figure, *, band_top_px: float | None = None) -> list[Violation]:
         violations += _audit_text_over_axes(fig, renderer)
     violations += _audit_tables(fig, renderer)
     violations += _audit_tick_labels(fig, renderer, canvas)
+    if getattr(fig, _ANNOTATION_AUDIT_ATTR, False):
+        violations += _annotation_overlaps(fig, renderer)
     return violations
 
 

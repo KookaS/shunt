@@ -1,0 +1,16 @@
+# shunt-ci: probe
+# SambaNova — free developer tier on an OpenAI-compatible API. Set
+# SAMBANOVA_API_KEY, then paste this into ~/.config/shunt/models.yaml.
+# See ../../docs/configuration.md.
+providers:
+  sambanova:
+    base_url: https://api.sambanova.ai/v1
+    api_key_env_var: SAMBANOVA_API_KEY
+    litellm_prefix: openai
+
+models:
+  sambanova-gpt-oss-120b:
+    model_id: gpt-oss-120b
+    provider: sambanova
+    supports_streaming: true
+    supports_cache_control: false

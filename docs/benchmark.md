@@ -39,7 +39,9 @@ tasks and would bias the baseline (see [the kill-gate and partial-coverage limit
 The live benchmark uses **SWE-bench Verified** — real GitHub bug-fix tasks
 with human-verified test sets (500 instances across 12 Python repositories). A second
 store, **SWE-bench Multimodal** (102 instances in multiple languages), is committed
-but not wired to live runs. Each task is a minimal spec under
+but not wired to live runs; its cells are gated per model — a collector refuses to
+schedule a multimodal cell for a model that has not first collected the whole Verified
+text corpus (default threshold 100%). Each task is a minimal spec under
 `benchmark/challenges/<source>/{instance_id}.json` carrying the upstream
 `repo`, `base_commit`, `version`, `FAIL_TO_PASS` / `PASS_TO_PASS` test sets, a
 `difficulty_stratum`, an `image_ref`, and a pinned `dataset_revision`. Repo and
@@ -72,7 +74,7 @@ cache-read/write rate in the model registry (`src/shunt/config/models.yaml`). Li
 | qwen3.7-plus | 0.32 | 1.28 |
 | gpt-5-mini | 0.25 | 2.00 |
 | kimi-k2.5 | 0.60 | 3.00 |
-| zai-glm-5.2 | 1.40 | 4.40 |
+| glm-5.2 | 1.40 | 4.40 |
 | kimi-k3 | 3.00 | 15.00 |
 
 Spread: ~21x input, ~54x output between the cheapest and the frontier model.
@@ -125,7 +127,9 @@ It composes six existing stages in order and prints one consolidated summary:
    is invalid, out of balance, or the provider is down, before any Docker container is
    created; a transient blip does not refuse. That probe covers exactly **one** model — the
    cheapest enabled one — and so does the serving check below; the other enabled models are not
-   probed. When *that* model's `base_url` is served locally, the preflight additionally asserts
+   probed. When the config enables no models at all and the run collects `--extra-models`
+   ids only, the probe targets the first extra id instead — that id's own credential is the
+   meaningful live guard for such a collection. When *that* model's `base_url` is served locally, the preflight additionally asserts
    its **resolved serving configuration**: the inference server's own command line is read and
    recorded, matched to the endpoint by the port the process itself binds and identified by its
    executable name (argv[0]'s basename — a wrapper script, a `grep`, or a path that merely
@@ -305,13 +309,30 @@ provenance strings (`provider`, `serving_mode`, `provider_latency_source`). A bl
 means 0; every other blank means **MISSING, never zero**, and aggregating one raises rather
 than defaulting.
 
-**None of the optional measurement or provenance columns carries a value today.** The
+Two further audit columns, `channel` and `channel_source`, record each row's **observed**
+billing: `paid` when the provider billed it (`real_cost > 0`), `free` when its evidence is a
+declared `$0` window, the free corpus, or a `billing: free` listing, and blank when unobserved
+(`calls == 0`) or unsupported. These are distinct from the listing's **entitlement** — the
+`billing: free|paid` field on every registry/overlay row — which is what the model-validity
+census reads, so a promotional window never flips an identity's channel. The two views may
+disagree in the promo direction (a free listing that billed, or a paid listing collected in a
+`$0` window), and that disagreement is the accounting evidence; `SH019` keeps the columns
+coherent. See the design notes' "Billing entitlement vs observed channel".
+
+**The optional measurement and provenance columns are populated only on live cells.** The
 schema was widened backward-compatibly so `wall_clock_s`, `latency_per_call_s`, `provider`,
-`serving_mode` and `provider_latency_source` are *collectable* by a live run — but no run
-has yet written one, so on the committed corpus they are blank on every row, and every
-consumer of them raises rather than defaulting. `ttft_s` is a step further out: the
-scaffold does not stream, so nothing can fill it as things stand. Treat the five as a
-plumbed-in capability, not as data. `uv run --extra benchmark python -m benchmark.column_coverage` reports which
+`serving_mode`, `provider_latency_source` and `cached_in_tok` are *collectable* by a live
+run — and the committed corpus's live cells are exactly such runs: the 200
+`deepseek-v4-pro` cells (measured 2026-09-02/04) carry the five latency/provenance columns,
+with `cached_in_tok` backfilled on them from the archived per-turn usage
+(`benchmark/routing/scripts/backfill_cached_tokens.py`), and 134 of the 136 collection-only
+`*-explabs` cells (measured 2026-09-06/10 over the free-promo channel) carry the same five
+columns (2 qwen3.8-27b-explabs rows carry none of them), with `cached_in_tok` present on 248
+of them where the provider reported it. The 1265 legacy rows
+predate the columns and stay blank on every one, and every consumer of them raises rather
+than defaulting. `ttft_s` is a step further out: the scaffold does not
+stream, so nothing can fill it as things stand. Treat the six as a plumbed-in capability
+populated by live collection, not as corpus-wide data. `uv run --extra benchmark python -m benchmark.column_coverage` reports which
 columns are populated and on which cells — run it before assuming any of them is there. Replicate collection is off by default (see
 `replicates:` in `benchmark/benchmark.yaml`); when on, `rep 0` stays canonical and no metric
 sees a replicate. Details: the design notes' "Optional columns and replicates".
@@ -497,7 +518,7 @@ Per model, if you only want to re-replay one model's runs:
 | kimi-k2.5 | 105 | 4,739 | 18 |
 | qwen3.7-plus | 60 | 3,023 | 9 |
 | kimi-k3 | 56 | 2,036 | 7 |
-| zai-glm-5.2 | 26 | 1,247 | 4 |
+| glm-5.2 | 26 | 1,247 | 4 |
 
 Trajectory count is a bad proxy for cost: `gpt-5-mini` has the most trajectories and 23% of
 the steps, `deepseek-v4-flash` fewer trajectories and 39%, because its runs are longer. A
@@ -525,6 +546,11 @@ evaluator uses each model's default reasoning arm). A
 strategy whose decision needs an uncached cell is flagged (it can't be
 backtested) rather than silently skipped. With an empty cache the evaluator
 prints *"no results yet — run the live matrix"* and exits cleanly.
+
+`--include-free-corpus` merges the physically separate free corpus — the `paths.results_csv`
+named by `configs/free-tier/benchmark.yaml`, i.e. `routing/results_free.csv` — into the
+evaluation matrix as an exploratory view. It is a no-op with a clear message when that file
+is absent; the paid corpus remains the pre-registered instrument.
 
 Metrics per strategy:
 
@@ -728,7 +754,7 @@ Exploration ships on ([configuration](configuration.md#tune-the-router)), so the
 obvious question is what it costs. You can answer it from the committed data alone.
 `results.csv` is a partly-dense grid of *measured* (task, model) outcomes. The replay
 runs on the largest fully dense sub-grid inside it, found greedily — currently
-**165 tasks × 2 models = 330 measured cells** against a full matrix that is 62.1%
+**171 tasks × 3 models = 513 measured cells** against a full matrix that is 68.7%
 dense. On a fully dense sub-grid, replaying a routing policy is exact rather than
 estimated: look up the model the policy picks, read the outcome that was actually
 recorded for that cell, average. Nothing is simulated and no request is sent.
@@ -743,15 +769,14 @@ off and once with it on, and writes `docs/assets/figures/routing/exploration_cos
 summary to stdout. Cells the policy routes to but the benchmark never ran are
 skipped and counted, never filled in with a guess.
 
-On the 165-task dense slice, averaged over 20 seeds: exploration costs **1.28× the
-exploration-off bill** on average and **1.48× on the worst seed**. That ratio is
-paired over the 138 tasks both arms scored — the exploit-only arm drops 27 cells as
-unscorable and all 27 are `qwen3.7-plus`, a model outside the dense slice, so
-comparing the arms' raw totals would compare different task sets. We previously
-published **1.65×/1.77×** from that unpaired ratio; it was ~30% too high. The paired
-per-task difference is **−3.2 pp pass rate (95% CI −4.8 to −1.8)** and **+$0.0023
-per task (95% CI +$0.0018 to +$0.0029)** — the paired numbers are the ones to read,
-since the two arms' marginal pass-rate intervals ([71%, 85%] vs [69%, 82%]) overlap
+On the 171-task dense slice, averaged over 20 seeds: exploration costs **1.60× the
+exploration-off bill** on average and **1.85× on the worst seed**. That ratio is
+paired over the 162 tasks both arms scored — the exploit-only arm drops 9 cells as
+unscorable and all 9 are `qwen3.7-plus`, a model outside the dense slice, so
+comparing the arms' raw totals would compare different task sets. The paired
+per-task difference is **−0.5 pp pass rate (95% CI −2.1 to +1.0)** and **+$0.0202
+per task (95% CI +$0.0148 to +$0.0275)** — the paired numbers are the ones to read,
+since the two arms' marginal pass-rate intervals ([72%, 85%] vs [73%, 84%]) overlap
 heavily.
 
 Four caveats keep this honest. The replay's outcome matrix is **static**, so an
@@ -760,12 +785,12 @@ cost with its learning benefit set to zero, which is the pessimistic half of the
 ledger, not a verdict on whether exploration pays. The budget cap counts the
 router's own confidence-weighted neighbourhood costs, not realized ones, so the
 realized explore/exploit spend ratio can exceed `explore_budget_frac` on an unlucky
-seed (0.66 against a 0.4 cap on the worst of 20 seeds here) even though the cap is doing its job. The dense
+seed (1.18 against a 0.4 cap on the worst of 20 seeds here) even though the cap is doing its job. The dense
 slice maximises *cells*, which currently favours many tasks over many models: it
-holds only the two cheapest models and **no frontier arm**, so the measured overhead
+holds only three cheap-to-mid models and **no frontier arm**, so the measured overhead
 is the cost of exploring between cheap models and is a **lower bound** on the shipped
-policy's, where an exploratory pull can land on a model ~40× the price. And it is
-one workload.
+policy's, where an exploratory pull can land on a model ~8× the priciest model in the
+slice. And it is one workload.
 
 ## Scoring every strategy on one task set — monotone-rank imputation
 
@@ -876,7 +901,15 @@ itself the signal to stop.
   (`--strategy full`). `full --live` with **no** `--max-cost` prompts for interactive
   confirmation before spending (uncapped live spend is dangerous); a non-interactive stdin
   aborts. `cost_optimal` keeps its own `constants_pinned` safety guard and needs no such
-  prompt.
+  prompt. A `full` run may add collection-only ids with `--extra-models` (priced registry
+  ids, or any `S-explabs` catalog slug synthesized collection-only at runtime, unioned into
+  the collect set and nowhere else); by default an extra whose model
+  identity — the registry `version`, e.g. `kimi-k3` shared by direct requesty `kimi-k3`
+  and free-promo `kimi-k3-explabs` — already has a real row for a challenge under another
+  channel id SKIPS that challenge, so collection prefers **more coverage** over
+  re-running a challenge the same model already completed on another channel. Only an
+  explicit `--cells` re-run overrides; models without a channel twin, and the
+  enabled/direct baseline, are unaffected.
 
 `python -m benchmark.runner.collect` is a **deprecated alias** for `--strategy
 cost_optimal`. Key `cost_optimal` knobs live under `collect:` in `benchmark/benchmark.yaml`:
@@ -885,6 +918,94 @@ model), and the two sizing
 constants `audit_fraction` (audit sampling probability π) and `noninferiority_margin` (δ).
 Pin those two from the live `results.csv` and set `constants_pinned: true` before any paid
 run, or the interval is mis-sized.
+
+## Free-lane collection (the non-shipped overlay)
+
+Free provider capacity can extend the corpus at $0 without a free model ever shipping. The
+free rows live in a separate, non-shipped overlay registry
+(`configs/free-tier/overlay.yaml`) and are collectable only through `--extra-models`:
+
+- **`--free-registry <path>`** (or `SHUNT_FREE_REGISTRY`) loads the overlay on top of the
+  shipped registry for that run only. The enabled set, the live router pool, the Pareto axes
+  and the kill gate never see a free row.
+- **`--require-zero-cost`** is the fail-closed harvesting gate: it refuses a run unless every
+  model is a non-shipped free lane, pre-flights each admitted lane once, and requires
+  `real_cost == 0` on every written row. Prefer it to `--max-cost 0` (a silent no-op), and
+  never set `live.cost_limit: 0` — that disables the scaffold cap rather than capping at $0.
+- **Per-lane admission limits** live in `routing/data/provider_limits.yaml` (`rpm`, `rpd`,
+  `tpm`, `max_request_tokens`, `daily_token_budget`, each with a `verified_by` provenance
+  stamp). The scheduler applies the same named limitations to every provider, summing ACTUAL
+  tokens over a trailing minute/day rather than reserving per cell. A lane whose single
+  request cannot fit its `tpm` is refused up front as `LANE_TPM_TOO_SMALL` — e.g. Groq's free
+  8K-TPM `openai/gpt-oss-120b`, whose SWE-bench first turn already exceeds the minute budget,
+  is skipped instead of thrashing 429s. A provider that serves no free tier through the API
+  is marked `free_access: false` (with an `access_note` carrying the evidence) and refused as
+  `LANE_NO_FREE_ACCESS` — e.g. OpenCode Zen, whose `-free` ids are app/session-gated. A provider
+  absent from `routing/data/free_catalogs.yaml` altogether (Together, Cerebras) has no declared
+  free lane and is refused the same way, so an overlay row kept for provenance can never spend.
+  One channel can be overridden under `lanes.limits` in `configs/free-tier/benchmark.yaml`; the
+  registry is the source of truth.
+- **`python -m benchmark.runner.free_lane_probe --all`** (alias **`--report`**) builds the admission pause document
+  from the committed scan snapshot **with no keys**: every discovered listing, its provider(s),
+  resolved identity, each static gate's verdict with the reason for any refusal, and the
+  wall-clock estimate (the host bound against the slowest model's own-lane bound). It writes
+  to `$SHUNT_FREE_SCAN_DIR` (default
+  `artifacts/free-tier-scan/<stamp>/`, gitignored — never committed). The live tool-call half
+  needs owner keys and is labelled pending until they exist.
+
+The scan source is `python -m benchmark.routing.scripts.scan_free_models` (`--dry-run` /
+`--propose` / `--apply`). It refreshes `routing/data/latest_free_models.json` and joins
+models.dev metadata by publisher-issued listing id only, never by the models.dev id.
+
+`python -m benchmark.routing.scripts.refresh_free_campaign` wraps the whole loop: scan →
+admission/priority filter (`collection_priority`) → apply. `--dry-run` writes nothing tracked
+and prints the runnable set ordered by descending priority; `--write` also rewrites the
+snapshot, the proposal and `configs/free-tier/overlay.yaml`. The scheduled workflow runs
+`--dry-run` every six hours and `--write` on manual dispatch, uploading the regenerated files
+as artifacts because the job cannot push. The `--apply` merge adds every **admitted** listing —
+active (not `withdrawn_at`), schedulable, not `free_access: false`, not explicitly declaring
+tool-less, identity-resolved, and carrying a real paid-twin list price (never `$0`, and never
+a `cache_read_cost_per_1m`) — and refreshes a changed price in place. A listing whose catalogue
+is silent on tools is admitted as **unknown**, not refused. The live tool-call probe is the
+intended gate for that unknown, but it is **not yet wired into production scheduling** — no
+scheduler or runner consumes its verdict today — so "unknown" and "no" are not yet fully
+separated on the collection path. The static half of the admission gate is what runs; a listing
+whose catalogue is silent therefore remains admitted until the live gate is wired in. A listing absent from a scan is marked
+  `withdrawn_at` in the snapshot and its overlay row is retained, never deleted, so the lane
+  quiesces while its price and identity provenance survive; the runnable set is built from the
+  active snapshot rows whose provider is a declared free lane (present in `free_catalogs.yaml`,
+  else reported excluded as `no-free-lane` / `free_access:false`), so a withdrawn or non-free
+  lane simply stops being scheduled. `--propose` derives the
+cross-provider identity proposal the merge is guarded by: a row absent from the reviewed
+proposal, or whose content hash moved, refuses the apply.
+
+The live collector orders its free lanes by the same model-value ranking: `build_plan` scores
+every `--extra-models` lane, retires a duplicate or not-worth lane with a named reason, caps the
+worker count at the number of runnable models, and pulls the highest-priority admissible cell
+first (a model's text cells before its multimodal ones). Only the cells `classify_cells` reports
+as needing computation are run, so a re-run collects MISSING/STALE cells and a withdrawn or
+not-worth lane is never scheduled.
+
+A local long-running campaign re-runs the refresh between passes to pick up newly admitted
+listings and drop withdrawn ones:
+
+```bash
+uv run python -m benchmark.routing.scripts.refresh_free_campaign --write   # then re-read the set
+uv run python -m benchmark.routing.scripts.refresh_free_campaign --dry-run # preview: $0, no write
+```
+
+The extraction and campaign orchestration live in `benchmark/routing/scripts/` and
+`benchmark/runner/`.
+
+Cross-provider concordance is the campaign's named measurement:
+`python -m benchmark.routing.concordance` pairs one model identity's rows across providers at
+the same `(challenge, arm)` and reports per-pair agreement plus a paired pass-rate delta with
+a 95% bootstrap CI, flagging a provider pair whose CI excludes zero. The identities and
+challenges it fans out to are declared under `concordance:` in
+`configs/free-tier/benchmark.yaml` (`fanout_cap`, `challenges`, `subset`); those channels are
+exempt from the default identity dedupe so one identity is measured across providers. It reads
+the corpus its config's `paths.results_csv` names (`routing/results_free.csv`) and reports
+nothing to measure when that corpus is absent.
 
 ## Honest limits
 

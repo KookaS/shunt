@@ -1,0 +1,1813 @@
+# Non-shipped free-model OVERLAY registry — collection-only, never loaded by a normal
+# Shunt boot and never part of `src/shunt/config/models.yaml`.
+#
+# WHY THIS FILE EXISTS. The benchmark can harvest datapoints from free/discounted provider
+# tiers without any free row ever shipping. This registry holds the provider rows and their
+# free model ids as COLLECTION-ONLY entries; `run_matrix --extra-models` (or the
+# `--free-registry <path>` / `SHUNT_FREE_REGISTRY` override in benchmark/config.py) merges a
+# requested id into the run's pricing view at the run site only. The shipped registry, the
+# live router pool, `benchmark.yaml`'s enabled set, `capability_rank`, the pareto axes and
+# the kill gate never see these rows.
+#
+# HARD RULES (the collection-only free-model policy, reversing the earlier free-model
+# retirement):
+#   1. NEVER enable a row here in benchmark.yaml. `config.enabled_models()` refuses any
+#      overlay id, so a free model cannot enter the enabled set / kill-gate / analysis.
+#   2. Every row records the model's REAL list price — never $0. A $0 list price would make
+#      the row the pareto global minimum and rank 0 in any cost comparison. The price is the
+#      paid channel's published list price for the same weights (see each `price_source`);
+#      the collection itself is free-promo, so a harvested row's `real_cost` may be 0.
+#   3. NO `cache_read_cost_per_1m` on any row: gateway cache namespaces can be shared across
+#      tenants, so a harvested cache rate would look measured without being so.
+#   4. Public-benchmark-prompts-only until each provider's ToS is read (see the probe report).
+#
+# PROVENANCE. Rows were assembled 2026-09-10 from a desk survey of provider catalogues.
+# List prices come from `https://models.dev/api.json` (the model's canonical paid listing) or
+# the paid twin in the live OpenRouter catalog. Models whose weights
+# have no published paid list price anywhere are intentionally OMITTED rather than priced $0.
+# Free listings rotate on a days-to-weeks timescale — re-verify before a measured run.
+#
+# `version` / `model` / `model_id` are the ONE bare canonical identity (the convention's
+# `scan_free_models.canonical_slug`): lowercase, no provider prefix, no `/`/`:`/`@`, no
+# `-free`/`:free`/`-explabs` marker. `lane` is the provider's RAW channel listing id — the
+# actual wire id the runner calls — and is the only field that may carry the serving path.
+#
+# CORPUS IDENTITY (decision recorded, not implicit). The benchmark keeps the two roles apart:
+#   * `lane` is the CHANNEL identity. In the results CSVs it is the `lane` column, and it is
+#     the resume/dedupe key `(challenge_id, lane, reasoning, rep)`; re-keying it would orphan
+#     collected cells. Here it is the raw listing id; the row name is its stable slug.
+#   * `version` / `model` / `model_id` (and the csv `model`/`model_version`) is the CANONICAL
+#     weights identity. Grouping the free and paid corpora across providers is done on it.
+# Canonicalisation edits only the identity fields (via the Tier-2 aliases in
+# `benchmark/routing/data/model_identity.yaml`, the durable path a rescan re-derives).
+#
+# ARCHIVING. A specific `(lane, provider)` row may be retired with `archived: true` plus
+# `archived_at` / `archive_reason`. The row is retained here, in the corpus and in provenance,
+# but `refresh_free_campaign` withholds it from the runnable set (reason `archived`). Archive
+# one channel only: the same weights on a provider that still serves them stay schedulable.
+
+providers:
+  requesty:
+    base_url: https://router.requesty.ai/v1
+    api_key_env_var: REQUESTY_API_KEY
+    litellm_prefix: openai
+  groq:
+    base_url: https://api.groq.com/openai/v1
+    api_key_env_var: GROQ_API_KEY
+    litellm_prefix: openai
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env_var: OPENROUTER_API_KEY
+    litellm_prefix: openrouter
+  google_ai_studio:
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    api_key_env_var: GOOGLE_AI_STUDIO_API_KEY
+    litellm_prefix: openai
+  nvidia_nim:
+    base_url: https://integrate.api.nvidia.com/v1
+    api_key_env_var: NVIDIA_NIM_API_KEY
+    litellm_prefix: openai
+  vercel_ai_gateway:
+    base_url: https://ai-gateway.vercel.sh/v1
+    api_key_env_var: VERCEL_AI_GATEWAY_API_KEY
+    litellm_prefix: openai
+  sambanova:
+    base_url: https://api.sambanova.ai/v1
+    api_key_env_var: SAMBANOVA_API_KEY
+    litellm_prefix: openai
+  cloudflare_workers_ai:
+    base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
+    api_key_env_var: CLOUDFLARE_API_TOKEN
+    litellm_prefix: openai
+  opencode_zen:
+    base_url: https://opencode.ai/zen/v1
+    api_key_env_var: OPENCODE_API_KEY
+    litellm_prefix: openai
+  kilo_gateway:
+    base_url: https://api.kilo.ai/api/gateway
+    api_key_env_var: KILO_API_KEY
+    litellm_prefix: openai
+    key_optional: true
+  together:
+    base_url: https://api.together.xyz/v1
+    api_key_env_var: TOGETHER_API_KEY
+    litellm_prefix: openai
+  explabs:
+    base_url: https://api.experientiallabs.ai/v1
+    api_key_env_var: EXPLABS_API_KEY
+    litellm_prefix: openai
+models:
+  requesty-nemotron-3.5-lightning-30b-a3b:
+    model_id: nemotron-3.5-lightning
+    provider: requesty
+    version: nemotron-3.5-lightning
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.08
+      output_cost_per_1m: 0.2
+      price_provider: requesty
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free on Requesty's standing free plan (collection-only). List price
+        = the paid listing's published rate for the same weights (kilo/openrouter
+        nvidia/nemotron-3.5-lightning, $0.08/$0.20).
+    lane: nvidia/nemotron-3.5-lightning-30b-a3b
+    model: nemotron-3.5-lightning
+  requesty-nemotron-3-super-120b-a12b:
+    model_id: nemotron-3-super-120b-a12b
+    provider: requesty
+    version: nemotron-3-super-120b-a12b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.085
+      output_cost_per_1m: 0.4
+      price_provider: requesty
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free on Requesty (collection-only). List price = the openrouter
+        paid twin's published rate, $0.085/$0.40.
+    lane: nvidia/nemotron-3-super-120b-a12b
+    model: nemotron-3-super-120b-a12b
+  requesty-nemotron-3-ultra-550b-a55b:
+    model_id: nemotron-3-ultra-550b-a55b
+    provider: requesty
+    version: nemotron-3-ultra-550b-a55b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.625
+      output_cost_per_1m: 3.125
+      price_provider: requesty
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free on Requesty (collection-only). List price = the openrouter
+        paid twin's published rate, $0.625/$3.125.
+    lane: nvidia/nemotron-3-ultra-550b-a55b
+    model: nemotron-3-ultra-550b-a55b
+  requesty-nemotron-3-nano-omni-30b-a3b-reasoning:
+    model_id: nemotron-3-nano-omni-30b-a3b-reasoning
+    provider: requesty
+    version: nemotron-3-nano-omni-30b-a3b-reasoning
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.06
+      output_cost_per_1m: 0.24
+      price_provider: requesty
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free on Requesty (collection-only). List price = the nebius/requesty
+        paid nemotron-3-nano-omni listing, $0.06/$0.24.
+    lane: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+    model: nemotron-3-nano-omni-30b-a3b-reasoning
+  requesty-gemma-4-31b-it:
+    model_id: gemma-4-31b-it
+    provider: requesty
+    version: gemma-4-31b-it
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.09
+      output_cost_per_1m: 0.34
+      price_provider: requesty
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free on Requesty (collection-only). List price = the openrouter
+        paid gemma-4-31b-it listing, $0.09/$0.34.
+    lane: google/gemma-4-31b-it
+    model: gemma-4-31b-it
+  requesty-muse-glimmer-30b:
+    model_id: muse-glimmer-30b
+    provider: requesty
+    version: muse-glimmer-30b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.3
+      output_cost_per_1m: 1.1
+      price_provider: requesty
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free on Requesty (collection-only). List price = the openrouter
+        meta/muse-glimmer-30b paid listing, $0.30/$1.10.
+    lane: nvidia/muse-glimmer-30b
+    model: muse-glimmer-30b
+  requesty-laguna-xs.2:
+    model_id: laguna-xs-2.1
+    provider: requesty
+    version: laguna-xs-2.1
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.06
+      output_cost_per_1m: 0.12
+      price_provider: requesty
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free on Requesty (collection-only). List price = the openrouter
+        poolside/laguna-xs-2.1 paid listing, $0.06/$0.12.
+    lane: poolside/laguna-xs.2
+    model: laguna-xs-2.1
+  groq-gpt-oss-120b:
+    model_id: gpt-oss-120b
+    provider: groq
+    version: gpt-oss-120b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.15
+      output_cost_per_1m: 0.6
+      price_provider: groq
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free on Groq's standing free plan (collection-only, 30 RPM / 1,000
+        RPD). List price = Groq's own paid rate, $0.15/$0.60.
+    lane: openai/gpt-oss-120b
+    model: gpt-oss-120b
+  groq-gpt-oss-20b:
+    model_id: gpt-oss-20b
+    provider: groq
+    version: gpt-oss-20b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.075
+      output_cost_per_1m: 0.3
+      price_provider: groq
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free on Groq's standing free plan (collection-only). List price
+        = Groq's own paid rate, $0.075/$0.30.
+    lane: openai/gpt-oss-20b
+    model: gpt-oss-20b
+  groq-qwen3.8-27b:
+    model_id: qwen3.8-27b
+    provider: groq
+    version: qwen3.8-27b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.8
+      output_cost_per_1m: 4.0
+      price_provider: groq
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free on Groq's standing free plan (collection-only). List price
+        = Groq's own paid rate, $0.80/$4.00.
+    lane: qwen/qwen3.8-27b
+    model: qwen3.8-27b
+  groq-qwen3.6-27b:
+    model_id: qwen3.6-27b
+    provider: groq
+    version: qwen3.6-27b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.6
+      output_cost_per_1m: 3.0
+      price_provider: groq
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free on Groq's standing free plan (collection-only). List price
+        = Groq's own paid rate, $0.60/$3.00.
+    lane: qwen/qwen3.6-27b
+    model: qwen3.6-27b
+  openrouter-laguna-xs-2.1-free:
+    model_id: laguna-xs-2.1
+    provider: openrouter
+    version: laguna-xs-2.1
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.06
+      output_cost_per_1m: 0.12
+      price_provider: openrouter
+      price_source: https://openrouter.ai/api/v1/models
+      price_as_of: '2026-09-10'
+      price_note: OpenRouter :free listing (collection-only). List price = the paid
+        poolside/laguna-xs-2.1 listing, $0.06/$0.12.
+    lane: poolside/laguna-xs-2.1:free
+    model: laguna-xs-2.1
+  openrouter-laguna-s-2.1-free:
+    model_id: laguna-s-2.1
+    provider: openrouter
+    version: laguna-s-2.1
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.09
+      output_cost_per_1m: 0.18
+      price_provider: openrouter
+      price_source: https://openrouter.ai/api/v1/models
+      price_as_of: '2026-09-10'
+      price_note: OpenRouter :free listing (collection-only). List price = the paid
+        poolside/laguna-s-2.1 listing, $0.09/$0.18.
+    lane: poolside/laguna-s-2.1:free
+    model: laguna-s-2.1
+  openrouter-nemotron-3.5-lightning-free:
+    model_id: nemotron-3.5-lightning
+    provider: openrouter
+    version: nemotron-3.5-lightning
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.08
+      output_cost_per_1m: 0.2
+      price_provider: openrouter
+      price_source: https://openrouter.ai/api/v1/models
+      price_as_of: '2026-09-10'
+      price_note: OpenRouter :free listing (collection-only). List price = the paid
+        nvidia/nemotron-3.5-lightning listing, $0.08/$0.20.
+    lane: nvidia/nemotron-3.5-lightning:free
+    model: nemotron-3.5-lightning
+  openrouter-nemotron-3-super-120b-a12b-free:
+    model_id: nemotron-3-super-120b-a12b
+    provider: openrouter
+    version: nemotron-3-super-120b-a12b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.085
+      output_cost_per_1m: 0.4
+      price_provider: openrouter
+      price_source: https://openrouter.ai/api/v1/models
+      price_as_of: '2026-09-10'
+      price_note: OpenRouter :free listing (collection-only). List price = the paid
+        nvidia/nemotron-3-super-120b-a12b listing, $0.085/$0.40.
+    lane: nvidia/nemotron-3-super-120b-a12b:free
+    model: nemotron-3-super-120b-a12b
+  openrouter-nemotron-3-ultra-550b-a55b-free:
+    model_id: nemotron-3-ultra-550b-a55b
+    provider: openrouter
+    version: nemotron-3-ultra-550b-a55b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.625
+      output_cost_per_1m: 3.125
+      price_provider: openrouter
+      price_source: https://openrouter.ai/api/v1/models
+      price_as_of: '2026-09-10'
+      price_note: OpenRouter :free listing (collection-only). List price = the paid
+        nvidia/nemotron-3-ultra-550b-a55b listing, $0.625/$3.125.
+    lane: nvidia/nemotron-3-ultra-550b-a55b:free
+    model: nemotron-3-ultra-550b-a55b
+  openrouter-ling-3.0-flash-fin-free:
+    model_id: ling-3-0-flash-fin
+    provider: openrouter
+    version: ling-3-0-flash-fin
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.06
+      output_cost_per_1m: 0.18
+      price_provider: openrouter
+      price_source: https://openrouter.ai/api/v1/models
+      price_as_of: '2026-09-10'
+      price_note: OpenRouter :free listing (collection-only). List price = the paid
+        inclusionai/ling-3.0-flash-fin listing, $0.06/$0.18.
+    lane: inclusionai/ling-3.0-flash-fin:free
+    model: ling-3-0-flash-fin
+  openrouter-gemma-4-31b-it-free:
+    model_id: gemma-4-31b-it
+    provider: openrouter
+    version: gemma-4-31b-it
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.09
+      output_cost_per_1m: 0.34
+      price_provider: openrouter
+      price_source: https://openrouter.ai/api/v1/models
+      price_as_of: '2026-09-10'
+      price_note: OpenRouter :free listing (collection-only). List price = the paid
+        google/gemma-4-31b-it listing, $0.09/$0.34.
+    lane: google/gemma-4-31b-it:free
+    model: gemma-4-31b-it
+  google-gemini-flash-latest:
+    model_id: gemini-flash-latest
+    provider: google_ai_studio
+    version: gemini-flash-latest
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.75
+      output_cost_per_1m: 3.75
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free usage tier on Google AI Studio (collection-only; limits shown
+        only in AI Studio). List price = the paid Gemini Flash rate, $0.75/$3.75.
+        Free-tier prompts may be used to improve Google products.
+    lane: gemini-flash-latest
+    model: gemini-flash-latest
+  google-gemini-flash-lite-latest:
+    model_id: gemini-flash-lite-latest
+    provider: google_ai_studio
+    version: gemini-flash-lite-latest
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.3
+      output_cost_per_1m: 2.5
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free usage tier on Google AI Studio (collection-only). List price
+        = the paid Gemini Flash-Lite rate, $0.30/$2.50. Free-tier prompts may be used
+        to improve Google products.
+    lane: gemini-flash-lite-latest
+    model: gemini-flash-lite-latest
+  nvidia-kimi-k3:
+    model_id: kimi-k3
+    provider: nvidia_nim
+    version: kimi-k3
+    billing: free
+    pricing:
+      input_cost_per_1m: 3.0
+      output_cost_per_1m: 15.0
+      price_provider: nvidia_nim
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free NVIDIA NIM development endpoint (collection-only; trial use,
+        traffic logged). List price = the canonical kimi-k3 rate, $3/$15.
+    lane: moonshotai/kimi-k3
+    model: kimi-k3
+  nvidia-deepseek-v4-pro-0813:
+    model_id: deepseek-v4-pro
+    provider: nvidia_nim
+    version: deepseek-v4-pro
+    billing: free
+    pricing:
+      input_cost_per_1m: 1.32
+      output_cost_per_1m: 3.96
+      price_provider: nvidia_nim
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free NVIDIA NIM development endpoint (collection-only). List price
+        = the paid requesty/fireworks deepseek-v4-pro-0813 listing, $1.32/$3.96.
+    lane: deepseek-ai/deepseek-v4-pro-0813
+    model: deepseek-v4-pro
+  nvidia-nemotron-3-ultra-550b-a55b:
+    model_id: nemotron-3-ultra-550b-a55b
+    provider: nvidia_nim
+    version: nemotron-3-ultra-550b-a55b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.5
+      output_cost_per_1m: 2.5
+      price_provider: nvidia_nim
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Free NVIDIA NIM development endpoint (collection-only). List price
+        = NVIDIA's own paid rate, $0.50/$2.50.
+    lane: nvidia/nemotron-3-ultra-550b-a55b
+    model: nemotron-3-ultra-550b-a55b
+  vercel-laguna-s-2.1-free:
+    model_id: laguna-s-2.1
+    provider: vercel_ai_gateway
+    version: laguna-s-2.1
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.1
+      output_cost_per_1m: 0.2
+      price_provider: vercel_ai_gateway
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Vercel AI Gateway free-tier model (collection-only). List price
+        = the paid poolside/laguna-s-2.1 rate, $0.10/$0.20.
+    lane: poolside/laguna-s-2.1-free
+    model: laguna-s-2.1
+  vercel-ling-3.0-flash-sante-free:
+    model_id: ling-3-0-flash-sante
+    provider: vercel_ai_gateway
+    version: ling-3-0-flash-sante
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.06
+      output_cost_per_1m: 0.18
+      price_provider: vercel_ai_gateway
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Vercel AI Gateway free-tier model (collection-only). List price
+        = the paid inclusionai/ling-3.0-flash rate, $0.06/$0.18.
+    lane: inclusionai/ling-3.0-flash-sante-free
+    model: ling-3-0-flash-sante
+  vercel-ling-3.0-flash-fin-free:
+    model_id: ling-3-0-flash-fin
+    provider: vercel_ai_gateway
+    version: ling-3-0-flash-fin
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.06
+      output_cost_per_1m: 0.18
+      price_provider: vercel_ai_gateway
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Vercel AI Gateway free-tier model (collection-only; verified serving
+        at $0 on 2026-09-11). List price = the paid inclusionai/ling-3.0-flash-fin
+        twin's published models.dev rate (openrouter/kilo rung), $0.06/$0.18.
+    lane: inclusionai/ling-3.0-flash-fin-free
+    model: ling-3-0-flash-fin
+  sambanova-gpt-oss-120b:
+    model_id: gpt-oss-120b
+    provider: sambanova
+    version: gpt-oss-120b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.22
+      output_cost_per_1m: 0.59
+      price_provider: sambanova
+      price_source: catalog:sambanova
+      price_as_of: '2026-09-11'
+      price_note: SambaNova free tier (collection-only, 20 RPM / 20 RPD). List price
+        = the gpt-oss-120b paid rate, $0.15/$0.60.
+    lane: gpt-oss-120b
+    model: gpt-oss-120b
+  sambanova-llama-3.3-70b:
+    model_id: llama-3.3-70b-instruct
+    provider: sambanova
+    version: llama-3.3-70b-instruct
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.6
+      output_cost_per_1m: 1.2
+      price_provider: sambanova
+      price_source: catalog:sambanova
+      price_as_of: '2026-09-11'
+      price_note: SambaNova free tier (collection-only). List price = the llama-3.3-70b
+        paid rate, $0.59/$0.79.
+    lane: Meta-Llama-3.3-70B-Instruct
+    model: llama-3.3-70b-instruct
+  sambanova-minimax-m2.7:
+    model_id: minimax-m2.7
+    provider: sambanova
+    version: minimax-m2.7
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.6
+      output_cost_per_1m: 2.4
+      price_provider: sambanova
+      price_source: catalog:sambanova
+      price_as_of: '2026-09-11'
+      price_note: SambaNova free tier (collection-only). List price = the MiniMax-M2.7
+        paid rate, $0.30/$1.20.
+    lane: MiniMax-M2.7
+    model: minimax-m2.7
+  sambanova-deepseek-v3.1:
+    model_id: deepseek-v3.1
+    provider: sambanova
+    version: deepseek-v3.1
+    billing: free
+    pricing:
+      input_cost_per_1m: 3.0
+      output_cost_per_1m: 4.5
+      price_provider: sambanova
+      price_source: catalog:sambanova
+      price_as_of: '2026-09-11'
+      price_note: SambaNova free tier (collection-only). List price = the DeepSeek-V3.1
+        paid rate, $0.27/$1.00.
+    lane: DeepSeek-V3.1
+    model: deepseek-v3.1
+  sambanova-gemma-4-31b-it:
+    model_id: gemma-4-31b-it
+    provider: sambanova
+    version: gemma-4-31b-it
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.38
+      output_cost_per_1m: 1.15
+      price_provider: sambanova
+      price_source: catalog:sambanova
+      price_as_of: '2026-09-11'
+      price_note: SambaNova free tier (collection-only). List price = the gemma-4-31b-it
+        paid rate, $0.09/$0.34.
+    lane: gemma-4-31B-it
+    model: gemma-4-31b-it
+  cf-gpt-oss-120b:
+    model_id: gpt-oss-120b
+    provider: cloudflare_workers_ai
+    version: gpt-oss-120b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.35
+      output_cost_per_1m: 0.75
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Cloudflare Workers AI free daily allocation (collection-only). List
+        price = Cloudflare's own paid rate, $0.35/$0.75.
+    lane: '@cf/openai/gpt-oss-120b'
+    model: gpt-oss-120b
+  cf-gpt-oss-20b:
+    model_id: gpt-oss-20b
+    provider: cloudflare_workers_ai
+    version: gpt-oss-20b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.2
+      output_cost_per_1m: 0.3
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Cloudflare Workers AI free daily allocation (collection-only). List
+        price = Cloudflare's own paid rate, $0.20/$0.30.
+    lane: '@cf/openai/gpt-oss-20b'
+    model: gpt-oss-20b
+  cf-qwen3-30b-a3b-fp8:
+    model_id: qwen3-30b-a3b-fp8
+    provider: cloudflare_workers_ai
+    version: qwen3-30b-a3b-fp8
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.0509
+      output_cost_per_1m: 0.335
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Cloudflare Workers AI free daily allocation (collection-only). List
+        price = Cloudflare's own paid rate, $0.0509/$0.335.
+    lane: '@cf/qwen/qwen3-30b-a3b-fp8'
+    model: qwen3-30b-a3b-fp8
+  cf-llama-3.3-70b-instruct-fp8-fast:
+    model_id: llama-3.3-70b-instruct-fp8-fast
+    provider: cloudflare_workers_ai
+    version: llama-3.3-70b-instruct-fp8-fast
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.293
+      output_cost_per_1m: 2.253
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Cloudflare Workers AI free daily allocation (collection-only). List
+        price = Cloudflare's own paid rate, $0.293/$2.253.
+    lane: '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
+    model: llama-3.3-70b-instruct-fp8-fast
+  opencode-deepseek-v4-flash-free:
+    model_id: deepseek-v4-flash
+    provider: opencode_zen
+    version: deepseek-v4-flash
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.14
+      output_cost_per_1m: 0.28
+      price_provider: opencode_zen
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: OpenCode Zen limited-time free model (collection-only; free-period
+        traffic may be used to train). List price = the direct deepseek-v4-flash rate,
+        $0.14/$0.28.
+    lane: deepseek-v4-flash-free
+    model: deepseek-v4-flash
+  opencode-nemotron-3-ultra-free:
+    model_id: nemotron-3-ultra-550b-a55b
+    provider: opencode_zen
+    version: nemotron-3-ultra-550b-a55b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.5
+      output_cost_per_1m: 2.5
+      price_provider: opencode_zen
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: OpenCode Zen limited-time free model (collection-only). List price
+        = the nemotron-3-ultra-550b-a55b paid rate, $0.50/$2.50.
+    lane: nemotron-3-ultra-free
+    model: nemotron-3-ultra-550b-a55b
+  opencode-nemotron-3.5-lightning-free:
+    model_id: nemotron-3.5-lightning
+    provider: opencode_zen
+    version: nemotron-3.5-lightning
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.08
+      output_cost_per_1m: 0.2
+      price_provider: opencode_zen
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: OpenCode Zen limited-time free model (collection-only). List price
+        = the nemotron-3.5-lightning paid rate, $0.08/$0.20.
+    lane: nemotron-3.5-lightning-free
+    model: nemotron-3.5-lightning
+  kilo-laguna-xs-2.1-free:
+    model_id: laguna-xs-2.1
+    provider: kilo_gateway
+    version: laguna-xs-2.1
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.06
+      output_cost_per_1m: 0.12
+      price_provider: kilo_gateway
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Kilo Gateway free mirror of the OpenRouter :free set (collection-only).
+        List price = the poolside/laguna-xs-2.1 paid rate, $0.06/$0.12.
+    lane: poolside/laguna-xs-2.1:free
+    model: laguna-xs-2.1
+  kilo-laguna-s-2.1-free:
+    model_id: laguna-s-2.1
+    provider: kilo_gateway
+    version: laguna-s-2.1
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.09
+      output_cost_per_1m: 0.18
+      price_provider: kilo_gateway
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Kilo Gateway free mirror of the OpenRouter :free set (collection-only).
+        List price = the poolside/laguna-s-2.1 paid rate, $0.09/$0.18.
+    lane: poolside/laguna-s-2.1:free
+    model: laguna-s-2.1
+  kilo-nemotron-3.5-lightning-free:
+    model_id: nemotron-3.5-lightning
+    provider: kilo_gateway
+    version: nemotron-3.5-lightning
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.08
+      output_cost_per_1m: 0.2
+      price_provider: kilo_gateway
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Kilo Gateway free mirror of the OpenRouter :free set (collection-only).
+        List price = the nvidia/nemotron-3.5-lightning paid rate, $0.08/$0.20.
+    lane: nvidia/nemotron-3.5-lightning:free
+    model: nemotron-3.5-lightning
+  kilo-step-3.7-flash-free:
+    model_id: step-3.7-flash
+    provider: kilo_gateway
+    version: step-3.7-flash
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.2
+      output_cost_per_1m: 1.15
+      price_provider: kilo_gateway
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Kilo Gateway free mirror of the OpenRouter :free set (collection-only).
+        List price = the stepfun/step-3.7-flash paid rate, $0.20/$1.15.
+    lane: stepfun/step-3.7-flash:free
+    model: step-3.7-flash
+  together-muse-glimmer-30b:
+    model_id: muse-glimmer-30b
+    provider: together
+    version: muse-glimmer-30b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.3
+      output_cost_per_1m: 1.1
+      price_provider: together
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-10'
+      price_note: Together free-priced serverless entry (collection-only; dynamic
+        limits). List price = the meta/muse-glimmer-30b paid rate, $0.30/$1.10.
+    lane: meta-models/Muse-Glimmer-30B
+    model: muse-glimmer-30b
+  gpt-6-astra-explabs:
+    model_id: gpt-6-astra
+    provider: explabs
+    version: gpt-6-astra
+    billing: paid
+    billing_note: Not a $0 promo lane — four committed cells billed (real_cost>0)
+      OUTSIDE any declared free window, so the listing billed standing. The `-explabs`
+      suffix is a channel label, not a billing claim.
+    pricing:
+      input_cost_per_1m: 10.0
+      output_cost_per_1m: 50.0
+      price_provider: explabs
+      price_source: https://platform.experientiallabs.ai/models/gpt-6-astra
+      price_as_of: '2026-09-07'
+      price_note: 'PROMO model (free-tier probe). Price = recovered list price of
+        record, dated 2026-09-07, reversible (was owner-$0 on 2026-09-06). $10/M in,
+        $50/M out, $1/M cached-in: recovered from the THREE REAL PAID cells in results.csv
+        (real_cost 0.5167 total) — gateway billing solves exactly to these rates on
+        all three rows. List-price parity with the claude-fable-5.1 frontier tier.'
+    lane: gpt-6-astra
+    model: gpt-6-astra
+  claude-fable-5.1-explabs:
+    model_id: claude-fable-5.1
+    provider: explabs
+    version: claude-fable-5.1
+    billing: free
+    billing_note: Promo listing, but NOT uniformly free — two committed cells on
+      2026-09-09 billed (real_cost>0) inside the declared promo window. The listing
+      entitlement stays free (promo); those rows carry observed channel=paid. The
+      contradicted window is retired in benchmark/routing/validate.py.
+    pricing:
+      input_cost_per_1m: 10.0
+      output_cost_per_1m: 50.0
+      price_provider: explabs
+      price_source: https://platform.experientiallabs.ai/models/claude-fable-5.1
+      price_as_of: '2026-09-07'
+      price_note: 'PROMO model (free-tier probe). Price = recovered list price of
+        record, dated 2026-09-07, reversible (was owner-$0 on 2026-09-06). $10/M in,
+        $50/M out, $0.25/M cached-in: the gateway catalog''s host_managed list (anthropic
+        + openrouter rungs agree) for the underlying claude-fable-5.1 model.'
+    lane: claude-fable-5.1
+    model: claude-fable-5.1
+  gpt-5.6-luna-explabs:
+    model_id: gpt-5.6-luna
+    provider: explabs
+    version: gpt-5.6-luna
+    billing: paid
+    billing_note: Not a $0 promo lane — two committed cells billed (real_cost>0)
+      OUTSIDE any declared free window, so the listing billed standing. The `-explabs`
+      suffix is a channel label, not a billing claim.
+    pricing:
+      input_cost_per_1m: 0.2
+      output_cost_per_1m: 1.2
+      price_provider: explabs
+      price_source: https://platform.experientiallabs.ai/models/gpt-5.6-luna
+      price_as_of: '2026-09-07'
+      price_note: 'PROMO model (free-tier probe). Price = recovered list price of
+        record, dated 2026-09-07, reversible (was owner-$0 on 2026-09-06). $0.20/M
+        in, $1.20/M out, $0.02/M cached-in: the gateway catalog''s host_managed list
+        (openrouter + openai rungs agree) AND confirmed by the ONE REAL PAID cell
+        in results.csv (astropy, real_cost 0.007519) — billing solves exactly to these
+        rates.'
+    lane: gpt-5.6-luna
+    model: gpt-5.6-luna
+  qwen3.8-27b-explabs:
+    model_id: qwen3.8-27b
+    provider: explabs
+    version: qwen3.8-27b
+    billing: free
+    billing_note: Promo listing, but NOT uniformly free — one committed 2026-09-09
+      cell billed (real_cost>0) inside the declared promo window, so that window is
+      retired in benchmark/routing/validate.py. Entitlement stays free; the billed
+      row carries observed channel=paid.
+    pricing:
+      input_cost_per_1m: 0.32
+      output_cost_per_1m: 2.4
+      price_provider: explabs
+      price_source: https://platform.experientiallabs.ai/models/qwen3.8-27b
+      price_as_of: '2026-09-07'
+      price_note: 'PROMO model (free-tier probe). Price = recovered list price of
+        record, dated 2026-09-07, reversible (was owner-$0 on 2026-09-06). $0.32/M
+        in, $2.40/M out, $0.04/M cached-in: the gateway catalog''s host_managed experiential-cloud
+        rung for the underlying qwen3.8-27b model (the openrouter rung differs at
+        $0.45/$3.20; the experiential-cloud rung is the rung of record here).'
+    lane: qwen3.8-27b
+    model: qwen3.8-27b
+  deepseek-v4-flash-explabs:
+    model_id: deepseek-v4-flash
+    provider: explabs
+    version: deepseek-v4-flash
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.14
+      output_cost_per_1m: 0.28
+      price_provider: explabs
+      price_source: https://platform.experientiallabs.ai/models/deepseek-v4-flash
+      price_as_of: '2026-09-07'
+      price_note: 'PROMO model (free-tier probe). Price = recovered list price of
+        record, dated 2026-09-07, reversible (was owner-$0 on 2026-09-06). Serves
+        the SAME model as the paid direct deepseek-v4-flash entry, so its input/output
+        list price MATCHES that direct entry exactly ($0.14/M in, $0.28/M out; cache-read
+        $0.0028/M on the direct entry). Channel-Namespaced id: MUST NOT collide with
+        the paid direct deepseek-v4-flash (results.csv keys on model id).'
+    lane: deepseek-v4-flash
+    model: deepseek-v4-flash
+  kimi-k3-explabs:
+    model_id: kimi-k3
+    provider: explabs
+    version: kimi-k3
+    billing: free
+    pricing:
+      input_cost_per_1m: 3.0
+      output_cost_per_1m: 15.0
+      price_provider: explabs
+      price_source: https://www.requesty.ai/models/moonshot/kimi-k3
+      price_as_of: '2026-09-09'
+      price_note: 'PROMO model (free-tier probe). Promo model served free via Experiential
+        — verified genuinely free 2026-09-09 by live probe (all models free daily
+        allowance). Price = recovered list price of record matching the direct requesty
+        kimi-k3 entry, dated 2026-09-09, reversible. $3/M in, $15/M out (cache-read
+        $0.30/M on the direct requesty entry; the explabs channel reports no cache-read
+        rate, so no cache_read key — consistent with the other *-explabs ids). Channel-Namespaced
+        id: MUST NOT collide with the paid direct kimi-k3 (results.csv keys on model
+        id).'
+    lane: kimi-k3
+    model: kimi-k3
+  deepseek-v4-pro-explabs:
+    model_id: deepseek-v4-pro
+    provider: explabs
+    version: deepseek-v4-pro
+    billing: free
+    billing_note: Promo listing, but NOT uniformly free — its only committed
+      2026-09-09 cell billed (real_cost>0) inside the declared promo window, so that
+      window is retired in benchmark/routing/validate.py. Entitlement stays free; the
+      billed row carries observed channel=paid.
+    pricing:
+      input_cost_per_1m: 0.435
+      output_cost_per_1m: 0.87
+      price_provider: explabs
+      price_source: https://platform.experientiallabs.ai/models/deepseek-v4-pro
+      price_as_of: '2026-09-09'
+      price_note: 'PROMO model (free-tier probe). Promo model served free via Experiential
+        — verified genuinely free 2026-09-09 by live probe (all models free daily
+        allowance). Price = recovered list price of record matching the direct deepseek-v4-pro
+        entry, dated 2026-09-09, reversible. $0.435/M in, $0.87/M out (cache-read
+        $0.0087/M on the direct entry; the explabs channel reports no cache-read rate,
+        so no cache_read key — consistent with the other *-explabs ids). Channel-Namespaced
+        id: MUST NOT collide with the paid direct deepseek-v4-pro (results.csv keys
+        on model id).'
+    lane: deepseek-v4-pro
+    model: deepseek-v4-pro
+  glm-5.3-explabs:
+    model_id: glm-5.3
+    provider: explabs
+    version: glm-5.3
+    billing: free
+    billing_note: Promo listing, but NOT uniformly free — six committed 2026-09-09
+      cells billed (real_cost>0) inside the declared promo window, so that window is
+      retired in benchmark/routing/validate.py. Entitlement stays free; the billed
+      rows carry observed channel=paid.
+    pricing:
+      input_cost_per_1m: 1.4
+      output_cost_per_1m: 4.4
+      price_provider: explabs
+      price_source: https://platform.experientiallabs.ai/models/glm-5.3
+      price_as_of: '2026-09-09'
+      price_note: 'PROMO model (free-tier probe). Promo model served free via Experiential
+        — verified genuinely free 2026-09-09 by live probe (all models free daily
+        allowance). Price = recovered list price of record, dated 2026-09-09, reversible:
+        the gateway platform''s host_managed rung lists $1.40/M in, $4.40/M out ($0.26/M
+        cached-in) for glm-5.3, agreeing with the direct fireworks/glm-5.2 rung''s
+        $1.40/$4.40. The explabs channel reports no cache-read rate, so no cache_read
+        key — consistent with the other *-explabs ids. No direct same-identity twin
+        exists in the registry, so this id introduces the glm-5.3 identity (distinct
+        from glm-5.3-flash). Channel-Namespaced id: MUST NOT collide with any direct
+        entry.'
+    lane: glm-5.3
+    model: glm-5.3
+  glm-5.3-flash-explabs:
+    model_id: glm-5.3-flash
+    provider: explabs
+    version: glm-5.3-flash
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.15
+      output_cost_per_1m: 0.5
+      price_provider: explabs
+      price_source: https://openrouter.ai/z-ai/glm-5.3-flash
+      price_as_of: '2026-09-09'
+      price_note: 'PROMO model (free-tier probe). Promo model served free via Experiential
+        — verified genuinely free 2026-09-09 by live probe (all models free daily
+        allowance). Price = recovered list price of record matching the direct glm-5.3-flash
+        entry, dated 2026-09-09, reversible. $0.15/M in, $0.50/M out (cache-read $0.03/M
+        on the direct openrouter entry; the explabs channel reports no cache-read
+        rate, so no cache_read key — consistent with the other *-explabs ids). Identity
+        glm-5.3-flash dedupes the 41 challenges the direct twin already covers. Channel-Namespaced
+        id: MUST NOT collide with the paid direct glm-5.3-flash (results.csv keys
+        on model id).'
+    lane: glm-5.3-flash
+    model: glm-5.3-flash
+  cloudflare_workers_ai-deepseek-v4-flash-0731:
+    model_id: deepseek-v4-flash-0731
+    provider: cloudflare_workers_ai
+    version: deepseek-v4-flash-0731
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.44
+      output_cost_per_1m: 1.32
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.44/1.32 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/deepseek-ai/deepseek-v4-flash-0731'
+    model: deepseek-v4-flash-0731
+  cloudflare_workers_ai-deepseek-v4-pro-0813:
+    model_id: deepseek-v4-pro
+    provider: cloudflare_workers_ai
+    version: deepseek-v4-pro
+    billing: free
+    pricing:
+      input_cost_per_1m: 1.32
+      output_cost_per_1m: 3.96
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (1.32/3.96 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/deepseek-ai/deepseek-v4-pro-0813'
+    model: deepseek-v4-pro
+  cloudflare_workers_ai-gemma-4-26b-a4b-it:
+    model_id: gemma-4-26b-a4b-it
+    provider: cloudflare_workers_ai
+    version: gemma-4-26b-a4b-it
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.1
+      output_cost_per_1m: 0.3
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.1/0.3 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/google/gemma-4-26b-a4b-it'
+    model: gemma-4-26b-a4b-it
+  cloudflare_workers_ai-kimi-k2-6:
+    model_id: kimi-k2-6
+    provider: cloudflare_workers_ai
+    version: kimi-k2-6
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.95
+      output_cost_per_1m: 4.0
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.95/4.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/moonshotai/kimi-k2.6'
+    model: kimi-k2-6
+  cloudflare_workers_ai-llama-3-2-11b-vision:
+    model_id: llama-3-2-11b-vision
+    provider: cloudflare_workers_ai
+    version: llama-3-2-11b-vision
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.0485
+      output_cost_per_1m: 0.676
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.0485/0.676 per 1M). No cache_read rate (HARD
+        RULE 3).
+    lane: '@cf/meta/llama-3.2-11b-vision-instruct'
+    model: llama-3-2-11b-vision
+  nvidia_nim-nemotron-3-super-120b-a12b:
+    model_id: nemotron-3-super-120b-a12b
+    provider: nvidia_nim
+    version: nemotron-3-super-120b-a12b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.2
+      output_cost_per_1m: 0.8
+      price_provider: nvidia_nim
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.2/0.8 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: nvidia/nemotron-3-super-120b-a12b
+    model: nemotron-3-super-120b-a12b
+  cloudflare_workers_ai-qwen3-8-27b:
+    model_id: qwen3.8-27b
+    provider: cloudflare_workers_ai
+    version: qwen3.8-27b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.45
+      output_cost_per_1m: 3.2
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.45/3.2 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/qwen/qwen3.8-27b'
+    model: qwen3.8-27b
+  cloudflare_workers_ai-cf-aisingapore-gemma-sea-lion-v4-27b-it:
+    model_id: gemma-sea-lion-v4-27b-it
+    provider: cloudflare_workers_ai
+    version: gemma-sea-lion-v4-27b-it
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.351
+      output_cost_per_1m: 0.555
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.351/0.555 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/aisingapore/gemma-sea-lion-v4-27b-it'
+    model: gemma-sea-lion-v4-27b-it
+  cloudflare_workers_ai-cf-deepseek-ai-deepseek-r1-distill-qwen-32b:
+    model_id: deepseek-r1-distill-qwen-32b
+    provider: cloudflare_workers_ai
+    version: deepseek-r1-distill-qwen-32b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.497
+      output_cost_per_1m: 4.881
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.497/4.881 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b'
+    model: deepseek-r1-distill-qwen-32b
+  cloudflare_workers_ai-cf-ibm-granite-granite-4-0-h-micro:
+    model_id: granite-4.0-h-micro
+    provider: cloudflare_workers_ai
+    version: granite-4.0-h-micro
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.017
+      output_cost_per_1m: 0.112
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.017/0.112 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/ibm-granite/granite-4.0-h-micro'
+    model: granite-4.0-h-micro
+  cloudflare_workers_ai-cf-meta-llama-3-1-8b-instruct-fp8:
+    model_id: llama-3.1-8b-instruct-fp8
+    provider: cloudflare_workers_ai
+    version: llama-3.1-8b-instruct-fp8
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.152
+      output_cost_per_1m: 0.287
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.152/0.287 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/meta/llama-3.1-8b-instruct-fp8'
+    model: llama-3.1-8b-instruct-fp8
+  cloudflare_workers_ai-cf-meta-llama-3-2-1b-instruct:
+    model_id: llama-3.2-1b-instruct
+    provider: cloudflare_workers_ai
+    version: llama-3.2-1b-instruct
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.027
+      output_cost_per_1m: 0.201
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.027/0.201 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/meta/llama-3.2-1b-instruct'
+    model: llama-3.2-1b-instruct
+  cloudflare_workers_ai-cf-meta-llama-3-2-3b-instruct:
+    model_id: llama-3.2-3b-instruct
+    provider: cloudflare_workers_ai
+    version: llama-3.2-3b-instruct
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.0509
+      output_cost_per_1m: 0.335
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.0509/0.335 per 1M). No cache_read rate (HARD
+        RULE 3).
+    lane: '@cf/meta/llama-3.2-3b-instruct'
+    model: llama-3.2-3b-instruct
+  cloudflare_workers_ai-cf-meta-llama-4-scout-17b-16e-instruct:
+    model_id: llama-4-scout-17b-16e-instruct
+    provider: cloudflare_workers_ai
+    version: llama-4-scout-17b-16e-instruct
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.27
+      output_cost_per_1m: 0.85
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.27/0.85 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/meta/llama-4-scout-17b-16e-instruct'
+    model: llama-4-scout-17b-16e-instruct
+  cloudflare_workers_ai-cf-mistralai-mistral-small-3-1-24b-instruct:
+    model_id: mistral-small-3.1-24b-instruct
+    provider: cloudflare_workers_ai
+    version: mistral-small-3.1-24b-instruct
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.351
+      output_cost_per_1m: 0.555
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.351/0.555 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/mistralai/mistral-small-3.1-24b-instruct'
+    model: mistral-small-3.1-24b-instruct
+  cloudflare_workers_ai-cf-moonshotai-kimi-k2-7-code:
+    model_id: kimi-k2.7-code
+    provider: cloudflare_workers_ai
+    version: kimi-k2.7-code
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.95
+      output_cost_per_1m: 4.0
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.95/4.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/moonshotai/kimi-k2.7-code'
+    model: kimi-k2.7-code
+  cloudflare_workers_ai-cf-nvidia-nemotron-3-120b-a12b:
+    model_id: nemotron-3-120b-a12b
+    provider: cloudflare_workers_ai
+    version: nemotron-3-120b-a12b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.5
+      output_cost_per_1m: 1.5
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.5/1.5 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/nvidia/nemotron-3-120b-a12b'
+    model: nemotron-3-120b-a12b
+  cloudflare_workers_ai-cf-qwen-qwen2-5-coder-32b-instruct:
+    model_id: qwen2.5-coder-32b-instruct
+    provider: cloudflare_workers_ai
+    version: qwen2.5-coder-32b-instruct
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.66
+      output_cost_per_1m: 1.0
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.66/1.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/qwen/qwen2.5-coder-32b-instruct'
+    model: qwen2.5-coder-32b-instruct
+  cloudflare_workers_ai-cf-qwen-qwq-32b:
+    model_id: qwq-32b
+    provider: cloudflare_workers_ai
+    version: qwq-32b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.66
+      output_cost_per_1m: 1.0
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.66/1.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/qwen/qwq-32b'
+    model: qwq-32b
+  cloudflare_workers_ai-cf-zai-org-glm-4-7-flash:
+    model_id: glm-4.7-flash
+    provider: cloudflare_workers_ai
+    version: glm-4.7-flash
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.0605
+      output_cost_per_1m: 0.4
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.0605/0.4 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/zai-org/glm-4.7-flash'
+    model: glm-4.7-flash
+  cloudflare_workers_ai-cf-zai-org-glm-5-2:
+    model_id: glm-5.2
+    provider: cloudflare_workers_ai
+    version: glm-5.2
+    billing: free
+    pricing:
+      input_cost_per_1m: 1.4
+      output_cost_per_1m: 4.4
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (1.4/4.4 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/zai-org/glm-5.2'
+    model: glm-5.2
+  cloudflare_workers_ai-cf-zai-org-glm-5-3:
+    model_id: glm-5.3
+    provider: cloudflare_workers_ai
+    version: glm-5.3
+    billing: free
+    pricing:
+      input_cost_per_1m: 1.4
+      output_cost_per_1m: 4.4
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (1.4/4.4 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/zai-org/glm-5.3'
+    model: glm-5.3
+  cloudflare_workers_ai-cf-zai-org-glm-5-3-flash:
+    model_id: glm-5.3-flash
+    provider: cloudflare_workers_ai
+    version: glm-5.3-flash
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.15
+      output_cost_per_1m: 0.5
+      price_provider: cloudflare_workers_ai
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.15/0.5 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: '@cf/zai-org/glm-5.3-flash'
+    model: glm-5.3-flash
+  google_ai_studio-deep-research-max-preview-04-2026:
+    model_id: deep-research-max-preview-04-2026
+    provider: google_ai_studio
+    version: deep-research-max-preview-04-2026
+    billing: free
+    pricing:
+      input_cost_per_1m: 2.0
+      output_cost_per_1m: 12.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (2.0/12.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: deep-research-max-preview-04-2026
+    model: deep-research-max-preview-04-2026
+  google_ai_studio-deep-research-preview-04-2026:
+    model_id: deep-research-preview-04-2026
+    provider: google_ai_studio
+    version: deep-research-preview-04-2026
+    billing: free
+    pricing:
+      input_cost_per_1m: 2.0
+      output_cost_per_1m: 12.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (2.0/12.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: deep-research-preview-04-2026
+    model: deep-research-preview-04-2026
+  google_ai_studio-gemini-2-5-computer-use-preview-10-2025:
+    model_id: gemini-2.5-computer-use-preview-10-2025
+    provider: google_ai_studio
+    version: gemini-2.5-computer-use-preview-10-2025
+    billing: free
+    pricing:
+      input_cost_per_1m: 1.25
+      output_cost_per_1m: 10.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (1.25/10.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-2.5-computer-use-preview-10-2025
+    model: gemini-2.5-computer-use-preview-10-2025
+  google_ai_studio-gemini-2-5-flash:
+    model_id: gemini-2.5-flash
+    provider: google_ai_studio
+    version: gemini-2.5-flash
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.3
+      output_cost_per_1m: 2.5
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.3/2.5 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-2.5-flash
+    model: gemini-2.5-flash
+  google_ai_studio-gemini-2-5-flash-image:
+    model_id: gemini-2.5-flash-image
+    provider: google_ai_studio
+    version: gemini-2.5-flash-image
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.3
+      output_cost_per_1m: 30.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.3/30.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-2.5-flash-image
+    model: gemini-2.5-flash-image
+  google_ai_studio-gemini-2-5-flash-lite:
+    model_id: gemini-2.5-flash-lite
+    provider: google_ai_studio
+    version: gemini-2.5-flash-lite
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.1
+      output_cost_per_1m: 0.4
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.1/0.4 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-2.5-flash-lite
+    model: gemini-2.5-flash-lite
+  google_ai_studio-gemini-2-5-flash-preview-tts:
+    model_id: gemini-2.5-flash-preview-tts
+    provider: google_ai_studio
+    version: gemini-2.5-flash-preview-tts
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.5
+      output_cost_per_1m: 10.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.5/10.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-2.5-flash-preview-tts
+    model: gemini-2.5-flash-preview-tts
+  google_ai_studio-gemini-2-5-pro:
+    model_id: gemini-2.5-pro
+    provider: google_ai_studio
+    version: gemini-2.5-pro
+    billing: free
+    pricing:
+      input_cost_per_1m: 1.25
+      output_cost_per_1m: 10.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (1.25/10.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-2.5-pro
+    model: gemini-2.5-pro
+  google_ai_studio-gemini-2-5-pro-preview-tts:
+    model_id: gemini-2.5-pro-preview-tts
+    provider: google_ai_studio
+    version: gemini-2.5-pro-preview-tts
+    billing: free
+    pricing:
+      input_cost_per_1m: 1.0
+      output_cost_per_1m: 20.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (1.0/20.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-2.5-pro-preview-tts
+    model: gemini-2.5-pro-preview-tts
+  google_ai_studio-gemini-3-flash-preview:
+    model_id: gemini-3-flash-preview
+    provider: google_ai_studio
+    version: gemini-3-flash-preview
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.5
+      output_cost_per_1m: 3.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.5/3.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3-flash-preview
+    model: gemini-3-flash-preview
+  google_ai_studio-gemini-3-pro-image:
+    model_id: gemini-3-pro-image
+    provider: google_ai_studio
+    version: gemini-3-pro-image
+    billing: free
+    pricing:
+      input_cost_per_1m: 2.0
+      output_cost_per_1m: 120.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (2.0/120.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3-pro-image
+    model: gemini-3-pro-image
+  google_ai_studio-gemini-3-pro-image-preview:
+    model_id: gemini-3-pro-image-preview
+    provider: google_ai_studio
+    version: gemini-3-pro-image-preview
+    billing: free
+    pricing:
+      input_cost_per_1m: 2.0
+      output_cost_per_1m: 120.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (2.0/120.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3-pro-image-preview
+    model: gemini-3-pro-image-preview
+  google_ai_studio-gemini-3-1-flash-image:
+    model_id: gemini-3.1-flash-image
+    provider: google_ai_studio
+    version: gemini-3.1-flash-image
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.5
+      output_cost_per_1m: 60.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.5/60.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3.1-flash-image
+    model: gemini-3.1-flash-image
+  google_ai_studio-gemini-3-1-flash-image-preview:
+    model_id: gemini-3.1-flash-image-preview
+    provider: google_ai_studio
+    version: gemini-3.1-flash-image-preview
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.5
+      output_cost_per_1m: 60.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.5/60.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3.1-flash-image-preview
+    model: gemini-3.1-flash-image-preview
+  google_ai_studio-gemini-3-1-flash-lite:
+    model_id: gemini-3.1-flash-lite
+    provider: google_ai_studio
+    version: gemini-3.1-flash-lite
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.25
+      output_cost_per_1m: 1.5
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.25/1.5 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3.1-flash-lite
+    model: gemini-3.1-flash-lite
+  google_ai_studio-gemini-3-1-flash-lite-image:
+    model_id: gemini-3.1-flash-lite-image
+    provider: google_ai_studio
+    version: gemini-3.1-flash-lite-image
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.25
+      output_cost_per_1m: 30.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.25/30.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3.1-flash-lite-image
+    model: gemini-3.1-flash-lite-image
+  google_ai_studio-gemini-3-1-flash-lite-preview:
+    model_id: gemini-3.1-flash-lite-preview
+    provider: google_ai_studio
+    version: gemini-3.1-flash-lite-preview
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.25
+      output_cost_per_1m: 1.5
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.25/1.5 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3.1-flash-lite-preview
+    model: gemini-3.1-flash-lite-preview
+  google_ai_studio-gemini-3-1-flash-tts-preview:
+    model_id: gemini-3.1-flash-tts-preview
+    provider: google_ai_studio
+    version: gemini-3.1-flash-tts-preview
+    billing: free
+    pricing:
+      input_cost_per_1m: 1.0
+      output_cost_per_1m: 20.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (1.0/20.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3.1-flash-tts-preview
+    model: gemini-3.1-flash-tts-preview
+  google_ai_studio-gemini-3-1-pro-preview:
+    model_id: gemini-3.1-pro-preview
+    provider: google_ai_studio
+    version: gemini-3.1-pro-preview
+    billing: free
+    pricing:
+      input_cost_per_1m: 2.0
+      output_cost_per_1m: 12.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (2.0/12.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3.1-pro-preview
+    model: gemini-3.1-pro-preview
+  google_ai_studio-gemini-3-1-pro-preview-customtools:
+    model_id: gemini-3.1-pro-preview-customtools
+    provider: google_ai_studio
+    version: gemini-3.1-pro-preview-customtools
+    billing: free
+    pricing:
+      input_cost_per_1m: 2.0
+      output_cost_per_1m: 12.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (2.0/12.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3.1-pro-preview-customtools
+    model: gemini-3.1-pro-preview-customtools
+  google_ai_studio-gemini-3-5-flash:
+    model_id: gemini-3.5-flash
+    provider: google_ai_studio
+    version: gemini-3.5-flash
+    billing: free
+    pricing:
+      input_cost_per_1m: 1.5
+      output_cost_per_1m: 9.0
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (1.5/9.0 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3.5-flash
+    model: gemini-3.5-flash
+  google_ai_studio-gemini-3-5-flash-lite:
+    model_id: gemini-3.5-flash-lite
+    provider: google_ai_studio
+    version: gemini-3.5-flash-lite
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.3
+      output_cost_per_1m: 2.5
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.3/2.5 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3.5-flash-lite
+    model: gemini-3.5-flash-lite
+  google_ai_studio-gemini-3-6-flash:
+    model_id: gemini-3.6-flash
+    provider: google_ai_studio
+    version: gemini-3.6-flash
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.75
+      output_cost_per_1m: 3.75
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.75/3.75 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3.6-flash
+    model: gemini-3.6-flash
+  google_ai_studio-gemini-3-7-flash:
+    model_id: gemini-3.7-flash
+    provider: google_ai_studio
+    version: gemini-3.7-flash
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.75
+      output_cost_per_1m: 3.75
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.75/3.75 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3.7-flash
+    model: gemini-3.7-flash
+  google_ai_studio-gemini-3-8-flash:
+    model_id: gemini-3.8-flash
+    provider: google_ai_studio
+    version: gemini-3.8-flash
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.75
+      output_cost_per_1m: 3.75
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.75/3.75 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-3.8-flash
+    model: gemini-3.8-flash
+  google_ai_studio-gemini-omni-flash-preview:
+    model_id: gemini-omni-flash-preview
+    provider: google_ai_studio
+    version: gemini-omni-flash-preview
+    billing: free
+    pricing:
+      input_cost_per_1m: 1.5
+      output_cost_per_1m: 17.5
+      price_provider: google_ai_studio
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (1.5/17.5 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: gemini-omni-flash-preview
+    model: gemini-omni-flash-preview
+  groq-meta-llama-llama-prompt-guard-2-22m:
+    model_id: llama-prompt-guard-2-22m
+    provider: groq
+    version: llama-prompt-guard-2-22m
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.03
+      output_cost_per_1m: 0.03
+      price_provider: groq
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.03/0.03 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: meta-llama/llama-prompt-guard-2-22m
+    model: llama-prompt-guard-2-22m
+  groq-meta-llama-llama-prompt-guard-2-86m:
+    model_id: llama-prompt-guard-2-86m
+    provider: groq
+    version: llama-prompt-guard-2-86m
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.04
+      output_cost_per_1m: 0.04
+      price_provider: groq
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.04/0.04 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: meta-llama/llama-prompt-guard-2-86m
+    model: llama-prompt-guard-2-86m
+  groq-openai-gpt-oss-safeguard-20b:
+    model_id: gpt-oss-safeguard-20b
+    provider: groq
+    version: gpt-oss-safeguard-20b
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.075
+      output_cost_per_1m: 0.3
+      price_provider: groq
+      price_source: https://models.dev/api.json
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.075/0.3 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: openai/gpt-oss-safeguard-20b
+    model: gpt-oss-safeguard-20b
+  sambanova-deepseek-v3-2:
+    model_id: deepseek-v3.2
+    provider: sambanova
+    version: deepseek-v3.2
+    billing: free
+    pricing:
+      input_cost_per_1m: 3.0
+      output_cost_per_1m: 4.5
+      price_provider: sambanova
+      price_source: catalog:sambanova
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (3.0/4.5 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: DeepSeek-V3.2
+    model: deepseek-v3.2
+  sambanova-minimax-m3:
+    model_id: minimax-m3
+    provider: sambanova
+    version: minimax-m3
+    billing: free
+    pricing:
+      input_cost_per_1m: 0.6
+      output_cost_per_1m: 2.4
+      price_provider: sambanova
+      price_source: catalog:sambanova
+      price_as_of: '2026-09-11'
+      price_note: Collection-only free lane. List price is the paid twin's published
+        rate for the same weights (0.6/2.4 per 1M). No cache_read rate (HARD RULE
+        3).
+    lane: MiniMax-M3
+    model: minimax-m3

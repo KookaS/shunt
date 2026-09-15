@@ -1,0 +1,30 @@
+{
+  "data": [
+    {
+      "id": "nex-agi/nex-n2.5-mini:free",
+      "canonical_slug": "nex-agi/nex-n2.5-mini-20260908",
+      "hugging_face_id": "nex-agi/Nex-N2.5-mini",
+      "context_length": 262144,
+      "expiration_date": null,
+      "supported_parameters": ["max_tokens", "tools", "tool_choice", "temperature"],
+      "pricing": {"prompt": "0", "completion": "0"}
+    },
+    {
+      "id": "openai/gpt-5-mini",
+      "canonical_slug": "openai/gpt-5-mini",
+      "hugging_face_id": "",
+      "context_length": 400000,
+      "supported_parameters": ["tools"],
+      "pricing": {"prompt": "0.00000025", "completion": "0.000002"}
+    },
+    {
+      "id": "dots-studio/dots-3-note-preview:free",
+      "canonical_slug": "dots-studio/dots-3-note-preview-20260910",
+      "hugging_face_id": "",
+      "context_length": 131072,
+      "expiration_date": "2026-09-30",
+      "supported_parameters": ["temperature"],
+      "pricing": {"prompt": "0", "completion": "0"}
+    }
+  ]
+}

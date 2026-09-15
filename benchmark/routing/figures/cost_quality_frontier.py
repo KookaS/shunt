@@ -95,7 +95,8 @@ SPEC = FigureSpec(
         "row's own Wilson lower bound, plus the fixed-frontier baseline and the oracle bound, "
         "widened by the room the names need. C's is the group whose MARKERS overlap inside B "
         "— measured on the rendered canvas, not chosen — widened to contain the full length "
-        "of every context bracket it draws. "
+        "of every context bracket it draws: the crowd's own, and any bracket-bearing neighbour "
+        "the widened window pulls inside, so no dashed rule runs off the panel's right edge. "
         "EVERY PANEL NAMES EVERY STRATEGY ITS OWN WINDOW HOLDS, so a name repeats down the "
         "stack at each scale — that is what a magnification is, one point named twice, not "
         "two measurements. A strategy outside the detail window is therefore named on A, on "
@@ -206,7 +207,9 @@ SPEC = FigureSpec(
             "one crowd no label placement can fix. A group whose names merely collide over "
             "separable markers is stacked on levels where it sits and earns no panel. The "
             "window is the overlapping group's own bounding box widened to contain everything "
-            "panel C draws, including the full length of a context bracket.",
+            "panel C draws, including the full length of every context bracket it draws on: "
+            "the crowd's own, and any bracket-bearing neighbour the widened window pulls "
+            "inside.",
         ),
         (
             "level",
@@ -579,15 +582,26 @@ def _draw_bracket(
             solid_capstyle="butt",
             zorder=2,
         )
+        # THE LABEL OWNS A TEXT-SIZED CHIP. On the band it used to read as an oversized
+        # backing box behind the word with the baseline hanging out of its bottom. A small
+        # opaque chip, sized to the text by `bbox` and centred on the rule, says where the
+        # label is; the band on either side still shows the range it names.
         inset.annotate(
             "summary",
             xy=(math.sqrt(lo * mid), level),
-            xytext=(0, -4),
+            xytext=(0, 0),
             textcoords="offset points",
             ha="center",
-            va="top",
+            va="center",
             fontsize=_BRACKET_FONT,
             color=_UNCERTAINTY,
+            bbox={
+                "boxstyle": "round,pad=0.22",
+                "facecolor": "#ECECEC",
+                "edgecolor": "white",
+                "linewidth": 0.6,
+            },
+            zorder=5,
         )
     inset.plot([hi], [level], "|", color=_UNCERTAINTY, ms=7, mew=1.2, alpha=0.9, zorder=2)
     inset.annotate(
@@ -1189,21 +1203,23 @@ def _draw_brackets(
 ) -> list[tuple[float, float, float, float]]:
     """Every bracket the panel draws, returned as pixel rects the labeller must avoid."""
     obstacles: list[tuple[float, float, float, float]] = []
-    for row in _bracket_rows(rows):
-        name = str(row["strategy"])
-        if name not in named:
-            continue
+    drawn = [r for r in _bracket_rows(rows) if str(r["strategy"]) in named]
+    for index, row in enumerate(drawn):
         cost, perf = _cost(row), float(row["AvgPerf%"])
-        # Halfway between the row's own pass rate and the panel's floor: derived, so a taller
-        # window drops the rule further and a bracket always has its label room below it. The
-        # rule asserts no pass rate, which is what makes moving it off the line legitimate.
-        level = (perf + window[2]) / 2.0
+        # DODGED LANES, one per bracket, spread across the gap between the panel floor and
+        # the row's own pass rate. Two escalating strategies share this panel, and when their
+        # rules sat at ONE height the upper strategy's dashed rule ran straight through the
+        # lower strategy's `full` label — a strike-through. A lane each keeps every rule off
+        # every other bracket's label. The rule asserts no pass rate, so moving it is
+        # legitimate; with a single bracket this lands halfway, exactly as it always did.
+        level = window[2] + (perf - window[2]) * (index + 1) / (len(drawn) + 1)
         hi = _draw_bracket(inset, row, cost, perf, level)
         x0, y0 = inset.transData.transform((cost, level))
         x1, y1 = inset.transData.transform((max(hi, cost), perf))
-        # The rule is not the whole obstacle: `summary` hangs BELOW it and `full` runs past its
-        # right end, and a strategy name placed onto either is the collision this panel exists
-        # to remove — moved from the plane into the panel, which would be no fix at all.
+        # The rule is not the whole obstacle: the `summary` chip straddles it and `full` runs
+        # past its right end, and a strategy name placed onto either is the collision this
+        # panel exists to remove — moved from the plane into the panel, which would be no fix
+        # at all.
         fig = inset.get_figure(root=True)
         scale = (fig.dpi if fig is not None else 72.0) / 72.0
         below = (plot_style.label_extent("summary", _BRACKET_FONT)[1] + 4.0) * scale
@@ -1479,6 +1495,19 @@ def _axes(fig: Figure, levels: int) -> list[Axes]:
     return list(fig.subplots(levels, 1, height_ratios=_PANEL_RATIOS[levels]))
 
 
+def _bracket_reach_in_window(rows: list[dict], window: tuple[float, float, float, float]) -> float:
+    """The rightmost dollar a bracket reaches among the rows THIS window draws a bracket on."""
+    # The window must CONTAIN every bracket it draws, and which rows those are is decided by the
+    # window itself: `_draw_brackets` draws on a DEPLOYABLE escalating row whose marker the
+    # window holds. Deriving the reach from the marker-overlap crowd alone missed a
+    # bracket-bearing neighbour the padding had pulled inside the window, and its dashed rule
+    # then ran off the panel's right edge with no legible `full` end.
+    return max(
+        (_num(r, _ALPHA_10_KEY) for r in _bracket_rows(rows) if _in_window(r, window)),
+        default=0.0,
+    )
+
+
 def _zoom_window(
     ax: Axes, ctx: ctxmod.RoutingContext, points: list[LabelPoint]
 ) -> tuple[float, float, float, float] | None:
@@ -1490,7 +1519,17 @@ def _zoom_window(
         if blob is None:
             continue
         crowd = {points[i].text for i in blob.members}
-        return _window(ax, blob, points, _bracket_extent(ctx.rows, crowd))
+        window = _window(ax, blob, points, _bracket_extent(ctx.rows, crowd))
+        # Widen until the window holds every bracket the drawn panel carries. Each pass only
+        # widens, and only over the finite set of bracket rows, so it reaches a fixed point; the
+        # crowd's own brackets seed it, so the first pass usually settles it.
+        for _ in range(len(_bracket_rows(ctx.rows)) + 1):
+            reach = _bracket_reach_in_window(ctx.rows, window)
+            widened = _window(ax, blob, points, reach)
+            if widened == window:
+                break
+            window = widened
+        return window
     return None
 
 

@@ -73,7 +73,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "astropy__astropy-13033__zai-glm-5.2__think": {
+    "astropy__astropy-13033__glm-5.2__think": {
       "content_sha256": "c70f32cb9832fbf60d441ef9e3d699312301fd31c36fdb96af1965eff0459ceb",
       "n_steps": 34,
       "snapshot_steps": null,
@@ -385,7 +385,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "astropy__astropy-14365__zai-glm-5.2__think": {
+    "astropy__astropy-14365__glm-5.2__think": {
       "content_sha256": "174c5556fdfe77148b67921b52caa3c7227b9809bf75b37c5fe070f62fff5c94",
       "n_steps": 25,
       "snapshot_steps": null,
@@ -643,7 +643,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "astropy__astropy-7606__zai-glm-5.2__think": {
+    "astropy__astropy-7606__glm-5.2__think": {
       "content_sha256": "fd82387d90786037f7c61be7e0dd1475ad425fd10221d4cfefa92f43fc130992",
       "n_steps": 22,
       "snapshot_steps": null,
@@ -769,7 +769,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "astropy__astropy-8872__zai-glm-5.2__think": {
+    "astropy__astropy-8872__glm-5.2__think": {
       "content_sha256": "2903afd233dfbdcd36c69de6f9381f929bca92f6099dd8d3d99845ecaf5da72e",
       "n_steps": 49,
       "snapshot_steps": null,
@@ -913,7 +913,7 @@
       "snapshot_steps": 42,
       "terminal_resolved": false
     },
-    "django__django-11885__zai-glm-5.2__nothink": {
+    "django__django-11885__glm-5.2__nothink": {
       "content_sha256": "c8b8b035df7dd3eef6f94353a6e90f6bf8d4aad35194b493357e1dda35b2c906",
       "n_steps": 70,
       "snapshot_steps": 70,
@@ -1147,7 +1147,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "django__django-14404__zai-glm-5.2__think": {
+    "django__django-14404__glm-5.2__think": {
       "content_sha256": "982322ba747c646c34a8fcedc1f5e62ff5fcd52473015c7ebd0fd59ac512a1a3",
       "n_steps": 40,
       "snapshot_steps": null,
@@ -1621,7 +1621,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "matplotlib__matplotlib-20676__zai-glm-5.2__think": {
+    "matplotlib__matplotlib-20676__glm-5.2__think": {
       "content_sha256": "7426b1557341160bd2fbdb0afc4e8557afa3285a449c41d00625b8c7c68a17f3",
       "n_steps": 45,
       "snapshot_steps": null,
@@ -1765,7 +1765,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "matplotlib__matplotlib-23299__zai-glm-5.2__think": {
+    "matplotlib__matplotlib-23299__glm-5.2__think": {
       "content_sha256": "ea80eb29689a12b38870ba278f6e9d93598adb9bbfac8022b2e3bdfce4e20ff3",
       "n_steps": 31,
       "snapshot_steps": null,
@@ -1999,7 +1999,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "matplotlib__matplotlib-24870__zai-glm-5.2__think": {
+    "matplotlib__matplotlib-24870__glm-5.2__think": {
       "content_sha256": "37fc591f67aab1545b7b72d64615a88d85d7a2dde29bc38734c4c956768081b1",
       "n_steps": 33,
       "snapshot_steps": null,
@@ -2197,7 +2197,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "matplotlib__matplotlib-26208__zai-glm-5.2__think": {
+    "matplotlib__matplotlib-26208__glm-5.2__think": {
       "content_sha256": "4c561a28e40b266d4cc54b19575e47241e9fdf71b83a9848f27a870d8ac92dbc",
       "n_steps": 58,
       "snapshot_steps": null,
@@ -2257,7 +2257,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "matplotlib__matplotlib-26466__zai-glm-5.2__think": {
+    "matplotlib__matplotlib-26466__glm-5.2__think": {
       "content_sha256": "5a88757a30de7c6628b1acbdf13b59897f24d6181c532fbbc78b6b61ff9d0ed4",
       "n_steps": 55,
       "snapshot_steps": null,
@@ -2347,7 +2347,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "psf__requests-1724__zai-glm-5.2__think": {
+    "psf__requests-1724__glm-5.2__think": {
       "content_sha256": "79675f7c11b5496ef9fae1f925c11eb8127f0b8acb39f76db90770e9c8a9f6fa",
       "n_steps": 26,
       "snapshot_steps": null,
@@ -2467,7 +2467,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "psf__requests-2317__zai-glm-5.2__think": {
+    "psf__requests-2317__glm-5.2__think": {
       "content_sha256": "17acf2e80665ff5d9f589b2ad683b6636e76139f4363313b3d255d0af768b55b",
       "n_steps": 39,
       "snapshot_steps": null,
@@ -2665,7 +2665,7 @@
       "snapshot_steps": 54,
       "terminal_resolved": true
     },
-    "pydata__xarray-3993__zai-glm-5.2__nothink": {
+    "pydata__xarray-3993__glm-5.2__nothink": {
       "content_sha256": "3c78ccdb68dfe3945bdbee50f8f69d95ee1dcd12779c0ec2d0fc350576643a8d",
       "n_steps": 48,
       "snapshot_steps": 47,
@@ -3061,7 +3061,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "pydata__xarray-7229__zai-glm-5.2__think": {
+    "pydata__xarray-7229__glm-5.2__think": {
       "content_sha256": "d468276ecbca1d177eeb3cac8e159cf5679bc3ce9d45f165020e16c290f2b10a",
       "n_steps": 56,
       "snapshot_steps": 55,
@@ -3175,7 +3175,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "pylint-dev__pylint-4661__zai-glm-5.2__think": {
+    "pylint-dev__pylint-4661__glm-5.2__think": {
       "content_sha256": "81f8c00b6dfa37bcec45312e0092ef905fe81225157f29289e7246972b24cbcb",
       "n_steps": 41,
       "snapshot_steps": null,
@@ -3379,7 +3379,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "pylint-dev__pylint-8898__zai-glm-5.2__think": {
+    "pylint-dev__pylint-8898__glm-5.2__think": {
       "content_sha256": "2532f97ec95624f9f5af3e74d67dec8cd0df78f2e6a725029fc8cac0134ef75f",
       "n_steps": 68,
       "snapshot_steps": null,
@@ -3511,7 +3511,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "pytest-dev__pytest-10356__zai-glm-5.2__think": {
+    "pytest-dev__pytest-10356__glm-5.2__think": {
       "content_sha256": "4ba3682786bd56ac6a89bcf44db458368ea83f465749f3b64b7978864f4cb941",
       "n_steps": 49,
       "snapshot_steps": null,
@@ -4345,7 +4345,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "scikit-learn__scikit-learn-14710__zai-glm-5.2__think": {
+    "scikit-learn__scikit-learn-14710__glm-5.2__think": {
       "content_sha256": "4b2afde08c2d44521465dcafe8dfb8f9110a30e4270127cec496ab5ca98ecbcc",
       "n_steps": 31,
       "snapshot_steps": null,
@@ -4501,7 +4501,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "scikit-learn__scikit-learn-25747__zai-glm-5.2__think": {
+    "scikit-learn__scikit-learn-25747__glm-5.2__think": {
       "content_sha256": "1217c40bea4a61a6ff237299f4639b64d3bf2a0133835874d713c542fb51d0c1",
       "n_steps": 54,
       "snapshot_steps": null,
@@ -4663,7 +4663,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "sphinx-doc__sphinx-11510__zai-glm-5.2__think": {
+    "sphinx-doc__sphinx-11510__glm-5.2__think": {
       "content_sha256": "49c3fffe753fe8429c5eaa46a0471c3805927d4d5d120223b3e0b659d14291fd",
       "n_steps": 70,
       "snapshot_steps": null,
@@ -4729,7 +4729,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "sphinx-doc__sphinx-7590__zai-glm-5.2__think": {
+    "sphinx-doc__sphinx-7590__glm-5.2__think": {
       "content_sha256": "968951c713143a7fc757cc806433be60e305501958d77924da32fbeb5e38935c",
       "n_steps": 47,
       "snapshot_steps": 46,
@@ -4963,7 +4963,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "sphinx-doc__sphinx-8548__zai-glm-5.2__think": {
+    "sphinx-doc__sphinx-8548__glm-5.2__think": {
       "content_sha256": "90c735e2cd115fec7f4d7f97d4e4c03c1130d60f3b0c8207f24214b936caca0d",
       "n_steps": 95,
       "snapshot_steps": 94,
@@ -5077,7 +5077,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "sphinx-doc__sphinx-9461__zai-glm-5.2__think": {
+    "sphinx-doc__sphinx-9461__glm-5.2__think": {
       "content_sha256": "ca07c3a1ae1abaeb9c5645bf916bc0e018bed09943fb01c1292ca7b8cb33e218",
       "n_steps": 70,
       "snapshot_steps": null,
@@ -5173,7 +5173,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "sphinx-doc__sphinx-9602__zai-glm-5.2__think": {
+    "sphinx-doc__sphinx-9602__glm-5.2__think": {
       "content_sha256": "ee579fef0d534e6299ce4f8d10172c46ac39b78f12a90126c90bacd868b44484",
       "n_steps": 51,
       "snapshot_steps": null,
@@ -5317,7 +5317,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "sphinx-doc__sphinx-9711__zai-glm-5.2__think": {
+    "sphinx-doc__sphinx-9711__glm-5.2__think": {
       "content_sha256": "d2c21d0c1ba75d6de72551a73c9cf871d3e670c5292b861c8491256a05c2f759",
       "n_steps": 17,
       "snapshot_steps": null,
@@ -5377,7 +5377,7 @@
       "snapshot_steps": 58,
       "terminal_resolved": false
     },
-    "sympy__sympy-12489__zai-glm-5.2__nothink": {
+    "sympy__sympy-12489__glm-5.2__nothink": {
       "content_sha256": "75cb599f33d2db875d198514816ad21c15c0cdcc0b07fc23ccf9ae28485b7711",
       "n_steps": 57,
       "snapshot_steps": 56,
@@ -5455,7 +5455,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "sympy__sympy-13852__zai-glm-5.2__think": {
+    "sympy__sympy-13852__glm-5.2__think": {
       "content_sha256": "08840f6041b7e7a77360bc2e159d66f7aa7c6eec336219c3593271c63446a4cd",
       "n_steps": 59,
       "snapshot_steps": null,
@@ -5761,7 +5761,7 @@
       "snapshot_steps": null,
       "terminal_resolved": false
     },
-    "sympy__sympy-16597__zai-glm-5.2__think": {
+    "sympy__sympy-16597__glm-5.2__think": {
       "content_sha256": "9bbd4997473a1d1e14a36207474c7f1543875b3d30da00581803565b483bfaf3",
       "n_steps": 32,
       "snapshot_steps": 31,
@@ -5845,7 +5845,7 @@
       "snapshot_steps": 38,
       "terminal_resolved": false
     },
-    "sympy__sympy-17318__zai-glm-5.2__nothink": {
+    "sympy__sympy-17318__glm-5.2__nothink": {
       "content_sha256": "cdb51438f20e83aac396200af9de96a88d88fa3c08f5f666e330e1c2597b9cca",
       "n_steps": 27,
       "snapshot_steps": 26,
@@ -5899,7 +5899,7 @@
       "snapshot_steps": 49,
       "terminal_resolved": false
     },
-    "sympy__sympy-17630__zai-glm-5.2__nothink": {
+    "sympy__sympy-17630__glm-5.2__nothink": {
       "content_sha256": "a166f13e442ee75c2551034ac1a94012b9477d3496bbfdb2f1eecb4e8f5fdebe",
       "n_steps": 70,
       "snapshot_steps": 70,

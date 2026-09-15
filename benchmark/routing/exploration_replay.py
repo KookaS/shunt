@@ -29,13 +29,12 @@ import numpy as np
 
 from benchmark.routing.strategies import routing_text
 from benchmark.routing.strategies.knn import (
-    _BUNDLED_MODEL_CONFIG,
     MatrixOutcomeIndex,
+    _benchmark_model_pool,
     _DummySessionManager,
     _embed_texts,
     _LookupEmbedder,
 )
-from shunt.models.config import ModelPool
 from shunt.router.budget import ConservativeGate, ExplorationBudget
 from shunt.router.cold_start import ColdStartStrategy
 from shunt.router.engine import RouterEngine
@@ -229,7 +228,10 @@ def build_engine(
         else None
     )
     engine = RouterEngine(
-        model_pool=ModelPool(_BUNDLED_MODEL_CONFIG),
+        # Same containment as the kNN strategy: the engine's pool is the shipped registry
+        # narrowed to the models the benchmark has enabled, so a replay pick can never land
+        # on a registry model that was never measured (its cell would be unscorable).
+        model_pool=_benchmark_model_pool(),
         session_manager=_DummySessionManager(),
         outcome_index=outcome_index,
         embedder=_LookupEmbedder(dict(zip(texts, list(embeddings), strict=True))),

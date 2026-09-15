@@ -1,0 +1,22 @@
+{
+  "models": [
+    {
+      "name": "models/gemini-flash-latest",
+      "displayName": "Gemini Flash Latest",
+      "inputTokenLimit": 1048576,
+      "supportedGenerationMethods": ["generateContent", "countTokens"]
+    },
+    {
+      "name": "models/embedding-001",
+      "displayName": "Embedding 001",
+      "inputTokenLimit": 2048,
+      "supportedGenerationMethods": ["embedContent"]
+    },
+    {
+      "name": "models/aqa",
+      "displayName": "AQA",
+      "inputTokenLimit": 7168,
+      "supportedGenerationMethods": ["generateAnswer"]
+    }
+  ]
+}

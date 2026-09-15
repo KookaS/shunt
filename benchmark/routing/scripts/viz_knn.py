@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 import numpy as np
+from matplotlib.lines import Line2D
 
 from benchmark import config, plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
@@ -63,7 +64,7 @@ _NULLC = "#9aa0a6"
 _THRESHOLD = "#B71C1C"
 
 SPEC = FigureSpec(
-    title="The router's one input does not predict outcomes; a 3-level human tag does",
+    title="The router's one input does not predict outcomes; a human difficulty tag does",
     reading=(
         "Left: the reliability diagram. x is the weighted neighbourhood success rate the "
         "shipped rule computes for a (task, model) pair; y is how often that pair actually "
@@ -281,7 +282,7 @@ class Calibration:
 
 
 def _draw_reliability(ax: Axes, cal: Calibration) -> None:
-    ax.plot([0, 1], [0, 1], ls="--", lw=1.0, color="#bbbbbb", zorder=1, label="perfect calibration")
+    ax.plot([0, 1], [0, 1], ls="--", lw=1.0, color="#bbbbbb", zorder=1)
     xs = [b["predicted"] for b in cal.bins]
     ys = [b["observed"] for b in cal.bins]
     yerr = np.array([plot_style.ci_yerr(b["observed"], *b["ci"]) for b in cal.bins]).T
@@ -295,7 +296,6 @@ def _draw_reliability(ax: Axes, cal: Calibration) -> None:
         lw=1.6,
         capsize=3,
         zorder=3,
-        label="observed",
     )
     ax.plot(
         xs,
@@ -305,7 +305,6 @@ def _draw_reliability(ax: Axes, cal: Calibration) -> None:
         ms=4,
         lw=1.2,
         zorder=2,
-        label="knowing only which model",
     )
     for b in cal.bins:
         ax.annotate(
@@ -332,7 +331,28 @@ def _draw_reliability(ax: Axes, cal: Calibration) -> None:
     ax.set_ylim(-0.03, 1.16)
     ax.set_xlabel("weighted neighbourhood success rate", fontsize=9)
     ax.set_ylabel("observed pass rate", fontsize=9)
-    ax.legend(fontsize=7, loc="lower right", frameon=False)
+    # Proxy handles, not the artists: the observed series is an errorbar container, whose
+    # legend handle renders as a bare cap bar and does not match the circle markers on the
+    # panel — the mark in the key must be the mark on the canvas.
+    ax.legend(
+        handles=[
+            Line2D([], [], ls="--", lw=1.2, color="#bbbbbb", label="perfect calibration"),
+            Line2D(
+                [],
+                [],
+                ls="--",
+                lw=1.2,
+                color="#8a8a8a",
+                marker="s",
+                ms=4,
+                label="knowing only which model",
+            ),
+            Line2D([], [], ls="-", lw=1.6, color=_OBSERVED, marker="o", ms=6, label="observed"),
+        ],
+        fontsize=7,
+        loc="lower right",
+        frameon=False,
+    )
     ax.grid(color="#eeeeee", lw=0.6)
     ax.set_axisbelow(True)
     plot_frame.panel_label(ax, "A · reliability of the routed score")
@@ -377,8 +397,9 @@ def _draw_skill(ax: Axes, cal: Calibration) -> None:
             ax.plot([x - 0.34, x + 0.34], [band.mean, band.mean], color=_NULLC, lw=1.0, zorder=2)
         inside = band is not None and band.contains(value)
         ax.plot([x], [value], "o", color=colour, ms=11, zorder=4)
+        band_line = f"\nnull 95% [{band.lo:+.3f}, {band.hi:+.3f}]" if band is not None else ""
         ax.annotate(
-            f"{value:+.3f}\n{'INSIDE the null' if inside else 'above the null'}",
+            f"{value:+.3f}\n{'INSIDE the null' if inside else 'above the null'}{band_line}",
             xy=(x, value),
             xytext=(0, 14),
             textcoords="offset points",

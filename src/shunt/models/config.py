@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -43,6 +44,11 @@ def strict_yaml_load(text: str) -> dict[str, Any]:
 
 
 DEFAULT_PROBE_ENDPOINT: Final[str] = "/v1/chat/completions"
+# The model id the keyless submission carries. It is deliberately nonexistent: the probe
+# wants the AUTH layer to answer, not a schema validator. A provider that validates the
+# model id first (NVIDIA NIM, SambaNova) needs a real id on the signature (`probe_model`)
+# or its rejection is a model-not-found 404, indistinguishable from a wrong base_url.
+DEFAULT_PROBE_MODEL: Final[str] = "shunt-probe-nonexistent-model"
 # The authenticated (200) check GETs this — a model listing, billed to no one.
 # Overridden per-provider where the default is public (OpenRouter) or set to None
 # where no free authenticated endpoint exists (Requesty).
@@ -64,6 +70,10 @@ class AuthProbe(BaseModel):
     expect_status: list[int] = [401]  # noqa: RUF012, SH001 (pydantic field default, copied per-instance)
     expect_body_pattern: str | None = None
     measured_as_of: str | None = None
+    # A provider that validates the model id BEFORE auth (NVIDIA NIM, SambaNova) answers a
+    # nonexistent-model request 404, which is indistinguishable from a wrong base_url. A real
+    # id here makes its rejection an auth-shaped 401. None keeps the deliberately-invalid id.
+    probe_model: str | None = None
     # Positive (authenticated) check: with a REAL key, prove the provider ACCEPTS
     # it (200) — the complement of the keyless rejection above. This endpoint is
     # GET-only and must never bill: `/v1/models` for most, `/v1/auth/key` for
@@ -81,6 +91,12 @@ class Provider(BaseModel):
     base_url: str
     api_key_env_var: str
     litellm_prefix: str
+    # A free lane that admits unauthenticated ("anonymous") requests: Kilo Gateway serves its
+    # `:free` ids with no `Authorization` header (a bogus key also returns 200). When true a
+    # missing `api_key_env_var` is NOT a refusal — the caller may send a harmless placeholder,
+    # which keeps litellm's client construction happy without inventing a billed path. False for
+    # every provider that answers an auth-shaped 401/403 without a key.
+    key_optional: bool = False
 
 
 class Pricing(BaseModel):
@@ -103,6 +119,14 @@ UNDISCLOSED: Final[str] = "UNDISCLOSED"
 # Where the weights run. `local` rows are $0 by construction and are never pooled with a
 # hosted namesake on a cost axis — the figures split on this field.
 ServingMode = Literal["hosted", "local"]
+
+# The LISTING's billing ENTITLEMENT, independent of any observed charge: what the channel is,
+# not what a given cell happened to cost. A `free` listing may still bill (a promo window that
+# lapsed); a `paid` listing may run for $0 inside a declared promo window. The census reads
+# this field (a paid listing anywhere makes the identity paid); the per-row observed `channel`
+# in results.csv is the accounting view. Optional at the schema level so example fragments and
+# tests need not carry it; the SH019 gate requires it on every committed registry/overlay row.
+Billing = Literal["free", "paid"]
 
 # A parameter count is either a vendor-published integer or the honest absence of one. The
 # literal exists so the two are never confused with a MISSING field: `total_params: null`
@@ -193,6 +217,22 @@ class ModelEntry(BaseModel):
 
     model_id: str
     provider: str
+    # The collection-only free overlay names its CHANNEL LISTING here (the provider's own raw
+    # id, `@cf/...`/`publisher/model:free`), while `model_id`/`model`/`version` all carry the
+    # bare canonical identity. The shipped registry has no `lane`; its `model_id` IS the wire
+    # id. `route` prefers `lane`, so a free row still calls the provider with its real id while
+    # the corpus keys on the canonical slug.
+    lane: str | None = None
+    # The bare canonical identity, mirrored on `model_id`/`version` in the overlay for readers
+    # that expect a single conventional field. Unused by routing.
+    model: str | None = None
+    # The listing's billing ENTITLEMENT — what the channel is, independent of any observed
+    # charge. `paid` ranks/prices normally; `free` marks a promo/collection listing whose
+    # harvested rows can legitimately carry real_cost==0. See `Billing`.
+    billing: Billing | None = None
+    # Why this listing carries the `billing` value it does, where the value is not obvious —
+    # a promo window that partially billed, an allowance-limited free plan. Short prose.
+    billing_note: str | None = None
     # Model identity: a genuine provider model change (new weights) is a NEW
     # registry id, not a version bump. Optional so unpriced example fragments stay
     # versionless, but required once `pricing` makes the model benchmarkable —
@@ -208,6 +248,13 @@ class ModelEntry(BaseModel):
     pricing: Pricing | None = None
     size: Size | None = None
     reasoning: ReasoningConfig | None = None
+    # Archive: a (model, provider) entry that has left service. `archived` is the switch; the
+    # two companions record when it happened and why. The row is RETAINED for provenance and
+    # the corpus, but the scheduler must drop it. Lives on the shared registry row so the
+    # non-shipped free overlay and the shipped registry express the same concept.
+    archived: bool = False
+    archived_at: str | None = None
+    archive_reason: str | None = None
 
     @model_validator(mode="after")
     def _priced_model_declares_version(self) -> ModelEntry:
@@ -235,10 +282,20 @@ class ModelConfig(BaseModel):
 
     name: str
     model_id: str | None = None
+    # The provider's raw channel listing (`lane`) when it differs from the canonical
+    # `model_id`; `route` uses it. None for every shipped row and for synthesized collection
+    # rows whose wire slug already is the canonical one.
+    lane: str | None = None
+    # The bare canonical identity (mirror of the overlay's `model`/`version`); informational.
+    model: str | None = None
+    # The listing's billing ENTITLEMENT (see `Billing`); None when the row predates the field.
+    billing: Billing | None = None
+    billing_note: str | None = None
     provider: str
     version: str | None = None
     base_url: str
     api_key_env_var: str
+    key_optional: bool = False
     litellm_prefix: str = "openai"
     supports_streaming: bool = True
     supports_cache_control: bool = False
@@ -246,11 +303,29 @@ class ModelConfig(BaseModel):
     pricing: Pricing | None = None
     size: Size | None = None
     reasoning: ReasoningConfig | None = None
+    # Archived (model, provider) rows stay for provenance but never schedule.
+    archived: bool = False
+    archived_at: str | None = None
+    archive_reason: str | None = None
 
     @property
     def route(self) -> str:
-        """The litellm target string: `<litellm_prefix>/<model_id>`."""
-        return f"{self.litellm_prefix}/{self.model_id or self.name}"
+        """The litellm target string: `<litellm_prefix>/<lane or model_id>`."""
+        return f"{self.litellm_prefix}/{self.lane or self.model_id or self.name}"
+
+
+_ENV_VAR_RE: Final = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def expand_env_vars(value: str) -> str:
+    """Expand every ``${VAR}`` in *value* from the environment; an unset name is left verbatim.
+
+    A provider's ``base_url`` can embed a per-account path segment (Cloudflare Workers AI's
+    ``.../accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1``). Templating keeps the account id out of a
+    tracked file while still resolving to a real URL at load time. An unset variable is left as
+    the literal ``${VAR}`` so the miss is visible in the resolved URL, never silently blank.
+    """
+    return _ENV_VAR_RE.sub(lambda match: os.environ.get(match.group(1), match.group(0)), value)
 
 
 def parse_registry(data: dict[str, Any]) -> Registry:
@@ -273,10 +348,15 @@ def resolve_models(registry: Registry) -> dict[str, ModelConfig]:
         resolved[name] = ModelConfig(
             name=name,
             model_id=entry.model_id,
+            lane=entry.lane,
+            model=entry.model,
+            billing=entry.billing,
+            billing_note=entry.billing_note,
             provider=entry.provider,
             version=entry.version,
-            base_url=provider.base_url,
+            base_url=expand_env_vars(provider.base_url),
             api_key_env_var=provider.api_key_env_var,
+            key_optional=provider.key_optional,
             litellm_prefix=provider.litellm_prefix,
             supports_streaming=entry.supports_streaming,
             supports_cache_control=entry.supports_cache_control,
@@ -284,6 +364,9 @@ def resolve_models(registry: Registry) -> dict[str, ModelConfig]:
             pricing=entry.pricing,
             size=entry.size,
             reasoning=entry.reasoning,
+            archived=entry.archived,
+            archived_at=entry.archived_at,
+            archive_reason=entry.archive_reason,
         )
     return resolved
 

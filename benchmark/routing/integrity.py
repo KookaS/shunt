@@ -105,6 +105,16 @@ OPTIONAL_COLUMNS: Final[tuple[str, ...]] = (
     *PROVENANCE_OPTIONAL_COLUMNS,
 )
 
+# OBSERVED channel accounting — one row's actual billing evidence, distinct from the listing's
+# ENTITLEMENT (`billing:` in the registry/overlay). Computed at write time and backfilled by
+# `benchmark/routing/scripts/backfill_channel.py`: `paid` iff real_cost>0; `free` iff a
+# free-window / free-corpus / free-listing / `-explabs`-fallback claim holds AND real_cost==0;
+# blank when unobserved (calls==0) or no evidence. `channel_source` names the rule that fired.
+# Audit-only, never a staleness key.
+CHANNEL_COLUMN: Final[str] = "channel"
+CHANNEL_SOURCE_COLUMN: Final[str] = "channel_source"
+CHANNEL_COLUMNS: Final[tuple[str, ...]] = (CHANNEL_COLUMN, CHANNEL_SOURCE_COLUMN)
+
 # The columns whose drift STALES a cached cell — the single declaration of that set. It used
 # to exist only as scattered branches in ``run_matrix._is_stale``, so "is this column an
 # anchor?" had no answer a reader (or the coverage report) could consult. ``_is_stale``
@@ -123,13 +133,18 @@ STALENESS_ANCHORS: Final[tuple[str, ...]] = (
 )
 
 # Full results.csv header, original outcome columns first for backward-compat.
-# ``reasoning`` follows ``model`` and, together with them, forms the cache key:
-# (challenge_id, model, reasoning). Legacy rows carry the literal
-# "default" and alias-resolve to their model's declared default_arm at read time
-# (`config.load_results` / `config.default_arm_ids`).
+# ``lane`` follows ``model`` and is the CHANNEL identity: the overlay row's KEY (e.g.
+# ``glm-5.3-explabs``), which names the provider channel the row was collected on. It is not
+# the overlay row's ``lane`` field — that field is the raw wire id (e.g. ``glm-5.3``).
+# ``model`` is the bare canonical weights identity. The cache key is
+# ``(challenge_id, lane, reasoning, rep)`` — keying on ``model`` would collide the same weights
+# served on two channels (e.g. a direct id and its `-explabs` mirror). ``reasoning`` follows
+# them; legacy rows carry the literal "default" and alias-resolve to their model's declared
+# default_arm at read time (`config.load_results` / `config.default_arm_ids`).
 RESULTS_FIELDS: Final[tuple[str, ...]] = (
     "challenge_id",
     "model",
+    "lane",
     "reasoning",
     "pass",
     "cost",
@@ -139,6 +154,7 @@ RESULTS_FIELDS: Final[tuple[str, ...]] = (
     *CACHE_COLUMNS,
     REPLICATE_COLUMN,
     *OPTIONAL_COLUMNS,
+    *CHANNEL_COLUMNS,
 )
 # Default reasoning arm written for every cell until full arm support lands.
 DEFAULT_REASONING: Final[str] = "default"

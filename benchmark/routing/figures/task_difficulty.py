@@ -16,6 +16,7 @@ from benchmark import plot_frame
 from benchmark.plot_frame import Annotations, FigureSpec
 from benchmark.routing import plot_style
 from benchmark.routing.figures import context as ctxmod
+from benchmark.routing.model_universe import canonical_label
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -24,6 +25,10 @@ if TYPE_CHECKING:
 
 _BAND = "#0072B2"
 _UNSOLVED = "#C62828"
+# Aggregated share of picks that fall outside the inference-valid pool. The individual
+# outside-pool models are NOT named here (they are named on model_validity / invalid_models).
+_OUTSIDE = "#9E9E9E"
+_OUTSIDE_LABEL = "outside inference-valid pool (not named)"
 
 SPEC = FigureSpec(
     title="The kNN selection rule sends most of every difficulty bucket to the cheapest model",
@@ -62,9 +67,11 @@ SPEC = FigureSpec(
         "The right panel is NOT circular for the rule plotted — kNN decides before any "
         "outcome for this task exists — but it is not independent either: the neighbours it "
         "reads and the solving-model count it is plotted against come from one matrix.",
-        "'No enabled model solved it' counts the six models at their DEFAULT arms. "
-        "complementarity.png counts every sampled (model, arm) column instead, so its "
-        "solved-by-none figure is smaller — a different denominator, not a disagreement.",
+        "'No enabled model solved it' counts the inference-VALID benchmark models at their "
+        "DEFAULT arms (benchmark-only and collection-only models are excluded, because the live "
+        "router cannot pick them). complementarity.png counts every sampled (model, arm) column "
+        "instead, so its solved-by-none figure is smaller — a different denominator, not a "
+        "disagreement.",
     ),
 )
 
@@ -98,13 +105,43 @@ def band_histogram(
 def allocation_by_difficulty(
     chosen: dict[str, str], results: dict, models_by_price: list[str]
 ) -> dict[int, Counter[str]]:
-    """solving-model count -> Counter of the model the router picked."""
+    """solving-model count -> Counter of the model the router picked.
+
+    The same `not any(...)` guard as `band_histogram`: a task the completion dropped (no
+    cells at all) is UNSCORED, not unwinnable, so it must not enter the n=0 bucket and
+    conflate with a task that genuinely had cells and no solver. The two panels then share
+    one denominator — tasks with at least one inference-valid cell.
+    """
     out: dict[int, Counter[str]] = {}
     for tid, pick in chosen.items():
         per_model = results.get(tid, {})
+        if not any(m in per_model for m in models_by_price):
+            continue
         n_solved = sum(1 for m in models_by_price if per_model.get(m, {}).get("pass"))
         out.setdefault(n_solved, Counter())[pick] += 1
     return out
+
+
+def outside_pool_picks(alloc: dict[int, Counter[str]], models_by_price: list[str]) -> int:
+    """How many picks name a model outside the inference-valid pool.
+
+    These picks are still in the denominator (the router made them) but are drawn as ONE
+    grey segment rather than named, so the stack reaches 1.0 without advertising a model
+    the live router cannot choose.
+    """
+    pool = set(models_by_price)
+    return sum(
+        value for counter in alloc.values() for model, value in counter.items() if model not in pool
+    )
+
+
+def _allocation_note(n_solved: int, counter: Counter[str], models_by_price: list[str]) -> str:
+    """One manifest line per bucket, with outside-pool picks aggregated (never named)."""
+    named = {canonical_label(m): v for m, v in sorted(counter.items()) if m in set(models_by_price)}
+    outside = sum(v for m, v in counter.items() if m not in set(models_by_price))
+    if outside:
+        named[_OUTSIDE_LABEL] = outside
+    return f"{n_solved} solvers: {named}"
 
 
 def _draw_bands(ax: Axes, counts: dict[int, int], unsolved: int) -> None:
@@ -131,6 +168,15 @@ def _draw_bands(ax: Axes, counts: dict[int, int], unsolved: int) -> None:
     # sixteenth of it.
     ax.set_ylim(0, max(values) * 1.12)
     ax.set_ylabel("tasks", fontsize=9)
+    ax.legend(
+        handles=[
+            Patch(color=_BAND, label="solved by an enabled model"),
+            Patch(color=_UNSOLVED, label="no enabled model solved it"),
+        ],
+        fontsize=7,
+        loc="upper right",
+        frameon=False,
+    )
     ax.grid(axis="y", color="#eeeeee", lw=0.6)
     ax.set_axisbelow(True)
     plot_frame.panel_label(ax, "A · cheapest band that solves the task")
@@ -153,20 +199,30 @@ def _draw_allocation(
                 x, share, bottom=bottom, width=0.62, color=colours.get(model, "#9E9E9E"), zorder=2
             )
             bottom += share
+        # Every remaining pick named a model OUTSIDE the pool (benchmark-only or
+        # collection-only). Counting them in the denominator but refusing to draw them left
+        # the stack short of 1.0 — the bug this segment fixes. They are aggregated and grey
+        # so the stack is complete without putting an unroutable model's name on the canvas.
+        outside = 1.0 - bottom
+        if outside > 1e-9:
+            ax.bar(x, outside, bottom=bottom, width=0.62, color=_OUTSIDE, zorder=2)
         ax.text(x, 1.02, f"n={total}", fontsize=7.5, ha="center", va="bottom", color="#555555")
     ax.set_xticks(xs)
     ax.set_xticklabels([str(n) for n in order], fontsize=8)
     ax.set_xlabel("models that solved the task (harder ← → easier)", fontsize=9)
-    # Shares reach exactly 1.0; the headroom is for the one-line n= label at 1.02.
+    # Every bar now reaches exactly 1.0 (pool shares plus the aggregated outside segment);
+    # the headroom is only for the one-line n= label at 1.02.
     ax.set_ylim(0, 1.08)
     ax.set_ylabel("share of the router's picks", fontsize=9)
     # Patch handles, not empty `bar` calls: an empty bar draws nothing, so matplotlib
     # gave every legend entry the default colour and the key contradicted the stacks.
     handles = [
-        Patch(color=colours.get(model, "#9E9E9E"), label=model)
+        Patch(color=colours.get(model, "#9E9E9E"), label=canonical_label(model))
         for model in models_by_price
         if any(model in counter for counter in alloc.values())
     ]
+    if outside_pool_picks(alloc, models_by_price):
+        handles.append(Patch(color=_OUTSIDE, label=_OUTSIDE_LABEL))
     ax.legend(
         handles=handles,
         fontsize=7,
@@ -180,33 +236,74 @@ def _draw_allocation(
     plot_frame.panel_label(ax, "B · what the router picked, by difficulty")
 
 
+def _modal_name(counter: Counter[str], models_by_price: list[str]) -> str | None:
+    """The bucket's modal pick, labelled for the manifest.
+
+    An outside-pool mode is aggregated to the same grey label the stack uses, never named:
+    the individual benchmark-only/collection-only models are named on model_validity.png and
+    invalid_models.png, and the canvas limitation says these picks are not named.
+    """
+    top = counter.most_common(1)
+    if not top:
+        return None
+    model = top[0][0]
+    return canonical_label(model) if model in set(models_by_price) else _OUTSIDE_LABEL
+
+
 def _annotations(
-    counts: dict[int, int], unsolved: int, unscored: int, alloc: dict[int, Counter[str]]
+    counts: dict[int, int],
+    unsolved: int,
+    unscored: int,
+    alloc: dict[int, Counter[str]],
+    models_by_price: list[str],
 ) -> Annotations:
     total = sum(counts.values()) + unsolved
+    outside = outside_pool_picks(alloc, models_by_price)
     spread = ""
     if alloc:
         hardest = min(alloc)
         easiest = max(alloc)
-        h_top = alloc[hardest].most_common(1)
-        e_top = alloc[easiest].most_common(1)
-        if h_top and e_top:
+        h_name = _modal_name(alloc[hardest], models_by_price)
+        e_name = _modal_name(alloc[easiest], models_by_price)
+        if h_name and e_name:
             spread = (
-                f"hardest bucket ({hardest} solvers) mostly {h_top[0][0]}, easiest "
-                f"({easiest} solvers) mostly {e_top[0][0]}"
+                f"hardest bucket ({hardest} solvers) mostly {h_name}, "
+                f"easiest ({easiest} solvers) mostly {e_name}"
             )
     facts = [
         f"{total} scored tasks ({unscored} incomplete challenges excluded); "
         f"{unsolved} solved by no enabled model",
         f"{len(counts)} capability bands populated",
     ]
+    if outside:
+        facts.append(
+            f"{outside} of panel B's picks fall outside the inference-valid pool "
+            "(drawn as one grey segment, not named)"
+        )
     if spread:
         facts.append(spread)
     return Annotations(
         subtitle_facts=tuple(facts),
         notes=tuple(f"band {b}: {n} tasks" for b, n in sorted(counts.items()))
-        + tuple(f"{n} solvers: {dict(sorted(c.items()))}" for n, c in sorted(alloc.items())),
-        counts=(("tasks", total), ("unsolved", unsolved), ("excluded", unscored)),
+        + tuple(
+            _allocation_note(n, counter, models_by_price) for n, counter in sorted(alloc.items())
+        )
+        + (
+            "Panels A and B share one denominator: tasks with at least one inference-valid "
+            "cell. A task the completion dropped (no cells at all) is excluded from both, "
+            "never counted as unwinnable.",
+        ),
+        limitations=(
+            "Picks naming a model outside the inference-valid pool are counted in the "
+            "denominator but aggregated into one grey segment and NOT named; the individual "
+            "models are named on model_validity.png and invalid_models.png.",
+        ),
+        counts=(
+            ("tasks", total),
+            ("unsolved", unsolved),
+            ("excluded", unscored),
+            ("outside_pool", outside),
+        ),
     )
 
 
@@ -215,21 +312,24 @@ def render(
 ) -> Path | None:
     """Draw task_difficulty.png from the band assignment and the router's picks."""
     results = ctx.completed.get("results", {})
-    counts, unsolved, unscored = band_histogram(results, ctx.tasks, bands, ctx.models_by_price)
+    # INFERENCE-FACING: bands, allocation and the solved-by-none count run over the
+    # inference-valid pool only. A benchmark-only model is not one the live router can pick.
+    models = ctx.inference_valid_models
+    counts, unsolved, unscored = band_histogram(results, ctx.tasks, bands, models)
     if not counts:
         return None
-    alloc = allocation_by_difficulty(chosen, results, ctx.models_by_price)
-    colours = plot_style.model_color_map(ctx.models_by_price)
+    alloc = allocation_by_difficulty(chosen, results, models)
+    colours = plot_style.model_color_map(models)
     size = plot_frame.WIDE
     fig, axes = plot_frame.subplots(size, 1, 2, width_ratios=(0.9, 1.15))
     _draw_bands(axes[0], counts, unsolved)
     if alloc:
-        _draw_allocation(axes[1], alloc, ctx.models_by_price, colours)
+        _draw_allocation(axes[1], alloc, models, colours)
     return plot_frame.save(
         fig,
         ctx.out_dir / "task_difficulty.png",
         SPEC,
-        extra=_annotations(counts, unsolved, unscored, alloc),
+        extra=_annotations(counts, unsolved, unscored, alloc, models),
         provenance=ctx.provenance(__name__),
         size=size,
     )

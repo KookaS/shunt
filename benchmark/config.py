@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -11,7 +12,9 @@ import yaml
 from shunt.models.config import (
     ModelConfig,
     Pricing,
+    Provider,
     ReasoningConfig,
+    Registry,
     default_registry_path,
     load_registry,
     resolve_models,
@@ -22,6 +25,15 @@ from shunt.models.config import (
 
 _config: dict | None = None
 _pricing: dict | None = None
+_free_registry: dict | None = None
+_free_registry_path_override: str | None = None
+
+# The non-shipped free-model OVERLAY registry. It holds free/discounted provider rows and
+# their model ids as COLLECTION-ONLY entries, and is loaded ONLY when explicitly configured
+# (`run_matrix --free-registry <path>` or the env var below). With no overlay configured,
+# every code path in this module is byte-identical to before: the shipped `_pricing_path()`,
+# the enabled set and the live pool never see a free row.
+FREE_REGISTRY_ENV: Final[str] = "SHUNT_FREE_REGISTRY"
 
 # Cost-weighted p(arm|model) fractions, indexed by within-model
 # rank (index 0 = cheapest rank). Decreasing so a cheaper arm samples more often
@@ -62,9 +74,23 @@ def _flatten(model: ModelConfig, pricing: Pricing) -> dict:
         "route": model.route,
         "base_url": model.base_url,
         "api_key_env_var": model.api_key_env_var,
+        # True for an anonymous free lane (Kilo Gateway's `:free` ids): the live runner must
+        # admit it without a key and let the scaffold inject the harmless placeholder. Carried
+        # on the flat row so `infer._model_key_optional` can resolve it per model.
+        "key_optional": model.key_optional,
         # `version` is a model-identity attribute (a sibling of tier/provider), no
         # longer a pricing field; a priced model always carries one (schema-enforced).
         "version": model.version,
+        # The provider's raw channel listing when it differs from the canonical `model_id`
+        # (the free overlay's `lane`), and the bare canonical identity. `route` above already
+        # prefers `lane`, so the wire call stays correct; they are surfaced for provenance.
+        "lane": model.lane,
+        "model": model.model,
+        # The listing's billing ENTITLEMENT (`free`/`paid`), carried on the flat row so
+        # `_is_free_lane`, `validate`, and the census read the DECLARATION rather than
+        # inferring a channel from the `-explabs` suffix or the corpus file it came from.
+        "billing": model.billing,
+        "billing_note": model.billing_note,
         # Where the weights actually run. Carried here so the live runner can LABEL every
         # latency it records without re-parsing the registry per cell: a local batch-1
         # second and a hosted batched second are not the same measurement, and an
@@ -90,6 +116,194 @@ def load_pricing(path: str | Path | None = None) -> dict:
         if model.pricing is not None
     }
     return _pricing
+
+
+# ── non-shipped free-model overlay ────────────────────────────────────────────
+def set_free_registry(path: str | Path | None) -> None:
+    """Configure the overlay registry path (``None`` clears it) and reset the cache.
+
+    Called by ``run_matrix`` from ``--free-registry``; tests call it directly. The overlay
+    is opt-in: unset means no free row is loadable, which is the byte-identical default.
+    """
+    global _free_registry, _free_registry_path_override  # noqa: PLW0603, SH001
+    _free_registry_path_override = str(path) if path else None
+    _free_registry = None
+
+
+def free_registry_path() -> Path | None:
+    """The configured overlay path: the ``set_free_registry`` override, else the env var."""
+    raw = _free_registry_path_override or os.environ.get(FREE_REGISTRY_ENV)
+    if not raw:
+        return None
+    return Path(raw)
+
+
+def load_free_registry() -> Registry | None:
+    """The parsed overlay registry, or None when unconfigured or the file is absent."""
+    path = free_registry_path()
+    if path is None or not path.exists():
+        return None
+    return load_registry(path)
+
+
+def free_registry() -> dict[str, dict]:
+    """Flattened priced overlay rows keyed by name; ``{}`` when no overlay is configured.
+
+    These rows are collection-only: they are merged into the pricing view at the run site by
+    ``register_collection_models``, never by ``load_pricing`` itself.
+    """
+    global _free_registry  # noqa: PLW0603, SH001 (module load-once overlay cache)
+    if _free_registry is not None:
+        return _free_registry
+    registry = load_free_registry()
+    _free_registry = (
+        {
+            name: _flatten(model, model.pricing)
+            for name, model in resolve_models(registry).items()
+            if model.pricing is not None
+        }
+        if registry is not None
+        else {}
+    )
+    return _free_registry
+
+
+def free_registry_ids() -> set[str]:
+    """Names of every priced overlay model — the collection-only free namespace."""
+    return set(free_registry())
+
+
+def free_registry_models() -> dict[str, ModelConfig]:
+    """Overlay rows resolved to ``ModelConfig`` keyed by name; ``{}`` when unconfigured.
+
+    The typed companion of ``free_registry()`` (the flat dict): the free-lane refusal and
+    pre-flight operate on ``ModelConfig``, so callers need the resolved form.
+    """
+    registry = load_free_registry()
+    if registry is None:
+        return {}
+    return resolve_models(registry)
+
+
+def is_free_registry_model(name: str) -> bool:
+    """True iff *name* is a collection-only overlay row (never enableable)."""
+    return name in free_registry()
+
+
+# ── collection-only channel synthesis ─────────────────────────────────────────
+# The Experiential catalog exposes free-promo slugs the registry does not hand-enumerate.
+# An `S-explabs` id that is NOT in the registry resolves at runtime to a collection-only
+# row (provider explabs, wire slug S, identity S) so ANY catalog slug can be collected via
+# `--extra-models` without a registry edit. It is never enabled and never reaches the
+# router's live pool; identity-skip then dedupes it against a direct twin whose version is S.
+COLLECTION_SUFFIX: Final[str] = "-explabs"
+COLLECTION_PROVIDER: Final[str] = "explabs"
+# Provenance for a synthesized row whose list price the local catalog does not carry. A $0
+# collection row is honest (the promo channel is free); a fabricated nonzero price would not.
+COLLECTION_UNKNOWN_SOURCE: Final[str] = "collection-only: list price unknown"
+COLLECTION_UNKNOWN_NOTE: Final[str] = "collection-only, list price unknown"
+
+
+def collection_slug(name: str) -> str | None:
+    """The base catalog slug of a collection-only `S-explabs` id, or None when ineligible."""
+    if not name.endswith(COLLECTION_SUFFIX):
+        return None
+    return name[: -len(COLLECTION_SUFFIX)] or None
+
+
+def catalog_host_rung(slug: str) -> dict | None:
+    """The catalog's host rung for *slug* from the local registry, or None if unpublished.
+
+    The direct twin's list price is the host rung the shipped `*-explabs` rows were priced
+    from; a slug with no twin (or an unpriced one) has no local host rung to quote.
+    """
+    return load_pricing().get(slug)
+
+
+def _collection_provider() -> Provider | None:
+    """The `explabs` provider row: the shipped registry first, else the non-shipped overlay.
+
+    The `explabs` provider SHIPS in `src/shunt/config/models.yaml`, so the generic `S-explabs`
+    synthesis resolves without the overlay; the overlay lookup is only a fallback for a tree
+    whose shipped registry has dropped it.
+    """
+    shipped = load_registry(_pricing_path()).providers.get(COLLECTION_PROVIDER)
+    if shipped is not None:
+        return shipped
+    overlay = load_free_registry()
+    return overlay.providers.get(COLLECTION_PROVIDER) if overlay is not None else None
+
+
+def synthesize_collection_model(name: str) -> dict | None:
+    """Synthesize a collection-only registry row for an `S-explabs` id, or None.
+
+    None for an ineligible id (not `-explabs`), for an id already in the registry (callers
+    use that row unchanged), or when the `explabs` provider is absent. The wire slug and
+    identity are both S. Price is the base slug's host rung when the local catalog publishes
+    one, else 0 with an explicit unknown note — never fabricated. No `cache_read` key: the
+    channel reports no cache-read rate.
+    """
+    slug = collection_slug(name)
+    if slug is None or name in load_pricing() or name in free_registry():
+        return None
+    provider = _collection_provider()
+    if provider is None:
+        return None
+    rung = catalog_host_rung(slug)
+    note = str(rung["price_note"]) if rung and rung.get("price_note") else None
+    if rung is None:
+        note = COLLECTION_UNKNOWN_NOTE
+    pricing = Pricing(
+        input_cost_per_1m=float(rung["input_cost_per_1m"]) if rung else 0.0,
+        output_cost_per_1m=float(rung["output_cost_per_1m"]) if rung else 0.0,
+        price_provider=COLLECTION_PROVIDER,
+        price_source=str(rung["price_source"]) if rung else COLLECTION_UNKNOWN_SOURCE,
+        price_as_of=str(rung["price_as_of"]) if rung else "",
+        price_note=note,
+    )
+    model = ModelConfig(
+        name=name,
+        model_id=slug,
+        provider=COLLECTION_PROVIDER,
+        version=slug,
+        base_url=provider.base_url,
+        api_key_env_var=provider.api_key_env_var,
+        litellm_prefix=provider.litellm_prefix,
+        serving_mode="hosted",
+        # A synthesized `S-explabs` id is a free-promo collection channel by construction: the
+        # declaration is set HERE, at the synth site, so `_is_free_lane`/`validate` read a
+        # billing declaration rather than the `-explabs` suffix.
+        billing="free",
+        pricing=pricing,
+    )
+    return _flatten(model, pricing)
+
+
+def register_collection_models(names: list[str]) -> None:
+    """Insert collection-only rows into the pricing view (idempotent).
+
+    A requested id resolves from the non-shipped overlay registry when configured,
+    else is synthesized as an `S-explabs` catalog slug. Called at the run site so
+    every downstream reader of `load_pricing()` — route resolution, the cache gate,
+    `model_versions()` — sees the collection-only row. Raises ValueError for an id that is
+    neither an overlay row nor synthesizable.
+    """
+    pricing = load_pricing()
+    overlay = free_registry()
+    for name in names:
+        if name in pricing:
+            continue
+        if name in overlay:
+            pricing[name] = overlay[name]
+            continue
+        synthesized = synthesize_collection_model(name)
+        if synthesized is None:
+            raise ValueError(
+                f"cannot synthesize collection model {name!r}: not a `{COLLECTION_SUFFIX}` "
+                "id, not an overlay-registry row, already unpriced, or the `explabs` provider "
+                "is not registered"
+            )
+        pricing[name] = synthesized
 
 
 def resolved_models() -> dict[str, ModelConfig]:
@@ -167,6 +381,197 @@ def collect_enabled() -> bool:
     return bool(collect_config().get("enabled", False))
 
 
+def concordance_config() -> dict:
+    """The `concordance` campaign block (the named cross-provider subset)."""
+    return dict(get().get("concordance", {}) or {})
+
+
+def concordance_fanout_cap() -> int:
+    """How many channels of one identity the named subset may collect at a challenge (>= 1)."""
+    return max(1, int(concordance_config().get("fanout_cap", 1)))
+
+
+def concordance_subset_models() -> set[str]:
+    """Every channel id named in the concordance subset (dedupe-exempt collection)."""
+    channels: set[str] = set()
+    for entry in concordance_config().get("subset", []) or []:
+        channels.update(str(name) for name in entry.get("channels", []) or [])
+    return channels
+
+
+def concordance_subset_challenges() -> list[str]:
+    """The explicit challenge ids the concordance subset is restricted to."""
+    return [str(cid) for cid in concordance_config().get("challenges", []) or []]
+
+
+def lanes_config() -> dict:
+    """The ``lanes:`` campaign block: per-lane limits, unknown defaults, and stall timeout.
+
+    Absent (the shipped paid config) means ``{}`` — the runner then builds no lane scheduler, so
+    behaviour is byte-identical to before per-lane admission control existed.
+    """
+    return dict(get().get("lanes", {}) or {})
+
+
+def lane_limits_config() -> dict[str, dict]:
+    """Per-lane raw limit mappings from ``lanes.limits`` (lane name -> mapping)."""
+    raw = lanes_config().get("limits", {}) or {}
+    return {str(name): dict(limits or {}) for name, limits in raw.items()}
+
+
+def lane_unknown_limits() -> dict:
+    """The ``lanes.unknown_limits`` defaults (rpm/rpd) applied to a lane with no explicit entry."""
+    return dict(lanes_config().get("unknown_limits", {}) or {})
+
+
+def lane_stall_timeout_s() -> float:
+    """The pull-loop stall budget in seconds; default 900 (bounds the blocked-lane stall case)."""
+    return float(lanes_config().get("stall_timeout_s", 900.0))
+
+
+_PRIORITY_DEFAULT: Final[str] = "routing/data/model_priority.yaml"
+
+
+def model_priority_path() -> Path:
+    """Path to the model-value priority config (importance allowlist + tunable weights)."""
+    return Path(__file__).resolve().parent / _PRIORITY_DEFAULT
+
+
+def load_model_priority() -> dict:
+    """Parse ``benchmark/routing/data/model_priority.yaml``; ``{}`` when the file is absent.
+
+    Data-only: the free-tier collector's value allowlist, denylist and stop knobs live here,
+    never as branches in ``benchmark/routing/collection_priority.py``.
+    """
+    path = model_priority_path()
+    if not path.exists():
+        return {}
+    return yaml.safe_load(path.read_text()) or {}
+
+
+# Fields the per-lane limits registry may carry; anything else in a block is provenance
+# (scope/notes/verified_*) and is not an enforceable gate. `free_access`/`access_note` are
+# the access marker: `free_access: false` makes the scheduler refuse the lane (LANE_NO_FREE_ACCESS).
+_LIMIT_FIELDS: Final[tuple[str, ...]] = (
+    "rpm",
+    "rpd",
+    "tpm",
+    "max_request_tokens",
+    "daily_token_budget",
+    "free_access",
+    "access_note",
+    # A time-boxed free promo's expiry, carried from the listing's `expiration_date` (or a
+    # registry/`lanes.limits` override). `lane_scheduler._EXPIRED` refuses the lane once now
+    # passes it, so a lapsed promo can never be scheduled.
+    "expires_at",
+)
+_LANE_REGISTRY_DEFAULT: Final[str] = "routing/data/provider_limits.yaml"
+_FREE_CATALOGS_DEFAULT: Final[str] = "routing/data/free_catalogs.yaml"
+_lane_registry: dict | None = None
+_free_provider_access: dict[str, str | None] | None = None
+
+
+def lane_registry_path() -> Path:
+    """The per-lane limits registry path from ``lanes.registry`` (config-file relative)."""
+    rel = lanes_config().get("registry", _LANE_REGISTRY_DEFAULT)
+    return (Path(__file__).resolve().parent / str(rel)).resolve()
+
+
+def free_catalogs_path() -> Path:
+    """The declared free-provider catalog (the scanner's input) the scheduler enforces against."""
+    return (Path(__file__).resolve().parent / _FREE_CATALOGS_DEFAULT).resolve()
+
+
+def free_provider_access() -> dict[str, str | None]:
+    """Every provider in ``free_catalogs.yaml`` mapped to its free-lane status.
+
+    ``None`` marks a DECLARED free provider (``free_tier.free_access`` not false); a string is
+    the ``free_access: false`` evidence note. A provider ABSENT from this mapping is not a
+    declared free provider at all, so a lane on it must be refused as ``no-free-lane`` — the
+    catalogues, not the overlay, are the source of truth for what may spend.
+    """
+    global _free_provider_access  # noqa: PLW0603, SH001 (module load-once registry cache)
+    if _free_provider_access is not None:
+        return _free_provider_access
+    path = free_catalogs_path()
+    document = (yaml.safe_load(path.read_text()) or {}) if path.exists() else {}
+    access: dict[str, str | None] = {}
+    for provider, spec in (document.get("providers") or {}).items():
+        free_tier = (spec or {}).get("free_tier") or {}
+        if isinstance(free_tier, Mapping) and free_tier.get("free_access") is False:
+            note = str(free_tier.get("access_note") or "").strip()
+            access[str(provider)] = note or f"{provider}: free_access is false"
+        else:
+            access[str(provider)] = None
+    _free_provider_access = access
+    return access
+
+
+def is_declared_free_provider(provider: str | None) -> bool:
+    """True iff *provider* is a declared free lane in ``free_catalogs.yaml``."""
+    declared = free_provider_access()
+    return provider is not None and provider in declared and declared[provider] is None
+
+
+def load_lane_registry() -> dict:
+    """The parsed per-lane limits registry; ``{}`` when the declared file is absent."""
+    global _lane_registry  # noqa: PLW0603, SH001 (module load-once registry cache)
+    if _lane_registry is None:
+        path = lane_registry_path()
+        _lane_registry = (yaml.safe_load(path.read_text()) or {}) if path.exists() else {}
+    return _lane_registry
+
+
+def _declared_free_access(provider: str | None) -> dict:
+    """The declared-free gate as a limits source; ``{}`` for a declared free provider.
+
+    A provider absent from ``free_catalogs.yaml``, or one it marks ``free_access: false``,
+    yields ``free_access: false`` plus the evidence note, so the existing
+    ``LANE_NO_FREE_ACCESS`` limitation refuses the lane through the one registry rule. A
+    PROVIDERLESS lane is refused the same way: with no provider there is no catalogue that can
+    vouch for a free tier, so it must fail CLOSED rather than fall through to the scheduler's
+    ``free_access=True`` default.
+    """
+    if not provider:
+        return {
+            "free_access": False,
+            "access_note": "providerless lane: no provider to declare a free tier",
+        }
+    declared = free_provider_access()
+    if provider not in declared:
+        return {
+            "free_access": False,
+            "access_note": f"{provider}: no free lane declared in free_catalogs.yaml",
+        }
+    note = declared[provider]
+    if note is not None:
+        return {"free_access": False, "access_note": note}
+    return {}
+
+
+def lane_limits_from_registry(model: str, provider: str | None) -> dict:
+    """Merge the registry's defaults, the declared-free gate, the provider block and overrides.
+
+    A lane is a channel id; its provider comes from the resolved overlay row. The result holds
+    only fields the scheduler enforces, so provenance keys never leak into ``LaneLimits``. The
+    declared-free gate is inserted BEFORE the provider block so an explicit registry
+    ``free_access`` still wins, while a non-free provider the registry never named is caught.
+    """
+    registry = load_lane_registry()
+    block = (registry.get("providers") or {}).get(provider or "") or {}
+    sources = (
+        registry.get("defaults") or {},
+        _declared_free_access(provider),
+        block,
+        (block.get("lanes") or {}).get(model) or {},
+        (registry.get("lanes") or {}).get(model) or {},
+    )
+    resolved: dict = {}
+    for source in sources:
+        resolved.update({key: source[key] for key in _LIMIT_FIELDS if source.get(key) is not None})
+    return resolved
+
+
 def ladder_config() -> dict:
     """The `ladder` collector block (cold-start budget-reservation knob)."""
     cfg = get()
@@ -233,6 +638,23 @@ def enabled_models() -> list[str]:
     cfg = get()
     listed = cfg.get("models", [])
     pricing = load_pricing()
+
+    # HARD WALL (collection-only free-model policy): a collection-only free row can never be
+    # enabled. It lives in the non-shipped overlay (or the `-explabs` synthesis namespace) and
+    # is collectable only through `--extra-models`; enabling one would leak it into
+    # `capability_rank`, the pareto
+    # axes, the kill gate and the live pool. Refuse before the registry lookup so the message
+    # names the real reason rather than "not found".
+    free_listed = [
+        m for m in listed if is_free_registry_model(m) or str(m).endswith(COLLECTION_SUFFIX)
+    ]
+    if free_listed:
+        raise ValueError(
+            "benchmark.yaml cannot enable free/collection-only model(s): "
+            f"{free_listed}. Free rows live in the non-shipped overlay registry and are "
+            "collectable only through --extra-models; they must never enter the enabled set, "
+            "the kill gate or any analysis."
+        )
 
     unregistered = [m for m in listed if m not in pricing]
     if unregistered:
@@ -602,6 +1024,24 @@ def results_csv_path() -> Path:
     return Path(__file__).resolve().parent / rel
 
 
+def free_results_csv_path() -> Path:
+    """Path to the physically separate free corpus declared by the free campaign config.
+
+    Read from ``configs/free-tier/benchmark.yaml``'s ``paths.results_csv`` WITHOUT loading
+    that config into the global cache: the paid instrument may include the free corpus
+    alongside its own, and doing so must not swap the active campaign config underneath it.
+    """
+    base = Path(__file__).resolve().parent
+    campaign = base.parent / "configs" / "free-tier" / "benchmark.yaml"
+    rel = "routing/results_free.csv"
+    if campaign.exists():
+        with open(campaign) as handle:
+            declared = (yaml.safe_load(handle) or {}).get("paths", {}).get("results_csv")
+        if declared:
+            rel = str(declared)
+    return base / rel
+
+
 def _bool_field(value: object) -> bool:
     return str(value or "").strip().lower() in ("true", "1", "yes")
 
@@ -741,10 +1181,14 @@ def load_results(path: str | Path | None = None) -> dict:
     groups: dict[tuple[str, str, str], list[dict[str, str]]] = {}
     with open(p, newline="") as f:
         for raw in csv.DictReader(f):
-            model = raw["model"]
+            # ``lane`` is the channel identity; ``model`` is the bare canonical weights id.
+            # The cache keys on the LANE so two channels serving one identity (a direct id and
+            # its `-explabs` mirror) stay distinct cells. A pre-migration row carries no `lane`
+            # and falls back to `model`, which was the channel id then.
+            lane = str(raw.get("lane") or raw["model"])
             stored = str(raw.get("reasoning") or _LEGACY_DEFAULT_REASONING)
-            arm = _arm_key(model, stored, defaults)
-            groups.setdefault((raw["challenge_id"], model, arm), []).append(raw)
+            arm = _arm_key(lane, stored, defaults)
+            groups.setdefault((raw["challenge_id"], lane, arm), []).append(raw)
     for (cid, model, arm), group in groups.items():
         row, n_reps, rep_pass_rate = reduce_reps(group)
         results.setdefault(cid, {}).setdefault(model, {})[arm] = {
@@ -925,7 +1369,12 @@ def validate(config_path: str | Path | None = None) -> list[str]:
         )
     else:
         for name in models_cfg:
-            if name not in pricing:
+            if is_free_registry_model(name) or str(name).endswith(COLLECTION_SUFFIX):
+                errors.append(
+                    f"Model '{name}' is collection-only (free overlay) and cannot be enabled "
+                    "in benchmark.yaml; collect it with --extra-models instead"
+                )
+            elif name not in pricing:
                 errors.append(f"Model '{name}' in benchmark.yaml not found in the model registry")
 
     # Check strategies

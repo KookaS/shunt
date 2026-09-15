@@ -32,17 +32,21 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import yaml
 
 from benchmark import config
 from benchmark.routing import plot_style
 from benchmark.routing.figures import context as ctxmod
+from benchmark.routing.model_universe import canonical_label
 from shunt.inspect import model_grid
 from shunt.inspect.model_grid import GridData, GridRow
 from shunt.inspect.plot_frame import FigureSpec
 from shunt.models.config import load_registry, resolve_models
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from benchmark.routing.model_validity import ModelValidity
 
 _UNDISCLOSED: Final[str] = "UNDISCLOSED"
 
@@ -70,10 +74,7 @@ SPEC = FigureSpec(
         "active parameters — the rule joining them IS the mixture-of-experts sparsity gap. "
         "A row whose name carries a dagger was measured outside this corpus under a different "
         "harness; its note below states which, and its height is not comparable cell-for-cell "
-        "with the rows beside it. "
-        "Panels C and D: per-call latency, hosted and local in separate axes because the "
-        "two "
-        "populations are not comparable."
+        "with the rows beside it."
     ),
     goal=(
         "Look for a rung that sits high and left in panel A — cheap per token and measured to "
@@ -200,7 +201,6 @@ def _external_rows(in_share: float, *, path: Path = EXTERNAL_RUNGS_PATH) -> list
                 passes=int(measured["passes"]),
                 total_params=_param(size.get("total_params")),
                 active_params=_param(size.get("active_params")),
-                latency_s=(),
                 provenance_note=(
                     f"measured on {measured['scaffold']} over {measured['task_population']}"
                     f"{_seed_clause(measured)}; "
@@ -215,43 +215,39 @@ def _external_rows(in_share: float, *, path: Path = EXTERNAL_RUNGS_PATH) -> list
     return rows
 
 
-def _undrawn_rungs(drawn: set[str]) -> list[str]:
-    """Models with cells in `results.csv` that this canvas does not draw, and why."""
-    # THE CANVAS IS NOT THE CACHE. `ctx.raw` reaches this adapter already scoped to
-    # `benchmark.yaml`'s enabled set (`report._only_enabled_models`), which legitimately
-    # drops a probe-only collection — a model measured on a free window and never enabled
-    # for the benchmark. That drop is deliberate; publishing a source line that says
-    # "the measured default-arm cells of results.csv" while a filter silently narrows it
-    # is not. This re-reads the cache — a csv parse, not a recomputation — purely so the
-    # subtitle can NAME what it left out instead of implying a sweep it never ran.
-    try:
-        cached = config.load_results()
-        enabled = set(config.enabled_models())
-    except Exception:  # noqa: BLE001 (the caption degrades; the figure does not)
-        return []
-    counts: dict[str, int] = {}
-    for per_model in cached.values():
-        for model, per_arm in per_model.items():
-            if model not in drawn:
-                counts[model] = counts.get(model, 0) + len(per_arm)
-    notes = []
-    for name, cells in sorted(counts.items()):
-        why = (
-            "not enabled in benchmark.yaml"
-            if enabled and name not in enabled
-            else "no measured default-arm cell"
-        )
-        notes.append(f"{name} ({cells} cells, {why})")
-    return notes
+def _undrawn_rungs(validity: list[ModelValidity] | None) -> list[str]:
+    """The excluded models named by the validity census, as `name (reason)` strings."""
+    # THE CANVAS IS NOT THE CACHE. `ctx.raw` reaches this adapter already scoped to the
+    # inference-valid set (`report.main` filters it through `model_validity.filter_valid`), so
+    # a dominated benchmark model, an unmeasured live slot and a collection-only probe all
+    # legitimately drop out. The full roster and the reason each one is out live in
+    # model_validity.png; this canvas points there instead of restating a wall of them.
+    out: list[str] = []
+    for row in validity or []:
+        name = getattr(row, "model", None)
+        reason = getattr(row, "reason", None)
+        valid = getattr(row, "valid", True)
+        if name and not valid and reason:
+            out.append(f"{name} ({reason})")
+    return out
 
 
-def _source_line(drawn: set[str]) -> str:
-    """What the canvas is drawn FROM — including what the enabled-set filter removed."""
-    base = "the measured default-arm cells of results.csv, plus any † out-of-corpus rung"
-    undrawn = _undrawn_rungs(drawn)
-    if not undrawn:
+def _source_line(
+    valid_count: int, external_count: int, validity: list[ModelValidity] | None
+) -> str:
+    """What the canvas is drawn FROM, and where the excluded models are explained."""
+    base = f"the {valid_count} inference-valid models' measured default-arm cells of results.csv"
+    if external_count:
+        # The dagger rides the word, not the count: "plus 2 † out-of-corpus" wrapped after the
+        # count and orphaned the glyph onto the next line ("plus 2 / t out-of-corpus").
+        base += f", plus {external_count} out-of-corpus rung(s) (†)"
+    excluded = _undrawn_rungs(validity)
+    if not excluded:
         return base
-    return f"{base} · results.csv also holds " + "; ".join(undrawn) + " — not drawn"
+    return (
+        f"{base} · {len(excluded)} excluded model(s) are named and explained in "
+        "the model-validity figure — not drawn here"
+    )
 
 
 def build(ctx: ctxmod.RoutingContext) -> GridData | None:
@@ -275,7 +271,12 @@ def build(ctx: ctxmod.RoutingContext) -> GridData | None:
         local = entry is not None and entry.serving_mode == "local"
         rows.append(
             GridRow(
+                # `name` stays the serving/channel KEY (the price/size/stats lookups above);
+                # the rendered label is the canonical bare identity, so a channel listing can
+                # never leak a publisher prefix while two channels of one weights set stay
+                # distinct.
                 name=name,
+                label=canonical_label(name),
                 # A local rung's marginal token price is exactly zero, which is a different
                 # kind of number from a list price and gets its own axis region.
                 x=None if local else _blended_price(pricing, name, in_share),
@@ -284,10 +285,6 @@ def build(ctx: ctxmod.RoutingContext) -> GridData | None:
                 passes=stats.passes,
                 total_params=_param(size.total_params) if size else None,
                 active_params=_param(size.active_params) if size else None,
-                # Latency is declared MISSING on this corpus: `wall_clock_s` and
-                # `latency_per_call_s` are blank on every committed row, and a blank
-                # measurement column is never read as a value.
-                latency_s=(),
             )
         )
     # THE CORPUS IS THE PRECONDITION, not the row count. An out-of-corpus row can never be the
@@ -295,7 +292,9 @@ def build(ctx: ctxmod.RoutingContext) -> GridData | None:
     # figure drawn from the external file alone would assert a provenance it does not have.
     if not rows:
         return None
-    rows.extend(_external_rows(in_share))
+    valid_count = len(rows)
+    external = _external_rows(in_share)
+    rows.extend(external)
     return GridData(
         rows=tuple(rows),
         x_label="blended $ per 1M tokens (log) — mix stated above",
@@ -303,7 +302,7 @@ def build(ctx: ctxmod.RoutingContext) -> GridData | None:
             f"blend = {in_share * 100:.0f}% input / {(1 - in_share) * 100:.0f}% output, "
             f"the corpus's own {in_tok:,}:{out_tok:,} token split"
         ),
-        source=_source_line({row.name for row in rows}),
+        source=_source_line(valid_count, len(external), getattr(ctx, "validity", None)),
         # THIS HALF PLOTS A LIST PRICE. The live half plots a measured bill and states the
         # opposite sentence; neither may inherit the other's.
         x_limitation=(

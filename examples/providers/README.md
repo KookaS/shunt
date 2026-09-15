@@ -37,6 +37,14 @@ benchmark — a model can never be scored against a price nobody measured. Add a
 | `fireworks.yaml` | `FIREWORKS_API_KEY` | probes `/v1/models`; litellm prefix is `fireworks_ai` |
 | `requesty.yaml` | `REQUESTY_API_KEY` | aggregator; rejects with 403 |
 | `deepseek.yaml` | `DEEPSEEK_API_KEY` | |
+| `explabs.yaml` | `EXPLABS_API_KEY` | Experiential Labs gateway; shipped in the registry with five available-only rows (registered and priced, but absent from the live pool and enabled set), and also backs the free-tier probe's collection channel |
+| `google_ai_studio.yaml` | `GOOGLE_AI_STUDIO_API_KEY` | probes `/chat/completions`; expects 400 "valid API key" |
+| `nvidia_nim.yaml` | `NVIDIA_NIM_API_KEY` | probes with a real `probe_model`; expects 401 |
+| `vercel_ai_gateway.yaml` | `VERCEL_AI_GATEWAY_API_KEY` | aggregator; probes `/v1/chat/completions`, expects 401 |
+| `sambanova.yaml` | `SAMBANOVA_API_KEY` | probes with a real `probe_model`; expects 401 |
+| `cloudflare_workers_ai.yaml` | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | account-scoped `${CLOUDFLARE_ACCOUNT_ID}` base_url; probe skipped (needs the account id) |
+| `opencode_zen.yaml` | `OPENCODE_API_KEY` | probes `/v1/chat/completions`, expects 401 |
+| `kilo_gateway.yaml` | `KILO_API_KEY` | probe skipped; host verified (`api.kilo.ai/api/gateway`) |
 | `local.yaml` | — | Ollama / vLLM; no key, no probe |
 
 ## The `shunt-ci:` marker (wired)
@@ -79,7 +87,8 @@ one starts being checked as soon as its secret exists.
 ## Where the pieces live
 
 These fragments carry only **connection facts** (`base_url`, `api_key_env_var`,
-`litellm_prefix`) and a sample model — everything a user needs to copy and route.
+`litellm_prefix`) plus, where a free lane serves requests anonymously, `key_optional: true`
+(`kilo_gateway.yaml`) — everything a user needs to copy and route.
 Two other files complete the picture, each the single owner of its part:
 
 - `src/shunt/config/models.yaml` — the runtime registry, listing only the

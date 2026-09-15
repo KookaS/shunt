@@ -31,14 +31,14 @@ the report writes to `benchmark/routing/reports/coverage_table.csv`):
 
 Seven models are compared, ranked by **measured** capability (which, at cold start
 before any data, is the price order): `gpt-5-mini` < `kimi-k2.5` < `deepseek-v4-flash`
-< `qwen3.7-plus` < `zai-glm-5.2` < `deepseek-v4-pro` < `kimi-k3`. Note that the measured
+< `qwen3.7-plus` < `glm-5.2` < `deepseek-v4-pro` < `kimi-k3`. Note that the measured
 rank is *not* the price order — `deepseek-v4-pro` is the second-cheapest model in the
 pool and ranks second-strongest. The rank is derived from the verified
 outcomes themselves, not assumed — see [Benchmark design](benchmark-design.md#equal-coverage-scoring-monotone-rank-imputation) for how the rank is measured.
 
 ### The eighth model in the file, and why nothing scores it
 
-The collected data holds an **eighth** model, `zai-glm-5.3-flash` (41 rows). It is in the
+The collected data holds an **eighth** model, `glm-5.3-flash` (41 rows). It is in the
 model registry but deliberately **not** in the benchmark's enabled list
 (`models:` in `benchmark/benchmark.yaml`), and every figure, table and strategy on this
 site is scoped to the enabled set — so it appears in no result here.
@@ -222,6 +222,35 @@ make benchmark ARGS="--from report"         # recompute artifacts from existing 
 The report stage regenerates the routing plots into `docs/assets/figures/routing/` and the derived
 CSVs into `benchmark/routing/reports/`. Each stage is also runnable on its own as a debug
 entrypoint (`make benchmark-live`, `make offline-replay`, `make routing-report`).
+
+### The model catalogue
+
+The report writes `benchmark/routing/reports/model_catalog.csv`: one row per **canonical
+weights identity** — the `model_version` slug, so the same weights served over several channel
+listings are one row and a provider prefix or `-free` marker is never a name. It is the
+machine-readable face of the inference-valid census the routing figures draw, so the CSV and the
+canvases cannot disagree about which models clear the bar.
+
+Columns: `model`, `channel` (`paid`/`free`), `providers`, `status`, `first_failing`, `cells`
+(measured default-arm cells), `covered`/`corpus` (verified challenges), `pass_rate`, `wilson_lo`,
+`wilson_hi`, `mean_cost`, `total_params`, `active_params`, `serving_mode`, and the `live`,
+`triage`, `capability` flags.
+
+`status` is one of:
+
+| Status | Meaning |
+|---|---|
+| `valid` | clears every criterion — the models the router may serve |
+| `no-evidence` | no measured cell in either channel |
+| `free-only` | a free channel serves it and no paid one does |
+| `insufficient` | a paid identity below the K-cell floor |
+| `invalid:<criterion>` | adequately covered but fails `live`, `triage` or `capability` |
+
+The criteria and first-failing reason come from `benchmark.routing.model_validity`; the pass
+rates, Wilson intervals and mean costs from `benchmark.routing.model_universe`. The catalogue is
+derived (regenerated on every report run, never hand-edited); the
+[model relevance figure](routing.md#fig-model-relevance) and
+[model validity figure](routing.md#fig-model-validity) draw the same census.
 
 ### Escalation evaluation
 

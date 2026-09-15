@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 import socket
 from dataclasses import replace
 from pathlib import Path
@@ -80,8 +81,15 @@ def _served_path(target: object) -> str:
     # from probe_url — so the assertion is an independent oracle, not an echo.
     probe: AuthProbe | None = target.probe  # type: ignore[attr-defined]
     assert probe is not None
-    suffix = probe.endpoint.rsplit("/v1/", 1)[-1]
-    return urlsplit(target.base_url).path.rstrip("/") + "/" + suffix  # type: ignore[attr-defined]
+    # The client contract: the endpoint is host-absolute, and its version segment is
+    # redundant with a base_url that already ends in one. A base_url with a non-version
+    # tail (Google's /v1beta/openai) keeps the endpoint's path verbatim. Deriving it here
+    # (not from probe_url) keeps this an independent oracle.
+    base_path = urlsplit(target.base_url).path.rstrip("/")  # type: ignore[attr-defined]
+    endpoint = probe.endpoint
+    if re.search(r"/v\d+$", base_path):
+        endpoint = re.sub(r"^/v\d+/", "/", endpoint)
+    return base_path + endpoint
 
 
 def _replay(target: object) -> MockSignature:

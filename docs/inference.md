@@ -1,59 +1,35 @@
 ---
 title: The live router, measured
-description: Eight figures that judge the shipped router on its own outcome store — the two strata sharing that store, what live inference actually cost, and the off-policy value of routing and escalation, refused where the logs cannot identify it.
+description: The live-router figure family kept as incomplete layouts on a seed-only corpus, each stamped awaiting live sessions, and where the populated layout lives.
 ---
 
 # The live router, measured
 
 Every other results page on this site measures the router **offline**, against a
-benchmark corpus replayed through a harness. This page measures the router
-**as it runs**: the same eight figures read the outcome store a live Shunt writes
-to, so the questions are the operational ones — what did inference cost, is the
-choice distribution collapsing, do near neighbours still predict outcomes, is
-escalation firing and helping.
+benchmark corpus replayed through a harness. This page is reserved for the opposite
+measurement — the router **as it runs**, read from the outcome store a live Shunt
+writes to.
 
-The store the figures below were rendered from holds **no live traffic at all**.
-That is not a defect of the render, and the page does not paper over it: an empty
-panel is a result here, and each one says on the canvas which number is missing and
-why.
+**That measurement does not exist yet.** The committed figure family is rendered from
+a deterministic **seed-only store**: the benchmark's committed seed bundle replayed
+into a fresh `OutcomeStore`, with no synthetic live rows invented to fill the live
+stratum. Every session carries the `bench:` id prefix and
+`selection_rule_used = benchmark_seed`; none was served by a router to real traffic.
 
-## Reading this page on committed data
+An eight-figure page whose subject has `live n=0` could be read as a measurement of the
+router no matter how many panels say otherwise. The answer is **not** to withdraw the
+figures — withdrawing them left nothing to complete once traffic arrives. This page
+publishes the eight as **incomplete layouts**: each draws its real title, subtitle and
+axes over the seeded corpus, the seeded reference band is the real committed benchmark
+corpus, every live-only panel states its own emptiness, and each canvas is stamped
+`AWAITING LIVE SESSIONS (live n=0)`. They are placeholders awaiting live sessions, not
+results, and they complete in place — unchanged — the moment the store serves traffic.
+The [synthetic demo page](inference-demo.md) draws the same eight over an invented
+corpus, watermarked `SYNTHETIC — NOT MEASURED`, so the populated shapes are legible;
+**nothing there is a measurement either.**
 
-The committed figures come from a **deterministic seed-only store**: the
-benchmark's committed seed bundle replayed into a fresh `OutcomeStore`, with **no
-synthetic live rows** invented to fill the live stratum. Every seeded session
-carries the `bench:` id prefix and `selection_rule_used = benchmark_seed`; nothing
-in the corpus was served by a router to real traffic.
-
-So a reader arriving at the figures should expect this, and read the emptiness as
-the measurement it is:
-
-- **F2 (cost)** and **F6 (escalation)** are **entirely empty**. Both filter to the
-  live stratum, and the live stratum has no members.
-- **F3 (unit economics)** draws only its seeded reference band; the **live claim is
-  empty**. The grey band is replayed benchmark outcomes and is never a stand-in for
-  the live number.
-- **F4 (neighbourhood)** draws panels A and B over the indexed population — that
-  part is real — and **panel C is empty**, because a neighbour-origin mix is a
-  property of a live decision and there are none.
-- **F5 (policy)** shows the seeded corpus composition as a hatched band and is
-  otherwise **empty**: no live share series, no rolling entropy, no propensities.
-- **F7 (off-policy)** renders a **refusal**. Both legs are NOT IDENTIFIED on this
-  corpus: the logged policy did not randomize, so there is nothing to estimate and
-  the panels print the estimator's own words where the bars would be.
-- **F1 (strata)** is the one figure this corpus answers in full — it is about the
-  corpus itself.
-
-[The same eight figures, on invented data](inference-demo.md) draws this family over a
-synthetic corpus, so the panels above that are empty can be read at all. Nothing on that
-page is a measurement and every canvas says so; it is there for the layout, never the
-numbers.
-
-Rendering the same eight against a rig that *has* served traffic fills exactly those
-gaps and changes nothing else. `make inference-figures` produces the committed set
-above from committed data alone — no network, no rig, no model weights — and the
-wrapper's own target renders the identical eight against a running local rig into
-gitignored session output. The producer is shipped code
+Rendering the measured eight against a rig that *has* served traffic changes nothing
+in the code. The producer is shipped code
 (`python -m shunt.inspect.inference --out-dir <dir>`), so the container path and the
 docs path draw the same figures from the same functions.
 
@@ -62,6 +38,11 @@ the optional `inspect` extra (`pip install 'shunt-router[inspect]'`), and the pr
 image ships without it. Any image used to render these figures must install that extra
 itself, and no test covers the in-container render — an image that drops it fails only
 when someone next asks it for a figure.
+
+## What the measured figures answer
+
+The sections below describe the family as it is designed to read once live traffic
+exists. They are the specification of the measurement, not a result.
 
 ## The two strata
 
@@ -189,6 +170,25 @@ Two guards sit in front of every number this figure draws:
 
 ## Figures
 
+### No live router sessions yet {#fig-no-live-sessions}
+
+![No live router sessions yet](assets/figures/inference/no_live_sessions.png)
+
+*the outcome store holds seeded (benchmark-replayed) sessions only · seeded n=584 · live n=0 · populated layout: docs/inference-demo.md (SYNTHETIC — NOT MEASURED)*
+> **Caveat.** Nothing here is a router measurement — every canvas waits on live sessions.
+**Reading.** The outcome store this figure family reads has been seeded but has never served live traffic. A seeded row was replayed into the store by the benchmark seeder; it carries the `bench:` session-id prefix and `selection_rule_used = benchmark_seed`, so it says what the benchmark paid and decided, not what the router did. The eight measured drawings — strata, cost, unit economics, neighbourhood, policy, escalation, model grid and off-policy value — are published below as INCOMPLETE LAYOUTS rather than withheld: each draws its real title, subtitle and axes, the seeded reference band is the real committed benchmark corpus, and every live-only panel states its own emptiness. They are placeholders awaiting live sessions, not results, and each is stamped so on its face. They complete in place, unchanged, once the store holds live traffic.
+
+**What to look for.** Read the count in the subtitle, not the shape: with live n=0 none of the eight panels below can answer an operational question about the router. Read them as the layout those figures take once a rig has served traffic, and read every live panel as empty rather than as a zero.
+
+**Terms.** *seeded row* — a benchmark session replayed into the outcome store by the seeder, id-prefixed `bench:`, never served by the router to real traffic *live row* — a session the router actually served; the only population that can measure it
+
+**Notes.** The eight drawings below are kept as incomplete layouts on purpose, not published as results: withdrawing them left the page with no layout to complete when live traffic arrives. Each carries the same `live n=0` state and is stamped `awaiting live sessions`, so an empty panel cannot be read as a rendering failure or a measurement.
+The seeded reference bands on strata, unit economics, policy and model grid are real committed benchmark data, drawn grey and hatched; they are a reference for shape, never a live result and never a stand-in for the empty live panels.
+`seeded` names two different corpora: the count in this subtitle is the real benchmark-replayed outcome store, while the demo page's seeded band (its own 250-session synthetic corpus) is invented for illustration — the two counts are different corpora and must not be compared.
+
+**Limits.** The seeded corpus is real committed benchmark data and the stratum census is real, but it is a property of the benchmark, not of the live router. Nothing on this page may be quoted as a live router result; every live panel is empty until the store serves traffic, at which point the same figures draw it unchanged.
+
+<!-- n: live=0, seeded=584 --><!-- generated-by: shunt.inspect.inference:render -->
 ### Two strata share one corpus, and the router cannot tell them apart {#fig-inference-strata}
 
 ![Two strata share one corpus, and the router cannot tell them apart](assets/figures/inference/inference_strata.png)
@@ -209,7 +209,6 @@ There is no Tier-1 bar, and its absence is the point: a Tier-1-only session is k
 **Limits.** Panel A counts sessions, not requests: a session serving many turns appears once. A session with no outcome event at all is stored and possibly embedded but never labeled. That gap is the store's, not this figure's.
 
 <!-- n: ambiguous=0, live=0, seeded=584, sessions=584 --><!-- generated-by: shunt.inspect.inference:render -->
-
 ### Live inference cost by model and window, seeded rows excluded {#fig-inference-cost}
 
 ![Live inference cost by model and window, seeded rows excluded](assets/figures/inference/inference_cost.png)
@@ -228,7 +227,6 @@ Cost is summed over `cost_known = 1` alone; the unknown count is reported beside
 **Limits.** A window with no live sessions is empty, not zero-cost. The figure states which. Cost is the provider's reported figure, so a provider that under-reports cache reads under-reports here too.
 
 <!-- n: cost_unknown=0, live_sessions=0, seeded_excluded=584 --><!-- generated-by: shunt.inspect.inference:render -->
-
 ### Cost per verified success, live traffic against the seeded reference band {#fig-inference-unit-economics}
 
 ![Cost per verified success, live traffic against the seeded reference band](assets/figures/inference/inference_unit_economics.png)
@@ -247,7 +245,6 @@ Cost per verified success is undefined where a model has zero verified successes
 **Limits.** The seeded band inherits the benchmark matrix's model mix, so its per-model n is a property of the sweep design and not of demand. Success is Tier-2 only. A model whose work is never verified contributes no successes however well it performed.
 
 <!-- n: live_labeled=0, seeded_labeled=584 --><!-- generated-by: shunt.inspect.inference:render -->
-
 ### Do near neighbours agree? Reliability, distance and neighbour origin {#fig-inference-neighbourhood}
 
 ![Do near neighbours agree? Reliability, distance and neighbour origin](assets/figures/inference/inference_neighbourhood.png)
@@ -266,7 +263,6 @@ Distance is the index's own metric, reported unchanged.
 **Limits.** Leave-one-out over a corpus imported in one burst measures the corpus, not the router's behaviour over time. A bin holding few sessions has a noisy realised rate; bin counts are printed so a bin resting on a handful of sessions is not read as a trend.
 
 <!-- n: live_decisions=0, probed=584 --><!-- generated-by: shunt.inspect.inference:render -->
-
 ### Model share over time, and whether the choice distribution has collapsed {#fig-inference-policy}
 
 ![Model share over time, and whether the choice distribution has collapsed](assets/figures/inference/inference_policy.png)
@@ -285,7 +281,6 @@ Alarm lines come from the shipped `LoopHealthThresholds` defaults, and both the 
 **Limits.** Entropy over a window holding fewer sessions than there are arms cannot reach 1.0 and so reads as collapse; the window size and the arm count are both printed. Propensity is missing for every non-policy decision — an escalated turn is imposed, not sampled — so panel C covers policy decisions only.
 
 <!-- n: live_sessions=0, seeded_models=4 --><!-- generated-by: shunt.inspect.inference:render -->
-
 ### Escalation: how often it fires, which rung, why it held, what followed {#fig-inference-escalation}
 
 ![Escalation: how often it fires, which rung, why it held, what followed](assets/figures/inference/inference_escalation.png)
@@ -304,7 +299,28 @@ Rung is read from `selection_rule_used` plus the presence of `escalated_reasonin
 **Limits.** The derived bar recovers only the undeliverable holds that were also being explored. Where escalation was not exploring, an undeliverable hold leaves no record at all and is counted nowhere on this figure — panel C is therefore a lower bound on holds, and is captioned as one. Panel D compares populations, not the same session under both arms; it is descriptive and carries no causal claim.
 
 <!-- n: escalation_records=0, live_sessions=0, undeliverable_holds=0 --><!-- generated-by: shunt.inspect.inference:render -->
+### Every model in the outcome store: price, size, measured outcome {#fig-inference-model-grid}
 
+![Every model in the outcome store: price, size, measured outcome](assets/figures/inference/inference_model_grid.png)
+
+*the benchmark half's grid, redrawn over the outcome store — both strata, split stated below · 4 models: the outcome store's Tier-2-labeled sessions — 0 live and 584 replayed from the benchmark corpus; 0 of 4 models drawn carry any live session · 0 at $0 (local) · 4 priced · n per model 84–200, unpaired task sets · x = billed spend over labeled sessions, from the store's own cost rows*
+> **Caveat.** Panel A's x axis is what the store was BILLED, so it is not the benchmark half's.
+**Reading.** Panel A: each model the store holds a Tier-2 label for, at its mean billed dollars per labeled session (x, log — with a separate column at the left for locally-served models, whose marginal price is exactly zero and cannot sit on a log axis) against its verified-success rate (y), with Wilson 95% whiskers. Marker area follows the square root of the active parameter count, the marker edge says hosted or local, and hue is the coarse total-size band. Panel B: a hollow mark at total parameters and a filled mark at active parameters, the rule between them being the mixture-of-experts sparsity gap. The former latency panels are retired: no committed row carries a sample, so they drew nothing and claimed nothing.
+
+**What to look for.** Compare this canvas with the benchmark half's. The two draw the same three panels from different corpora, so a model that sits in one place here and elsewhere there is telling you the benchmark corpus and the served traffic are not the same workload — which is the gap the whole live-versus-benchmark question turns on.
+
+**Terms.** *verified success* — A session whose Tier-2 (test/typecheck) outcome is a pass. Tier-1 rows are excluded: they are never materialized and never become routing neighbours. *$ per labeled session* — Billed spend divided by labeled sessions, read off the store's own cost rows. A model whose sessions are not all priced is left off the axis rather than plotted at a partial total. This is a MEASURED bill, not a list price, so it is not the quantity the benchmark half's panel A plots and the two must not be compared. *active parameters* — What one token decodes through — a COMPUTE claim. All of a mixture's total parameters must still be resident to serve it. *UNDISCLOSED* — The vendor publishes no parameter count. No estimate is substituted, and the row draws at a fixed reference marker that is deliberately off the size ramp.
+
+**Notes.** Panel A's x and the benchmark half's x are different quantities — billed dollars per session here, a blended list price per million tokens there. The two canvases share a shape, not an axis, and a model's horizontal position must never be carried between them.
+deepseek-v4-flash: 68.9% on n=190 · $0.0092 (measured $ per labeled session (log)) · 284B total / 13B active
+deepseek-v4-pro: 85.0% on n=200 · $0.1373 (measured $ per labeled session (log)) · size UNDISCLOSED
+glm-5.2: 57.1% on n=84 · $0.3429 (measured $ per labeled session (log)) · 753B total / 40B active
+kimi-k3: 84.5% on n=110 · $0.5487 (measured $ per labeled session (log)) · 2800B total / 104B active
+drawn at a fixed reference marker because no parameter count is published: deepseek-v4-pro
+
+**Limits.** STRATA ARE POOLED ON THIS PANEL, and the subtitle states the split. A row drawn entirely from seeded sessions was REPLAYED from the benchmark corpus: it repeats the benchmark half's finding rather than corroborating it, and nothing on this canvas may be read as live measurement until the subtitle reports live sessions. The x axis is a mean over sessions of very different sizes, so a model that served the longer sessions looks dearer per session without being dearer per token. Rates are not paired: models were not served the same sessions, so a height difference between two rows is not a controlled comparison. Panel A's x axis is a MEASURED BILL — dollars per labeled session, off the store's own cost rows — not a list price, and not the benchmark half's axis. A model whose sessions are not all priced is left off the panel rather than plotted at a partial total. The $0 column and the log region are not one ruler. The gap between them is a break, and no distance across it is meaningful. Hue is a coarse size band, not a capability measurement — panel B carries the exact counts, and a band is not evidence that its members behave alike.
+
+<!-- n: external=0, models=4, sized=3, undisclosed=1 --><!-- generated-by: shunt.inspect.inference:render -->
 ### Off-policy value of routing and escalation, and whether it is identified at all {#fig-inference-ope}
 
 ![Off-policy value of routing and escalation, and whether it is identified at all](assets/figures/inference/inference_ope.png)
@@ -324,26 +340,3 @@ INSTRUMENT ADMISSIBLE: positive control +3.1908, destroyed-signal null +0.4011, 
 **Limits.** The routing leg covers policy turns only. An escalated turn carries no candidate scores and a cold-start turn carries none either, so both are excluded before the estimator sees them; the excluded count is printed on panel D. An ADMISSIBLE instrument verdict is a gate against breakage — a filter that stopped filtering, an estimator that stopped weighting — not a warrant that these numbers are accurate to within a few points.
 
 <!-- n: escalation_logged=0, escalation_usable=0, routing_logged=0, routing_usable=0 --><!-- generated-by: shunt.inspect.inference:render -->
-
-### Every model in the outcome store: price, size, measured outcome {#fig-inference-model-grid}
-
-![Every model in the outcome store: price, size, measured outcome](assets/figures/inference/inference_model_grid.png)
-
-*the benchmark half's grid, redrawn over the outcome store — both strata, split stated below · 4 models over the outcome store's Tier-2-labeled sessions — 0 live and 584 replayed from the benchmark corpus; 0 of 4 models drawn carry any live session · 0 at $0 (local) · 4 priced · n per model 84–200, unpaired task sets · x = billed spend over labeled sessions, from the store's own cost rows*
-> **Caveat.** Panel A's x axis is what the store was BILLED, so it is not the benchmark half's.
-**Reading.** Panel A: each model the store holds a Tier-2 label for, at its mean billed dollars per labeled session (x, log — with a separate column at the left for locally-served models, whose marginal price is exactly zero and cannot sit on a log axis) against its verified-success rate (y), with Wilson 95% whiskers. Marker area follows the square root of the active parameter count, the marker edge says hosted or local, and hue is the coarse total-size band. Panel B: a hollow mark at total parameters and a filled mark at active parameters, the rule between them being the mixture-of-experts sparsity gap. Panels C and D: per-call latency, hosted and local on separate axes.
-
-**What to look for.** Compare this canvas with the benchmark half's. The two draw the same three panels from different corpora, so a model that sits in one place here and elsewhere there is telling you the benchmark corpus and the served traffic are not the same workload — which is the gap the whole live-versus-benchmark question turns on.
-
-**Terms.** *verified success* — A session whose Tier-2 (test/typecheck) outcome is a pass. Tier-1 rows are excluded: they are never materialized and never become routing neighbours. *$ per labeled session* — Billed spend divided by labeled sessions, read off the store's own cost rows. A model whose sessions are not all priced is left off the axis rather than plotted at a partial total. This is a MEASURED bill, not a list price, so it is not the quantity the benchmark half's panel A plots and the two must not be compared. *active parameters* — What one token decodes through — a COMPUTE claim. All of a mixture's total parameters must still be resident to serve it. *UNDISCLOSED* — The vendor publishes no parameter count. No estimate is substituted, and the row draws at a fixed reference marker that is deliberately off the size ramp.
-
-**Notes.** Panel A's x and the benchmark half's x are different quantities — billed dollars per session here, a blended list price per million tokens there. The two canvases share a shape, not an axis, and a model's horizontal position must never be carried between them.
-deepseek-v4-flash: 68.9% on n=190 · $0.0092 (measured $ per labeled session (log)) · 284B total / 13B active
-deepseek-v4-pro: 85.0% on n=200 · $0.1373 (measured $ per labeled session (log)) · size UNDISCLOSED
-kimi-k3: 84.5% on n=110 · $0.5487 (measured $ per labeled session (log)) · 2800B total / 104B active
-zai-glm-5.2: 57.1% on n=84 · $0.3429 (measured $ per labeled session (log)) · 753B total / 40B active
-drawn at a fixed reference marker because no parameter count is published: deepseek-v4-pro
-
-**Limits.** STRATA ARE POOLED ON THIS PANEL, and the subtitle states the split. A row drawn entirely from seeded sessions was REPLAYED from the benchmark corpus: it repeats the benchmark half's finding rather than corroborating it, and nothing on this canvas may be read as live measurement until the subtitle reports live sessions. The x axis is a mean over sessions of very different sizes, so a model that served the longer sessions looks dearer per session without being dearer per token. Rates are not paired: models were not served the same sessions, so a height difference between two rows is not a controlled comparison. Panel A's x axis is a MEASURED BILL — dollars per labeled session, off the store's own cost rows — not a list price, and not the benchmark half's axis. A model whose sessions are not all priced is left off the panel rather than plotted at a partial total. The $0 column and the log region are not one ruler. The gap between them is a break, and no distance across it is meaningful. Hue is a coarse size band, not a capability measurement — panel B carries the exact counts, and a band is not evidence that its members behave alike. Panels C and D are empty: no latency has been instrumented on any row. The column is MISSING, and nothing here should be read as a speed claim.
-
-<!-- n: external=0, latency_hosted=0, latency_local=0, models=4, sized=3, undisclosed=1 --><!-- generated-by: shunt.inspect.inference:render -->

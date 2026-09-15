@@ -246,7 +246,7 @@ class TestLegacyMigration:
         config.load("benchmark/benchmark.yaml")
         p = self._legacy_csv(tmp_path, [self._row("default")])
         config.load_results(p)
-        assert "deepseek-v4-flash,default," in p.read_text()
+        assert "deepseek-v4-flash,,default," in p.read_text()
 
     def test_explicit_arm_row_not_aliased(self, tmp_path):
         config.load("benchmark/benchmark.yaml")
@@ -411,7 +411,7 @@ class TestSchema:
     def test_results_fields_carry_reasoning_and_arm_hash(self):
         assert "reasoning" in integrity.RESULTS_FIELDS
         assert "arm_hash" in integrity.RESULTS_FIELDS
-        assert integrity.RESULTS_FIELDS[:3] == ("challenge_id", "model", "reasoning")
+        assert integrity.RESULTS_FIELDS[:4] == ("challenge_id", "model", "lane", "reasoning")
 
     def test_old_file_without_arm_hash_column_loads_without_crashing(self, tmp_path):
         # The committed legacy header has no arm_hash column. load_results must not

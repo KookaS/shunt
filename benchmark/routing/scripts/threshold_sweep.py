@@ -959,10 +959,19 @@ def _draw_regimes(ax: Axes, res: SweepResult, panel_width_in: float) -> None:
     ax.set_yticklabels([f"{t:.1f}" for t in thresholds], fontsize=7.5)
     ax.set_xlabel("k  (log-spaced grid)", fontsize=9)
     ax.set_ylabel("success_rate_thresh", fontsize=9)
+    # ONLY THE REGIMES THIS SLICE ACTUALLY CONTAINS. The legend listed all four unconditionally,
+    # so a grid with no always-frontier cell still showed an orange "F · always-frontier /
+    # degenerate" swatch for a colour that appears nowhere in the panel — a reader hunting for a
+    # cell that does not exist. The key is derived from the drawn codes, so it cannot promise a
+    # category the slice has none of.
+    present = {int(code) for code in np.unique(codes)}
     ax.legend(
         handles=[
             Patch(facecolor=c, edgecolor="#444444", linewidth=0.5, label=f"{key} · {lbl}")
-            for c, key, lbl in zip(_REGIME_COLORS, _REGIME_KEYS, _REGIME_LABELS, strict=True)
+            for index, (c, key, lbl) in enumerate(
+                zip(_REGIME_COLORS, _REGIME_KEYS, _REGIME_LABELS, strict=True)
+            )
+            if index in present
         ],
         fontsize=6.8,
         loc="upper center",

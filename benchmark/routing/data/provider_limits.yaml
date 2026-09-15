@@ -1,0 +1,208 @@
+# PER-PROVIDER/LANE ADMISSION LIMITS — the single enforcement registry for free lanes.
+#
+# This file is DATA, read once by `benchmark/config.py` and resolved per lane (channel id)
+# by joining the lane's provider. Every admission limitation is expressed here once and
+# enforced identically for every provider by `benchmark/runner/lane_scheduler.py`; adding a
+# new provider is a registry row, never provider-specific code.
+#
+# Fields per provider block (a lane inherits its provider's values; `lanes.<channel-id>`
+# overrides any field for one channel):
+#   scope                 per_model | per_account | per_project | per_ip
+#   rpm                   requests per minute, or null when UNKNOWN (never invented)
+#   rpd                   requests per day, or null
+#   tpm                   tokens per minute, or null
+#   max_request_tokens    the largest SINGLE request (prompt + completion) the lane must
+#                         send. When it exceeds `tpm`, a request can never fit any minute's
+#                         budget and the provider rejects it however it is spaced
+#                         (LANE_TPM_TOO_SMALL) — the scheduler refuses such a lane up front.
+#   daily_token_budget    tokens per day (TPD), or null
+#   free_access           false on a provider that serves no free tier through the API; the
+#                         scheduler refuses such a lane as LANE_NO_FREE_ACCESS (default true)
+#   access_note           the evidence a LANE_NO_FREE_ACCESS refusal quotes, in the lane's
+#                         named reason
+#   paid_alternative      the vendor's paid tier for the same model (research only, not
+#                         enforced): what paying would lift the limits to.
+#   notes                 the reason a value is null, or a scope/money caveat
+#   verified_as_of        the date the value was last confirmed
+#   verified_by           probe | docs | unverified  (a probe is a live in-tree observation)
+#
+# `verified_by: unverified` means the vendor is silent or its docs are unreachable. Declaring
+# null beats inventing a number; the scheduler substitutes the campaign's `unknown_limits`
+# (10 RPM / 100 RPD) for a null rpm/rpd, and leaves a null tpm/budget unenforced.
+#
+# Where a value overlaps `free_catalogs.yaml` (`rpm`, `rpd`, `scope`), that file is the
+# scanner's copy of the same fact; `test_provider_limits.py` asserts the two agree so they
+# cannot drift.
+
+schema: 1
+
+# Values omitted on a provider block fall back to these. `unknown_limits` in the campaign
+# config supplies the effective rpm/rpd for a lane with no registry entry at all.
+defaults:
+  rpm: null
+  rpd: null
+  tpm: null
+  max_request_tokens: null
+  daily_token_budget: null
+
+providers:
+  groq:
+    scope: per_model
+    rpm: 30
+    rpd: 1000
+    tpm: 8000
+    # A first SWE-bench agent turn measured ~8026 tokens against the 8000 TPM cap, so a
+    # single request exceeds the whole minute's budget: refused as LANE_TPM_TOO_SMALL.
+    max_request_tokens: 8026
+    daily_token_budget: 200000
+    paid_alternative:
+      tier: Developer
+      rpm: 1000
+      rpd: 500000
+      tpm: 250000
+      notes: >-
+        Paid pay-as-you-go. gpt-oss-120b lists $0.15 input / $0.60 output per 1M tokens;
+        250K TPM fits a full SWE-bench turn. Paying works but converts the $0 corpus to a
+        billed one.
+    notes: >-
+      Free plan, per model row: gpt-oss-120b / gpt-oss-20b / qwen3.6-27b / qwen3.8-27b
+      share 30 RPM / 1K RPD / 8K TPM / 200K TPD. `groq/compound` is the cheap 70K-TPM free
+      row; any free lane whose TPM is at least the request size is admitted normally.
+    verified_as_of: '2026-09-11'
+    verified_by: probe
+  openrouter:
+    scope: per_account
+    rpm: 20
+    rpd: 1000
+    tpm: null
+    max_request_tokens: null
+    daily_token_budget: null
+    notes: >-
+      Post-$10 free-model quota: 1,000 RPD and a 20 RPM ceiling, account-global (sweeps
+      do not parallelise). No published TPM, left UNKNOWN rather than invented.
+    verified_as_of: '2026-09-10'
+    verified_by: docs
+  kilo_gateway:
+    scope: per_ip
+    # 200 requests/hour per IP is shared across every Kilo model; 3 RPM is 200/60 floored
+    # (conservative), and the 429 quarantine is the cross-lane backstop.
+    rpm: 3
+    rpd: 4800
+    tpm: null
+    max_request_tokens: null
+    daily_token_budget: null
+    notes: >-
+      Anonymous free access is 200 requests/hour per IP, shared across all models. The
+      per-lane bucket cannot see the shared IP cap, so the scheduler under-counts by design
+      and the quarantine absorbs the difference.
+    verified_as_of: '2026-09-10'
+    verified_by: docs
+  google_ai_studio:
+    scope: per_project
+    rpm: null
+    rpd: 20
+    tpm: null
+    max_request_tokens: null
+    daily_token_budget: null
+    notes: >-
+      gemini-3.8-flash free measured at 20 requests/day by a live 429. The public docs now
+      defer per-model RPM/TPM/RPD to AI Studio and state RPD resets at midnight Pacific, so
+      RPM/TPM are UNKNOWN here, never guessed.
+    verified_as_of: '2026-09-11'
+    verified_by: probe
+  requesty:
+    scope: per_account
+    rpm: null
+    rpd: 200
+    tpm: null
+    max_request_tokens: null
+    daily_token_budget: null
+    notes: '~200 requests/day; the vendor docs are silent, so this is UNVERIFIED.'
+    verified_as_of: '2026-09-10'
+    verified_by: unverified
+  sambanova:
+    scope: per_account
+    rpm: 20
+    rpd: 20
+    tpm: null
+    max_request_tokens: null
+    daily_token_budget: null
+    notes: '~20 RPD; the vendor docs 404, so this is UNVERIFIED.'
+    verified_as_of: '2026-09-10'
+    verified_by: unverified
+  nvidia_nim:
+    scope: per_account
+    rpm: null
+    rpd: null
+    tpm: null
+    max_request_tokens: null
+    daily_token_budget: null
+    notes: 'Free developer credits; no published request or token limits (UNVERIFIED).'
+    verified_as_of: '2026-09-10'
+    verified_by: unverified
+  vercel_ai_gateway:
+    scope: per_model
+    rpm: null
+    rpd: null
+    tpm: null
+    max_request_tokens: null
+    daily_token_budget: null
+    notes: >-
+      Card now on file. The free subset serves at $0 — a live probe on 2026-09-11 saw
+      ling-3.0-flash-fin-free and ling-3.0-flash-sante-free return HTTP 200 with
+      usage.cost=0 and tool calls present, and laguna-s-2.1-free a transient 503. No
+      published per-model RPM/RPD, so both stay UNKNOWN rather than invented.
+    verified_as_of: '2026-09-11'
+    verified_by: probe
+  cloudflare_workers_ai:
+    scope: per_account
+    rpm: null
+    rpd: null
+    tpm: null
+    max_request_tokens: null
+    daily_token_budget: null
+    notes: >-
+      10,000 neurons/day (account); the stronger models require paid billing. The neuron
+      budget is not a token budget, so it is not folded into `daily_token_budget`.
+    verified_as_of: '2026-09-10'
+    verified_by: docs
+  opencode_zen:
+    scope: per_account
+    rpm: null
+    rpd: null
+    tpm: null
+    max_request_tokens: null
+    daily_token_budget: null
+    free_access: false
+    access_note: >-
+      The free ids are app/session-gated, not balance-gated. A live probe on 2026-09-11 got
+      HTTP 400 MissingSessionID ("OpenCode's free tier can only be used in OpenCode") for
+      nemotron-3.5-lightning-free and nemotron-3-ultra-free, and HTTP 400 "Model is
+      unavailable." for deepseek-v4-flash-free; the paid ids deepseek-v4-flash and kimi-k3
+      got HTTP 401 CreditsError (no payment method). Adding credits opens paid models only,
+      never the free ids.
+    notes: >-
+      Free suffix ids are app/session-gated rather than free through the API; published
+      limits are UNVERIFIED. Refused as a free lane (see access_note).
+    verified_as_of: '2026-09-11'
+    verified_by: probe
+  together:
+    scope: per_account
+    rpm: null
+    rpd: null
+    tpm: null
+    max_request_tokens: null
+    daily_token_budget: null
+    notes: 'No free marker in the OpenAI-shaped catalogue; enters via the admission probe.'
+    verified_as_of: '2026-09-10'
+    verified_by: unverified
+  explabs:
+    scope: per_account
+    rpm: null
+    rpd: null
+    tpm: null
+    max_request_tokens: null
+    daily_token_budget: null
+    notes: 'Umbrella free daily allowance; the promotions shape publishes no rpm/rpd.'
+    verified_as_of: '2026-09-10'
+    verified_by: unverified

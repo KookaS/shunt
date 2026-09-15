@@ -80,6 +80,16 @@ class SessionRow:
     rung: str | None
     undeliverable: bool
     tier2_success: bool | None
+    # The canonical display label for `model_chosen`, produced once at read time by the ONE
+    # resolver (`benchmark.routing.model_universe.canonical_label` on the docs path, the
+    # registry `version` identity on the rig). Empty when no resolver was supplied, so a
+    # hand-built `SessionRow` still reads as its own stored name.
+    model_label: str = ""
+
+    @property
+    def display_model(self) -> str:
+        """The bare canonical slug a figure draws, or the stored name when none resolved."""
+        return self.model_label or self.model_chosen
 
 
 def _parse_time(raw: str) -> datetime | None:
@@ -153,8 +163,16 @@ def _undeliverable(prov: dict[str, Any]) -> bool:
     )
 
 
-def read_sessions(store: OutcomeStore) -> list[SessionRow]:
-    """Every session in the store, origin-adjudicated, oldest first."""
+def read_sessions(
+    store: OutcomeStore, *, label_of: Callable[[str], str] | None = None
+) -> list[SessionRow]:
+    """Every session in the store, origin-adjudicated, oldest first.
+
+    `label_of` is the ONE canonical model resolver applied at the single point labels are
+    produced, so no per-figure patcher can drift from another. The store key stays
+    `model_chosen`; only the drawn `model_label` is canonicalised, so a display fix never
+    merges two arms or moves a measured count.
+    """
     sources = {
         str(row["session_id"]): row.get("outcome_source") for row in store.labeled_outcome_rows()
     }
@@ -168,7 +186,7 @@ def read_sessions(store: OutcomeStore) -> list[SessionRow]:
         raw.extend(page)
         if len(page) < _PAGE:
             break
-    rows = [_session_row(item, sources, successes) for item in raw]
+    rows = [_session_row(item, sources, successes, label_of) for item in raw]
     return sorted(rows, key=lambda r: (r.timestamp is None, r.timestamp, r.session_id))
 
 
@@ -176,14 +194,17 @@ def _session_row(
     item: dict[str, Any],
     sources: dict[str, str | None],
     successes: dict[str, bool],
+    label_of: Callable[[str], str] | None = None,
 ) -> SessionRow:
     prov = _provenance(item.get("decision_provenance"))
     session_id = str(item["session_id"])
     rule = prov.get("selection_rule_used")
+    model_chosen = str(item.get("model_chosen") or "(unknown)")
     return SessionRow(
         session_id=session_id,
         timestamp=_parse_time(str(item.get("timestamp") or "")),
-        model_chosen=str(item.get("model_chosen") or "(unknown)"),
+        model_chosen=model_chosen,
+        model_label=label_of(model_chosen) if label_of is not None else "",
         cost=float(item.get("cost") or 0.0),
         cost_known=bool(item.get("cost_known", 1)),
         stratum=classify_stratum(session_id, rule, sources.get(session_id)),
@@ -240,13 +261,18 @@ def strata(store: OutcomeStore, rows: list[SessionRow]) -> StrataData:
         (row.model_chosen, row.stratum) for row in rows if row.tier2_success is not None
     )
     models = sorted({model for model, _ in labeled})
+    # The census is keyed on the raw `model_chosen`; the DRAWN name is the canonical label
+    # carried on the row, so panel C shows the bare slug while the counts stay per stored arm.
+    labels = {row.model_chosen: row.display_model for row in rows}
     strata_of = Counter(row.stratum for row in rows)
     census = store.stratum_census()
     return StrataData(
         census=census,
         ambiguous=[row.session_id for row in rows if row.stratum == AMBIGUOUS],
         times=[(row.stratum, row.timestamp) for row in rows if row.timestamp is not None],
-        per_model=[(model, labeled[(model, SEEDED)], labeled[(model, LIVE)]) for model in models],
+        per_model=[
+            (labels[model], labeled[(model, SEEDED)], labeled[(model, LIVE)]) for model in models
+        ],
         n_sessions=len(rows),
         n_seeded=strata_of[SEEDED],
         n_live=strata_of[LIVE],
@@ -338,10 +364,11 @@ def _live_cost(
     known = [row for row in live if row.cost_known]
     counts = Counter(row.model_chosen for row in known)
     totals: dict[str, float] = dict.fromkeys(counts, 0.0)
+    labels = {row.model_chosen: row.display_model for row in known}
     for row in known:
         totals[row.model_chosen] += row.cost
     return LiveCostAggregates(
-        by_model=[(model, counts[model], totals[model]) for model in sorted(counts)],
+        by_model=[(labels[model], counts[model], totals[model]) for model in sorted(counts)],
         total=sum(row.cost for row in known),
         n_cost_known=len(known),
         n_cost_unknown=len(live) - len(known),
@@ -381,6 +408,9 @@ class ModelEconomics:
     """One model's verified-success rate and cost per success within one stratum."""
 
     model: str
+    # The canonical display slug for `model`; the grouping key `model` stays the stored name so
+    # a label fix never merges two arms or changes a count.
+    label: str
     n_labeled: int
     n_success: int
     rate: float
@@ -423,6 +453,7 @@ def _economics(rows: Iterable[SessionRow]) -> list[ModelEconomics]:
         out.append(
             ModelEconomics(
                 model=model,
+                label=members[0].display_model,
                 n_labeled=len(labeled),
                 n_success=n_success,
                 rate=n_success / len(labeled) if labeled else 0.0,
@@ -454,18 +485,31 @@ def model_grid(rows: list[SessionRow], model_pool: ModelPool | None = None) -> G
     # model would land left of where it belongs and read as cheaper than it was.
     from shunt.inspect.model_grid import GridData, GridRow
     from shunt.models.config import ModelPool
+    from shunt.router.policy import load_router_policy, packaged_policy_path
 
     pool = model_pool if model_pool is not None else ModelPool.load()
+    # ONLY A MODEL THE SHIPPED ROUTER CAN CHOOSE. The store can hold outcomes for a
+    # benchmark-only or collection-only model (the demo corpus does), and drawing it beside a
+    # served one would present a non-routable model as a live option. Read from the packaged
+    # router.yaml, the same live pool the routing figures use.
+    live = set(load_router_policy(packaged_policy_path()).models)
     grid: list[GridRow] = []
     known = _known_spend(rows)
     for econ in _economics(rows):
+        if econ.model not in live:
+            continue
         entry = pool.get_model(econ.model)
         size = entry.size if entry is not None else None
         local = entry is not None and entry.serving_mode == "local"
         spend = known.get(econ.model)
         grid.append(
             GridRow(
+                # The store keys the row on the served name; the rendered label is the
+                # canonical identity the resolver produced (falling back to the registry
+                # `version` for a row built without one), so a publisher-namespaced listing
+                # (`z-ai/glm-5.3:free`) never leaks a prefix while the key stays routable.
                 name=econ.model,
+                label=econ.label or (entry.version if entry is not None else None),
                 # Local serving is $0 by construction and enters the category column; a hosted
                 # model with no known spend is left off the axis entirely (None would put it
                 # in the $0 column, claiming it was free).
@@ -475,7 +519,6 @@ def model_grid(rows: list[SessionRow], model_pool: ModelPool | None = None) -> G
                 passes=econ.n_success,
                 total_params=_param(size.total_params) if size else None,
                 active_params=_param(size.active_params) if size else None,
-                latency_s=(),
             )
         )
     drawn = tuple(g for g in grid if g.n and (g.x is not None or g.is_local))
@@ -650,6 +693,9 @@ class PolicyData:
     entropy: list[tuple[int, float]]
     frontier_share: list[tuple[int, float]]
     propensities: list[tuple[str, int, float, float]]
+    # Raw `model_chosen` -> canonical display slug, so every F5 panel draws the same bare name
+    # while the palette and the frontier comparison stay keyed on the stored arm.
+    labels: dict[str, str]
     window: int
     n_live: int
     thresholds: LoopHealthThresholds
@@ -669,6 +715,7 @@ def policy(rows: list[SessionRow], model_pool: ModelPool | None = None) -> Polic
     live = [row for row in rows if row.stratum == LIVE and row.timestamp is not None]
     frontier = top_capability_cluster(model_pool) if model_pool is not None else set()
     candidates = len(model_pool.model_names()) if model_pool is not None else None
+    labels = {row.model_chosen: row.display_model for row in rows}
     return PolicyData(
         live_series=_share_series(live, thresholds.recent_window),
         seed_mix=sorted(Counter(row.model_chosen for row in rows if row.stratum == SEEDED).items()),
@@ -683,6 +730,7 @@ def policy(rows: list[SessionRow], model_pool: ModelPool | None = None) -> Polic
             else []
         ),
         propensities=_propensities(rows),
+        labels=labels,
         window=thresholds.recent_window,
         n_live=len(live),
         thresholds=thresholds,

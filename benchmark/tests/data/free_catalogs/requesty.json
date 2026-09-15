@@ -1,0 +1,26 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "poolside/laguna-m.1",
+      "context_window": 32768,
+      "input_price": 0,
+      "output_price": 0,
+      "supports_tool_calling": false
+    },
+    {
+      "id": "nvidia/nemotron-3-super-120b-a12b",
+      "context_window": 1048576,
+      "input_price": 0,
+      "output_price": 0,
+      "supports_tool_calling": true
+    },
+    {
+      "id": "moonshot/kimi-k3",
+      "context_window": 262144,
+      "input_price": 0.000003,
+      "output_price": 0.000015,
+      "supports_tool_calling": true
+    }
+  ]
+}

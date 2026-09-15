@@ -11,13 +11,14 @@ import json
 import logging
 import math
 import os
+import re
 import time
 import types
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final, NoReturn
+from typing import Any, Final, Literal, NoReturn
 
 from benchmark import config
 from benchmark.routing import censoring, integrity
@@ -51,6 +52,11 @@ _WATCHDOG_MARGIN_S: Final[int] = 300
 # benchmark.yaml live.cost_limit so the budget increase cannot relabel cost censors as step censors.
 _DEFAULT_STEP_LIMIT: Final[int] = 150
 
+# Default per-lane preflight bound. One probe must never wedge the fleet: a free campaign may
+# sweep dozens of lanes, so each gets a single, short, retry-disabled attempt. The knob is
+# threaded from the runner's ``--preflight-timeout``.
+DEFAULT_PREFLIGHT_TIMEOUT_S: Final[float] = 20.0
+
 
 def _external_watchdog_s(wall_limit_s: int) -> int:
     """External hard-watchdog ceiling — strictly greater than the internal graceful wall."""
@@ -68,6 +74,12 @@ _KEY_ENV: Final[tuple[str, ...]] = (
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
+    # Experiential Labs' free-promo channel: the credential behind the collection-only
+    # `*-explabs` registry ids (registered 2026-09-06), resolved per model by
+    # `_model_key_env_var`/`litellm_model_target`. Mirrors run_matrix._KEY_ENV so an
+    # extra-models-only --live collection run is gated on the key it actually uses, not
+    # spuriously on a paid router key.
+    "EXPLABS_API_KEY",
 )
 
 
@@ -88,6 +100,15 @@ class PermanentModelError(RuntimeError):
 
     Deterministic in the prompt, so retrying only hangs the run. The cell is recorded as
     failed (pass=False) so the ladder escalates it, not left MISSING to recompute forever.
+    """
+
+
+class ModelUnavailableError(RuntimeError):
+    """This lane's model is permanently not served here (retired id, plan-gated, wrong API).
+
+    A LANE fault, not a cell failure and not a fleet-wide key fault: the provider answered, it
+    just does not serve this ``(model, provider)`` pair. Recording a ``pass=False`` would
+    fabricate a capability failure, and retrying is futile, so ``run_matrix`` disables the lane.
     """
 
 
@@ -212,6 +233,10 @@ class AgentPatch:
     # Client-side duration of each SUCCESSFUL provider call, in call order, as measured at the
     # scaffold model seam (`scaffold_model.EnvKeyLitellmModel`). Empty means NOT MEASURED.
     call_latencies_s: tuple[float, ...] = ()
+    # Sum of the provider's reported cached prompt tokens across the cell's assistant calls,
+    # or None when ANY usage-carrying call omitted the field (a blank `cached_in_tok` on the
+    # results row is MISSING FOREVER, never a measured zero). See `_sum_cached_in_tokens`.
+    cached_in_tok: int | None = None
 
 
 def generate_patch_live(
@@ -229,7 +254,9 @@ def generate_patch_live(
     Gated: raises ``MissingApiKeysError`` without keys (keyless never fabricates);
     scaffold import is lazy so the wiring is unit-testable without it installed.
     """
-    if not has_api_keys(env):
+    if not has_api_keys(env) and not _model_key_optional(model):
+        # A key_optional provider (an anonymous free lane) is admitted with no key: it answers
+        # a keyless request, so gating it here would refuse a lane that needs no credential.
         raise MissingApiKeysError(
             f"live inference for {spec.instance_id}/{model} needs one of {_KEY_ENV}"
         )
@@ -260,6 +287,14 @@ def _model_key_env_var(model: str) -> str | None:
     return str(info["api_key_env_var"])
 
 
+def _model_key_optional(model: str) -> bool:
+    """True iff *model*'s provider admits anonymous (keyless) free-lane requests."""
+    # A missing row is False (fail-closed): only an explicit `key_optional: true` on the
+    # provider row opens the anonymous path. `load_pricing` carries the flag (benchmark/config).
+    info = config.load_pricing().get(model)
+    return bool(isinstance(info, dict) and info.get("key_optional", False))
+
+
 def litellm_model_target(model: str) -> tuple[str, dict[str, Any]]:
     """Map an internal model alias to a litellm ``(model_string, model_kwargs)`` pair."""
     # Route, base_url and key env var all come from the registry's provider row. The returned
@@ -272,6 +307,11 @@ def litellm_model_target(model: str) -> tuple[str, dict[str, Any]]:
         return route, {}
     key = os.environ.get(key_env)
     if not key:
+        if _model_key_optional(model):
+            # Anonymous free lane: the provider needs no credential. Return base_url but NO
+            # api_key — the scaffold's `EnvKeyLitellmModel` injects the harmless placeholder at
+            # request time, after the credential-free config has been serialised.
+            return route, {"api_base": str(info["base_url"])}
         raise MissingApiKeysError(f"routing {model!r} via {info['provider']} needs {key_env}")
     return route, {"api_base": str(info["base_url"]), "api_key": key}
 
@@ -331,58 +371,120 @@ def _preflight_serving_check(target: str, model_kwargs: dict[str, Any]) -> None:
         raise ApiUnusableError(f"unsafe local serving config for {target}: {exc}") from exc
 
 
-def preflight_api_check(model: str | None = None) -> bool:
-    """Prove the API key works with ONE minimal real completion, before any container spins up.
+# A preflight probe's classification. Every class is handled at the LANE, never the fleet:
+# a dead key disables its lane, a throttle quarantines it (honouring Retry-After), a permanent
+# model gap disables it, and a transient blip is left alone. Only "no usable lane remains"
+# aborts the campaign.
+PreflightKind = Literal["ok", "unusable", "rate_limited", "unavailable", "transient"]
 
-    A dead/empty key or no-balance error raises ``ApiUnusableError`` (refuse the run); a
-    transient blip (rate-limit / 5xx) is inconclusive and returns True — never refuse over one.
+
+@dataclass(frozen=True)
+class PreflightOutcome:
+    """One lane's preflight result: how it behaved, and whether it removes the lane."""
+
+    kind: PreflightKind
+    reason: str
+    retry_after: float | None = None
+
+    @property
+    def disables(self) -> bool:
+        """True when the lane is permanently unusable (dead key, or model not served here)."""
+        return self.kind in ("unusable", "unavailable")
+
+    @property
+    def quarantines(self) -> bool:
+        """True when the lane is throttled now but may recover (a 429/quota backoff)."""
+        return self.kind == "rate_limited"
+
+    @property
+    def usable(self) -> bool:
+        """True when the lane may be scheduled (now for ok/transient, later for throttled)."""
+        return not self.disables
+
+
+def preflight_api_probe(
+    model: str | None = None, *, timeout_s: float = DEFAULT_PREFLIGHT_TIMEOUT_S
+) -> PreflightOutcome:
+    """Probe one lane once with a minimal real completion; classify, never fabricate.
+
+    Deliberately one attempt and no litellm retries: a free-lane fleet sweep must not wedge on
+    a provider that would otherwise be retried for minutes. The classification is the contract
+    the runner disables/quarantines on, so it is deliberately broader than the single refusal
+    ``preflight_api_check`` used to surface.
     """
-    # A local endpoint additionally has its resolved serving flags asserted (`serving_guard`).
+    # A local endpoint additionally has its resolved serving flags asserted (`serving_guard`),
+    # which raises ``ApiUnusableError`` directly — an unusable local server is a dead lane.
+    # Target/key resolution is INSIDE the guard too: a lane whose credential env var is unset
+    # must disable that lane, never escape as a fleet-wide crash.
     import litellm  # noqa: PLC0415
 
     target = model or _cheapest_enabled_model()
-    model_string, model_kwargs = litellm_model_target(target)
-    _preflight_serving_check(target, model_kwargs)
+    try:
+        model_string, model_kwargs = litellm_model_target(target)
+        _preflight_serving_check(target, model_kwargs)
+    except (MissingApiKeysError, ApiUnusableError) as exc:
+        return PreflightOutcome("unusable", f"{type(exc).__name__}: {redact_secrets(str(exc))}")
     try:
         litellm.completion(
             model=model_string,
             messages=[{"role": "user", "content": "ping"}],
             max_tokens=1,
+            timeout=timeout_s,
+            num_retries=0,
             **model_kwargs,
         )
     except Exception as exc:  # noqa: BLE001 (health probe: classify, never fabricate a result)
-        if _is_api_unusable(exc):
-            raise ApiUnusableError(
-                f"preflight health check failed for {target}: "
-                f"{type(exc).__name__}: {redact_secrets(str(exc))}"
-            ) from exc
-        _LOG.warning(
-            "preflight for %s hit a transient error (not refusing): %s",
-            target,
-            redact_secrets(str(exc)),
+        detail = f"{type(exc).__name__}: {redact_secrets(str(exc))}"
+        # A throttle whose body also says "insufficient quota" is STILL a 429 the fleet must
+        # quarantine rather than permanently retire, so rate-limit is classified first.
+        if is_rate_limited(exc):
+            return PreflightOutcome("rate_limited", detail, retry_after_seconds(exc))
+        # A transient upstream failure wrapped in a 4xx (Cloudflare's "Internal Server Error"
+        # 400, or a "high demand" body) is NOT a dead lane — the model/unusable checks must not
+        # see it, so it is excluded here and falls through to the transient tail.
+        if not is_transient_upstream_error(exc):
+            if _is_model_unavailable(exc):
+                return PreflightOutcome("unavailable", detail)
+            if _is_api_unusable(exc):
+                return PreflightOutcome("unusable", detail)
+        _LOG.warning("preflight for %s hit a transient error (not disabling): %s", target, detail)
+        return PreflightOutcome("transient", detail)
+    return PreflightOutcome("ok", f"preflight healthy for {target}")
+
+
+def preflight_api_check(model: str | None = None) -> bool:
+    """Prove the API key works with ONE minimal real completion, before any container spins up.
+
+    A dead/empty key, no-balance error, or a model this key cannot serve raises
+    ``ApiUnusableError`` (refuse the run); a transient blip (rate-limit / 5xx) is inconclusive
+    and returns True — never refuse over one.
+    """
+    outcome = preflight_api_probe(model)
+    if outcome.disables:
+        raise ApiUnusableError(
+            f"preflight health check failed for {model or _cheapest_enabled_model()}: "
+            f"{outcome.reason}"
         )
     return True
 
 
-@functools.lru_cache(maxsize=1)
-def _dataset_instances() -> dict[str, dict[str, Any]]:
-    """All Verified rows keyed by instance id (loaded once; used for problem statements)."""
-    from datasets import load_dataset  # noqa: PLC0415
+def _instance_from_spec(spec: swebench_specs.SwebenchSpec) -> dict[str, Any]:
+    """The scaffold's instance dict built from the spec — no dataset network dependency.
 
-    ds = load_dataset(
-        swebench_specs.DATASET_NAME,
-        split=swebench_specs.DATASET_SPLIT,
-        revision=swebench_specs.DATASET_REVISION,
-    )
-    return {str(row["instance_id"]): dict(row) for row in ds}
-
-
-def _load_instance(instance_id: str) -> dict[str, Any]:
-    """The dataset row (problem_statement, image name, …) for one instance id."""
-    instances = _dataset_instances()
-    if instance_id not in instances:
-        raise KeyError(f"instance {instance_id!r} not in {swebench_specs.DATASET_NAME}")
-    return instances[instance_id]
+    ``image_name`` is the spec's prebuilt Docker image (``image_ref``), unrelated to the
+    multimodal image assets. Refuses a spec predating ``problem_statement`` rather than
+    handing the agent an empty task.
+    """
+    if not spec.problem_statement:
+        raise ValueError(
+            f"spec {spec.instance_id!r} has no problem_statement (written before the field "
+            "existed); re-materialise the challenge spec before running it"
+        )
+    return {
+        "instance_id": spec.instance_id,
+        "problem_statement": spec.problem_statement,
+        "image_name": spec.image_ref,
+    }
 
 
 def _call_cost(extra: dict[str, Any], usage: dict[str, Any]) -> float:
@@ -414,6 +516,34 @@ def _sum_usage(messages: list[dict[str, Any]]) -> tuple[int, int, int, float]:
     return in_tok, out_tok, calls, cost
 
 
+def _sum_cached_in_tokens(messages: list[dict[str, Any]]) -> int | None:
+    """Sum the provider-reported cached prompt tokens across a cell's assistant messages.
+
+    Returns None — NOT 0 — unless EVERY usage-carrying assistant message reported
+    ``usage.prompt_tokens_details.cached_tokens``. A provider that does not report the
+    field leaves the row's ``cached_in_tok`` MISSING rather than measured-zero, so a
+    silent provider's rows can never be pooled with a reporting provider's 0-hit rows as
+    if both meant "nothing was cached".
+    """
+    total = 0
+    seen = 0
+    for msg in messages:
+        response = (msg.get("extra") or {}).get("response")
+        if not response:
+            continue
+        usage = response.get("usage") or {}
+        if not usage:
+            continue
+        details = usage.get("prompt_tokens_details") or {}
+        if not isinstance(details, dict) or "cached_tokens" not in details:
+            return None
+        seen += 1
+        total += int(details["cached_tokens"] or 0)
+    if seen == 0:
+        return None
+    return total
+
+
 def _scaffold_model_kwargs(
     model: str, arm: str, base: dict[str, Any], target: dict[str, Any]
 ) -> dict[str, Any]:
@@ -429,7 +559,14 @@ def _scaffold_model_kwargs(
         raise ValueError(
             f"reasoning arm {arm!r} of {model!r} sets reserved request key(s) {sorted(clash)}"
         )
-    return {**base, **target, **arm_params}
+    kwargs = {**base, **target, **arm_params}
+    # litellm's `completion` DEFAULTS num_retries to 3 (`kwargs.pop("num_retries", 3)`), so an
+    # unset value stamps a client-side retry storm on a throttled lane BEFORE the lane scheduler's
+    # 429 backoff or the scaffold's abort list can act. Disable the client default so a 429
+    # surfaces on the first attempt; a deliberate positive value set by an arm is preserved.
+    if not kwargs.get("num_retries"):
+        kwargs["num_retries"] = 0
+    return kwargs
 
 
 def _permanent_model_errors() -> tuple[type[BaseException], ...]:
@@ -467,6 +604,11 @@ _API_UNUSABLE_SIGNATURES: Final[tuple[str, ...]] = (
     "not enough balance",
     "exceeded your current quota",
     "payment required",
+    "payment method is required",
+    "payment method required",
+    "add a payment method",
+    "no payment method",
+    "payment_method",
     "402",
     "invalid api key",
     "invalid_api_key",
@@ -483,20 +625,181 @@ def _is_api_unusable(exc: BaseException) -> bool:
     return any(sig in text for sig in _API_UNUSABLE_SIGNATURES)
 
 
+# Message fragments (case-folded) that mark a PERMANENTLY unavailable model on this key/plan:
+# a retired id, a plan/app-gated model, an endpoint that serves a different API. Distinguishable
+# from a dead key so the named reason says "this model is not served here" rather than
+# "credential invalid". Deliberately checked before `_is_api_unusable`: a plan-gated 403
+# ("not available on the Workers Free plan") is a `PermissionDeniedError`, which the generic
+# API-unusable set would otherwise swallow as a dead key.
+_MODEL_UNAVAILABLE_SIGNATURES: Final[tuple[str, ...]] = (
+    "no longer available",
+    "not available on the workers free plan",
+    "not available on the free plan",
+    "not available on your plan",
+    "not available on this plan",
+    "please check the model",
+    "only supports interactions api",
+    "interactions api",
+    "model not found",
+    "model is not available",
+    "is no longer supported",
+    "unsupported model",
+    # A provider-side model agreement the key has not accepted: deterministic until accepted,
+    # so retrying the same request never heals it and the lane must be disabled, not looped.
+    "model agreement",
+    "submit the prompt 'agree'",
+)
+
+
+def _model_unavailable_error_types() -> tuple[type[BaseException], ...]:
+    """Litellm exception types that mean the MODEL is not served on this key/plan."""
+    import litellm  # noqa: PLC0415
+
+    return (litellm.exceptions.NotFoundError,)
+
+
+def _is_model_unavailable(exc: BaseException) -> bool:
+    """True iff the model is permanently not served here (retired / plan-gated / wrong API)."""
+    if isinstance(exc, _model_unavailable_error_types()):
+        return True
+    text = str(exc).lower()
+    return any(sig in text for sig in _MODEL_UNAVAILABLE_SIGNATURES)
+
+
+# Message fragments (case-folded) that mark a RATE LIMIT (429 / throttle) even when the provider
+# wraps it in a generic type. Deliberately disjoint from `_API_UNUSABLE_SIGNATURES`: a 402 /
+# insufficient-balance body is a dead lane, not a throttle, and `_is_api_unusable` is checked
+# first so the two never collide.
+_RATE_LIMITED_SIGNATURES: Final[tuple[str, ...]] = (
+    "rate limit",
+    "rate_limit",
+    "ratelimit",
+    "too many requests",
+    "429",
+    "retry-after",
+    "retry after",
+)
+
+
+def _rate_limited_error_types() -> tuple[type[BaseException], ...]:
+    """Litellm exception types that mean the request was THROTTLED (retryable / quarantine)."""
+    import litellm  # noqa: PLC0415
+
+    return (litellm.exceptions.RateLimitError,)
+
+
+def is_rate_limited(exc: BaseException) -> bool:
+    """True iff an exception means the API throttled this lane (429 / Retry-After)."""
+    if isinstance(exc, _rate_limited_error_types()):
+        return True
+    text = str(exc).lower()
+    return any(sig in text for sig in _RATE_LIMITED_SIGNATURES)
+
+
+# Message fragments (case-folded) that mark a TRANSIENT UPSTREAM failure even when the provider
+# wraps it in a 4xx type. Cloudflare Workers AI surfaces an upstream "Internal Server Error" as a
+# ``BadRequestError`` (code 3030), and a 400 "high demand / try again later" body is equally
+# retryable. Without this carve-out ``_permanent_model_errors`` tombstones the lane and records an
+# UNSOLVED_NOT_RUN poison for a fault that clears on the next attempt.
+_TRANSIENT_UPSTREAM_SIGNATURES: Final[tuple[str, ...]] = (
+    "internal server error",
+    "high demand",
+    "spike in demand",
+    "temporarily unavailable",
+    "temporarily rate-limited",
+    "please try again later",
+    "please try again shortly",
+    "upstream timeout",
+    "gateway timeout",
+    "bad gateway",
+    "service unavailable",
+    "overloaded",
+)
+
+
+def is_transient_upstream_error(exc: BaseException) -> bool:
+    """True iff the failure is transient even when wrapped in a permanent-looking 4xx type."""
+    if is_rate_limited(exc):
+        return True
+    text = str(exc).lower()
+    return any(sig in text for sig in _TRANSIENT_UPSTREAM_SIGNATURES)
+
+
+# `Retry-After` appears either as a structured header or inside the provider's message; the
+# regex catches the delta-seconds form only (an HTTP-date is left to the exponential backoff).
+_RETRY_AFTER_MESSAGE_RE: Final = re.compile(
+    r"retry[-_ ]?after[:\s]+([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE
+)
+
+
+def _header_value(headers: object, name: str) -> object | None:
+    """A header's value from any ``.get``-bearing mapping, or None (a hostile mapping is safe)."""
+    getter = getattr(headers, "get", None)
+    if not callable(getter):
+        return None
+    try:
+        return getter(name)
+    except Exception:  # noqa: BLE001 (header lookup must never abort error classification)
+        return None
+
+
+def _parse_retry_after(raw: object) -> float | None:
+    """A Retry-After header value (delta-seconds) as a non-negative float, or None."""
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def retry_after_seconds(exc: BaseException) -> float | None:
+    """The server's Retry-After in seconds from a throttle exception, or None if absent.
+
+    The companion to :func:`is_rate_limited`: a numeric backoff floor the lane scheduler can
+    honour. Reads a structured header (litellm's RateLimitError carries an ``httpx.Response``
+    under ``.response``, or a ``headers`` mapping) before falling back to a ``Retry-After: <n>``
+    fragment in the message. Never invents a value; an HTTP-date header is not converted.
+    """
+    sources = (
+        getattr(exc, "headers", None),
+        getattr(getattr(exc, "response", None), "headers", None),
+    )
+    for headers in sources:
+        for name in ("retry-after", "Retry-After"):
+            parsed = _parse_retry_after(_header_value(headers, name))
+            if parsed is not None:
+                return parsed
+    match = _RETRY_AFTER_MESSAGE_RE.search(str(exc))
+    if match is None:
+        return None
+    return _parse_retry_after(match.group(1))
+
+
 def _abort_error_types() -> tuple[type[BaseException], ...]:
-    """Errors the scaffold must ABORT on (not retry): permanent model + API-unusable."""
-    # Retrying either is futile — a permanent 4xx is deterministic, a dead key never heals —
-    # so both go on the abort list, surfacing on the first call instead of burning the retry budget.
-    return (*_permanent_model_errors(), *_api_unusable_error_types())
+    """Errors the scaffold must NOT retry: permanent/unavailable/unusable, plus a 429.
+
+    The fire-and-abort classes are deterministic. A 429 is NOT deterministic, but it is owned
+    by the LANE scheduler: that layer quarantines the lane with full-jitter backoff and honours
+    the server's ``Retry-After``, while tenacity's fixed exponential ladder (up to 10 attempts,
+    60s) ignores both and stamps a retry storm on an already-throttled provider. Surfacing the
+    429 on the first call hands control to the one component that can pace it correctly.
+    """
+    return (
+        *_permanent_model_errors(),
+        *_model_unavailable_error_types(),
+        *_api_unusable_error_types(),
+        *_rate_limited_error_types(),
+    )
 
 
 def _harden_model_retries(model: Any) -> None:
-    """Make the scaffold model abort (not retry) on permanent 4xx + API-unusable errors."""
+    """Make the scaffold model abort (not retry) on permanent/unavailable/unusable errors + 429."""
     # mini-swe-agent retries any exception NOT in model.abort_exceptions (tenacity, up to
     # MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT with exponential backoff), and its default list omits
     # ContentPolicyViolationError / AuthenticationError — so a deterministic content-policy block
-    # or a dead key is retried until the cap, wedging the run. Assign a NEW instance list (never
-    # .append onto the shared class attribute), so the change is per-cell.
+    # or a dead key is retried until the cap, wedging the run. RateLimitError is included so the
+    # lane scheduler (not tenacity) owns 429 backoff. Assign a NEW instance list (never .append
+    # onto the shared class attribute), so the change is per-cell.
     current = getattr(model, "abort_exceptions", None)
     if not isinstance(current, list):
         return
@@ -508,9 +811,26 @@ def _harden_model_retries(model: Any) -> None:
 def _reraise_classified(instance_id: str, model: str, exc: Exception) -> NoReturn:
     """Reclassify a scaffold error into the taxonomy, else re-raise it unchanged.
 
-    API-unusable is checked FIRST: a dead key / empty balance must abort the run, never be
-    mistaken for a permanent model refusal and recorded as a fake ``pass=False`` cell.
+    A throttle is classified FIRST and re-raised unchanged, mirroring ``preflight_api_probe``:
+    a 429 whose body also carries quota/balance words ("exceeded your current quota") is a
+    per-lane THROTTLE the scheduler quarantines, never a fleet-wide dead key — the body-signature
+    check in ``_is_api_unusable`` would otherwise permanently disable the lane. A transient
+    upstream fault wrapped in a 4xx body is likewise re-raised, never tombstoned as permanent.
+    A model the provider does not serve is a LANE gap (disable it); an unusable key/balance is
+    fleet-wide.
     """
+    if is_rate_limited(exc):
+        raise exc
+    if is_transient_upstream_error(exc):
+        # A transient upstream failure wrapped in a 4xx — Cloudflare's "Internal Server Error"
+        # (code 3030) or a "high demand / try again later" 400 — is NOT a permanent model error.
+        # Re-raise unchanged so the cell stays MISSING and is retried instead of being tombstoned.
+        raise exc
+    if _is_model_unavailable(exc):
+        raise ModelUnavailableError(
+            f"model unavailable for {instance_id}/{model}: "
+            f"{type(exc).__name__}: {redact_secrets(str(exc))}"
+        ) from exc
     if _is_api_unusable(exc):
         raise ApiUnusableError(
             f"API unusable for {instance_id}/{model}: "
@@ -571,6 +891,7 @@ def _scaffold_config_overlay(
     cost_limit: float,
     trajectory_id: str,
     api_key_env_var: str | None,
+    key_optional: bool = False,
 ) -> dict[str, Any]:
     """The mini-swe-agent config overlay for one live cell (merged over the swebench default)."""
     # step_limit is the PRIMARY model-speed-agnostic bound; wall_time_limit_seconds is a generous
@@ -595,7 +916,10 @@ def _scaffold_config_overlay(
         # written to disk in plaintext once per cell. It carries the env var's NAME and the
         # value is injected per request. See `benchmark.runner.scaffold_model`.
         "model": scaffold_model.credential_free_model_block(
-            model_string, model_kwargs, api_key_env_var=api_key_env_var
+            model_string,
+            model_kwargs,
+            api_key_env_var=api_key_env_var,
+            key_optional=key_optional,
         ),
         "environment": {"environment_class": "docker"},
     }
@@ -844,7 +1168,7 @@ def _invoke_scaffold(
     """Invoke mini-swe-agent (v2) for one instance/model/arm (only reached when keys exist)."""
     from benchmark.escalation.live_capture import make_trajectory_id  # noqa: PLC0415
 
-    instance = _load_instance(spec.instance_id)
+    instance = _instance_from_spec(spec)
     model_string, model_kwargs = litellm_model_target(model)
     trajectory_id = make_trajectory_id(spec.instance_id, model, arm)
     # A resumable saved conversation exists? (config-gated; a graded cell is never re-invoked, so
@@ -938,6 +1262,7 @@ def _invoke_scaffold_attempt(
         cost_limit=effective_cost_limit,
         trajectory_id=trajectory_id,
         api_key_env_var=_model_key_env_var(model),
+        key_optional=_model_key_optional(model),
     )
     merged = recursive_merge(default_config, overlay)
     # The overlay was built credential-free, but `recursive_merge` merges the scaffold's own
@@ -979,12 +1304,14 @@ def _invoke_scaffold_attempt(
     wall_clock_s = time.perf_counter() - started
     messages: list[dict[str, Any]] = getattr(agent, "messages", [])
     in_tok, out_tok, calls, cost = _sum_usage(messages)
+    cached_in_tok = _sum_cached_in_tokens(messages)
     return AgentPatch(
         patch=str(info.get("submission") or ""),
         in_tok=in_tok,
         out_tok=out_tok,
         calls=calls,
         cost=cost,
+        cached_in_tok=cached_in_tok,
         exit_status=str(info.get("exit_status") or ""),
         messages=messages,
         snapshots=recorder.snapshots if recorder is not None else {},
@@ -1289,4 +1616,8 @@ def run_live_cell(
         "image_digest": image_version.used_image_digest(spec.image_ref) or "",
         **_collection_provenance(model, arm, step_limit=step_limit, cost_limit=actual_cost_limit),
         **_latency_provenance(model, patch),
+        # A cell whose every usage-carrying call reported cached tokens carries its measured
+        # cached-in total; anything less is a MISSING column, not a zero. `_build_row` passes
+        # it through the MEASUREMENT-OPTIONAL `cached_in_tok` slot verbatim.
+        **({"cached_in_tok": patch.cached_in_tok} if patch.cached_in_tok is not None else {}),
     }

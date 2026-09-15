@@ -97,6 +97,36 @@ class TestUncappedLiveConfirm:
         assert run_matrix._prompt_confirm("? ") is None
 
 
+class TestRequireZeroCostBypassesUncappedConfirm:
+    """A `--require-zero-cost` live run is contractually $0-capped, so it is not an
+    uncapped-spend prompt: it must run without a TTY. Plain `--live` still refuses."""
+
+    def test_zero_cost_live_does_not_prompt_and_runs(self, monkeypatch):
+        # A background free-lane campaign has no TTY; prompting would abort it at cell 0.
+        def boom() -> bool:
+            raise AssertionError("zero-cost live must not call the uncapped-spend confirm")
+
+        monkeypatch.setattr(run_matrix, "_confirm_uncapped_live", boom)
+        monkeypatch.setattr(run_matrix, "_run_full", lambda a: 0)
+        assert (
+            run_matrix._dispatch(
+                _args(strategy="full", live=True, max_cost=None, require_zero_cost=True)
+            )
+            == 0
+        )
+
+    def test_uncapped_live_without_zero_cost_still_refuses_non_interactive(self, monkeypatch):
+        # Control: without the flag, no --max-cost and no TTY is still a refusal (exit 3).
+        monkeypatch.setattr(run_matrix, "_prompt_confirm", lambda _p: None)
+        monkeypatch.setattr(run_matrix, "_run_full", lambda a: 0)
+        assert (
+            run_matrix._dispatch(
+                _args(strategy="full", live=True, max_cost=None, require_zero_cost=False)
+            )
+            == 3
+        )
+
+
 class TestCollectAlias:
     def test_alias_delegates_and_warns(self, monkeypatch, capsys):
         calls: list[tuple[str, dict]] = []

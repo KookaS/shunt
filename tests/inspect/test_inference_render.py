@@ -93,13 +93,53 @@ def _stub_certificate(monkeypatch: pytest.MonkeyPatch, *, admissible: bool) -> N
     monkeypatch.setattr(estimators, "certify", _certify)
 
 
-def test_render_writes_all_eight_figures_and_their_manifest(
+def _add_live_session(store: OutcomeStore, session_id: str) -> None:
+    """One router-served row, so a render takes the measured path rather than the placeholder."""
+    store.store_session(
+        session_id=session_id,
+        prompt_text=f"prompt {session_id}",
+        embedding=np.ones(_DIM, dtype=np.float32) / float(np.sqrt(_DIM)),
+        model_chosen="cheap",
+        cost=0.2,
+        cache_stats={},
+        duration=1.0,
+        timestamp=datetime(2020, 1, 2, tzinfo=UTC).isoformat(),
+        decision_provenance={"selection_rule_used": "knn"},
+        provenance=SessionProvenance(selection_propensity=None, cost_known=True),
+    )
+    store.append_outcome_event(
+        OutcomeEvent(
+            session_id=session_id,
+            tier=2,
+            source="live",
+            outcome="success",
+            confidence=0.9,
+            run_signature=f"test:{session_id}",
+            created_at=datetime(2020, 1, 2, tzinfo=UTC).isoformat(),
+        )
+    )
+
+
+def test_a_seed_only_corpus_publishes_the_overview_and_the_eight_empty_state_layouts(
     seeded_store: OutcomeStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # With live n=0 the eight drawings are kept as incomplete layouts (the owner completes them
+    # at inference) rather than retired; the overview leads the page and explains the absence.
+    _stub_certificate(monkeypatch, admissible=True)
+    report = inference.render(seeded_store, tmp_path / "figures")
+    expected = [specs.NO_LIVE_SESSIONS.filename, *[text.filename for text in specs.FIGURES]]
+    assert [path.name for path in report.figures] == expected
+    rows = json.loads(report.manifest.read_text())["figures"]
+    assert set(rows) == set(expected)
+
+
+def test_a_live_corpus_publishes_all_eight_measured_figures(
+    seeded_store: OutcomeStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _add_live_session(seeded_store, "live:1")
     _stub_certificate(monkeypatch, admissible=True)
     report = inference.render(seeded_store, tmp_path / "figures")
     assert [path.name for path in report.figures] == [text.filename for text in specs.FIGURES]
-    assert report.inadmissible is None
     rows = json.loads(report.manifest.read_text())["figures"]
     assert set(rows) == {text.filename for text in specs.FIGURES}
 
@@ -108,7 +148,9 @@ def test_an_inadmissible_instrument_costs_one_figure_not_the_family(
     seeded_store: OutcomeStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The whole point of catching it: a broken estimator must not take down the six figures
-    # that read the store rather than the instrument.
+    # that read the store rather than the instrument. Needs live rows, or the render takes the
+    # placeholder path and never reaches the estimator.
+    _add_live_session(seeded_store, "live:1")
     _stub_certificate(monkeypatch, admissible=False)
     report = inference.render(seeded_store, tmp_path / "figures")
     assert report.inadmissible is not None
@@ -195,7 +237,9 @@ def test_emit_docs_section_prints_every_figure_in_family_order(
     assert main(["--out-dir", str(out_dir), "--emit-docs-section", "all"]) == 0
     printed = capsys.readouterr().out
     headings = [line for line in printed.splitlines() if line.startswith("### ")]
-    assert headings == [f"### {text.title} {{#fig-{text.slug}}}" for text in specs.FIGURES]
+    # A seed-only manifest holds the overview plus the eight empty-state layouts, in family order.
+    expected = [specs.NO_LIVE_SESSIONS, *specs.FIGURES]
+    assert headings == [f"### {text.title} {{#fig-{text.slug}}}" for text in expected]
 
 
 def test_the_module_entrypoint_requires_an_out_dir(capsys: pytest.CaptureFixture[str]) -> None:

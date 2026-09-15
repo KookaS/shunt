@@ -14,11 +14,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from collections.abc import Callable
+
     from shunt.db.store import OutcomeStore
     from shunt.inspect.inference.data import SessionRow
     from shunt.models.config import ModelPool
 
 GENERATOR: Final[str] = "shunt.inspect.inference:render"
+
+# Stamped across every canvas of a seed-only render. The eight measured drawings are kept as
+# incomplete layout placeholders, and this is what makes "deliberately awaiting live sessions"
+# unmistakable on the face of each — distinguishable at a glance from a rendering failure and
+# from a measurement. It rides the same ContextVar `plot_frame.watermarked` uses for the demo
+# half's `SYNTHETIC — NOT MEASURED`, so no draw function can omit it.
+EMPTY_STATE_WATERMARK: Final[str] = "AWAITING LIVE SESSIONS (live n=0)"
 
 # The manifest stays beside the code that writes it — it is source, not a published asset —
 # while the PNGs live inside the docs tree so the page can link them relatively.
@@ -112,8 +121,19 @@ def render(
     windows: tuple[int | None, ...] = (7, 30, None),
     family: Family = INFERENCE,
     now: datetime | None = None,
+    label_of: Callable[[str], str] | None = None,
 ) -> InferenceReport:
-    """Render the eight inference figures into `out_dir` and record their manifest rows."""
+    """Render the inference family into `out_dir` and record its manifest rows.
+
+    A live store draws the eight measured figures. A seed-only store draws the same eight as
+    empty-state layout placeholders, stamped `AWAITING LIVE SESSIONS`, plus the family overview.
+
+    `label_of` is the ONE canonical model resolver, supplied by the benchmark-side caller as
+    `benchmark.routing.model_universe.canonical_label` and applied at the single point labels
+    are produced (`data.read_sessions`), so the stored arm key is never rewritten and no
+    per-figure patcher can draw a publisher prefix. The rig, which ships no `benchmark/` tree,
+    leaves it None and falls back to the registry `version` identity.
+    """
     # `now` reaches exactly one place — `data._in_window`, the family's single windowed
     # predicate — and defaults to the wall clock, so a measured render is unchanged. It is here
     # for a corpus with FROZEN timestamps, whose `7d`/`30d` panels would otherwise decay with
@@ -124,20 +144,27 @@ def render(
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    rows = idata.read_sessions(store)
+    pool = _model_pool()
+    resolver = label_of if label_of is not None else _registry_label(pool)
+    rows = idata.read_sessions(store, label_of=resolver)
     provenance = plot_frame.Provenance(
         generator=GENERATOR,
         data_digest=data_digest(rows),
         manifest=family.manifest_for(out_dir),
     )
-    pool = _model_pool()
     inadmissible: str | None = None
+    strata = idata.strata(store, rows)
+    # A seed-only corpus KEEPS the eight measured drawings as incomplete layout placeholders,
+    # stamped so an empty panel cannot read as a result. A family mark (the demo half's
+    # `SYNTHETIC — NOT MEASURED`) wins where one is set; otherwise the empty-state stamp applies
+    # on the seed-only path and nothing is stamped on a measured render.
+    empty_state = strata.n_live == 0
+    mark = family.watermark or (EMPTY_STATE_WATERMARK if empty_state else None)
     # The whole draw sits inside the family's stamp, so every canvas below — and every canvas
-    # a later edit adds — is marked without the draw functions knowing the mark exists. On the
-    # default family the watermark is None and this block is a no-op, byte for byte.
-    with plot_frame.watermarked(family.watermark):
+    # a later edit adds — is marked without the draw functions knowing the mark exists.
+    with plot_frame.watermarked(mark):
         written = [
-            figures.draw_strata(out_dir, idata.strata(store, rows), provenance),
+            figures.draw_strata(out_dir, strata, provenance),
             figures.draw_cost(out_dir, idata.cost(rows, windows, now=now), provenance),
             figures.draw_unit_economics(out_dir, idata.unit_economics(rows), provenance),
             figures.draw_neighbourhood(out_dir, idata.neighbourhood(store, rows), provenance),
@@ -150,9 +177,14 @@ def render(
             written.append(figures.draw_ope(out_dir, idata.ope(store, estimates), provenance))
         except estimators.InstrumentInadmissibleError as exc:
             # One estimator that failed its control must not take the family down: the seven
-            # figures before it read the store, not the instrument. F7 leaves no PNG, so SH009 sees
-            # a section with no file and the commit stops — the intended coupling, not a skip.
+            # figures before it read the store, not the instrument. F7 leaves no PNG, so
+            # SH009 sees a section with no file and the commit stops — the intended
+            # coupling, not a skip.
             inadmissible = str(exc)
+    if empty_state:
+        # The family overview leads the page and explains why the eight below are empty. It
+        # states the absence itself, so it carries no `awaiting` stamp.
+        written.insert(0, figures.draw_no_live_sessions(out_dir, strata, provenance))
     return InferenceReport(
         out_dir=out_dir,
         manifest=provenance.manifest,
@@ -167,6 +199,21 @@ def _model_pool() -> ModelPool:
     from shunt.models.config import ModelPool
 
     return ModelPool.load()
+
+
+def _registry_label(pool: ModelPool) -> Callable[[str], str]:
+    """Registry-identity fallback used when no benchmark canonicaliser is supplied.
+
+    The benchmark render path passes `model_universe.canonical_label`; the rig has no
+    `benchmark/` tree, so it reads the same bare identity off the registry `version` (the
+    `model_grid` drawer's own source) rather than drawing a publisher-prefixed slot.
+    """
+
+    def label(name: str) -> str:
+        entry = pool.get_model(name)
+        return (entry.version or entry.model or name) if entry is not None else name
+
+    return label
 
 
 # ------------------------------------------------------------------ docs sections
@@ -236,7 +283,7 @@ def docs_sections(manifest: Path) -> str:
     rows: dict[str, Any] = payload.get("figures", {})
     blocks = [
         docs_section(text.filename, rows[text.filename], half=half)
-        for text in specs.FIGURES
+        for text in specs.DOC_FIGURES
         if text.filename in rows
     ]
     return "\n".join(blocks)

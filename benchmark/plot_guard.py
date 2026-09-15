@@ -10,7 +10,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Final
 
-from shunt.inspect import plot_frame
+import shunt.inspect.plot_frame as plot_frame
 
 # SH007 is an AST DENYLIST: it can only refuse the spellings its author enumerated. A file
 # holding `ax.set(title=...)`, an aliased `savefig` and a `getattr(fig, "savefig")` passed it

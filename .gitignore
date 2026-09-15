@@ -43,6 +43,10 @@ data/
 # construction — a `git add -A` mid-rebuild must not sweep them into the public repo.
 benchmark/escalation/data/**/.corpus.lock
 benchmark/escalation/data/**/*.tmp
+# Scanner test fixtures are curated inputs, not run artifacts — the generic data/ rule would
+# otherwise silently ignore them, so the suite would pass locally and fail in a fresh clone.
+!benchmark/tests/data/
+!benchmark/tests/data/**
 index/
 
 # Live full-content trajectory capture — encrypted, LOCAL only, NEVER committed. Belt-and-

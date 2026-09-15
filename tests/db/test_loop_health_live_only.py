@@ -67,7 +67,7 @@ def test_collapse_alarm_reads_live_behaviour_not_the_seed_corpus(store: OutcomeS
     health = compute_loop_health(
         store.loop_health_snapshot(),
         frontier_models={"kimi-k3"},
-        candidate_models={"deepseek-v4-flash", "kimi-k3", "gpt-5-mini", "zai-glm-5.2"},
+        candidate_models={"deepseek-v4-flash", "kimi-k3", "gpt-5-mini", "glm-5.2"},
     )
     assert health.routing_collapse.window_size == 6
     assert health.routing_collapse.distinct_models == 1
