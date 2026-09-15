@@ -181,6 +181,14 @@ class kNNCascadeStrategy(Strategy):  # noqa: N801 (kNN is the established algori
             if distance < 0.001:
                 continue
             for model, outcome in matrix["results"].get(nid, {}).items():
+                # An IMPUTED cell is a monotone-ladder fill (impute.py `to_cell`),
+                # near-exclusively pass=True — not a verification. Drop it here, at the
+                # data boundary, so it is neither a vote in `_weighted_success_rate` nor
+                # a sample toward `min_samples`, exactly as the kNN row zeroes an imputed
+                # neighbour's verification_confidence (knn.py). A measured cell is kept
+                # unchanged; a raw matrix with no `imputed` key behaves as before.
+                if outcome.get("imputed", False):
+                    continue
                 neighbor_results.setdefault(model, []).append(
                     (distance, bool(outcome.get("pass", False)))
                 )

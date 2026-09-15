@@ -730,23 +730,20 @@ attempt.
 
 ### What the offline eval found about routing
 
-Scored offline, the embedding-based routing strategies split by workload:
-
-- On **QA and reasoning-style** tasks, the task embedding separates
-  cheap-solvable from frontier-only work, so kNN has signal to route on.
-- On the **agentic-coding** tasks this benchmark targets, the embedding-based
-  difficulty signal did not clear the viability bar for cost-at-equal-quality
-  relative to fixed-frontier-with-caching. Ranking hard tasks from easy ones off the
-  prompt embedding came out near chance — and that result was measured while the
-  strategies embedded the short `description` label rather than the task's
-  `problem_statement`, so it was pending re-measurement. The manifest has since been
-  rebuilt with the real statements (2026-08-05), and the re-measured numbers fell:
-  kNN-semantic 77.72% is inside noise of Always-Cheap — a settled null, not a coverage gap
-  ([Results](results.md#routing-results)). The router is wired into the live proxy
-  (it decides the first turn), outcomes are recorded automatically at session close
-  (via off-wire test re-execution when configured), and the learning loop is live.
-  On this particular workload, the embedding signal is not presently strong enough
-  to justify routing below frontier, though outcomes continue to accumulate.
+Scored offline on the **agentic-coding** tasks this benchmark targets, the
+embedding-based difficulty signal did not clear the viability bar for
+cost-at-equal-quality relative to fixed-frontier-with-caching. Ranking hard tasks
+from easy ones off the prompt embedding came out near chance — and that result was
+measured while the strategies embedded the short `description` label rather than
+the task's `problem_statement`, so it was pending re-measurement. The manifest has
+since been rebuilt with the real statements (2026-08-05), and the re-measured
+numbers fell: kNN-semantic 77.72% is inside noise of Always-Cheap — a settled null,
+not a coverage gap ([Results](results.md#routing-results)). The router is wired into
+the live proxy (it decides the first turn), outcomes are recorded automatically at
+session close (via off-wire test re-execution when configured), and the learning
+loop is live. On this particular workload, the embedding signal is not presently
+strong enough to justify routing below frontier, though outcomes continue to
+accumulate.
 
 ### Evaluating the exploration policy without spending money
 
@@ -769,15 +766,13 @@ off and once with it on, and writes `docs/assets/figures/routing/exploration_cos
 summary to stdout. Cells the policy routes to but the benchmark never ran are
 skipped and counted, never filled in with a guess.
 
-On the 171-task dense slice, averaged over 20 seeds: exploration costs **1.60× the
-exploration-off bill** on average and **1.85× on the worst seed**. That ratio is
-paired over the 162 tasks both arms scored — the exploit-only arm drops 9 cells as
-unscorable and all 9 are `qwen3.7-plus`, a model outside the dense slice, so
-comparing the arms' raw totals would compare different task sets. The paired
-per-task difference is **−0.5 pp pass rate (95% CI −2.1 to +1.0)** and **+$0.0202
-per task (95% CI +$0.0148 to +$0.0275)** — the paired numbers are the ones to read,
-since the two arms' marginal pass-rate intervals ([72%, 85%] vs [73%, 84%]) overlap
-heavily.
+On the 171-task dense slice, averaged over 20 seeds: exploration costs **1.68× the
+exploration-off bill** on average and **1.89× on the worst seed**. That ratio is
+paired over the 171 tasks both arms scored, with no cell dropped as unscorable. The
+paired per-task difference is **+1.0 pp pass rate (95% CI −0.5 to +2.6)** and
+**+$0.01880 per task (95% CI +$0.01382 to +$0.02453)** — the paired numbers are the
+ones to read, since the two arms' marginal pass-rate intervals ([69%, 82%] vs
+[70%, 82%]) overlap heavily.
 
 Four caveats keep this honest. The replay's outcome matrix is **static**, so an
 exploratory pull can never improve a later decision — this measures exploration's
@@ -785,7 +780,8 @@ cost with its learning benefit set to zero, which is the pessimistic half of the
 ledger, not a verdict on whether exploration pays. The budget cap counts the
 router's own confidence-weighted neighbourhood costs, not realized ones, so the
 realized explore/exploit spend ratio can exceed `explore_budget_frac` on an unlucky
-seed (1.18 against a 0.4 cap on the worst of 20 seeds here) even though the cap is doing its job. The dense
+seed (0.58 against a 0.4 cap on the worst of 20 seeds here) even though the cap is
+doing its job. The dense
 slice maximises *cells*, which currently favours many tasks over many models: it
 holds only three cheap-to-mid models and **no frontier arm**, so the measured overhead
 is the cost of exploring between cheap models and is a **lower bound** on the shipped

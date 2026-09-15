@@ -1,9 +1,12 @@
 """Tests for routing strategies: Oracle, AlwaysCheap, AlwaysFrontier, Random, PriceCascade."""
 
+from collections import Counter
 from pathlib import Path
 
 import pytest
 
+from benchmark import config
+from benchmark.routing import run_eval, summary
 from benchmark.routing.strategies.fixed import AlwaysCheap, AlwaysFrontier, Random
 from benchmark.routing.strategies.knn_cascade import compute_cascade_order
 from benchmark.routing.strategies.oracle import Oracle
@@ -916,3 +919,304 @@ class TestMatrixOutcomeIndexImputedConfidence:
         results = idx.query(embeddings[0])
         assert results
         assert all(r.verification_confidence == pytest.approx(1.0) for r in results)
+
+
+class TestCascadeOrderExcludesImputedVotes:
+    """An imputed pass must not satisfy the within-task cascade's vote or min_samples.
+
+    Same defect class as ``TestMatrixOutcomeIndexImputedConfidence`` above, one file over:
+    ``_get_cascade_order`` reads the impute.py ``imputed`` flag at the data boundary, so the
+    pure ``compute_cascade_order`` never sees a synthetic fill as a verified outcome.
+    """
+
+    _TASK_IDS = ("t1", "t2", "t3", "t4")
+
+    @staticmethod
+    def _index(embeddings):
+        import hnswlib
+        import numpy as np
+
+        n = len(embeddings)
+        index = hnswlib.Index(space="cosine", dim=int(embeddings.shape[1]))
+        index.init_index(max_elements=n, ef_construction=10, M=8)
+        index.add_items(np.asarray(embeddings, dtype=np.float32), np.arange(n), num_threads=1)
+        index.set_ef(4)
+        return index
+
+    def _strategy(self, monkeypatch, matrix):
+        import numpy as np
+
+        from benchmark.routing.strategies import knn_cascade
+
+        # Non-orthogonal one-hots: every neighbour sits ~0.106 from the query, well inside
+        # the self-exclusion radius and the distance-confidence window.
+        embeddings = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [1.0, 0.5, 0.0, 0.0],
+                [1.0, 0.0, 0.5, 0.0],
+                [1.0, 0.0, 0.0, 0.5],
+            ],
+            dtype=np.float32,
+        )
+        monkeypatch.setattr(knn_cascade, "_embed_texts", lambda texts: embeddings[0:1])
+        strategy = knn_cascade.kNNCascadeStrategy(
+            k=20, max_tries=3, min_samples=3, success_rate_threshold=0.6
+        )
+        strategy._task_ids = list(self._TASK_IDS)
+        strategy._embeddings = embeddings
+        strategy._index = self._index(embeddings)
+        strategy._pricing = {"cheap": 0.1, "mid": 1.0}
+        strategy._ready = True
+        return strategy
+
+    def _matrix(self, cheap_cell: dict, mid_cell: dict) -> dict:
+        # t2..t4 are the query's only neighbours (t1 is self-excluded); each carries both models.
+        return {
+            "tasks": {tid: {"description": tid} for tid in self._TASK_IDS},
+            "models": {"cheap": {"input_price": 0.1}, "mid": {"input_price": 1.0}},
+            "results": {
+                tid: {"cheap": dict(cheap_cell), "mid": dict(mid_cell)}
+                for tid in ("t2", "t3", "t4")
+            },
+        }
+
+    def test_imputed_pass_is_not_in_the_cascade_order(self, monkeypatch):
+        matrix = self._matrix(
+            cheap_cell={"pass": True, "cost": 0.1, "imputed": True},
+            mid_cell={"pass": True, "cost": 1.0, "imputed": False},
+        )
+        strategy = self._strategy(monkeypatch, matrix)
+        order = strategy._get_cascade_order("t1", {}, matrix)
+        assert "cheap" not in order  # three imputed passes -> no measured evidence
+        assert order == ["mid"]  # the measured pass still clears the bar
+
+    def test_measured_pass_still_enters_the_cascade_order(self, monkeypatch):
+        matrix = self._matrix(
+            cheap_cell={"pass": True, "cost": 0.1, "imputed": False},
+            mid_cell={"pass": True, "cost": 1.0, "imputed": False},
+        )
+        strategy = self._strategy(monkeypatch, matrix)
+        order = strategy._get_cascade_order("t1", {}, matrix)
+        assert order == ["cheap", "mid"]  # cheapest measured pass is tried first
+
+
+class TestNeighbourKControlsTheTaskWindow:
+    """``k`` bounds neighbour TASKS, not flattened (task x model) rows.
+
+    ``MatrixOutcomeIndex`` emits one ``NeighborResult`` per model of each neighbour task, so
+    the old row-count cap resolved every ``k`` above the model count to ``ceil(k / models)`` tasks:
+    on the 7-model completed matrix the published k=20 row ran a 3-task window while the knob
+    said 20. The fixture puts THREE models on the two nearest neighbours so the old cap
+    truncates (3 rows + 3 rows clears k=5) BEFORE the cheap model's tasks are reached. These
+    are the positive controls — different ``k`` must yield different neighbour sets AND
+    different picks — run through the real HNSW index and the real ``RouterEngine``.
+    """
+
+    _TASKS = ("t0", "t1", "t2", "t3", "t4", "t5")
+    # t0 is the query; t1/t2 are its nearest neighbours, t3..t5 are farther.
+    _EMB = {
+        "t0": [1.0, 0.0, 0.0],
+        "t1": [0.99, 0.1, 0.0],
+        "t2": [0.2, 1.0, 0.0],
+        "t3": [0.2, 1.0, 0.1],
+        "t4": [0.2, 1.0, 0.2],
+        "t5": [0.2, 1.0, 0.3],
+    }
+    _EXPENSIVE = ("exp-a", "exp-b", "exp-c")
+    _CHEAP = "deepseek-v4-flash"
+
+    def _embeddings(self):
+        import numpy as np
+
+        return np.array([self._EMB[t] for t in self._TASKS], dtype=np.float32)
+
+    def _matrix(self) -> dict:
+        # The cheap model lives ONLY beyond the old row-cap's reach at k=5: t1 and t2 carry the
+        # three expensive models (6 rows >= 5), t3..t5 carry the cheap one. A correct task cap
+        # sees cheap by k=5; the old row cap never does.
+        results: dict = {"t0": {self._CHEAP: {"pass": True, "cost": 1.0}}}
+        for tid in ("t1", "t2"):
+            results[tid] = {m: {"pass": True, "cost": 10.0} for m in self._EXPENSIVE}
+        for tid in ("t3", "t4", "t5"):
+            results[tid] = {self._CHEAP: {"pass": True, "cost": 1.0}}
+        return {
+            "models": {
+                **{m: {"input_price": 5.0, "output_price": 5.0} for m in self._EXPENSIVE},
+                self._CHEAP: {"input_price": 0.1, "output_price": 0.1},
+            },
+            "tasks": {tid: {"problem_statement": tid} for tid in self._TASKS},
+            "results": results,
+        }
+
+    def _index(self):
+        from benchmark.routing.strategies.knn import MatrixOutcomeIndex, _build_index
+
+        embeddings = self._embeddings()
+        return (
+            MatrixOutcomeIndex(
+                task_ids=list(self._TASKS),
+                embeddings=embeddings,
+                index=_build_index(embeddings),
+                matrix=self._matrix(),
+            ),
+            embeddings,
+        )
+
+    def _strategy(self, k: int):
+        import numpy as np
+
+        from benchmark.routing.strategies.knn import kNNStrategy
+
+        return kNNStrategy(
+            k=k,
+            success_rate_threshold=0.0,
+            min_samples=1,
+            embed_texts=lambda texts: np.array([self._EMB[t] for t in texts], dtype=np.float32),
+        )
+
+    def test_query_returns_exactly_k_distinct_tasks(self):
+        idx, embeddings = self._index()
+        for k in (1, 3, 5):
+            window = {r.session_id for r in idx.query(embeddings[0], k=k)}
+            assert len(window) == k
+
+    def test_default_k_returns_every_other_task_not_a_model_sized_slice(self):
+        idx, embeddings = self._index()
+        rows = idx.query(embeddings[0])  # default k=20 on a 6-task corpus
+        window = {r.session_id for r in rows}
+        assert window == set(self._TASKS) - {"t0"}
+        # Rows outnumber tasks (one per task x model) — the cap counts tasks, not rows.
+        assert len(rows) > len(window)
+
+    def test_k1_and_k5_return_different_neighbour_sets(self):
+        idx, embeddings = self._index()
+        one = {r.session_id for r in idx.query(embeddings[0], k=1)}
+        five = {r.session_id for r in idx.query(embeddings[0], k=5)}
+        assert one == {"t1"}
+        assert five == {"t1", "t2", "t3", "t4", "t5"}
+
+    def test_k1_and_k5_produce_different_model_picks(self):
+        matrix = self._matrix()
+        short = self._strategy(k=1)
+        long = self._strategy(k=5)
+        # k=1 sees only the nearest neighbour's expensive models; k=5 reaches the cheap model.
+        assert short.select("t0", matrix["tasks"]["t0"], matrix) in self._EXPENSIVE
+        assert long.select("t0", matrix["tasks"]["t0"], matrix) == self._CHEAP
+
+
+# ---------------------------------- committed matrix, real select(), no synthetic fixture
+# Everything above drives Oracle / PriceCascade / Session-Cascade over a hand-built
+# `make_matrix()`, so none would fail if the committed `benchmark/routing/data/challenges.json`
+# stopped loading or was silently re-stamped — the strategy would just keep returning whatever
+# fixture it was handed. These run the SHIPPED strategy objects (from `run_eval.get_strategies`,
+# i.e. benchmark.yaml) over the completed committed matrix and pin counts re-derived from it.
+
+
+def _committed_completed_matrix() -> dict:
+    """Shipped config + committed challenges.json, completed to equal coverage."""
+    # The SAME loaders the published rows use, so the pinned counts describe the scored corpus.
+    config.load()
+    completed, _imputed = summary.complete_scored_matrix(config.load_matrix())
+    return completed
+
+
+def _shipped(name: str) -> object:
+    """The strategy object `run_eval` builds for `name` under the committed benchmark.yaml."""
+    return next(s for s in run_eval.get_strategies() if s.name == name)
+
+
+class TestCommittedMatrixCoverage:
+    """Real committed-table guards for the enabled strategies the synthetic tests miss."""
+
+    def test_price_cascade_escalation_over_the_committed_matrix(self) -> None:
+        """Price-Cascade's real select() over the committed table.
+
+        Derivation: run the shipped Price-Cascade (max_tries=3) over the 181 complete tasks of
+        the committed matrix and count the returned model and the tried depth. Re-derived:
+        picks {deepseek-v4-flash: 136, deepseek-v4-pro: 26, kimi-k3: 19}; the flash tasks stop on
+        try 1, the pro tasks on try 2, and the kimi-k3 tasks exhaust the 3-rung shortlist and
+        bill the frontier (depth 4). Total billed cost is $22.26936698639999 and no path crosses
+        an unmeasured cell. A wrong price order or outcome read changes every one of these.
+        """
+        matrix = _committed_completed_matrix()
+        tasks = sorted(matrix["results"])
+        strategy = _shipped("Price-Cascade")
+        picks: Counter = Counter()
+        depth: Counter = Counter()
+        total = 0.0
+        unscorable = 0
+        for tid in tasks:
+            picks[strategy.select(tid, matrix["tasks"].get(tid, {}), matrix)] += 1
+            depth[len(strategy.cascade_tried_models)] += 1
+            total += strategy.cascade_total_cost
+            if not strategy.cascade_scorable:
+                unscorable += 1
+        assert picks == Counter({"deepseek-v4-flash": 136, "deepseek-v4-pro": 26, "kimi-k3": 19})
+        assert depth == Counter({1: 136, 2: 26, 4: 19})
+        assert unscorable == 0
+        assert total == pytest.approx(22.26936698639999)
+
+    def test_session_cascade_replay_over_the_committed_matrix(self) -> None:
+        """Session-Cascade's real replay over the committed table at the SHIPPED ladder.
+
+        Derivation: the same completed matrix and the shipped Session-Cascade (benchmark.yaml
+        pins ladder=rank_only). Re-derived: the final session lands on flash for 136, pro for 26
+        and kimi-k3 for 19; session waits are {1: 136, 3: 26, 7: 14, 8: 5}; distinct rungs
+        occupied are {1: 136, 2: 26, 4: 19}; total billed cost is $28.21091271599999 and every
+        path is scorable. A replay that opens below the cheapest rung or reads the rung order
+        wrong changes these.
+        """
+        matrix = _committed_completed_matrix()
+        tasks = sorted(matrix["results"])
+        strategy = _shipped("Session-Cascade")
+        final: Counter = Counter()
+        sessions: Counter = Counter()
+        distinct: Counter = Counter()
+        total = 0.0
+        unscorable = 0
+        for tid in tasks:
+            final[strategy.select(tid, matrix["tasks"].get(tid, {}), matrix)] += 1
+            sessions[strategy.sessions_burned] += 1
+            distinct[strategy.session_distinct_rungs] += 1
+            total += strategy.cascade_total_cost
+            if not strategy.cascade_scorable:
+                unscorable += 1
+        assert final == Counter({"deepseek-v4-flash": 136, "deepseek-v4-pro": 26, "kimi-k3": 19})
+        assert sessions == Counter({1: 136, 3: 26, 7: 14, 8: 5})
+        assert distinct == Counter({1: 136, 2: 26, 4: 19})
+        assert unscorable == 0
+        assert total == pytest.approx(28.21091271599999)
+
+    def test_oracle_reads_per_task_outcomes_over_the_committed_matrix(self) -> None:
+        """Oracle's real select() over the committed table is not a constant.
+
+        Derivation: on the completed committed matrix Oracle returns the cheapest passing cell
+        for 176 of the 181 tasks and the cheapest cell for the 5 tasks no model solves. Its pick
+        distribution is {flash: 140, pro: 16, qwen3.7-plus: 6, kimi-k3: 10, glm-5.2: 2,
+        kimi-k2.5: 2, gpt-5-mini: 5}. glm-5.2 is the bare-slug lane identity left by the
+        model-identity migration (the matrix keys on `lane`, formerly `zai-glm-5.2`). A
+        constant or mis-read pick collapses the distribution and moves n_pass.
+        """
+        matrix = _committed_completed_matrix()
+        tasks = sorted(matrix["results"])
+        strategy = _shipped("Oracle")
+        picks: Counter = Counter()
+        n_pass = 0
+        for tid in tasks:
+            picks[strategy.select(tid, matrix["tasks"].get(tid, {}), matrix)] += 1
+            if any(cell.get("pass", False) for cell in matrix["results"][tid].values()):
+                n_pass += 1
+        assert n_pass == 176
+        assert len(tasks) - n_pass == 5
+        assert picks == Counter(
+            {
+                "deepseek-v4-flash": 140,
+                "deepseek-v4-pro": 16,
+                "qwen3.7-plus": 6,
+                "kimi-k3": 10,
+                "glm-5.2": 2,
+                "kimi-k2.5": 2,
+                "gpt-5-mini": 5,
+            }
+        )

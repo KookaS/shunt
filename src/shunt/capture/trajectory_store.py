@@ -91,7 +91,8 @@ def _make_fernet(key: bytes) -> _Cipher:
         from cryptography.fernet import Fernet
     except ImportError as exc:  # pragma: no cover - exercised only without the extra
         raise RuntimeError(
-            "full-content capture needs the 'capture' extra: pip install 'shunt-router[capture]'"
+            "full-content capture needs the 'capture' extra: "
+            "pip install -e '.[capture]' from a source checkout"
         ) from exc
     # cryptography ships no type stubs, so Fernet(...) is Any without the extra installed;
     # cast to the Protocol keeps strict mypy green whether or not `capture` is installed.

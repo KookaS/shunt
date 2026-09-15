@@ -7,7 +7,7 @@ import yaml
 from pydantic import ValidationError
 
 from benchmark import config
-from benchmark.routing import integrity
+from benchmark.routing import cache_cost, integrity
 from shunt.models.config import ModelPool, default_registry_path, parse_registry
 
 REQUIRED_PRICING_FIELDS = (
@@ -263,6 +263,79 @@ class TestCachingGate:
         monkeypatch.setattr(config, "load_pricing", lambda *a, **k: pricing)
         assert config.model_has_cache("fake-nocache") is False
         assert "fake-nocache" in config.models_missing_cache(["fake-nocache", "gpt-5-mini"])
+
+
+class TestCacheDiscountAuthorityIsThePricePair:
+    """`cache_cost._discount` and `config.model_has_cache` resolve the SAME authority:
+    `cache_read_cost_per_1m` against `input_cost_per_1m`. `supports_cache_control` is a
+    ROUTING field (whether the router may send explicit breakpoints on the live wire),
+    not a cost gate — a row that declares it false still banks the automatic prefix-cache
+    discount its price quotes.
+
+    This pins the reconciliation. An earlier change made `_discount` require the flag and
+    split it from `model_has_cache`, so the kill gate's control model (flag false, real
+    cache-read price) was priced cache-blind while the benchmark's caching gate still
+    called it cache-capable.
+    """
+
+    _REGISTRY: Final = {
+        "providers": {
+            "p": {
+                "base_url": "https://p.ai/v1",
+                "api_key_env_var": "P_KEY",
+                "litellm_prefix": "openai",
+            }
+        },
+        "models": {
+            # Flag FALSE, real cache-read price: automatic caching still applies.
+            "autocache": {
+                "model_id": "p/autocache",
+                "provider": "p",
+                "version": "autocache",
+                "supports_cache_control": False,
+                "pricing": {
+                    "input_cost_per_1m": 1.0,
+                    "output_cost_per_1m": 2.0,
+                    "cache_read_cost_per_1m": 0.1,
+                    "price_provider": "p",
+                    "price_source": "https://p.ai",
+                    "price_as_of": "2026-09-01",
+                },
+            },
+            # No cache-read price: the cost model falls back, never a silent zero.
+            "noread": {
+                "model_id": "p/noread",
+                "provider": "p",
+                "version": "noread",
+                "supports_cache_control": True,
+                "pricing": {
+                    "input_cost_per_1m": 1.0,
+                    "output_cost_per_1m": 2.0,
+                    "price_provider": "p",
+                    "price_source": "https://p.ai",
+                    "price_as_of": "2026-09-01",
+                },
+            },
+        },
+    }
+
+    def test_flag_false_model_with_a_cache_read_price_banks_the_discount(
+        self, tmp_path, monkeypatch
+    ):
+        path = tmp_path / "models.yaml"
+        path.write_text(yaml.safe_dump(self._REGISTRY, sort_keys=False))
+        monkeypatch.setattr(config, "_pricing", None)
+        monkeypatch.setattr(config, "_pricing_path", lambda: path)
+        # The benchmark's caching gate and the cost model agree: the price pair decides.
+        assert config.model_has_cache("autocache") is True
+        # `shares={}` keeps the measured-token path out of it: this test is about the price.
+        prices = cache_cost.cache_prices(["autocache", "noread"], shares={})
+        assert prices["autocache"].discount == pytest.approx(0.9)
+        assert prices["autocache"].provenance == cache_cost.MEASURED
+        assert prices["autocache"].saving_fraction > 0.0
+        # No cache-read price -> the assumed fallback, not a silent zero.
+        assert prices["noread"].discount == pytest.approx(cache_cost.ASSUMED_CACHE_DISCOUNT)
+        assert prices["noread"].provenance == cache_cost.ASSUMED
 
 
 class TestCostModelConsumesCanonicalPrice:

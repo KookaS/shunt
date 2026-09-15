@@ -66,6 +66,48 @@ def test_empty_rank_falls_back() -> None:
     assert got == "deepseek-v4-flash"
 
 
+def test_imputed_pass_is_not_a_vote() -> None:
+    # c0 has ONE measured fail; its other five neighbour "passes" are IMPUTED monotone-ladder
+    # fills. Counted, they lift the mean to 5/6 >= 0.6 and c0 wins; excluded, its measured vote
+    # is 0/1 and m0 (measured pass) wins. Isolates the pass-VOTE half of the exclusion.
+    results = {
+        "n1": {"c0": {"pass": False, "imputed": False}, "m0": {"pass": True, "imputed": False}},
+        "n2": {"c0": {"pass": True, "imputed": True}, "m0": {"pass": True, "imputed": False}},
+        "n3": {"c0": {"pass": True, "imputed": True}, "m0": {"pass": True, "imputed": False}},
+        "n4": {"c0": {"pass": True, "imputed": True}},
+        "n5": {"c0": {"pass": True, "imputed": True}},
+        "n6": {"c0": {"pass": True, "imputed": True}},
+    }
+    model = predict_model(
+        ["n1", "n2", "n3", "n4", "n5", "n6"],
+        _matrix(results),
+        MODELS,
+        threshold=0.6,
+        min_samples=1,
+    )
+    assert model == "m0"
+
+
+def test_imputed_pass_is_not_a_sample() -> None:
+    # c0's neighbours ALL pass, but every pass is imputed -> ZERO measured samples, so c0 is
+    # below min_samples and skipped. Isolates the min_samples half of the exclusion.
+    results = {f"n{i}": {"c0": {"pass": True, "imputed": True}} for i in range(1, 4)}
+    model = predict_model(
+        ["n1", "n2", "n3"], _matrix(results), MODELS, threshold=0.6, min_samples=3
+    )
+    # No model clears the bar with measured evidence -> strongest is the fallback.
+    assert model == "f0"
+
+
+def test_measured_pass_still_counts_and_wins() -> None:
+    # The control: the SAME three c0 passes, flagged measured, make c0 the weakest eligible.
+    results = {f"n{i}": {"c0": {"pass": True, "imputed": False}} for i in range(1, 4)}
+    model = predict_model(
+        ["n1", "n2", "n3"], _matrix(results), MODELS, threshold=0.6, min_samples=3
+    )
+    assert model == "c0"
+
+
 def test_select_empty_matrix_falls_back_to_weakest(monkeypatch) -> None:
     from benchmark import config
 

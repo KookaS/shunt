@@ -25,18 +25,25 @@ def predict_model(
     threshold: float,
     min_samples: int,
 ) -> str:
-    """Weakest ranked model (``models`` is weakest -> strongest) whose neighbours pass at
-    ``>= threshold``; the strongest model when none clears the bar; a fixed default when
+    """Weakest ranked model (``models`` is weakest -> strongest) whose MEASURED neighbours pass
+    at ``>= threshold``; the strongest model when none clears the bar; a fixed default when
     ``models`` is empty."""
     if not models:
         return _FALLBACK_MODEL
     results = matrix.get("results", {})
     for model in models:  # weakest -> strongest: the first likely to solve it wins
-        passes = [
-            bool(results[nid][model].get("pass"))
+        # An IMPUTED cell is a monotone-ladder fill (impute.py `to_cell`), near-exclusively
+        # pass=True — not a verification. Exclude it from BOTH the pass vote and the
+        # min_samples count, exactly as the kNN row zeroes an imputed neighbour's
+        # verification_confidence (knn.py): at 0.0 it contributes no weight and is not a
+        # measured sample. A genuinely measured cell keeps full weight. A raw matrix with
+        # no `imputed` key therefore behaves as before (`.get(..., False)` == measured).
+        measured = [
+            results[nid][model]
             for nid in neighbor_ids
-            if model in results.get(nid, {})
+            if model in results.get(nid, {}) and not results[nid][model].get("imputed", False)
         ]
+        passes = [bool(cell.get("pass")) for cell in measured]
         if len(passes) >= min_samples and mean(passes) >= threshold:
             return model
     return models[-1]

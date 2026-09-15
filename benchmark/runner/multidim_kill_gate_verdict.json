@@ -30,16 +30,16 @@
         {
           "baseline": 94.3701,
           "column": "TotalCost_cacheaware",
-          "relative_delta": -0.728073,
+          "relative_delta": -0.715181,
           "result": "better",
-          "router": 25.6618
+          "router": 26.8784
         },
         {
           "baseline": 1.0,
           "column": "sessions_mean",
-          "relative_delta": 0.768,
+          "relative_delta": 0.89,
           "result": "worse",
-          "router": 1.768
+          "router": 1.89
         },
         {
           "baseline": 1.0,
@@ -51,9 +51,9 @@
         {
           "baseline": 0.5623,
           "column": "cost_cv",
-          "relative_delta": 3.473413,
+          "relative_delta": 3.316023,
           "result": "worse",
-          "router": 2.5154
+          "router": 2.4269
         }
       ],
       "baseline": "Always-Frontier",
@@ -69,16 +69,16 @@
         {
           "baseline": 22.2694,
           "column": "TotalCost_cacheaware",
-          "relative_delta": 0.152335,
+          "relative_delta": 0.206966,
           "result": "worse",
-          "router": 25.6618
+          "router": 26.8784
         },
         {
           "baseline": 1.459,
           "column": "sessions_mean",
-          "relative_delta": 0.211789,
+          "relative_delta": 0.295408,
           "result": "worse",
-          "router": 1.768
+          "router": 1.89
         },
         {
           "baseline": 4.0,
@@ -90,9 +90,9 @@
         {
           "baseline": 2.7915,
           "column": "cost_cv",
-          "relative_delta": -0.098907,
+          "relative_delta": -0.130611,
           "result": "better",
-          "router": 2.5154
+          "router": 2.4269
         }
       ],
       "baseline": "Price-Cascade",

@@ -3,8 +3,8 @@
 #   docker compose -f benchmark/compose.yaml run --rm benchmark
 #
 # Kept out of the repo-root docker-compose.yml on purpose: that file is the deploy
-# example, run from the published image, while this one bind-mounts the source tree
-# and so only works from a checkout. The two cannot both be true of one file.
+# example, built and tagged locally from the checkout, while this one bind-mounts the
+# source tree and so only works from a checkout. The two cannot both be true of one file.
 #
 # Code is mounted READ-ONLY; only the outcome cache and plot output are writable.
 # Simulated by default (reports gaps, fabricates nothing) — pass `--live` for real

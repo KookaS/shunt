@@ -194,19 +194,33 @@ class MatrixOutcomeIndex:
         return {}
 
     def query(self, embedding: npt.NDArray, k: int = 20) -> list[NeighborResult]:
-        """Return k neighbours (excluding self) as per-model NeighborResults."""
-        k_search = min(k + 1, len(self._task_ids))
+        """Return the per-model rows of up to ``k`` distinct neighbour tasks (self excluded).
+
+        ``k`` bounds TASKS consulted, not result rows. This index emits one NeighborResult per
+        model of each neighbour task, so the old row-count cap (`len(results) >= k`) made every
+        ``k`` larger than the model count resolve to only ``ceil(k / models)`` tasks — the
+        published k=20 row ran a 3-task window (7 models per cell) while `kNNStrategy` reported
+        k=20. The served ``OutcomeIndex`` caps rows instead — one per session, not one per
+        distinct task — so this task-cap only lands the benchmark's window at the claimed ``k``
+        tasks; it does not make the two sides mean the same thing.
+        """
+        n = len(self._task_ids)
+        k_tasks = min(k, n)
+        # Request one extra label so self-exclusion can still leave k_tasks distinct tasks.
+        k_search = min(k_tasks + 1, n)
         labels, distances = self._index.knn_query(embedding.reshape(1, -1), k_search)
 
         results: list[NeighborResult] = []
+        consulted = 0
         for label, dist in zip(labels[0], distances[0], strict=True):
-            if len(results) >= k:
+            if consulted >= k_tasks:
                 break
             nid = self._task_ids[label]
             distance = float(dist)
             # Skip self (identical embedding has distance ~0)
             if distance < 0.001:
                 continue
+            consulted += 1
             neighbor_results = self._matrix["results"].get(nid, {})
             for model, outcome in neighbor_results.items():
                 # A cell's `imputed` flag separates MEASURED outcomes from monotone-ladder

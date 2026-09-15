@@ -33,8 +33,8 @@ in the code. The producer is shipped code
 (`python -m shunt.inspect.inference --out-dir <dir>`), so the container path and the
 docs path draw the same figures from the same functions.
 
-The container path has one requirement the published image does not carry: drawing needs
-the optional `inspect` extra (`pip install 'shunt-router[inspect]'`), and the product
+The container path has one requirement the product image does not carry: drawing needs
+the optional `inspect` extra (`pip install -e '.[inspect]'`), and the product
 image ships without it. Any image used to render these figures must install that extra
 itself, and no test covers the in-container render — an image that drops it fails only
 when someone next asks it for a figure.

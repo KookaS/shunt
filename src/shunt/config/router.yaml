@@ -127,6 +127,12 @@ router:
     # one, so it introduces no model switch the policy would not already make (cache-safe).
     exploration_epsilon: 0.0      # 0 = deterministic; 0.1-0.3 while collecting identifiable data
     exploration_seed: null        # null ⇒ the router draws one and records it on every decision
+    # Above 0 the engine builds a seeded ExplorationStream (from `exploration_seed`, else one it
+    # draws and records per decision) and each flagged decision logs its realized propensity; a
+    # direct decide_escalation/runner caller must inject one or the code raises. Read the persisted
+    # propensities back with OutcomeStore.escalation_exploration_rows() and score them with
+    # shunt.analysis.ope (estimate_policy_value / ips_estimate), which refuses NOT_IDENTIFIED
+    # rather than guessing when the log carries no randomization.
     # What the ESCALATED model receives of the conversation that ran on the cheaper one.
     #   full    (DEFAULT) — pure pass-through. Shunt forwards your messages untouched, which is
     #             what has always shipped and what every published cost number assumes. The

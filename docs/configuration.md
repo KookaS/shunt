@@ -856,7 +856,7 @@ marker by outcome, benchmark-seeded vs live), a corpus census panel
 (session/embedding/labeled/Tier-2 counts, seeded-vs-live split, per-model
 counts, total cost), and a k-nearest-neighbours overlay for the most recent
 session and an optional `--prompt`, embedded via the shipped embedder. Requires
-the `[inspect]` optional extra (`pip install 'shunt-router[inspect]'` or
+the `[inspect]` optional extra (`pip install -e '.[inspect]'` or
 `uv sync --extra inspect`). An empty corpus prints a clean "still cold-start"
 note.
 

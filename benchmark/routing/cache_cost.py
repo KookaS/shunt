@@ -103,7 +103,16 @@ def measured_input_shares(results_csv: Path | None = None) -> dict[str, float]:
 
 
 def _discount(info: object) -> tuple[float, str]:
-    """A model's cache-read discount from the registry, or the assumed fallback."""
+    """A model's cache-read discount from the registry, or the assumed fallback.
+
+    The authority is ``cache_read_cost_per_1m`` against ``input_cost_per_1m`` — the same
+    price pair ``benchmark.config.model_has_cache`` resolves, so the costing and the
+    benchmark's caching gate cannot disagree. ``supports_cache_control`` is deliberately
+    NOT consulted: it is a ROUTING field, governing whether the router may send explicit
+    cache breakpoints on the live wire (over-claiming earns a 400 mid-request), not whether
+    the provider caches automatically. A row with ``supports_cache_control: false`` still
+    banks the automatic prefix-cache discount its cache-read price quotes.
+    """
     if isinstance(info, dict):
         read = info.get("cache_read_cost_per_1m")
         inp = info.get("input_cost_per_1m")

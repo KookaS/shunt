@@ -29,6 +29,7 @@ from typing import Final
 
 import numpy as np
 
+from benchmark import grouped_split
 from benchmark.admissibility import AdmissibilityResult
 
 # A permutation band needs enough draws that its 2.5/97.5 percentiles are stable;
@@ -450,13 +451,9 @@ def _memorisation_rate(sims: np.ndarray, pass_mat: np.ndarray, k: int, threshold
 
 def repo_of(task_id: str) -> str:
     """Source repository carried in a SWE-bench task id (`org__repo-1234` -> `org/repo`)."""
-    # Splits on the LAST hyphen, not the first: repo names contain hyphens themselves
-    # (`scikit-learn__scikit-learn-10297`, `pytest-dev__pytest-5495`), and splitting on the
-    # first one silently collapses them into a bogus `scikit` bucket.
-    head, sep, tail = task_id.rpartition("-")
-    if not sep or not tail.isdigit():
-        head = task_id
-    return head.replace("__", "/") if "__" in head else head
+    # ONE implementation, in the shared grouped-split module: the routing and escalation halves
+    # must not disagree about what a repository is, or the two splits drift apart.
+    return grouped_split.repo_of(task_id)
 
 
 @dataclass(frozen=True)
