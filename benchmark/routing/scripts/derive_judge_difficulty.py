@@ -37,6 +37,26 @@ CHEAP_MODEL: Final[str] = "deepseek-v4-flash"
 ADOPTION_TOLERANCE: Final[float] = 0.01
 
 
+def _repo_root() -> Path:
+    """The shunt repo root — the nearest ancestor of this file holding pyproject.toml."""
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").is_file():
+            return parent
+    raise FileNotFoundError("no pyproject.toml above derive_judge_difficulty.py")
+
+
+def _repo_relative(path: Path) -> str:
+    """A probe path as a forward-slash path relative to the repo root.
+
+    This value is committed provenance, so a path outside the repo (absolute or escaping
+    with `..`) is refused rather than recorded: raising names the offending path.
+    """
+    try:
+        return path.resolve().relative_to(_repo_root()).as_posix()
+    except ValueError as exc:
+        raise ValueError(f"path is outside the shunt repo: {path}") from exc
+
+
 def _task_costs(records: list[dict]) -> dict[str, float]:
     """Per-task mean measured judge cost over its round-2 runs (one call at inference)."""
     groups: dict[str, list[float]] = defaultdict(list)
@@ -116,7 +136,7 @@ def main() -> int:
     payload = {
         "judge": JUDGE,
         "generated": datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
-        "source_artifacts": [str(p) for p in paths],
+        "source_artifacts": [_repo_relative(p) for p in paths],
         "aggregation": (
             "difficulty = mean over round-2 runs; "
             "judge_cost_usd = mean raw_cost over that task's runs "
