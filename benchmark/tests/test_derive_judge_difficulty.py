@@ -11,6 +11,18 @@ import pytest
 from benchmark.routing.scripts import derive_judge_difficulty as djd
 
 
+def test_repo_relative_in_repo_path_is_relative() -> None:
+    path = djd._repo_root() / "benchmark" / "routing" / "data" / "judge_difficulty.json"
+    assert djd._repo_relative(path) == "benchmark/routing/data/judge_difficulty.json"
+
+
+def test_repo_relative_outside_repo_raises(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="outside the shunt repo"):
+        djd._repo_relative(tmp_path / "judge_probe_x.jsonl")
+    with pytest.raises(ValueError, match="outside the shunt repo"):
+        djd._repo_relative(Path("../etc/passwd"))
+
+
 def _fake_records(judges: list[str]) -> list[dict]:
     return [
         {
@@ -88,6 +100,9 @@ def test_writes_the_table_when_terra_matches_the_anchor(
     monkeypatch.setattr(
         djd, "_loo_r2", lambda j, _r, _t: (0.029, 190) if j == "gpt-5.6-terra" else (0.027, 190)
     )
+    # The probe fixture lives outside the repo (tmp_path); provenance naming is covered
+    # by test_repo_relative_* above, so keep this test on the table-writing path.
+    monkeypatch.setattr(djd, "_repo_relative", lambda p: p.name)
     monkeypatch.setattr(sys, "argv", ["derive", "--probe", probe_file, "--out", out])
     rc = djd.main()
     assert rc == 0

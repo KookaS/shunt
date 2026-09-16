@@ -4,15 +4,15 @@
   "generated": "20260826T133414Z",
   "judge": "gpt-5.6-terra",
   "source_artifacts": [
-    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260825T184846Z.jsonl",
-    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T062249Z.jsonl",
-    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T073306Z.jsonl",
-    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T073333Z.jsonl",
-    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T083444Z.jsonl",
-    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T131615Z.jsonl",
-    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T131631Z.jsonl",
-    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_20260826T131645Z.jsonl",
-    "/workspace/shunt/benchmark/routing/artifacts/judge_probe_r2_recovered.jsonl"
+    "benchmark/routing/artifacts/judge_probe_20260825T184846Z.jsonl",
+    "benchmark/routing/artifacts/judge_probe_20260826T062249Z.jsonl",
+    "benchmark/routing/artifacts/judge_probe_20260826T073306Z.jsonl",
+    "benchmark/routing/artifacts/judge_probe_20260826T073333Z.jsonl",
+    "benchmark/routing/artifacts/judge_probe_20260826T083444Z.jsonl",
+    "benchmark/routing/artifacts/judge_probe_20260826T131615Z.jsonl",
+    "benchmark/routing/artifacts/judge_probe_20260826T131631Z.jsonl",
+    "benchmark/routing/artifacts/judge_probe_20260826T131645Z.jsonl",
+    "benchmark/routing/artifacts/judge_probe_r2_recovered.jsonl"
   ],
   "tasks": {
     "astropy__astropy-12907": {
