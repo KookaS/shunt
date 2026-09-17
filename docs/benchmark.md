@@ -222,9 +222,10 @@ ledger records which stages ran.
 
 Flags: `--no-report` runs only collect; `--from {collect,columns,stamp,evaluate,report,figures}`
 starts at a later stage (so a failed report never forces re-collection); `--replay-timeout`
-bounds each stamp and `--stamp-workers` sets how many replay in parallel; `--restamp`
-re-replays already-stamped trajectories (the full-corpus rebuild — without it the stamp stage
-only picks up unstamped ones). Both modes resume from
+bounds each stamp and `--stamp-workers` sets how many replay in parallel; `--figure-workers`
+sets how many standalone figure producers render at once (`1` = serial, streaming live);
+`--restamp` re-replays already-stamped trajectories (the full-corpus rebuild — without it the
+stamp stage only picks up unstamped ones). Both modes resume from
 `stamp_ledger.json`, which records the replay-source digest each trajectory was last
 completed under, so an interrupted rebuild does not start over and a source change
 re-queues everything. Resume is per trajectory and unaffected by the worker count: a killed

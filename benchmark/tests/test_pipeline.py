@@ -636,6 +636,57 @@ class TestStandaloneFigureFreshness:
         assert pipeline.drifted_figures(manifest, jobs) == []
         assert pipeline.uncertified_figures(manifest, jobs) == []
 
+    def test_parallel_figure_branch_regenerates_and_drops_a_failed_job(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`--figure-workers > 1` must preserve the serial contract.
+
+        The pool's captured-output path is the only branch that passes `capture=True`, so
+        recording it proves the parallel branch ran — not a serial run in disguise. The
+        contract it must keep: every job is dispatched once, a crashed producer records no
+        entry, and the manifest is written once after the pool drains.
+        """
+        jobs = _redirect(pipeline.STANDALONE_FIGURES, tmp_path / "out")
+        monkeypatch.setattr(pipeline, "STANDALONE_FIGURES", jobs)
+        crashed = next(job for job in jobs if job.name == "viz_knn")
+        writes: list[Path] = []
+        captures: list[bool] = []
+
+        def counting(
+            path: Path = pipeline.FIGURE_MANIFEST,
+            *,
+            jobs: tuple[pipeline.FigureJob, ...] | None = None,
+            drop: tuple[str, ...] = (),
+        ) -> Path:
+            writes.append(path)
+            return _REAL_WRITE_MANIFEST(path, jobs=jobs, drop=drop)
+
+        def one_crashes(
+            module: str, argv: list[str], *, capture: bool = False, **_: object
+        ) -> subprocess.CompletedProcess[str]:
+            captures.append(capture)
+            if module == crashed.module:
+                return subprocess.CompletedProcess([module], 1, stdout="", stderr="")
+            for job in jobs:
+                if job.module == module:
+                    for out in job.outputs:
+                        (job.output_dir(out) / out).write_bytes(b"x")
+            return subprocess.CompletedProcess([module], 0, stdout="", stderr="")
+
+        monkeypatch.setattr(pipeline, "write_figure_manifest", counting)
+        monkeypatch.setattr(pipeline, "run_module", one_crashes)
+        manifest = tmp_path / "figure_inputs.json"
+        with pytest.raises(pipeline.StageError):
+            pipeline.stage_figures(
+                _args(figure_workers=2), pipeline.PipelineState(), manifest=manifest
+            )
+        assert captures and all(captures)  # the captured-output (parallel) branch ran
+        assert len(captures) == len(jobs)  # every job dispatched exactly once
+        assert len(writes) == 1  # written once, after the pool drained
+        recorded = json.loads(manifest.read_text())
+        assert crashed.name not in recorded  # the failed job is dropped, not re-baselined
+        assert all(job.name in recorded for job in jobs if job is not crashed)
+
     def test_a_certified_output_edited_afterwards_is_reported_drifted(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
