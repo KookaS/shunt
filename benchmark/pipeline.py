@@ -40,6 +40,7 @@ from benchmark.escalation import features, schema
 from benchmark.escalation.live_capture import LIVE_DIR
 from benchmark.routing import integrity
 from benchmark.runner import replay_admissibility
+from benchmark.utilization import mem_available_bytes, worker_budget
 
 logger = logging.getLogger(__name__)
 
@@ -1364,27 +1365,66 @@ def missing_figures(jobs: tuple[FigureJob, ...] = FIGURE_JOBS) -> list[str]:
     ]
 
 
+def _figure_block(job: FigureJob, result: subprocess.CompletedProcess[str]) -> str:
+    """One producer's captured output, every line tagged with the figure it came from."""
+    # Captured rather than streamed: N children sharing one pipe interleave mid-line, so a
+    # redraw log in which an error cannot be attributed to a producer is not diagnosable.
+    lines = [
+        ln for ln in f"{result.stderr or ''}\n{result.stdout or ''}".splitlines() if ln.strip()
+    ]
+    return "".join(f"  [{job.name}] {ln}\n" for ln in lines).rstrip("\n")
+
+
+def _invoke_figure(job: FigureJob, *, capture: bool) -> tuple[bool, str, str]:
+    """Run one producer; return (succeeded, failure text, captured output)."""
+    try:
+        result = run_module(job.module, [], capture=capture)
+    except Exception as exc:  # noqa: BLE001 — one crashed producer fails only its job
+        return False, f"{job.module} crashed ({exc})", ""
+    block = _figure_block(job, result) if capture else ""
+    if result.returncode != 0:
+        return False, f"{job.module} exited {result.returncode}", block
+    return True, "", block
+
+
 def stage_figures(
     _args: argparse.Namespace, _state: PipelineState, *, manifest: Path = FIGURE_MANIFEST
 ) -> None:
-    """Regenerate every standalone figure, then re-record the input manifest."""
+    """Regenerate every standalone figure, in parallel, then re-record the input manifest."""
     # The manifest records ONE entry per job that actually rendered this run, and DROPS the
     # entry of any job whose render failed — a crashed render reports STALE (its old digest is
     # never retained as fresh). A job that exits non-zero, or that "succeeds" writing none of
     # its declared outputs, is a failure and is dropped from the manifest.
+    #
+    # Each job writes DISTINCT outputs under its own directory, so the producers are safe to
+    # run concurrently; the two shared resources are stdout and the manifest, and both are
+    # handled here: output is captured per job and re-emitted as one tagged block, and the
+    # manifest is written once, after every job has finished. `--figure-workers 1` keeps the
+    # serial path (live streaming, no pool) so existing callers see no change.
+    jobs = STANDALONE_FIGURES
+    workers = max(1, int(getattr(_args, "figure_workers", 1)))
     failed: list[str] = []
     regenerated: list[FigureJob] = []
-    for job in STANDALONE_FIGURES:
-        print(f"  figures: {job.name}", flush=True)  # noqa: T201
-        try:
-            result = run_module(job.module, [])
-        except Exception as exc:  # noqa: BLE001 — one crashed producer fails only its job
-            failed.append(f"{job.module} crashed ({exc})")
-            continue
-        if result.returncode != 0:
-            failed.append(f"{job.module} exited {result.returncode}")
-            continue
-        regenerated.append(job)
+    if workers > 1 and len(jobs) > 1:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {job: pool.submit(_invoke_figure, job, capture=True) for job in jobs}
+        for job in jobs:
+            print(f"  figures: {job.name}", flush=True)  # noqa: T201
+            succeeded, failure, block = futures[job].result()
+            if block:
+                print(block, flush=True)  # noqa: T201
+            if not succeeded:
+                failed.append(failure)
+                continue
+            regenerated.append(job)
+    else:
+        for job in jobs:
+            print(f"  figures: {job.name}", flush=True)  # noqa: T201
+            succeeded, failure, _ = _invoke_figure(job, capture=False)
+            if not succeeded:
+                failed.append(failure)
+                continue
+            regenerated.append(job)
     absent = missing_figures(STANDALONE_FIGURES)
     absent_jobs = {entry.split(":", 1)[0] for entry in absent}
     if absent:
@@ -1622,6 +1662,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "Instances replayed in parallel during the stamp stage (default: host cores minus "
             f"{_RESERVED_CORES}, capped at {_MAX_STAMP_WORKERS}). One instance is never split "
             "across workers. Container replays pin ~1 core each — oversubscribing costs ~2x."
+        ),
+    )
+    ap.add_argument(
+        "--figure-workers",
+        type=int,
+        default=worker_budget("figures", os.cpu_count() or 1, mem_available_bytes()),
+        help=(
+            "Standalone figure producers rendered in parallel (default: the host's memory- "
+            "and core-bounded figure budget). 1 = serial, streaming output live. Producers "
+            "write distinct outputs, so only stdout is shared and it is captured per job."
         ),
     )
     ap.add_argument(
