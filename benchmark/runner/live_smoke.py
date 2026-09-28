@@ -291,12 +291,12 @@ def post_completion(port: int, timeout: float) -> tuple[int | None, dict[str, st
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-            headers = {key: value for key, value in resp.headers.items()}
+            headers = {key.lower(): value for key, value in resp.headers.items()}
             return resp.status, headers, resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         return (
             exc.code,
-            {key: value for key, value in exc.headers.items()},
+            {key.lower(): value for key, value in exc.headers.items()},
             exc.read().decode("utf-8", "replace"),
         )
     except (urllib.error.URLError, OSError) as exc:
@@ -306,9 +306,23 @@ def post_completion(port: int, timeout: float) -> tuple[int | None, dict[str, st
 # ── verification (machine-checkable pass criteria) ───────────────────────────
 
 
+def header_value(headers: dict[str, str], name: str) -> str | None:
+    """Case-insensitive HTTP header lookup, or None when absent.
+
+    Header names are case-insensitive, and Starlette lowercases them on the wire
+    (``x-shunt-decision``), so a plain-dict lookup on the canonical spelling misses
+    every one of them.
+    """
+    wanted = name.lower()
+    for key, value in headers.items():
+        if key.lower() == wanted:
+            return value
+    return None
+
+
 def decision_from_headers(headers: dict[str, str]) -> tuple[str, str] | None:
     """Split ``X-Shunt-Decision`` into ``(model, reason)``, or None when absent."""
-    raw = headers.get("X-Shunt-Decision")
+    raw = header_value(headers, "X-Shunt-Decision")
     if not raw:
         return None
     model, _, reason = raw.partition("; reason=")
@@ -340,7 +354,7 @@ def verify_headers(
             )
         if got_reason != reason:
             problems.append(f"decision reason is {got_reason!r}; expected {reason!r}")
-    if not headers.get("X-Shunt-Session-Id"):
+    if not header_value(headers, "X-Shunt-Session-Id"):
         problems.append("response carried no X-Shunt-Session-Id header")
     return problems
 
@@ -569,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
             decision = decision_from_headers(headers)
             if decision is not None:
                 served, decision_reason = decision
-            session_id = headers.get("X-Shunt-Session-Id", "")
+            session_id = header_value(headers, "X-Shunt-Session-Id") or ""
             problems.extend(verify_headers(status, headers, expected.name, STRATEGY))
             problems.extend(content_problems(body))
 

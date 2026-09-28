@@ -151,7 +151,7 @@ def _verify(server, expected: ModelConfig, max_cost: float, report: Callable[[st
     decision = live.decision_from_headers(headers)
     served = decision[0] if decision is not None else expected.name
     reason = decision[1] if decision is not None else None
-    session_id = headers.get("X-Shunt-Session-Id", "")
+    session_id = live.header_value(headers, "X-Shunt-Session-Id") or ""
 
     problems = live.verify_headers(status, headers, expected.name, live.STRATEGY)
     problems.extend(live.content_problems(body))

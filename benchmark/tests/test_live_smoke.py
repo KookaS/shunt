@@ -178,6 +178,30 @@ def test_verify_headers_missing_session_fails() -> None:
     assert any("X-Shunt-Session-Id" in p for p in problems)
 
 
+def test_decision_header_parse_is_case_insensitive() -> None:
+    # Starlette lowercases response header names on the wire (``x-shunt-decision``),
+    # so a plain-dict lookup on the canonical spelling missed every real response and
+    # the smoke could never pass. HTTP names are case-insensitive; only the case
+    # handling is tolerant — the header is still required for a pass.
+    lower = {
+        "x-shunt-decision": "deepseek-v4-flash; reason=always_cheap",
+        "x-shunt-session-id": "sess-1",
+    }
+    assert live_smoke.decision_from_headers(lower) == ("deepseek-v4-flash", "always_cheap")
+    assert live_smoke.verify_headers(200, lower, "deepseek-v4-flash", "always_cheap") == []
+
+
+def test_verify_headers_lowercase_missing_session_still_fails() -> None:
+    # The session header remains mandatory: lowercase-only decision must still fail.
+    problems = live_smoke.verify_headers(
+        200,
+        {"x-shunt-decision": "deepseek-v4-flash; reason=always_cheap"},
+        "deepseek-v4-flash",
+        "always_cheap",
+    )
+    assert any("X-Shunt-Session-Id" in p for p in problems)
+
+
 def test_verify_headers_non_200_fails() -> None:
     problems = live_smoke.verify_headers(401, {}, "deepseek-v4-flash", "always_cheap")
     assert problems and "HTTP 401" in problems[0]
