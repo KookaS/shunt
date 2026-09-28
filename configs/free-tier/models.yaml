@@ -7,7 +7,7 @@
 # only the smoke points SHUNT_CONFIG_DIR here.
 #
 # Model verified against the live public catalog at
-# https://openrouter.ai/api/v1/models (2026-08-23): present, pricing prompt/completion = 0.
+# https://openrouter.ai/api/v1/models (2026-09-28): present, pricing prompt/completion = 0.
 # Slugs rot: `openai/gpt-oss-20b:free` was RETIRED by OpenRouter and now 404s, pointing at
 # the PAID `openai/gpt-oss-20b` — which is not a substitute in a $0 smoke. Re-verify against
 # that endpoint before editing this file.
@@ -18,10 +18,10 @@ providers:
     litellm_prefix: openrouter
 
 models:
-  nemotron-nano-9b-free:
-    model_id: nvidia/nemotron-nano-9b-v2:free
+  gemma-4-26b-a4b-free:
+    model_id: google/gemma-4-26b-a4b-it:free
     provider: openrouter
-    version: nemotron-nano-9b-v2-free
+    version: gemma-4-26b-a4b-it-free
     billing: free
     supports_streaming: true
     supports_cache_control: false
@@ -30,6 +30,6 @@ models:
       output_cost_per_1m: 0
       cache_read_cost_per_1m: 0
       price_provider: openrouter
-      price_source: https://openrouter.ai/models/nvidia/nemotron-nano-9b-v2
-      price_as_of: "2026-08-23"
-      price_note: OpenRouter :free listing — genuinely $0 (verified against the live public catalog 2026-08-23).
+      price_source: https://openrouter.ai/models/google/gemma-4-26b-a4b-it
+      price_as_of: "2026-09-28"
+      price_note: OpenRouter :free listing — genuinely $0 (verified against the live public catalog 2026-09-28).
