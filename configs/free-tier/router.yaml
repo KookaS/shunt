@@ -53,4 +53,4 @@ router:
   # The single $0 model in this directory's models.yaml — the only model the
   # free-tier smoke may ever route to.
   models:
-    - gemma-4-26b-a4b-free
+    - nemotron-3-nano-omni-free

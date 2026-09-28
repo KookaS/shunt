@@ -18,10 +18,10 @@ providers:
     litellm_prefix: openrouter
 
 models:
-  gemma-4-26b-a4b-free:
-    model_id: google/gemma-4-26b-a4b-it:free
+  nemotron-3-nano-omni-free:
+    model_id: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
     provider: openrouter
-    version: gemma-4-26b-a4b-it-free
+    version: nemotron-3-nano-omni-free
     billing: free
     supports_streaming: true
     supports_cache_control: false
@@ -30,6 +30,6 @@ models:
       output_cost_per_1m: 0
       cache_read_cost_per_1m: 0
       price_provider: openrouter
-      price_source: https://openrouter.ai/models/google/gemma-4-26b-a4b-it
+      price_source: https://openrouter.ai/models/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
       price_as_of: "2026-09-28"
       price_note: OpenRouter :free listing — genuinely $0 (verified against the live public catalog 2026-09-28).
