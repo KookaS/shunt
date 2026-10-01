@@ -33,13 +33,17 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from benchmark import config, corpus_lock
 from benchmark.escalation import features, schema
 from benchmark.escalation.live_capture import LIVE_DIR
 from benchmark.routing import integrity
 from benchmark.runner import replay_admissibility
+
+if TYPE_CHECKING:
+    from benchmark.runner.capacity.guard import CapacityHandle
+    from benchmark.runner.capacity.types import ResourceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -407,15 +411,60 @@ def _replay_instance(
     digest: str,
     replay_timeout: float,
     progress: _StampProgress,
+    capacity: CapacityHandle | None = None,
 ) -> None:
-    """Replay one instance's trajectories in sequence — the gate measures once, the rest cache."""
-    for item in group:
-        _replay_one(item, digest=digest, replay_timeout=replay_timeout, progress=progress)
+    """Replay one instance's trajectories in sequence — the gate measures once, the rest cache.
+
+    When ``capacity`` is a :class:`CapacityHandle`, the instance's image is acquired (and
+    warmed, if prefetch is on) for the whole group and released — then dropped under
+    ``per-challenge`` — only after every trajectory of the instance has finished.
+    """
+    ref = None
+    if capacity is not None:
+        from benchmark.runner.capacity.sizes import image_refs_for_ids
+
+        ref = image_refs_for_ids((group[0][1],))[0]
+        capacity.retention.acquire(ref)
+        if capacity.prefetch is not None:
+            capacity.prefetch.wait_ready(ref)
+    try:
+        for item in group:
+            _replay_one(item, digest=digest, replay_timeout=replay_timeout, progress=progress)
+    finally:
+        if capacity is not None and ref is not None:
+            capacity.retention.release(ref)
+            capacity.retention.release_challenge([group[0][1]])
 
 
 def _beat(progress: _StampProgress, stop: threading.Event, interval: float) -> None:
     while not stop.wait(interval):
         progress.emit(progress.heartbeat())
+
+
+def _run_stamp_pool(
+    groups: list[list[tuple[str, str, Path]]],
+    *,
+    workers: int,
+    digest: str,
+    replay_timeout: float,
+    progress: _StampProgress,
+    capacity: CapacityHandle | None,
+) -> None:
+    """Replay every instance group across *workers* (capacity handle threaded through)."""
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [
+            pool.submit(
+                _replay_instance,
+                group,
+                digest=digest,
+                replay_timeout=replay_timeout,
+                progress=progress,
+                capacity=capacity,
+            )
+            for group in groups
+        ]
+    for future in futures:
+        future.result()  # re-raise anything the per-item guard did not catch
 
 
 def run_stamp_stage(
@@ -425,8 +474,15 @@ def run_stamp_stage(
     workers: int,
     replay_timeout: float,
     heartbeat_s: float = _HEARTBEAT_S,
+    resources: ResourceConfig | None = None,
 ) -> list[str]:
-    """Replay every owed trajectory across *workers*, instance by instance; return the failures."""
+    """Replay every owed trajectory across *workers*, instance by instance; return the failures.
+
+    When ``resources`` is supplied the stage is wrapped in the capacity manager: a disk
+    preflight of the pending instance-image set (hard-fail), an optional prefetch of those
+    images ahead of the subprocesses that pull them, a RAM cap on ``workers``, and
+    per-instance release once the instance's trajectories have all finished.
+    """
     digest = replay_admissibility.instrument_digest()
     groups = group_by_instance(pending)
     workers = max(1, min(workers, len(groups)))
@@ -439,19 +495,35 @@ def run_stamp_stage(
     beater = threading.Thread(target=_beat, args=(progress, stop, heartbeat_s), daemon=True)
     beater.start()
     try:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [
-                pool.submit(
-                    _replay_instance,
-                    group,
+        if resources is None:
+            _run_stamp_pool(
+                groups,
+                workers=workers,
+                digest=digest,
+                replay_timeout=replay_timeout,
+                progress=progress,
+                capacity=None,
+            )
+        else:
+            from benchmark.runner.capacity.guard import capacity_manager
+            from benchmark.runner.capacity.sizes import image_refs_for_ids
+            from benchmark.runner.memory_guard import MemoryGuard, read_mem_available_bytes
+
+            refs = list(dict.fromkeys(image_refs_for_ids([iid for _, iid, _ in pending])))
+            with capacity_manager(refs, config=resources) as cap:
+                effective = MemoryGuard(
+                    config=config.memory_config(),
+                    requested_workers=workers,
+                    available_bytes_fn=read_mem_available_bytes,
+                ).check_or_raise()
+                _run_stamp_pool(
+                    groups,
+                    workers=effective,
                     digest=digest,
                     replay_timeout=replay_timeout,
                     progress=progress,
+                    capacity=cap,
                 )
-                for group in groups
-            ]
-        for future in futures:
-            future.result()  # re-raise anything the per-item guard did not catch
     finally:
         stop.set()
         beater.join(timeout=2.0)
@@ -470,6 +542,7 @@ def stage_stamp(args: argparse.Namespace, _state: PipelineState) -> None:
         live_dir=LIVE_DIR,
         workers=args.stamp_workers,
         replay_timeout=args.replay_timeout,
+        resources=config.resource_config() if getattr(args, "capacity", False) else None,
     )
     if failures:
         # LOUD, not a warning buried in a green run: an unreplayed trajectory keeps whatever it
@@ -1636,6 +1709,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--check-figures",
         action="store_true",
         help="Only verify the committed standalone figures are current, then exit (no drawing)",
+    )
+    ap.add_argument(
+        "--capacity",
+        action="store_true",
+        help="Wrap the stamp stage in the capacity manager: disk preflight of the pending "
+        "instance images (hard-fail), optional prefetch, a RAM cap on --stamp-workers and "
+        "per-instance image release. OFF by default so the offline stamp tests stay offline.",
     )
     ap.add_argument(
         "--half",

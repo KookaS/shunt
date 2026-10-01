@@ -23,6 +23,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
+from typing import TYPE_CHECKING
 
 from benchmark import config
 from benchmark.routing import integrity
@@ -32,11 +33,16 @@ from benchmark.runner.calibration import DEFAULT_SALT
 from benchmark.runner.run_matrix import (
     _apply_multimodal_gate,
     _has_keys,
+    add_capacity_args,
     collect_phase,
     preflight_refuses,
 )
 from benchmark.runner.sampling import AUDIT_SALT, in_frontier_audit
 from shunt.secrets import load_dotenv_file
+
+if TYPE_CHECKING:
+    from benchmark.runner.capacity.types import ResourceConfig
+    from benchmark.runner.memory_guard import MemoryConfig
 
 _MANIFEST_PATH = (
     Path(__file__).resolve().parent.parent / "routing" / "artifacts" / "collect_manifest.json"
@@ -150,6 +156,8 @@ def run_collect(
     max_consecutive_failures: int | None = None,
     check_images: bool = False,
     step_limit: int | None = None,
+    resources: ResourceConfig | None = None,
+    memory: MemoryConfig | None = None,
 ) -> int:
     """Drive the three-phase collection; returns a process exit code (0 ok, 2 refused)."""
     load_dotenv_file()
@@ -218,6 +226,8 @@ def run_collect(
         max_start_failures=max_start_failures,
         max_consecutive_failures=max_consecutive_failures,
         step_limit=step_limit,
+        resources=resources,
+        memory=memory,
     )
 
     cache = config.load_results()
@@ -245,6 +255,8 @@ def run_collect(
         max_start_failures=max_start_failures,
         max_consecutive_failures=max_consecutive_failures,
         step_limit=step_limit,
+        resources=resources,
+        memory=memory,
     )
 
     _write_manifest(
@@ -303,6 +315,7 @@ def _add_args(ap: argparse.ArgumentParser, config_path: str) -> None:
         default=None,
         help="Abort remaining cells once cumulative real_cost (USD) crosses this.",
     )
+    add_capacity_args(ap)
 
 
 def main(config_path: str = "benchmark/benchmark.yaml") -> int:
@@ -323,6 +336,8 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> int:
         workers=args.workers,
         max_cost=args.max_cost,
         step_limit=args.step_limit,
+        resources=config.resource_config(args),
+        memory=config.memory_config(args),
     )
 
 

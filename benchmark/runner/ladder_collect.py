@@ -17,6 +17,7 @@ import threading
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from benchmark import config
 from benchmark.config import RankedModel
@@ -26,10 +27,15 @@ from benchmark.runner.collect import _refuse_live, _resolve_digests
 from benchmark.runner.run_matrix import (
     _FailureTracker,
     _has_keys,
+    add_capacity_args,
     collect_phase,
     preflight_refuses,
 )
 from shunt.secrets import load_dotenv_file
+
+if TYPE_CHECKING:
+    from benchmark.runner.capacity.types import ResourceConfig
+    from benchmark.runner.memory_guard import MemoryConfig
 
 
 def _confirm_uncapped_live() -> bool:
@@ -103,6 +109,8 @@ def run_ladder(
     max_consecutive_failures: int | None = None,
     check_images: bool = False,  # noqa: ARG001 (parity with sibling collectors; digests via config)
     step_limit: int | None = None,
+    resources: ResourceConfig | None = None,
+    memory: MemoryConfig | None = None,
 ) -> int:
     """Drive the ladder; returns a process exit code (0 ok, 2 refused).
 
@@ -147,6 +155,8 @@ def run_ladder(
         max_start_failures=max_start_failures,
         max_consecutive_failures=max_consecutive_failures,
         step_limit=step_limit,
+        resources=resources,
+        memory=memory,
     )
     if not live:
         print("  simulated: rungs classified only; leaving cells uncached (no fabrication).")
@@ -226,6 +236,8 @@ class _LadderRun:
     failures: _FailureTracker
     cold_start_tier_cost: float
     step_limit: int
+    resources: ResourceConfig | None = None
+    memory: MemoryConfig | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
     write_lock: threading.Lock = field(default_factory=threading.Lock)
     abort: threading.Event = field(default_factory=threading.Event)
@@ -284,6 +296,8 @@ def _escalate_tiers(run: _LadderRun, task: str) -> None:
             write_lock=run.write_lock,
             failures=run.failures,
             step_limit=run.step_limit,
+            resources=run.resources,
+            memory=run.memory,
         )
         cell = _solved_matrix().get(task, {}).get(rung.model)
         if cell is not None and cell.get("pass"):
@@ -367,6 +381,8 @@ def _run_challenges(
     max_start_failures: int | None,
     max_consecutive_failures: int | None,
     step_limit: int = infer._DEFAULT_STEP_LIMIT,
+    resources: ResourceConfig | None = None,
+    memory: MemoryConfig | None = None,
 ) -> None:
     """Escalate up to ``workers`` challenges CONCURRENTLY (each cheap->strong serially within)."""
     # Same fan-out mechanism and defaults as cost_optimal/full. Challenge-atomic budgeting holds
@@ -389,6 +405,8 @@ def _run_challenges(
         failures=_FailureTracker(max_start_failures, max_consecutive_failures),
         cold_start_tier_cost=config.cold_start_tier_cost(),
         step_limit=step_limit,
+        resources=resources,
+        memory=memory,
     )
     next_idx = 0
     in_flight: dict[Future[None], str] = {}
@@ -427,6 +445,7 @@ def _add_args(ap: argparse.ArgumentParser, config_path: str) -> None:
         "--workers", type=int, default=1, help="Challenges to escalate concurrently (1 = serial)"
     )
     ap.add_argument("--max-cost", type=float, default=None, help="Abort once real_cost crosses USD")
+    add_capacity_args(ap)
 
 
 def main(config_path: str = "benchmark/benchmark.yaml") -> int:
@@ -442,6 +461,8 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> int:
         workers=args.workers,
         max_cost=args.max_cost,
         step_limit=args.step_limit,
+        resources=config.resource_config(args),
+        memory=config.memory_config(args),
     )
 
 

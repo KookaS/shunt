@@ -563,12 +563,45 @@ class FreeCampaignRunner:
             return
         if self._execute_fn is None:
             self._ensure_runtime()
+            self._run_pass_with_capacity()
+            return
         with ThreadPoolExecutor(max_workers=self.workers) as pool:
-            while not self._stop.is_set() and not self._due(self._now()):
-                self._fill(pool)
-                if not self._in_flight:
-                    break
-                self._drain(block=True)
+            self._drain_pool(pool)
+
+    def _run_pass_with_capacity(self) -> None:
+        """Wrap the real executor with the disk preflight, RAM cap and image retention.
+
+        The priority scheduler has no challenge-major boundary, so per-challenge release is not
+        available here; the manager's end-of-pass drain removes leftover images under
+        PER_CHALLENGE. The injectable ``execute_fn`` test seam bypasses this entirely (run_pass's
+        branch above), so no unit test ever touches docker or the registry through this path.
+        """
+        from dataclasses import replace
+
+        from benchmark import config
+        from benchmark.runner.capacity.guard import capacity_manager
+        from benchmark.runner.capacity.sizes import image_refs_for_ids
+        from benchmark.runner.memory_guard import MemoryGuard, read_mem_available_bytes
+
+        refs = list(dict.fromkeys(image_refs_for_ids([entry.cell[0] for entry in self._queue])))
+        with capacity_manager(refs, config=config.resource_config()) as cap:
+            guard = MemoryGuard(
+                config=config.memory_config(),
+                requested_workers=self.workers,
+                available_bytes_fn=read_mem_available_bytes,
+            )
+            if self._ctx is not None:
+                self._ctx = replace(self._ctx, capacity=cap)
+            with ThreadPoolExecutor(max_workers=guard.check_or_raise()) as pool:
+                self._drain_pool(pool)
+
+    def _drain_pool(self, pool: ThreadPoolExecutor) -> None:
+        """Run the pass against *pool* until stopped, the rescan is due, or the queue empties."""
+        while not self._stop.is_set() and not self._due(self._now()):
+            self._fill(pool)
+            if not self._in_flight:
+                break
+            self._drain(block=True)
         self._drain(block=False)  # reap anything that finished while shutting down
 
     def _fill(self, pool: ThreadPoolExecutor) -> None:

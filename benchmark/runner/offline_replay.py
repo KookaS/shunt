@@ -516,6 +516,10 @@ def run_offline_replay(trajectory_id: str, instance_id: str, jsonl_path: Path) -
     verdict = replay_admissibility.cached_verdict(instance_id, plan.gate_key, out_dir)
     if verdict is not None and not verdict.admissible:
         return clear_rejected(verdict, jsonl_path)
+    # TODO(capacity): disk preflight + retention for a BATCH are owned by
+    # `pipeline.run_stamp_stage` (one manager over the pending instance images, per-instance
+    # release). Running this module STANDALONE bypasses that guard; wrap `plan.image_ref` in a
+    # capacity manager here if a standalone disk-safety check is ever needed.
     with instance_container(plan.image_ref, f"shunt-replay-{trajectory_id}") as name:
         exec_fn = docker_exec(name)
         if verdict is None:

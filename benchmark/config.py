@@ -5,7 +5,11 @@ import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from benchmark.runner.capacity.types import ResourceConfig
+    from benchmark.runner.memory_guard import MemoryConfig
 
 import yaml
 
@@ -607,6 +611,51 @@ def live_cost_limit() -> float:
     # The value MOVES WITH ``step_limit``: the two are raised together, so a budget increase
     # cannot relabel step censors as cost censors under a lying label.
     return float(live_config().get("cost_limit", 4.0))
+
+
+# ── container/image capacity (disk preflight · prefetch · retention · RAM guard) ──
+# The `resources:` block declares a run's capacity policy. It is read here as a plain mapping;
+# the typed configs are built lazily so this module stays free of a capacity import at load
+# time (the capacity package reaches back through `swebench_specs` to here).
+
+
+def resources_mapping() -> dict:
+    """The ``resources:`` block (disk/prefetch/retention/memory tunables); ``{}`` when absent."""
+    return dict(get().get("resources", {}) or {})
+
+
+def resource_config(args: object | None = None) -> ResourceConfig:
+    """Disk/prefetch/retention policy: config defaults overlaid by non-None CLI flags.
+
+    ``args`` uses the runner's flag names (``retention`` from ``--image-retention``,
+    ``prefetch_enabled`` from ``--prefetch/--no-prefetch``); pass None for config-only.
+    """
+    from benchmark.runner.capacity.types import ResourceConfig
+
+    mapping = resources_mapping()
+    # The YAML spells the prefetch toggle `prefetch:`; ResourceConfig reads `prefetch_enabled`.
+    if "prefetch" in mapping and "prefetch_enabled" not in mapping:
+        mapping["prefetch_enabled"] = mapping["prefetch"]
+    if args is None:
+        return ResourceConfig.from_mapping(mapping)
+    return ResourceConfig.from_args(args, mapping=mapping)
+
+
+def memory_config(args: object | None = None) -> MemoryConfig:
+    """RAM-guard policy: per-container/reserve GiB from ``resources:`` over CLI flags."""
+    from benchmark.runner.memory_guard import MemoryConfig
+
+    mapping = resources_mapping()
+    base = MemoryConfig(
+        container_gib=float(mapping.get("container_memory_gib", 1.5)),
+        reserve_gib=float(mapping.get("memory_reserve_gib", 2.0)),
+    )
+    container = getattr(args, "container_memory_gib", None) if args is not None else None
+    reserve = getattr(args, "memory_reserve_gib", None) if args is not None else None
+    return MemoryConfig(
+        container_gib=float(container) if container is not None else base.container_gib,
+        reserve_gib=float(reserve) if reserve is not None else base.reserve_gib,
+    )
 
 
 def resume_enabled() -> bool:

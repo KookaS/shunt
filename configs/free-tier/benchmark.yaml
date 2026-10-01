@@ -13,6 +13,21 @@
 
 models: []
 
+# Container/image capacity policy — same fields and defaults as benchmark/benchmark.yaml (see
+# that file for the full explanation). A $0 campaign still pulls real containers, so the disk
+# preflight and RAM cap apply here too; per-challenge retention is the recommended setting.
+resources:
+  retention: keep              # keep | per-challenge (per-challenge is recommended for a big run)
+  allow_insufficient_disk: false   # true = proceed even when the preflight says it won't fit
+  disk_safety_factor: 1.5      # compressed -> uncompressed multiplier for registry sizes
+  disk_reserve_gib: 10         # free space to leave untouched on the docker root
+  assumed_image_gib: 3         # fallback footprint when a size cannot be resolved
+  prefetch: false              # warm images ahead of the cell that needs them
+  prefetch_window: 5           # how many images ahead the prefetcher stays
+  prefetch_workers: 2          # concurrent pulls during prefetch
+  container_memory_gib: 1.5    # per-container RAM bound for the worker cap
+  memory_reserve_gib: 2        # RAM held back for the host/docker when capping workers
+
 paths:
   challenges: routing/data/challenges.json
   results_csv: routing/results_free.csv   # the free corpus, physically separate

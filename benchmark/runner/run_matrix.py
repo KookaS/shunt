@@ -33,6 +33,14 @@ from benchmark.runner import (
     swebench_multimodal_specs,
     swebench_specs,
 )
+from benchmark.runner.capacity.guard import CapacityHandle, capacity_manager
+from benchmark.runner.capacity.sizes import image_refs_for_ids
+from benchmark.runner.capacity.types import ResourceConfig
+from benchmark.runner.memory_guard import (
+    MemoryConfig,
+    MemoryGuard,
+    read_mem_available_bytes,
+)
 from shunt.secrets import load_dotenv_file
 
 # History log columns: the full cache row plus when the row was superseded.
@@ -767,6 +775,10 @@ class _LiveContext:
     # suffix, which also labels legitimate paid promo history. Empty means `_build_row` was
     # reached without provenance (a direct/test call), so the wall conservatively abstains.
     free_collection_models: frozenset[str] = frozenset()
+    # The capacity handle (disk retention + prefetch) when the entrypoint opted into capacity
+    # management. None for a direct/library caller, which keeps every call offline (no docker
+    # preflight, no registry lookup) — the CLI entrypoints always supply one.
+    capacity: CapacityHandle | None = None
 
 
 class RunAbortError(RuntimeError):
@@ -989,6 +1001,14 @@ def _run_one_cell(
     # per-lane 429/throttle (no row, MISSING, lane quarantined); _START_FAILURE →
     # container-start failure; None → any other per-cell error (skip). Pure/thread-safe.
     cid, model, arm = cell
+    capacity = ctx.capacity
+    ref = image_refs_for_ids((cid,))[0] if capacity is not None else None
+    if capacity is not None and ref is not None:
+        # Hold the image for this cell (and its in-process grading) and warm it when prefetch
+        # is on, so a cold image is local before the scaffold's 120s pull_timeout can fire.
+        capacity.retention.acquire(ref)
+        if capacity.prefetch is not None:
+            capacity.prefetch.wait_ready(ref)
     # The ENTIRE body is guarded, not just the harness call: in a worker thread an
     # unhandled raise (import, spec-hash, row-build) would propagate out of the pool's
     # result loop and discard every already-collected (paid) row. Returning a sentinel/None
@@ -1050,6 +1070,9 @@ def _run_one_cell(
         kind = "start-fail" if start_fail else "skip"
         print(f"  {kind} {cid}:{model}:{arm} — {exc}", file=sys.stderr)
         return _START_FAILURE if start_fail else None
+    finally:
+        if capacity is not None and ref is not None:
+            capacity.retention.release(ref)
 
 
 def _over_budget(spent: float, max_cost: float | None) -> bool:
@@ -1081,6 +1104,17 @@ def _group_by_challenge(
             order.append(cid)
         groups[cid].append(cell)
     return [(cid, groups[cid]) for cid in order]
+
+
+def _release_challenge(ctx: _LiveContext, cid: str) -> None:
+    """Drop a challenge's image once every one of its cells has released it.
+
+    Challenge-major batching is what makes this safe: the group loop only reaches here after
+    the challenge's cells (and their in-process grading) have all returned, so the per-cell
+    ref-count is zero and the manager removes the image under PER_CHALLENGE.
+    """
+    if ctx is not None and ctx.capacity is not None:
+        ctx.capacity.retention.release_challenge([cid])
 
 
 def _row_tokens(row: dict) -> int:
@@ -1234,12 +1268,14 @@ def _run_cells_serial(
                 f" — stopping ({len(rows)} cells done)",
                 file=sys.stderr,
             )
+            _release_challenge(ctx, _cid)
             return rows
         if lanes is not None:
             batch_rows, spent, stopped = _run_scheduled_batch(
                 batch, ctx, lanes, tracker, checkpoint, spent, hard, max_cost, overshoot_note
             )
             rows.extend(batch_rows)
+            _release_challenge(ctx, _cid)
             if stopped:
                 return rows
             continue
@@ -1250,6 +1286,7 @@ def _run_cells_serial(
                     f" — stopping ({len(rows)} cells done)",
                     file=sys.stderr,
                 )
+                _release_challenge(ctx, _cid)
                 return rows
             row = _run_one_cell(cell, ctx)
             if isinstance(row, _ApiUnusable):
@@ -1276,6 +1313,7 @@ def _run_cells_serial(
             spent += float(row["real_cost"])
             if checkpoint is not None:
                 checkpoint(row)
+        _release_challenge(ctx, _cid)
     return rows
 
 
@@ -1368,6 +1406,7 @@ def _run_cells_parallel(
                     and consecutive_failures >= max_consecutive_failures
                 ):
                     _abort_consecutive_failures(consecutive_failures)
+            _release_challenge(ctx, _cid)
     return rows
 
 
@@ -1379,6 +1418,7 @@ def _live_context(
     timeout: int,
     step_limit: int,
     free_collection_models: frozenset[str] = frozenset(),
+    capacity: CapacityHandle | None = None,
 ) -> _LiveContext:
     """Assemble the read-only shared inputs for one batch of live cells."""
     return _LiveContext(
@@ -1391,6 +1431,7 @@ def _live_context(
         timeout=timeout,
         step_limit=step_limit,
         free_collection_models=free_collection_models,
+        capacity=capacity,
     )
 
 
@@ -1415,6 +1456,8 @@ def run_live_cells(
     mode: Literal["supersede", "replicate"] = "supersede",
     lanes: lane_scheduler.LaneScheduler | None = None,
     campaign: campaign_scheduler.CampaignRun | None = None,
+    resources: ResourceConfig | None = None,
+    memory: MemoryConfig | None = None,
 ) -> list[dict]:
     """Delegate each (challenge, model, arm) cell to the real SWE-bench harness executor.
 
@@ -1424,6 +1467,12 @@ def run_live_cells(
     limiter serializes admission regardless of worker count); ``workers`` otherwise picks the
     challenge-major parallel path. When ``campaign`` is supplied (the free-campaign path), the
     plan's priority order, domination stop and per-model phase gate drive the pull loop.
+
+    Supplying ``resources`` opts the run into capacity management: a HARD disk preflight
+    (raises ``InsufficientDiskError`` unless the planned images fit or the config allows it),
+    a RAM guard that caps ``workers`` (raises ``InsufficientMemoryError`` when even one
+    container cannot fit), optional prefetch, and per-challenge image retention. It is None
+    by default so a direct/library caller stays offline; the CLI entrypoints always pass it.
     """
     # ``write_lock``/``failures`` let a concurrent caller (the ladder) serialize writes and
     # share the counters across challenge threads.
@@ -1449,15 +1498,6 @@ def run_live_cells(
     # it to the write-time wall so a billed free lane trips FREE_LANE_BILLED, while a plain
     # read of results.csv carries no provenance and never treats `-explabs` history as free.
     free_collection_models = frozenset(m for _, m, _ in cells if _is_free_lane(m))
-    ctx = _live_context(
-        hashes,
-        versions,
-        digests,
-        arm_hash_map,
-        timeout,
-        step_limit,
-        free_collection_models,
-    )
     # Persist each completed cell through merge_rows (history-log supersession +
     # key-upsert + atomic write preserved); None ⇒ old in-memory-only behaviour.
     checkpoint = (
@@ -1465,6 +1505,81 @@ def run_live_cells(
         if results_path is not None
         else None
     )
+    if resources is None or not cells:
+        ctx = _live_context(
+            hashes,
+            versions,
+            digests,
+            arm_hash_map,
+            timeout,
+            step_limit,
+            free_collection_models,
+        )
+        return _dispatch_live_cells(
+            cells,
+            ctx,
+            workers,
+            max_cost,
+            checkpoint,
+            max_cost_overshoot,
+            max_start_failures,
+            max_consecutive_failures,
+            failures,
+            lanes,
+            campaign,
+        )
+    # Capacity path: ordered, de-duplicated image refs for the run's cells, then one manager
+    # for the whole dispatch. The disk preflight raises before ANY container starts; the RAM
+    # guard refuses before the pool is built; per-challenge retention and prefetch are driven
+    # through the handle threaded on the context.
+    refs = list(dict.fromkeys(image_refs_for_ids([cid for cid, _, _ in cells])))
+    memory_cfg = memory if memory is not None else config.memory_config()
+    with capacity_manager(refs, config=resources) as cap:
+        guard = MemoryGuard(
+            config=memory_cfg,
+            requested_workers=workers,
+            available_bytes_fn=read_mem_available_bytes,
+        )
+        effective_workers = guard.check_or_raise()
+        ctx = _live_context(
+            hashes,
+            versions,
+            digests,
+            arm_hash_map,
+            timeout,
+            step_limit,
+            free_collection_models,
+            cap,
+        )
+        return _dispatch_live_cells(
+            cells,
+            ctx,
+            effective_workers,
+            max_cost,
+            checkpoint,
+            max_cost_overshoot,
+            max_start_failures,
+            max_consecutive_failures,
+            failures,
+            lanes,
+            campaign,
+        )
+
+
+def _dispatch_live_cells(
+    cells: list[tuple[str, str, str]],
+    ctx: _LiveContext,
+    workers: int,
+    max_cost: float | None,
+    checkpoint: Callable[[dict], None] | None,
+    max_cost_overshoot: float,
+    max_start_failures: int | None,
+    max_consecutive_failures: int | None,
+    failures: _FailureTracker | None,
+    lanes: lane_scheduler.LaneScheduler | None,
+    campaign: campaign_scheduler.CampaignRun | None,
+) -> list[dict]:
+    """Route a run's cells to the campaign, serial or parallel executor (unchanged by capacity)."""
     if campaign is not None:
         # Free-campaign path: the priority plan, domination stop and phase gate drive the
         # pull loop. The tracker keeps the run-level abort caps that the serial path enforces.
@@ -1531,6 +1646,8 @@ def _run_and_merge(
     mode: Literal["supersede", "replicate"] = "supersede",
     lanes: lane_scheduler.LaneScheduler | None = None,
     campaign: campaign_scheduler.CampaignRun | None = None,
+    resources: ResourceConfig | None = None,
+    memory: MemoryConfig | None = None,
 ) -> int:
     """Run a cell list through the challenge-major executor and upsert results.csv.
 
@@ -1560,6 +1677,8 @@ def _run_and_merge(
         mode=mode,
         lanes=lanes,
         campaign=campaign,
+        resources=resources,
+        memory=memory,
     )
     if write_lock is not None:
         with write_lock:
@@ -1586,6 +1705,8 @@ def collect_phase(
     write_lock: threading.Lock | None = None,
     failures: _FailureTracker | None = None,
     step_limit: int = infer._DEFAULT_STEP_LIMIT,
+    resources: ResourceConfig | None = None,
+    memory: MemoryConfig | None = None,
 ) -> CellStatus:
     """Classify one (tasks x models) block against the cache and, when live, run+merge it.
 
@@ -1621,6 +1742,8 @@ def collect_phase(
                 failures=failures,
                 step_limit=step_limit,
                 mode=mode,  # type: ignore[arg-type]
+                resources=resources,
+                memory=memory,
             )
     return status
 
@@ -1658,6 +1781,8 @@ def _run_replicates(
         step_limit=step_limit,
         mode="replicate",
         lanes=lanes,
+        resources=getattr(args, "resources", None),
+        memory=getattr(args, "memory", None),
     )
 
 
@@ -1938,6 +2063,85 @@ def _sampled_selected_arms(
     return selected
 
 
+def add_capacity_args(ap: argparse.ArgumentParser) -> None:
+    """Add the shared container/image capacity flags (grouped) to an entrypoint parser.
+
+    Defaults are None so an absent flag inherits the config's ``resources:`` block —
+    ``ResourceConfig.from_args`` overlays only non-None values. The disk preflight HARD-FAILS
+    by default: a run that cannot fit its images aborts with the remedy list rather than
+    filling the root volume, and ``--allow-insufficient-disk`` is the explicit override.
+    ``--image-retention per-challenge`` drops each challenge's image once its cells and their
+    grading finish, and is the recommended setting for a large matrix.
+    """
+    capacity = ap.add_argument_group(
+        "capacity",
+        "Disk preflight (hard-fail by default) · per-challenge image retention · RAM worker cap.",
+    )
+    capacity.add_argument(
+        "--image-retention",
+        dest="retention",
+        choices=("keep", "per-challenge"),
+        default=None,
+        help="keep (default) keeps images for the whole run; per-challenge removes a "
+        "challenge's image as soon as its cells + grading finish (recommended for a big run). "
+        "Default: benchmark.yaml resources.retention.",
+    )
+    capacity.add_argument(
+        "--allow-insufficient-disk",
+        dest="allow_insufficient_disk",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Proceed even when the disk preflight says the images will not fit. Default: "
+        "resources.allow_insufficient_disk (false) — refusing the run is the safe default.",
+    )
+    capacity.add_argument(
+        "--disk-safety-factor",
+        type=float,
+        default=None,
+        help="compressed -> uncompressed multiplier for registry image sizes. "
+        "Default: resources.disk_safety_factor.",
+    )
+    capacity.add_argument(
+        "--disk-reserve-gib",
+        type=float,
+        default=None,
+        help="Free GiB to leave untouched on the docker root. Default: resources.disk_reserve_gib.",
+    )
+    capacity.add_argument(
+        "--prefetch",
+        dest="prefetch_enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Warm images ahead of the cell that needs them (also dodges mini-swe-agent's "
+        "120s pull_timeout). Default: resources.prefetch (false).",
+    )
+    capacity.add_argument(
+        "--prefetch-window",
+        type=int,
+        default=None,
+        help="How many images ahead the prefetcher stays. Default: resources.prefetch_window.",
+    )
+    capacity.add_argument(
+        "--prefetch-workers",
+        type=int,
+        default=None,
+        help="Concurrent pulls during prefetch. Default: resources.prefetch_workers.",
+    )
+    capacity.add_argument(
+        "--container-memory-gib",
+        type=float,
+        default=None,
+        help="Per-container RAM bound used to cap --workers. "
+        "Default: resources.container_memory_gib.",
+    )
+    capacity.add_argument(
+        "--memory-reserve-gib",
+        type=float,
+        default=None,
+        help="Host RAM held back when capping workers. Default: resources.memory_reserve_gib.",
+    )
+
+
 def _add_args(ap: argparse.ArgumentParser, config_path: str) -> None:
     ap.add_argument(
         "--strategy",
@@ -1985,6 +2189,7 @@ def _add_args(ap: argparse.ArgumentParser, config_path: str) -> None:
         help="Concurrent live cells (I/O-bound: Docker + LLM). Each worker runs a "
         "SWE-bench container — raise it with an eye on host memory. 1 = serial.",
     )
+    add_capacity_args(ap)
     ap.add_argument(
         "--preflight-timeout",
         type=float,
@@ -2131,6 +2336,8 @@ def _dispatch(args: argparse.Namespace) -> int:
             max_consecutive_failures=args.max_consecutive_failures,
             check_images=args.check_images,
             step_limit=getattr(args, "step_limit", None),
+            resources=getattr(args, "resources", None),
+            memory=getattr(args, "memory", None),
         )
     if args.strategy == "ladder":
         import json  # noqa: PLC0415
@@ -2155,6 +2362,8 @@ def _dispatch(args: argparse.Namespace) -> int:
             max_consecutive_failures=args.max_consecutive_failures,
             check_images=args.check_images,
             step_limit=getattr(args, "step_limit", None),
+            resources=getattr(args, "resources", None),
+            memory=getattr(args, "memory", None),
         )
     # A `--require-zero-cost` run is contractually $0-capped (fail-closed by
     # `require_zero_cost_refusal` and the FREE_LANE_BILLED interlock), so it is NOT an
@@ -2190,6 +2399,10 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> int:
         config.load(args.config)
     if getattr(args, "free_registry", None):
         config.set_free_registry(args.free_registry)
+    # Capacity policy: benchmark.yaml's `resources:` block overlaid by the CLI flags. Stashed
+    # on args so every dispatch path (full / cost_optimal / ladder) threads the same pair.
+    args.resources = config.resource_config(args)
+    args.memory = config.memory_config(args)
     return _dispatch(args)
 
 
@@ -2468,6 +2681,8 @@ def _run_full(args: argparse.Namespace) -> int:
                 max_consecutive_failures=args.max_consecutive_failures,
                 step_limit=step_limit,
                 lanes=scheduler,
+                resources=getattr(args, "resources", None),
+                memory=getattr(args, "memory", None),
             )
             print(f"  live: wrote {n} cell(s) to {config.results_csv_path()}")
             matrix = config.load_matrix(config.challenges_path())
@@ -2490,6 +2705,8 @@ def _run_full(args: argparse.Namespace) -> int:
                 step_limit=step_limit,
                 lanes=scheduler,
                 campaign=campaign,
+                resources=getattr(args, "resources", None),
+                memory=getattr(args, "memory", None),
             )
             print(f"  live: wrote {n} cell(s) to {config.results_csv_path()}")
             n += _run_replicates(

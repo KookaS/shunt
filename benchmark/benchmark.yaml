@@ -222,6 +222,27 @@ live:
     # satisfied by any local endpoint. 6000 is the cap the motivating run actually used.
     max_tokens: 6000
 
+# Container/image capacity policy (benchmark.runner.capacity + memory_guard). A live run
+# preflights the disk before any container: with `allow_insufficient_disk: false` (the default)
+# a shortfall ABORTS the run with the remedy list rather than filling the root volume and
+# OOM/ENOSPC-ing mid-cell. `retention: per-challenge` drops a challenge's image as soon as all
+# its cells (and grading) finish — the recommended setting for a large matrix; `keep` mirrors
+# the pre-capacity behaviour. Prefetch is OFF by default; turn it on to warm cold images ahead
+# of a cell (this also dodges mini-swe-agent's 120s pull_timeout). Every field is overridable
+# by a `--disk-*` / `--prefetch*` / `--container-memory-gib` CLI flag, and a CLI `--prefetch`
+# default of None means "use this file".
+resources:
+  retention: keep              # keep | per-challenge (per-challenge is recommended for a big run)
+  allow_insufficient_disk: false   # true = proceed even when the preflight says it won't fit
+  disk_safety_factor: 1.5      # compressed -> uncompressed multiplier for registry sizes
+  disk_reserve_gib: 10         # free space to leave untouched on the docker root
+  assumed_image_gib: 3         # fallback footprint when a size cannot be resolved
+  prefetch: false              # warm images ahead of the cell that needs them
+  prefetch_window: 5           # how many images ahead the prefetcher stays
+  prefetch_workers: 2          # concurrent pulls during prefetch
+  container_memory_gib: 1.5    # per-container RAM bound for the worker cap
+  memory_reserve_gib: 2        # RAM held back for the host/docker when capping workers
+
 paths:
   challenges: routing/data/challenges.json        # curated input, relative to config.py dir
   results_csv: routing/results.csv                # generated source of truth (read-write)
