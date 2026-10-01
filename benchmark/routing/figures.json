@@ -593,7 +593,7 @@
         "bin [0.2,0.4): predicted 0.372, observed 1.000 (n=3)",
         "bin [0.4,0.6): predicted 0.537, observed 0.647 (n=139)",
         "bin [0.6,0.8): predicted 0.712, observed 0.755 (n=465)",
-        "bin [0.8,1.0): predicted 0.897, observed 0.862 (n=645)"
+        "bin [0.8,1.0): predicted 0.897, observed 0.862 (n=647)"
       ],
       "price_sheet": null,
       "reading": "Left: the reliability diagram. x is the weighted neighbourhood success rate the shipped rule computes for a (task, model) pair; y is how often that pair actually passed. A calibrated predictor tracks the dashed diagonal. Bars carry 95% Wilson intervals and the count in each bin. The red line is the shipped 0.6 eligibility threshold. Middle: how those scores are distributed, so the threshold's position is visible geometry rather than a claim. Right: Brier skill score against the marginal pass rate \u2014 above zero means the neighbourhood rate beats simply knowing how often each model passes \u2014 with the shuffled-outcome null band and the human-difficulty-tag positive control on the same axis.",

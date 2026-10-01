@@ -720,7 +720,7 @@ ADMISSIBLE: positive control +0.9875 clears chance band (>+0.6001) AND destroyed
 bin [0.2,0.4): predicted 0.372, observed 1.000 (n=3)
 bin [0.4,0.6): predicted 0.537, observed 0.647 (n=139)
 bin [0.6,0.8): predicted 0.712, observed 0.755 (n=465)
-bin [0.8,1.0): predicted 0.897, observed 0.862 (n=645)
+bin [0.8,1.0): predicted 0.897, observed 0.862 (n=647)
 
 **Limits.** The neighbour weight is similarity only. The shipped rule also multiplies by each neighbour's verification confidence, which is 1.0 for every cell in this corpus, so the two coincide here and could diverge on live traffic. 396/1267 scored cells (31.3%) are monotone-IMPUTED, not measured, and 390/396 of them are filled pass=True — imputation here is near-exclusively pass-filling (the ladder's fail branch fires rarely), so it almost never adds a failure. Every rate on this figure is biased UPWARD by that fill.
 
