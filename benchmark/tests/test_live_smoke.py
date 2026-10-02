@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 from benchmark.runner import live_smoke
@@ -211,6 +212,97 @@ def test_content_problems() -> None:
     assert live_smoke.content_problems('{"choices":[{"message":{"content":"OK"}}]}') == []
     assert live_smoke.content_problems('{"choices":[]}') != []
     assert live_smoke.content_problems("not json") != []
+
+
+# ── transient in-band provider refusals ───────────────────────────────────────
+
+# The exact shape OpenRouter returns while an upstream worker is at capacity:
+# HTTP 200, `choices` null, and the cause in an `error` object. The old smoke
+# misreported this as "no parseable text content" — a wiring failure for what is
+# a transient provider condition.
+_RESOURCE_EXHAUSTED = json.dumps(
+    {
+        "id": "gen-x",
+        "choices": None,
+        "error": {
+            "message": (
+                "Upstream error from Nvidia: ResourceExhausted: "
+                "Worker local total request limit reached (16/16)"
+            ),
+            "code": 502,
+            "metadata": {"error_type": "provider_unavailable"},
+        },
+    }
+)
+
+
+def test_transient_provider_error_classifies_resource_exhausted() -> None:
+    reason = live_smoke.transient_provider_error(_RESOURCE_EXHAUSTED)
+    assert reason is not None and "ResourceExhausted" in reason
+
+
+def test_transient_provider_error_none_for_real_answer() -> None:
+    assert live_smoke.transient_provider_error('{"choices":[{"message":{"content":"OK"}}]}') is None
+    assert live_smoke.transient_provider_error("not json") is None
+
+
+def test_content_problems_names_in_band_provider_failure_distinctly() -> None:
+    problems = live_smoke.content_problems(_RESOURCE_EXHAUSTED)
+    assert len(problems) == 1
+    assert "transient provider failure" in problems[0]
+    assert "ResourceExhausted" in problems[0]
+    # A parseable body with empty content is a DIFFERENT failure (not transient).
+    assert live_smoke.content_problems('{"choices":[{"message":{"content":""}}]}') == [
+        "routed completion returned empty text content"
+    ]
+
+
+def test_post_completion_with_retry_recovers_from_transient(monkeypatch) -> None:
+    calls = {"n": 0}
+
+    def fake_post(_port: int, _timeout: float) -> tuple[int, dict[str, str], str]:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return 200, {}, _RESOURCE_EXHAUSTED
+        return 200, {"x-shunt-decision": "ok"}, '{"choices":[{"message":{"content":"OK"}}]}'
+
+    monkeypatch.setattr(live_smoke, "post_completion", fake_post)
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    reported: list[str] = []
+    status, _headers, body = live_smoke.post_completion_with_retry(1, 1.0, reported.append)
+    assert status == 200
+    assert "OK" in body
+    assert calls["n"] == 3
+    assert len(reported) == 2  # one report per retried refusal
+
+
+def test_post_completion_with_retry_does_not_retry_a_non_2xx(monkeypatch) -> None:
+    # A bad key is a 401 — a wiring/auth failure that must fail at once, not retry.
+    calls = {"n": 0}
+
+    def fake_post(_port: int, _timeout: float) -> tuple[int, dict[str, str], str]:
+        calls["n"] += 1
+        return 401, {}, '{"error":{"message":"No auth credentials found","code":401}}'
+
+    monkeypatch.setattr(live_smoke, "post_completion", fake_post)
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    status, _headers, _body = live_smoke.post_completion_with_retry(1, 1.0, lambda _m: None)
+    assert status == 401
+    assert calls["n"] == 1
+
+
+def test_post_completion_with_retry_gives_up_after_bounded_attempts(monkeypatch) -> None:
+    calls = {"n": 0}
+
+    def fake_post(_port: int, _timeout: float) -> tuple[int, dict[str, str], str]:
+        calls["n"] += 1
+        return 200, {}, _RESOURCE_EXHAUSTED
+
+    monkeypatch.setattr(live_smoke, "post_completion", fake_post)
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    status, _headers, body = live_smoke.post_completion_with_retry(1, 1.0, lambda _m: None)
+    assert calls["n"] == live_smoke.COMPLETION_MAX_ATTEMPTS
+    assert body == _RESOURCE_EXHAUSTED
 
 
 def test_verify_capture_pass() -> None:

@@ -217,7 +217,12 @@ def reliability(rates: np.ndarray, pass_mat: np.ndarray, n_bins: int = _N_BINS) 
     flat_r, flat_y = rates.ravel(), pass_mat.ravel()
     out: list[dict] = []
     for lo, hi in zip(edges[:-1], edges[1:], strict=True):
-        mask = (flat_r >= lo) & (flat_r < hi if hi < 1.0 else flat_r <= hi)
+        # The final edge is OPEN-ENDED. A weighted average of 0/1 outcomes is
+        # mathematically <= 1, but rounding lands 13 of the live 1267 cells at
+        # 1.0000000000000002, and a strict `< hi` dropped them from every bin —
+        # the figure and docs/routing.md then summed to 1254. `>= lo` on the top
+        # bin guarantees every cell is counted exactly once.
+        mask = flat_r >= lo if hi >= 1.0 else (flat_r >= lo) & (flat_r < hi)
         n = int(mask.sum())
         if n == 0:
             continue

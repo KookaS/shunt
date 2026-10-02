@@ -35,6 +35,19 @@ SESSION_WAIT_S: Final[float] = 15.0
 PROMPT_MARKER: Final[str] = "shunt-live-smoke"
 SMOKE_PROMPT: Final[str] = f"{PROMPT_MARKER}: reply with the single word OK."
 STRATEGY: Final[str] = "always_cheap"
+# 16 left a reasoning `:free` lane with no room to emit VISIBLE text — every token
+# went to reasoning and `content` came back empty while the body parsed fine. 64
+# gives a reasoning model room for both the scratchpad and the one-word answer.
+SMOKE_MAX_TOKENS: Final[int] = 64
+# Transient in-band refusals (upstream worker at capacity) are retried with
+# exponential backoff rather than failed as a wiring bug. Five attempts span
+# 2+4+8+16 = 30s, which clears a short 16/16 worker wall without stalling CI.
+COMPLETION_MAX_ATTEMPTS: Final[int] = 5
+COMPLETION_BACKOFF_S: Final[float] = 2.0
+_TRANSIENT_ERROR_TYPES: Final[frozenset[str]] = frozenset(
+    {"provider_unavailable", "rate_limit", "server_error", "timeout"}
+)
+_TRANSIENT_ERROR_CODES: Final[frozenset[int]] = frozenset({408, 429, 500, 502, 503, 504})
 
 
 # ── spend gates (pure — unit-tested) ─────────────────────────────────────────
@@ -276,7 +289,7 @@ def post_completion(port: int, timeout: float) -> tuple[int | None, dict[str, st
         {
             "model": "auto",
             "stream": False,
-            "max_tokens": 16,
+            "max_tokens": SMOKE_MAX_TOKENS,
             "messages": [{"role": "user", "content": SMOKE_PROMPT}],
         }
     ).encode("utf-8")
@@ -301,6 +314,73 @@ def post_completion(port: int, timeout: float) -> tuple[int | None, dict[str, st
         )
     except (urllib.error.URLError, OSError) as exc:
         return None, {}, str(exc)
+
+
+def _inband_error(body: str) -> tuple[bool, str] | None:
+    """``(is_transient, message)`` for an HTTP-200 body carrying an error, else None.
+
+    OpenRouter reports a provider-side refusal inside a 200 body — ``choices`` is
+    null and an ``error`` object carries the cause — rather than as an HTTP status.
+    A missing key or header surfaces as a non-200 status and never reaches here.
+    """
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("choices"):
+        return None
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return None
+    metadata = error.get("metadata")
+    error_type = str(metadata.get("error_type") or "") if isinstance(metadata, dict) else ""
+    code = error.get("code")
+    message = str(error.get("message") or "")
+    transient = (
+        error_type in _TRANSIENT_ERROR_TYPES
+        or (isinstance(code, int) and code in _TRANSIENT_ERROR_CODES)
+        or "ResourceExhausted" in message
+    )
+    return transient, (message or f"in-band {error_type or code} error")
+
+
+def transient_provider_error(body: str) -> str | None:
+    """The message of a retryable in-band provider refusal, or None.
+
+    A capacity refusal (``ResourceExhausted`` / ``provider_unavailable``) is
+    transient provider news, not a content or wiring failure, so the caller may
+    retry it; anything else returns None and fails on its own merits.
+    """
+    found = _inband_error(body)
+    if found is None or not found[0]:
+        return None
+    return found[1]
+
+
+def post_completion_with_retry(
+    port: int, timeout: float, report: Callable[[str], None]
+) -> tuple[int | None, dict[str, str], str]:
+    """One completion, retrying a transient in-band provider refusal with backoff.
+
+    Non-200 responses and reachable parseable bodies return immediately; only a
+    transient in-band refusal (e.g. an upstream worker at capacity) is retried,
+    bounded at ``COMPLETION_MAX_ATTEMPTS``. The final attempt's body is returned
+    so a persistent refusal is still reported — as a provider condition.
+    """
+    delay = COMPLETION_BACKOFF_S
+    result = post_completion(port, timeout)
+    for attempt in range(2, COMPLETION_MAX_ATTEMPTS + 1):
+        transient = transient_provider_error(result[2])
+        if result[0] is None or transient is None:
+            return result
+        report(
+            f"transient provider refusal (attempt {attempt - 1}/{COMPLETION_MAX_ATTEMPTS}): "
+            f"{transient}; retrying in {delay:.0f}s"
+        )
+        time.sleep(delay)
+        delay *= 2
+        result = post_completion(port, timeout)
+    return result
 
 
 # ── verification (machine-checkable pass criteria) ───────────────────────────
@@ -361,6 +441,10 @@ def verify_headers(
 
 def content_problems(body: str) -> list[str]:
     """The completion body must be a real, non-empty model answer."""
+    found = _inband_error(body)
+    if found is not None:
+        kind = "transient provider failure" if found[0] else "provider returned an in-band error"
+        return [f"{kind}: {found[1]}"]
     try:
         payload = json.loads(body)
         content = payload["choices"][0]["message"]["content"]
@@ -573,9 +657,12 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
 
             report.write(
-                f"sending one real completion (max_tokens=16, marker={PROMPT_MARKER!r})..."
+                f"sending one real completion (max_tokens={SMOKE_MAX_TOKENS}, "
+                f"marker={PROMPT_MARKER!r})..."
             )
-            status, headers, body = post_completion(args.port, REQUEST_TIMEOUT_S)
+            status, headers, body = post_completion_with_retry(
+                args.port, REQUEST_TIMEOUT_S, report.write
+            )
             if status is None:
                 problems.append(f"could not reach shunt: {body}")
                 return 1

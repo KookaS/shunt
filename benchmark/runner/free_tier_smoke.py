@@ -142,8 +142,13 @@ def _verify(server, expected: ModelConfig, max_cost: float, report: Callable[[st
     if not live.model_listed(server.port, expected.name):
         return [f"expected model {expected.name} is not in GET /v1/models"], [], None
 
-    report(f"sending one real completion (max_tokens=16, marker={live.PROMPT_MARKER!r})...")
-    status, headers, body = live.post_completion(server.port, live.REQUEST_TIMEOUT_S)
+    report(
+        f"sending one real completion (max_tokens={live.SMOKE_MAX_TOKENS}, "
+        f"marker={live.PROMPT_MARKER!r})..."
+    )
+    status, headers, body = live.post_completion_with_retry(
+        server.port, live.REQUEST_TIMEOUT_S, report
+    )
     if status is None:
         return [f"could not reach shunt: {body}"], [], None
     report(f"completion returned HTTP {status}")

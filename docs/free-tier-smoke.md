@@ -67,6 +67,15 @@ intentions:
    the check yet.
 4. **A hard $0 cost cap.** A recorded session cost above `$0` fails the smoke —
    a `:free` model is expected to bill nothing.
+5. **A transient provider refusal is retried, not misreported.** OpenRouter can
+   answer HTTP 200 with `choices: null` and an in-band `error` (e.g.
+   `ResourceExhausted` / `provider_unavailable`) while an upstream worker is at
+   capacity. That is retried with bounded exponential backoff (five attempts over
+   ~30s) and, if it persists, fails with a **transient provider failure** message —
+   distinct from the `no parseable text content` wiring failure a genuinely
+   malformed body produces. A bad key or a missing header stays a non-200 and
+   fails immediately. The completion requests `max_tokens=64` so a reasoning model
+   leaves room to emit visible text after its scratchpad.
 
 ## When it runs
 
