@@ -118,8 +118,8 @@ def _build_prefetch(
     if not config.prefetch_enabled:
         return None
 
-    def default_pull(ref: str) -> None:
-        pull_image(ref, fetch=fetch, local_fn=local_fn)
+    def default_pull(ref: str) -> bool:
+        return pull_image(ref, fetch=fetch, local_fn=local_fn)
 
     def disk_free() -> int:
         return free_fn(docker_root_fn())

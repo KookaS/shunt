@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 import shlex
 import subprocess
+import sys
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -48,11 +49,16 @@ from benchmark.runner import (
     swebench_grading,
     swebench_specs,
 )
+from benchmark.runner.capacity.guard import InsufficientDiskError, capacity_manager
+from benchmark.runner.capacity.sizes import image_refs_for_ids
+from benchmark.runner.capacity.types import ResourceConfig
 from benchmark.runner.step_snapshots import TESTBED
 from shunt.verifiers.base import VerifierResult
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from benchmark.runner.capacity.guard import CapacityHandle
 
 _LOG = logging.getLogger(__name__)
 
@@ -478,8 +484,82 @@ def _handle_absent_snapshots(trajectory_id: str, jsonl_path: Path) -> None:
     )
 
 
-def run_offline_replay(trajectory_id: str, instance_id: str, jsonl_path: Path) -> Path | None:
-    """Full offline pass: snapshots → container replay → restamp the committed trajectory jsonl."""
+def _instance_image_refs(instance_id: str) -> list[str]:
+    """The ordered, de-duplicated image refs a standalone replay preflights and retains."""
+    return list(dict.fromkeys(image_refs_for_ids([instance_id])))
+
+
+def _replay_instance(
+    trajectory_id: str,
+    plan: ReplayPlan,
+    snapshots: dict[int, str],
+    jsonl_path: Path,
+    verdict: replay_admissibility.AdmissibilityVerdict | None,
+    *,
+    capacity: CapacityHandle | None = None,
+) -> Path | None:
+    """Run one instance's container replay, holding its image while ``capacity`` tracks it."""
+    ref = _instance_image_refs(plan.instance_id)[0]
+    if capacity is not None:
+        capacity.retention.acquire(ref)
+        if capacity.prefetch is not None and not capacity.prefetch.wait_ready(
+            ref, timeout=capacity.prefetch.wait_timeout_s
+        ):
+            # Soft degradation: proceed and let the replay pull it, never hang.
+            _LOG.warning("prefetch not ready for %s; the replay will pull it", ref)
+    try:
+        with instance_container(plan.image_ref, f"shunt-replay-{trajectory_id}") as name:
+            exec_fn = docker_exec(name)
+            if verdict is None:
+                verdict = replay_admissibility.check_instance(
+                    instance_id=plan.instance_id,
+                    test_patch=plan.test_patch,
+                    gold_patch=plan.gold_patch,
+                    test_cmd=plan.test_cmd,
+                    test_selectors=plan.selectors,
+                    exec_fn=exec_fn,
+                    classify=plan.classify,
+                    fail_to_pass=plan.classify.fail_to_pass,
+                    gate_key_value=plan.gate_key,
+                )
+                replay_admissibility.record_verdict(verdict, jsonl_path.parent)
+            if not verdict.admissible:
+                return clear_rejected(verdict, jsonl_path)
+            outcomes = replay_snapshots(
+                snapshots=snapshots,
+                test_patch=plan.test_patch,
+                test_cmd=plan.test_cmd,
+                test_selectors=plan.selectors,
+                exec_fn=exec_fn,
+                classify=plan.classify,
+            )
+    finally:
+        if capacity is not None:
+            capacity.retention.release(ref)
+            capacity.retention.release_challenge([plan.instance_id])
+    out_dir = jsonl_path.parent
+    with corpus_lock.corpus_lock(out_dir):
+        traj = restamp_trajectory(schema.load_jsonl(jsonl_path), outcomes)
+        commit_trajectory(traj, jsonl_path)
+    _LOG.info("restamped %s with %d per-step outcomes", jsonl_path, len(outcomes))
+    return jsonl_path
+
+
+def run_offline_replay(
+    trajectory_id: str,
+    instance_id: str,
+    jsonl_path: Path,
+    *,
+    resources: ResourceConfig | None = None,
+) -> Path | None:
+    """Full offline pass: snapshots → container replay → restamp the committed trajectory jsonl.
+
+    When ``resources`` is supplied the standalone path gets the same capacity guard as the
+    batch stamp stage: a disk preflight of the instance image (hard-fail unless
+    ``allow_insufficient_disk``), an optional prefetch, and a ref-count around the container.
+    ``None`` keeps the historical no-capacity behaviour; the batch stage passes nothing and
+    owns the manager itself.
+    """
     snapshots = step_snapshots.read_snapshots(trajectory_id)
     if not snapshots:
         _handle_absent_snapshots(trajectory_id, jsonl_path)
@@ -516,40 +596,16 @@ def run_offline_replay(trajectory_id: str, instance_id: str, jsonl_path: Path) -
     verdict = replay_admissibility.cached_verdict(instance_id, plan.gate_key, out_dir)
     if verdict is not None and not verdict.admissible:
         return clear_rejected(verdict, jsonl_path)
-    # TODO(capacity): disk preflight + retention for a BATCH are owned by
-    # `pipeline.run_stamp_stage` (one manager over the pending instance images, per-instance
-    # release). Running this module STANDALONE bypasses that guard; wrap `plan.image_ref` in a
-    # capacity manager here if a standalone disk-safety check is ever needed.
-    with instance_container(plan.image_ref, f"shunt-replay-{trajectory_id}") as name:
-        exec_fn = docker_exec(name)
-        if verdict is None:
-            verdict = replay_admissibility.check_instance(
-                instance_id=instance_id,
-                test_patch=plan.test_patch,
-                gold_patch=plan.gold_patch,
-                test_cmd=plan.test_cmd,
-                test_selectors=plan.selectors,
-                exec_fn=exec_fn,
-                classify=plan.classify,
-                fail_to_pass=plan.classify.fail_to_pass,
-                gate_key_value=plan.gate_key,
-            )
-            replay_admissibility.record_verdict(verdict, out_dir)
-        if not verdict.admissible:
-            return clear_rejected(verdict, jsonl_path)
-        outcomes = replay_snapshots(
-            snapshots=snapshots,
-            test_patch=plan.test_patch,
-            test_cmd=plan.test_cmd,
-            test_selectors=plan.selectors,
-            exec_fn=exec_fn,
-            classify=plan.classify,
+    if resources is None:
+        return _replay_instance(trajectory_id, plan, snapshots, jsonl_path, verdict)
+    # The standalone parity with `pipeline.run_stamp_stage`: one manager over the planned
+    # instance images, a hard preflight before any container, then per-instance acquisition
+    # and release. The batch stage keeps owning its own manager; only a caller that opts in
+    # (the CLI's `--capacity`) reaches this branch.
+    with capacity_manager(_instance_image_refs(instance_id), config=resources) as capacity:
+        return _replay_instance(
+            trajectory_id, plan, snapshots, jsonl_path, verdict, capacity=capacity
         )
-    with corpus_lock.corpus_lock(out_dir):
-        traj = restamp_trajectory(schema.load_jsonl(jsonl_path), outcomes)
-        commit_trajectory(traj, jsonl_path)
-    _LOG.info("restamped %s with %d per-step outcomes", jsonl_path, len(outcomes))
-    return jsonl_path
 
 
 def commit_trajectory(traj: schema.Trajectory, jsonl_path: Path) -> None:
@@ -574,6 +630,7 @@ def _main() -> int:
     import argparse  # noqa: PLC0415
 
     from benchmark.escalation.live_capture import LIVE_DIR  # noqa: PLC0415
+    from benchmark.runner.run_matrix import add_capacity_args  # noqa: PLC0415
 
     # The stamping stage runs this module as a SUBPROCESS, and a child with no handler falls back
     # to `logging.lastResort`, which starts at WARNING. Every ADMISSIBLE gate verdict is logged at
@@ -597,9 +654,33 @@ def _main() -> int:
         default=None,
         help="trajectory jsonl to restamp (default: the live plane's <trajectory_id>.jsonl)",
     )
+    ap.add_argument(
+        "--config",
+        default="benchmark/benchmark.yaml",
+        help="benchmark config whose `resources:` block seeds the capacity policy.",
+    )
+    ap.add_argument(
+        "--capacity",
+        action="store_true",
+        help="Opt into the capacity manager (disk preflight + retention) for this replay. "
+        "Off by default, mirroring the batch stamp stage; off keeps the replay docker-only.",
+    )
+    add_capacity_args(ap)
     args = ap.parse_args()
     jsonl = args.jsonl or (LIVE_DIR / f"{args.trajectory_id}.jsonl")
-    result = run_offline_replay(args.trajectory_id, args.instance_id, jsonl)
+    resources = None
+    if args.capacity:
+        from benchmark import config as bench_config  # noqa: PLC0415
+
+        bench_config.load(args.config)
+        resources = bench_config.resource_config(args)
+    try:
+        result = run_offline_replay(
+            args.trajectory_id, args.instance_id, jsonl, resources=resources
+        )
+    except InsufficientDiskError as exc:
+        print(f"REFUSING: {exc}", file=sys.stderr)
+        return 2
     # None has two causes — the instance was inadmissible, or the trajectory captured no
     # snapshots — and they are not interchangeable; see the WARNING each logs. A checkout that
     # merely lacks the scratch does not return None at all: it raises SnapshotsMissingError.

@@ -13,6 +13,25 @@ GIB: Final[int] = 1024**3
 # registry manifest scaled by the calibration factor, or the configured fallback.
 ImageSource = Literal["local", "registry", "assumed"]
 
+# Every key the `resources:` block may carry, across ResourceConfig and the memory
+# keys MemoryConfig consumes. The union lives here so `ResourceConfig.from_mapping`
+# can reject a typo in ANY of them without importing the memory-guard module.
+_RESOURCE_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "retention",
+        "allow_insufficient_disk",
+        "disk_safety_factor",
+        "disk_reserve_gib",
+        "assumed_image_gib",
+        "prefetch",
+        "prefetch_enabled",
+        "prefetch_workers",
+        "prefetch_wait_timeout_s",
+        "container_memory_gib",
+        "memory_reserve_gib",
+    }
+)
+
 
 class RetentionPolicy(Enum):
     """How long a pulled image is kept on disk after a challenge finishes."""
@@ -22,14 +41,15 @@ class RetentionPolicy(Enum):
 
     @classmethod
     def parse(cls, value: object) -> RetentionPolicy:
-        """Coerce a policy name (or member) to a member; anything unknown means KEEP."""
+        """Coerce a policy name (or member) to a member; raise on anything unknown."""
         if isinstance(value, cls):
             return value
         text = str(value or "").strip().lower().replace("_", "-")
         for member in cls:
             if member.value == text:
                 return member
-        return cls.KEEP
+        valid = ", ".join(member.value for member in cls)
+        raise ValueError(f"unknown retention {value!r}; expected one of: {valid}")
 
 
 @dataclass(frozen=True)
@@ -65,32 +85,56 @@ class ResourceConfig:
     disk_safety_factor: float = 1.5
     disk_reserve_gib: float = 10.0
     assumed_image_gib: float = 3.0
-    prefetch_window: int = 5
     prefetch_workers: int = 2
     prefetch_enabled: bool = False
+    prefetch_wait_timeout_s: float = 600.0
 
     @classmethod
     def from_mapping(
         cls, data: Mapping[str, object] | None = None, *, base: ResourceConfig | None = None
     ) -> ResourceConfig:
-        """Overlay a config mapping onto ``base`` (or the defaults)."""
+        """Overlay a config mapping onto ``base`` (or the defaults).
+
+        STRICT: an unknown key, an unknown ``retention`` value, or a non-numeric /
+        negative numeric value raises ``ValueError`` so a typo cannot silently fall
+        back to a default. The accepted key set spans the whole ``resources:`` block
+        (including the memory keys ``MemoryConfig`` reads) so this can validate it.
+        """
         cfg = base or cls()
         if not data:
             return cfg
-        retention = data.get("retention", None)
+        unknown = set(data) - _RESOURCE_KEYS
+        if unknown:
+            raise ValueError(f"unknown resources key(s): {', '.join(sorted(unknown))}")
+        retention_raw = data.get("retention")
+        prefetch_raw = data.get("prefetch_enabled", data.get("prefetch"))
         return cls(
             retention=(
-                RetentionPolicy.parse(retention) if retention is not None else cfg.retention
+                cfg.retention if retention_raw is None else RetentionPolicy.parse(retention_raw)
             ),
             allow_insufficient_disk=_as_bool(
-                data.get("allow_insufficient_disk"), cfg.allow_insufficient_disk
+                data.get("allow_insufficient_disk"),
+                cfg.allow_insufficient_disk,
+                name="allow_insufficient_disk",
             ),
-            disk_safety_factor=_as_float(data.get("disk_safety_factor"), cfg.disk_safety_factor),
-            disk_reserve_gib=_as_float(data.get("disk_reserve_gib"), cfg.disk_reserve_gib),
-            assumed_image_gib=_as_float(data.get("assumed_image_gib"), cfg.assumed_image_gib),
-            prefetch_window=_as_int(data.get("prefetch_window"), cfg.prefetch_window),
-            prefetch_workers=_as_int(data.get("prefetch_workers"), cfg.prefetch_workers),
-            prefetch_enabled=_as_bool(data.get("prefetch_enabled"), cfg.prefetch_enabled),
+            disk_safety_factor=_as_float(
+                data.get("disk_safety_factor"), cfg.disk_safety_factor, name="disk_safety_factor"
+            ),
+            disk_reserve_gib=_as_float(
+                data.get("disk_reserve_gib"), cfg.disk_reserve_gib, name="disk_reserve_gib"
+            ),
+            assumed_image_gib=_as_float(
+                data.get("assumed_image_gib"), cfg.assumed_image_gib, name="assumed_image_gib"
+            ),
+            prefetch_workers=_as_int(
+                data.get("prefetch_workers"), cfg.prefetch_workers, name="prefetch_workers"
+            ),
+            prefetch_enabled=_as_bool(prefetch_raw, cfg.prefetch_enabled, name="prefetch"),
+            prefetch_wait_timeout_s=_as_float(
+                data.get("prefetch_wait_timeout_s"),
+                cfg.prefetch_wait_timeout_s,
+                name="prefetch_wait_timeout_s",
+            ),
         )
 
     @classmethod
@@ -113,39 +157,78 @@ class ResourceConfig:
                 RetentionPolicy.parse(retention) if retention is not None else cfg.retention
             ),
             allow_insufficient_disk=_as_bool(
-                getattr(args, "allow_insufficient_disk", None), cfg.allow_insufficient_disk
+                getattr(args, "allow_insufficient_disk", None),
+                cfg.allow_insufficient_disk,
+                name="allow_insufficient_disk",
             ),
             disk_safety_factor=_as_float(
-                getattr(args, "disk_safety_factor", None), cfg.disk_safety_factor
+                getattr(args, "disk_safety_factor", None),
+                cfg.disk_safety_factor,
+                name="disk_safety_factor",
             ),
             disk_reserve_gib=_as_float(
-                getattr(args, "disk_reserve_gib", None), cfg.disk_reserve_gib
+                getattr(args, "disk_reserve_gib", None),
+                cfg.disk_reserve_gib,
+                name="disk_reserve_gib",
             ),
             assumed_image_gib=_as_float(
-                getattr(args, "assumed_image_gib", None), cfg.assumed_image_gib
+                getattr(args, "assumed_image_gib", None),
+                cfg.assumed_image_gib,
+                name="assumed_image_gib",
             ),
-            prefetch_window=_as_int(getattr(args, "prefetch_window", None), cfg.prefetch_window),
-            prefetch_workers=_as_int(getattr(args, "prefetch_workers", None), cfg.prefetch_workers),
+            prefetch_workers=_as_int(
+                getattr(args, "prefetch_workers", None),
+                cfg.prefetch_workers,
+                name="prefetch_workers",
+            ),
             prefetch_enabled=_as_bool(
-                getattr(args, "prefetch_enabled", None), cfg.prefetch_enabled
+                getattr(args, "prefetch_enabled", None), cfg.prefetch_enabled, name="prefetch"
+            ),
+            prefetch_wait_timeout_s=_as_float(
+                getattr(args, "prefetch_wait_timeout_s", None),
+                cfg.prefetch_wait_timeout_s,
+                name="prefetch_wait_timeout_s",
             ),
         )
 
 
-def _as_bool(value: object, default: bool) -> bool:
-    """Coerce a config/CLI value to bool, preserving ``default`` on None."""
-    return default if value is None else bool(value)
-
-
-def _as_float(value: object, default: float) -> float:
-    """Coerce a config/CLI value to float, preserving ``default`` on None."""
+def _as_bool(value: object, default: bool, *, name: str) -> bool:
+    """Coerce a config/CLI value to bool, preserving ``default`` on None; else STRICT."""
     if value is None:
         return default
-    return float(cast("float | int | str", value))
+    if not isinstance(value, bool):
+        raise ValueError(f"{name}: expected true/false, got {value!r}")
+    return value
 
 
-def _as_int(value: object, default: int) -> int:
-    """Coerce a config/CLI value to int, preserving ``default`` on None."""
+def _as_float(value: object, default: float, *, name: str) -> float:
+    """Coerce a config/CLI value to a non-negative float, preserving ``default`` on None."""
     if value is None:
         return default
-    return int(cast("float | int | str", value))
+    if isinstance(value, bool):  # bool is an int subclass; a bool here is a typo, not a number
+        raise ValueError(f"{name}: expected a number, got {value!r}")
+    try:
+        result = float(cast("float | int | str", value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name}: expected a number, got {value!r}") from exc
+    if result < 0:
+        raise ValueError(f"{name}: must be >= 0, got {result}")
+    return result
+
+
+def _as_int(value: object, default: int, *, name: str) -> int:
+    """Coerce a config/CLI value to a non-negative int, preserving ``default`` on None."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError(f"{name}: expected an integer, got {value!r}")
+    try:
+        number = float(cast("float | int | str", value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name}: expected an integer, got {value!r}") from exc
+    if not number.is_integer():
+        raise ValueError(f"{name}: expected an integer, got {value!r}")
+    result = int(number)
+    if result < 0:
+        raise ValueError(f"{name}: must be >= 0, got {result}")
+    return result

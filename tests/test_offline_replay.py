@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -14,6 +16,14 @@ import pytest
 
 from benchmark.escalation import schema
 from benchmark.runner import offline_replay, replay_admissibility
+from benchmark.runner.capacity.guard import CapacityHandle, InsufficientDiskError
+from benchmark.runner.capacity.retention import ImageRetention
+from benchmark.runner.capacity.sizes import image_refs_for_ids
+from benchmark.runner.capacity.types import (
+    CapacityVerdict,
+    ResourceConfig,
+    RetentionPolicy,
+)
 from benchmark.runner.offline_replay import replay_snapshots, replay_step
 from shunt.verifiers.parse import parse_test_outcome
 from tests.escalation.factories import make_step, make_trajectory
@@ -919,3 +929,117 @@ def test_the_replay_cli_quiets_http_chatter_but_not_its_own_verdicts(
         assert logging.getLogger(name).level == logging.WARNING
     # The replay's OWN loggers keep whatever the run configured — quieting is targeted, not global.
     assert logging.getLogger("benchmark.runner.replay_admissibility").level == logging.NOTSET
+
+
+# ---------------------------------------------------------------------------
+# C7b: the STANDALONE path must get the batch stamp stage's capacity guard. Before this, a
+# standalone `run_offline_replay` started a container with no disk preflight and no ref-count, so
+# it could fill the root volume that `run_stamp_stage` refuses to let it — the batching parent
+# held the guard, the one trajectory the owner runs by hand did not.
+# ---------------------------------------------------------------------------
+
+
+def _capacity_verdict(*, ok: bool) -> CapacityVerdict:
+    """A minimal preflight verdict; only ``ok`` drives the branch under test."""
+    return CapacityVerdict(
+        ok=ok,
+        needed_bytes=0,
+        free_bytes=0,
+        shortfall_bytes=0,
+        per_image=(),
+        docker_root="/",
+        remedies=(),
+    )
+
+
+def test_capacity_preflight_runs_before_any_container(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The ordering IS the guard: a preflight evaluated after the container starts protects
+    # nothing. This drives the REAL capacity_manager with only its preflight seam faked.
+    from benchmark.runner.capacity import guard as capacity_guard
+
+    events: list[str] = []
+
+    def _preflight(_refs: object, **_kwargs: object) -> CapacityVerdict:
+        events.append("preflight")
+        return _capacity_verdict(ok=True)
+
+    def _container(_ref: str, name: str) -> object:
+        events.append("container")
+        import contextlib  # noqa: PLC0415
+
+        return contextlib.nullcontext(name)
+
+    jsonl = tmp_path / "t.jsonl"
+    schema.dump_jsonl(make_trajectory([_unstamped(0), _unstamped(1)], snapshot_steps=2), jsonl)
+    _wire_replay(monkeypatch, _LegScriptedContainer(_SYMPY_F2P_FAILS, _SYMPY_F2P_PASSES))
+    monkeypatch.setattr(capacity_guard, "preflight", _preflight)
+    monkeypatch.setattr(offline_replay, "instance_container", _container)
+
+    result = offline_replay.run_offline_replay(
+        "traj-1", "repo__repo-1", jsonl, resources=ResourceConfig(disk_reserve_gib=0.0)
+    )
+
+    assert result == jsonl
+    assert events[0] == "preflight"
+    assert "container" in events
+
+
+def test_capacity_insufficient_disk_aborts_before_any_container(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from benchmark.runner.capacity import guard as capacity_guard
+
+    jsonl = tmp_path / "t.jsonl"
+    schema.dump_jsonl(make_trajectory([_unstamped(0), _unstamped(1)], snapshot_steps=2), jsonl)
+    _wire_replay(monkeypatch, _LegScriptedContainer(_SYMPY_F2P_FAILS, _SYMPY_F2P_PASSES))
+    monkeypatch.setattr(
+        capacity_guard, "preflight", lambda _refs, **_k: _capacity_verdict(ok=False)
+    )
+    # A container here would be the bug: the refusal must happen before it starts.
+    monkeypatch.setattr(offline_replay, "instance_container", _no_container)
+    before = jsonl.read_bytes()
+
+    with pytest.raises(InsufficientDiskError):
+        offline_replay.run_offline_replay(
+            "traj-1", "repo__repo-1", jsonl, resources=ResourceConfig()
+        )
+    assert jsonl.read_bytes() == before
+
+
+def test_a_shared_image_is_not_released_until_the_last_trajectory_finishes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Two trajectories of one instance share the image ref. The standalone path must release its
+    # OWN hold (and ask to release the challenge) without removing the image a sibling still uses;
+    # removal waits for the last holder. A per-trajectory `docker rmi` would break the sibling.
+    removed: list[str] = []
+    resources = ResourceConfig(retention=RetentionPolicy.PER_CHALLENGE)
+    retention = ImageRetention(resources, remove_fn=lambda ref: (removed.append(ref), 0)[1])
+    handle = CapacityHandle(retention=retention, prefetch=None, verdict=_capacity_verdict(ok=True))
+    ref = image_refs_for_ids(["repo__repo-1"])[0]
+
+    @contextmanager
+    def _manager(_refs: object, **_kwargs: object) -> Iterator[CapacityHandle]:
+        yield handle
+
+    monkeypatch.setattr(offline_replay, "capacity_manager", _manager)
+    jsonl = tmp_path / "t.jsonl"
+    schema.dump_jsonl(make_trajectory([_unstamped(0), _unstamped(1)], snapshot_steps=2), jsonl)
+    _wire_replay(monkeypatch, _LegScriptedContainer(_SYMPY_F2P_FAILS, _SYMPY_F2P_PASSES))
+
+    # The sibling trajectory of the same instance is still replaying and holds the image.
+    retention.acquire(ref)
+
+    assert (
+        offline_replay.run_offline_replay("traj-A", "repo__repo-1", jsonl, resources=resources)
+        == jsonl
+    )
+    # traj-A released its own hold and requested the challenge release — the ref is still held, so
+    # nothing may be removed yet.
+    assert removed == []
+
+    retention.release(ref)
+    retention.drain()
+    assert removed == [ref]

@@ -238,8 +238,8 @@ resources:
   disk_reserve_gib: 10         # free space to leave untouched on the docker root
   assumed_image_gib: 3         # fallback footprint when a size cannot be resolved
   prefetch: false              # warm images ahead of the cell that needs them
-  prefetch_window: 5           # how many images ahead the prefetcher stays
   prefetch_workers: 2          # concurrent pulls during prefetch
+  prefetch_wait_timeout_s: 600 # finite wait for a prefetched image; then the harness pulls
   container_memory_gib: 1.5    # per-container RAM bound for the worker cap
   memory_reserve_gib: 2        # RAM held back for the host/docker when capping workers
 

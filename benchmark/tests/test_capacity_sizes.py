@@ -139,17 +139,3 @@ def test_resolve_sizes_assumed_fallback_when_registry_unavailable() -> None:
     sizes = resolve_sizes(["img"], config=config, fetch=lambda url, headers: (0, b""))
     assert sizes[0].source == "assumed"
     assert sizes[0].uncompressed_estimate_bytes == int(4.0 * GIB)
-
-
-def test_online_calibration_updates_the_factor() -> None:
-    config = ResourceConfig(disk_safety_factor=1.5)
-    resolver = SizeResolver(
-        config=config, local_fn=lambda ref: None, registry_fn=lambda ref, *, fetch=None: 1_000
-    )
-    assert resolver.factor == 1.5
-    resolver.observe(1_000, 3_000)
-    assert resolver.factor == 3.0
-    resolver.observe(1_000, 5_000)
-    assert resolver.factor == 4.0
-    resolved = resolver.resolve(["img"])
-    assert resolved[0].uncompressed_estimate_bytes == 4_000

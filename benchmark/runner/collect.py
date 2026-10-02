@@ -329,16 +329,26 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> int:
     )
     _add_args(ap, config_path)
     args = ap.parse_args()
-    return run_collect(
-        args.config,
-        live=args.live,
-        timeout=args.timeout,
-        workers=args.workers,
-        max_cost=args.max_cost,
-        step_limit=args.step_limit,
-        resources=config.resource_config(args),
-        memory=config.memory_config(args),
-    )
+    # Load the (possibly custom) config BEFORE building the capacity policy, so a
+    # `--config` file's `resources:` block is the base the CLI flags overlay.
+    config.load(args.config)
+    from benchmark.runner.capacity.guard import InsufficientDiskError
+    from benchmark.runner.memory_guard import InsufficientMemoryError
+
+    try:
+        return run_collect(
+            args.config,
+            live=args.live,
+            timeout=args.timeout,
+            workers=args.workers,
+            max_cost=args.max_cost,
+            step_limit=args.step_limit,
+            resources=config.resource_config(args),
+            memory=config.memory_config(args),
+        )
+    except (InsufficientDiskError, InsufficientMemoryError) as exc:
+        print(f"REFUSING: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

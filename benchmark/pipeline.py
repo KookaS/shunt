@@ -425,8 +425,11 @@ def _replay_instance(
 
         ref = image_refs_for_ids((group[0][1],))[0]
         capacity.retention.acquire(ref)
-        if capacity.prefetch is not None:
-            capacity.prefetch.wait_ready(ref)
+        if capacity.prefetch is not None and not capacity.prefetch.wait_ready(
+            ref, timeout=capacity.prefetch.wait_timeout_s
+        ):
+            # Soft degradation: proceed and let the replay subprocess pull it, never hang.
+            progress.emit(f"  stamp: prefetch not ready for {ref} — replay will pull it")
     try:
         for item in group:
             _replay_one(item, digest=digest, replay_timeout=replay_timeout, progress=progress)

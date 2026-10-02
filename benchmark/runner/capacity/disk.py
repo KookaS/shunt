@@ -41,8 +41,8 @@ _RETENTION_REMEDY: Final[str] = (
     "run with `--image-retention per-challenge`."
 )
 _PREPULL_REMEDY: Final[str] = (
-    "Pre-stage the images before the run (enable prefetch, or pull them ahead of time with "
-    "`scripts/benchmark/prepull_swebench_images.py`)."
+    "Pre-stage the images before the run by enabling prefetch (`--prefetch`), which pulls "
+    "them ahead of the cells that need them (images are otherwise pulled on demand)."
 )
 _VOLUME_REMEDY: Final[str] = (
     "Grow the EC2 root volume (infra root_block_device volume_size) and re-apply Terraform."

@@ -11,7 +11,7 @@ from typing import Final
 
 from benchmark.runner.capacity.types import GIB, ImageSize, ResourceConfig
 
-PullFn = Callable[[str], None]
+PullFn = Callable[[str], bool]
 FreeFn = Callable[[], int]
 OnPulledFn = Callable[[str], None]
 
@@ -72,19 +72,31 @@ class Prefetcher:
         self._scheduler.start()
 
     def wait_ready(self, ref: str, timeout: float | None = None) -> bool:
-        """Block until ``ref`` has been pulled (or attempted); True when it is local."""
-        deadline = None if timeout is None else time.monotonic() + timeout
+        """Block until ``ref`` has been pulled (or attempted); True when it is local.
+
+        ``timeout=None`` uses the configurable ``prefetch_wait_timeout_s``, so a wait is
+        ALWAYS finite — a full disk that never frees the scheduler's condition cannot hang
+        the caller forever. A ref whose pull returned falsy (or raised) is failed and this
+        returns False immediately.
+        """
+        effective = self._config.prefetch_wait_timeout_s if timeout is None else timeout
+        deadline = time.monotonic() + effective
         with self._cond:
             if self._pool is None and self._scheduler is None:
                 return ref in self._ready
             while ref not in self._ready and ref not in self._failed:
                 if self._closed:
                     return ref in self._ready
-                remaining = None if deadline is None else deadline - time.monotonic()
-                if remaining is not None and remaining <= 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     return ref in self._ready
                 self._cond.wait(remaining)
             return ref in self._ready
+
+    @property
+    def wait_timeout_s(self) -> float:
+        """The finite wait bound a caller should pass to :meth:`wait_ready`."""
+        return self._config.prefetch_wait_timeout_s
 
     def close(self) -> None:
         """Stop scheduling and join the scheduler and worker pool."""
@@ -141,12 +153,16 @@ class Prefetcher:
             self._pool.submit(self._run, ref)
 
     def _run(self, ref: str) -> None:
-        """Pull one ref, then release its reservation and record the outcome."""
+        """Pull one ref, then release its reservation and record the outcome.
+
+        A pull function that returns falsy is a FAILURE, not a success: the ref is
+        recorded failed and any ``wait_ready`` returns False promptly (the harness will
+        then pull it itself, a soft degradation rather than a silent false positive).
+        """
         estimate = self._estimate(ref)
         ok = False
         try:
-            self._pull_fn(ref)
-            ok = True
+            ok = bool(self._pull_fn(ref))
         except Exception:  # noqa: BLE001 - one failed prefetch must not kill the pool
             ok = False
         with self._cond:

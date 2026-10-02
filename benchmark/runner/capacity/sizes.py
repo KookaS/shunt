@@ -170,8 +170,9 @@ def registry_size(ref: str, *, fetch: Fetch | None = None) -> int | None:
     """Compressed image size from the registry, or None when unavailable.
 
     Resolves an OCI/Docker image index down to its linux/amd64 manifest and sums
-    the layer blobs plus the config. Docker Hub uses an anonymous bearer token;
-    GHCR is queried anonymously.
+    the layer blobs plus the config. Docker Hub is queried with an anonymous bearer
+    token; GHCR's registry endpoint refuses anonymous manifest requests (HTTP 401),
+    so those refs fall through to the local inspect or the assumed fallback.
     """
     http = fetch or _urllib_fetch
     parts = _parse_ref(ref)
@@ -202,7 +203,7 @@ def registry_size(ref: str, *, fetch: Fetch | None = None) -> int | None:
 
 
 class SizeResolver:
-    """Resolve image sizes while online-calibrating the compressed/uncompressed ratio."""
+    """Resolve image sizes from the local store, the registry, or the assumed fallback."""
 
     def __init__(
         self,
@@ -217,20 +218,6 @@ class SizeResolver:
         self._local = local_fn
         self._registry = registry_fn
         self._factor = config.disk_safety_factor
-        self._observations = 0
-
-    @property
-    def factor(self) -> float:
-        """The current compressed -> uncompressed multiplier."""
-        return self._factor
-
-    def observe(self, compressed_bytes: int, uncompressed_bytes: int) -> None:
-        """Fold a measured (compressed, uncompressed) pair into the running factor."""
-        if compressed_bytes <= 0 or uncompressed_bytes <= 0:
-            return
-        ratio = uncompressed_bytes / compressed_bytes
-        self._factor = (self._factor * self._observations + ratio) / (self._observations + 1)
-        self._observations += 1
 
     def resolve(self, refs: Iterable[str]) -> tuple[ImageSize, ...]:
         """Classify every ref as cached-local, registry-scaled, or assumed."""

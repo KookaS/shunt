@@ -629,13 +629,12 @@ def resource_config(args: object | None = None) -> ResourceConfig:
 
     ``args`` uses the runner's flag names (``retention`` from ``--image-retention``,
     ``prefetch_enabled`` from ``--prefetch/--no-prefetch``); pass None for config-only.
+    ``ResourceConfig.from_mapping`` is strict: a typo'd key or bad value raises so a
+    misconfigured run cannot silently fall back to a default.
     """
     from benchmark.runner.capacity.types import ResourceConfig
 
     mapping = resources_mapping()
-    # The YAML spells the prefetch toggle `prefetch:`; ResourceConfig reads `prefetch_enabled`.
-    if "prefetch" in mapping and "prefetch_enabled" not in mapping:
-        mapping["prefetch_enabled"] = mapping["prefetch"]
     if args is None:
         return ResourceConfig.from_mapping(mapping)
     return ResourceConfig.from_args(args, mapping=mapping)
@@ -646,10 +645,7 @@ def memory_config(args: object | None = None) -> MemoryConfig:
     from benchmark.runner.memory_guard import MemoryConfig
 
     mapping = resources_mapping()
-    base = MemoryConfig(
-        container_gib=float(mapping.get("container_memory_gib", 1.5)),
-        reserve_gib=float(mapping.get("memory_reserve_gib", 2.0)),
-    )
+    base = MemoryConfig.from_mapping(mapping)
     container = getattr(args, "container_memory_gib", None) if args is not None else None
     reserve = getattr(args, "memory_reserve_gib", None) if args is not None else None
     return MemoryConfig(
@@ -1455,5 +1451,20 @@ def validate(config_path: str | Path | None = None) -> list[str]:
     control = cfg.get("routing", {}).get("control_model")
     if control and control not in pricing:
         errors.append(f"control_model '{control}' not found in the model registry")
+
+    # `resources:` is STRICT: an unknown key, an unknown retention value, or a
+    # non-numeric/negative numeric is a validation error rather than a silent fallback.
+    resources = cfg.get("resources")
+    if resources is not None and not isinstance(resources, dict):
+        errors.append("benchmark.yaml 'resources' must be a mapping")
+    else:
+        from benchmark.runner.capacity.types import ResourceConfig
+        from benchmark.runner.memory_guard import MemoryConfig
+
+        for strict in (ResourceConfig.from_mapping, MemoryConfig.from_mapping):
+            try:
+                strict(resources or {})
+            except (ValueError, TypeError) as exc:
+                errors.append(f"resources: {exc}")
 
     return errors

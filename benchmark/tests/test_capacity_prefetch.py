@@ -27,7 +27,7 @@ class _Recorder:
         self.pulled: list[str] = []
         self._delay = delay
 
-    def __call__(self, ref: str) -> None:
+    def __call__(self, ref: str) -> bool:
         with self._lock:
             self._active += 1
             self.peak = max(self.peak, self._active)
@@ -35,6 +35,7 @@ class _Recorder:
         with self._lock:
             self.pulled.append(ref)
             self._active -= 1
+        return True
 
 
 def _run(refs: list[str], *, config: ResourceConfig, free: int, sizes, pull) -> Prefetcher:
@@ -96,3 +97,42 @@ def test_prefetch_off_by_default() -> None:
     prefetch.close()
     assert pull.pulled == []
     assert prefetch.wait_ready("r0", timeout=1.0) is False
+
+
+def test_falsy_pull_is_recorded_failed() -> None:
+    refs = ["bad"]
+    config = ResourceConfig(prefetch_enabled=True, prefetch_workers=1, disk_reserve_gib=0.0)
+    prefetch = Prefetcher(
+        refs,
+        config=config,
+        sizes=_sizes(refs),
+        pull_fn=lambda ref: False,
+        free_fn=lambda: 100 * GIB,
+    )
+    prefetch.start()
+    assert prefetch.wait_ready("bad", timeout=5.0) is False
+    prefetch.close()
+
+
+def test_no_space_wait_is_bounded_by_the_config_timeout() -> None:
+    refs = ["r0"]
+    # 0 free - 10 GiB reserve can never fit the image, so the scheduler only ever waits.
+    config = ResourceConfig(
+        prefetch_enabled=True,
+        prefetch_workers=1,
+        disk_reserve_gib=10.0,
+        prefetch_wait_timeout_s=0.05,
+    )
+    calls: list[str] = []
+
+    def pull(ref: str) -> bool:
+        calls.append(ref)
+        return True
+
+    prefetch = Prefetcher(refs, config=config, sizes=_sizes(refs), pull_fn=pull, free_fn=lambda: 0)
+    prefetch.start()
+    started = time.monotonic()
+    assert prefetch.wait_ready("r0") is False  # None -> the config bound, never forever
+    assert time.monotonic() - started < 5.0
+    prefetch.close()
+    assert calls == []  # never fit, so never pulled

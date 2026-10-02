@@ -3,26 +3,23 @@
 OOM is the FATAL direction. An over-provisioned worker pool gets a container
 ``SIGKILL``-ed (exit 137), which costs the whole trajectory — not merely wall-clock — and
 the kill is invisible to every status-based retry. Under-provisioning workers only slows a
-run down. The bound is therefore a HIGH percentile (p90) of the observed per-container
-peaks, inflated by a safety margin, never the mean: the mean hides the heavy tail that
-actually triggers the OOM, and a cluster of small containers must not license one large
-one.
+run down. The bound is therefore a conservative per-container size from
+``resources.container_memory_gib`` (never the mean of a few observed containers): a
+cluster of small containers must not license one large one.
 
 The guard is self-contained (no ``capacity/`` dependency) so an entrypoint can adopt it on
-its own; wiring is the integrator's job. ``cap_workers`` is pure arithmetic over injected
-inputs, and ``MemoryGuard`` owns the live seam: it reads ``MemAvailable``, records the
-peaks of finished containers, and refuses — before any container starts — when even one
-cannot fit.
+its own. ``cap_workers`` is pure arithmetic over injected inputs, and ``MemoryGuard`` owns
+the live seam: it reads ``MemAvailable`` and refuses — before any container starts — when
+even one cannot fit.
 """
 
 from __future__ import annotations
 
 import math
-import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, cast
 
 _BYTES_PER_GIB: Final[int] = 1024**3
 _MEMINFO_PATH: Final[Path] = Path("/proc/meminfo")
@@ -52,13 +49,42 @@ class InsufficientMemoryError(RuntimeError):
 
 @dataclass(frozen=True)
 class MemoryConfig:
-    """Per-container memory assumptions and the sampling/margin policy."""
+    """Per-container memory assumptions for the worker cap."""
 
     container_gib: float = 1.5
     reserve_gib: float = 2.0
-    sample_containers: int = 3
-    percentile: float = 0.9
-    safety_margin: float = 0.2
+
+    @classmethod
+    def from_mapping(
+        cls, data: Mapping[str, object] | None = None, *, base: MemoryConfig | None = None
+    ) -> MemoryConfig:
+        """Overlay the ``resources:`` memory keys; raise on a non-numeric or negative value."""
+        cfg = base or cls()
+        if not data:
+            return cfg
+        return cls(
+            container_gib=_as_gib(
+                data.get("container_memory_gib"), cfg.container_gib, "container_memory_gib"
+            ),
+            reserve_gib=_as_gib(
+                data.get("memory_reserve_gib"), cfg.reserve_gib, "memory_reserve_gib"
+            ),
+        )
+
+
+def _as_gib(value: object, default: float, name: str) -> float:
+    """Coerce a resources memory field to a non-negative float, preserving ``default`` on None."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError(f"{name}: expected a number, got {value!r}")
+    try:
+        result = float(cast("float | int | str", value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name}: expected a number, got {value!r}") from exc
+    if result < 0:
+        raise ValueError(f"{name}: must be >= 0, got {result}")
+    return result
 
 
 def read_mem_available_bytes(
@@ -83,35 +109,11 @@ def read_mem_available_bytes(
     raise ValueError(f"no MemAvailable line in {path}")
 
 
-def _percentile(values: Sequence[float], fraction: float) -> float:
-    """Linear-interpolated percentile (numpy's default method) of *values*."""
-    ordered = sorted(values)
-    if len(ordered) == 1:
-        return ordered[0]
-    rank = (len(ordered) - 1) * fraction
-    lower = math.floor(rank)
-    upper = min(lower + 1, len(ordered) - 1)
-    return ordered[lower] + (rank - lower) * (ordered[upper] - ordered[lower])
-
-
-def _bound_gib(config: MemoryConfig, observed_peak_gib: Sequence[float]) -> float:
-    """GiB one container is assumed to need: observed high percentile + margin, else default.
-
-    Only the FIRST ``sample_containers`` observations shape the bound, so a long run's
-    bound stabilises after the opening wave instead of creeping with every ``record``.
-    """
-    sample = tuple(observed_peak_gib)[: max(0, config.sample_containers)]
-    if not sample:
-        return config.container_gib
-    return _percentile(sample, config.percentile) * (1.0 + config.safety_margin)
-
-
 def cap_workers(
     requested: int,
     *,
     config: MemoryConfig,
     available_bytes: int | None = None,
-    observed_peak_gib: Sequence[float] = (),
 ) -> int:
     """The worker count to actually run: ``requested`` capped by what memory can hold.
 
@@ -119,7 +121,7 @@ def cap_workers(
     clamping to zero or launching the doomed container.
     """
     available = read_mem_available_bytes() if available_bytes is None else available_bytes
-    bound_gib = _bound_gib(config, observed_peak_gib)
+    bound_gib = config.container_gib
     headroom = available - int(config.reserve_gib * _BYTES_PER_GIB)
     fits = math.floor(headroom / (bound_gib * _BYTES_PER_GIB))
     if fits < 1:
@@ -130,7 +132,7 @@ def cap_workers(
 
 
 class MemoryGuard:
-    """Stateful memory seam: reads availability and refines the bound from observations."""
+    """Stateful memory seam: reads availability and reports the capped worker count."""
 
     def __init__(
         self,
@@ -142,19 +144,6 @@ class MemoryGuard:
         self._config = config
         self._requested = requested_workers
         self._available_bytes_fn = available_bytes_fn
-        self._lock = threading.Lock()
-        self._observed: list[float] = []
-
-    @property
-    def observed_peak_gib(self) -> tuple[float, ...]:
-        """Snapshot of recorded per-container peaks, taken under the lock."""
-        with self._lock:
-            return tuple(self._observed)
-
-    def record(self, peak_gib: float) -> None:
-        """Append one finished container's peak, thread-safe (workers record concurrently)."""
-        with self._lock:
-            self._observed.append(float(peak_gib))
 
     def check_or_raise(self) -> int:
         """``cap_workers`` for this guard's request; raises rather than starting a doomed run."""
@@ -162,12 +151,11 @@ class MemoryGuard:
             self._requested,
             config=self._config,
             available_bytes=self._available_bytes_fn(),
-            observed_peak_gib=self.observed_peak_gib,
         )
 
     @property
     def effective_workers(self) -> int:
-        """The capped worker count, validated against current memory and observations."""
+        """The capped worker count, validated against current memory."""
         return self.check_or_raise()
 
 

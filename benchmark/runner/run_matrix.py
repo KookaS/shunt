@@ -33,10 +33,15 @@ from benchmark.runner import (
     swebench_multimodal_specs,
     swebench_specs,
 )
-from benchmark.runner.capacity.guard import CapacityHandle, capacity_manager
+from benchmark.runner.capacity.guard import (
+    CapacityHandle,
+    InsufficientDiskError,
+    capacity_manager,
+)
 from benchmark.runner.capacity.sizes import image_refs_for_ids
 from benchmark.runner.capacity.types import ResourceConfig
 from benchmark.runner.memory_guard import (
+    InsufficientMemoryError,
     MemoryConfig,
     MemoryGuard,
     read_mem_available_bytes,
@@ -904,7 +909,7 @@ def _abort_start_failures(n: int) -> NoReturn:
     """Emit the kill message and raise — the run cannot make progress against missing images."""
     msg = (
         f"aborting: {n} consecutive container-start failures — images likely missing or "
-        "registry throttled; pre-stage images with scripts/benchmark/prepull_swebench_images.py"
+        "registry throttled; enable prefetch (`--prefetch`) to warm them ahead of the cells"
     )
     print(f"  {msg}", file=sys.stderr)
     raise ContainerStartAbortError(msg)
@@ -1007,8 +1012,12 @@ def _run_one_cell(
         # Hold the image for this cell (and its in-process grading) and warm it when prefetch
         # is on, so a cold image is local before the scaffold's 120s pull_timeout can fire.
         capacity.retention.acquire(ref)
-        if capacity.prefetch is not None:
-            capacity.prefetch.wait_ready(ref)
+        if capacity.prefetch is not None and not capacity.prefetch.wait_ready(
+            ref, timeout=capacity.prefetch.wait_timeout_s
+        ):
+            # Soft degradation: the warm-up timed out (a full disk that never freed, or a
+            # failed pull). Proceed — the harness pulls the image itself — never hang.
+            print(f"  prefetch not ready {cid}:{model}:{arm} — harness will pull", file=sys.stderr)
     # The ENTIRE body is guarded, not just the harness call: in a worker thread an
     # unhandled raise (import, spec-hash, row-build) would propagate out of the pool's
     # result loop and discard every already-collected (paid) row. Returning a sentinel/None
@@ -2116,16 +2125,17 @@ def add_capacity_args(ap: argparse.ArgumentParser) -> None:
         "120s pull_timeout). Default: resources.prefetch (false).",
     )
     capacity.add_argument(
-        "--prefetch-window",
-        type=int,
-        default=None,
-        help="How many images ahead the prefetcher stays. Default: resources.prefetch_window.",
-    )
-    capacity.add_argument(
         "--prefetch-workers",
         type=int,
         default=None,
         help="Concurrent pulls during prefetch. Default: resources.prefetch_workers.",
+    )
+    capacity.add_argument(
+        "--prefetch-wait-timeout-s",
+        type=float,
+        default=None,
+        help="Finite upper bound (s) on waiting for a prefetched image before degrading to "
+        "the harness pulling it. Default: resources.prefetch_wait_timeout_s (600).",
     )
     capacity.add_argument(
         "--container-memory-gib",
@@ -2261,8 +2271,7 @@ def _add_args(ap: argparse.ArgumentParser, config_path: str) -> None:
         default=5,
         help="Abort the run after this many CONSECUTIVE container-start failures (image "
         "missing / registry throttled) instead of hammering the registry with skips. "
-        "Reset by any successful cell; pre-stage images with "
-        "scripts/benchmark/prepull_swebench_images.py.",
+        "Reset by any successful cell; enable prefetch (`--prefetch`) to warm images ahead.",
     )
     ap.add_argument(
         "--max-consecutive-failures",
@@ -2403,7 +2412,13 @@ def main(config_path: str = "benchmark/benchmark.yaml") -> int:
     # on args so every dispatch path (full / cost_optimal / ladder) threads the same pair.
     args.resources = config.resource_config(args)
     args.memory = config.memory_config(args)
-    return _dispatch(args)
+    try:
+        return _dispatch(args)
+    except (InsufficientDiskError, InsufficientMemoryError) as exc:
+        # A capacity refusal is a verdict, not a crash: exit non-zero with the remedy
+        # text and no traceback, before any container starts.
+        print(f"REFUSING: {exc}", file=sys.stderr)
+        return 2
 
 
 def _parse_cells(raw: str) -> list[tuple[str, str, str]]:
