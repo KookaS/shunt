@@ -50,7 +50,10 @@ statuses below are the current audit of that contract:
   re-stamping needs the state plane, the SWE-bench images, and the gold rows — hours of Docker
   and never API money. The $0 leg you'll actually iterate in is **re-scoring** (the
   backtest items below): replaying policies over the committed stamps costs nothing but a
-  ~90 s run.
+  ~90 s run. The standalone CLI (`python -m benchmark.runner.offline_replay <trajectory>
+  --instance-id <id>`) opts into the same capacity guard the batch stamp stage uses with
+  `--capacity`: it preflights the instance image against the docker root and ref-counts it for
+  the container's lifetime. Without `--capacity` the replay stays docker-only, as before.
 - **PARTLY — from a fresh clone, once you supply what git cannot hold.** Replay reads the per-step
   `git diff HEAD` captures from `runner/artifacts/step_snapshots/`, which is **gitignored**
   (`step_snapshots.SNAPSHOT_ROOT`; ~74 MB / 792 trajectories on the collecting host), and a

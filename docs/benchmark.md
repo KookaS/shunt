@@ -27,6 +27,7 @@ different meanings, so keep them apart (see the note below the table).
 | `strategies.enabled` | evaluate | **Which routing policies are scored offline** over the cache — `oracle`, `always_cheap`, `always_frontier`, `knn_semantic`, `knn_semantic_cascade`, `knn_semantic_cascade_withintask`, `knn_difficulty`, `knn_difficulty_cascade`, `difficulty_band_cascade`, `price_cascade`, `session_cascade`, `knn_semantic_tier`. |
 | `strategies.knn_semantic.*`, `knn_semantic_cascade_withintask.*`, `knn_difficulty.*`, `difficulty_band.*` … | evaluate | Per-policy hyperparameters (`k`, `success_rate_threshold`, `max_tries`). `knn_semantic_cascade` has no block of its own — it takes the `knn_semantic` selection knobs and the `session_cascade` ladder knobs, so the four session-cadence rows (`session_cascade`, `knn_semantic_cascade`, `knn_difficulty_cascade`, `difficulty_band_cascade`) can never be scored at two different ladders. The difficulty family's judge cost is not a knob — it is the measured per-task bill from `judge_difficulty.json`. |
 | `routing.control_model` | evaluate | The fixed-frontier baseline the kill-gate is measured against. |
+| `resources.*` | collect | Disk preflight, image retention, prefetch and the RAM worker cap (see **Capacity controls**). |
 
 **The two "strategy" words.** `--strategy` (a CLI flag) chooses *how live data is
 collected*; `strategies:` (a config block) lists *the routing policies scored on that
@@ -230,6 +231,29 @@ completed under, so an interrupted rebuild does not start over and a source chan
 re-queues everything. Resume is per trajectory and unaffected by the worker count: a killed
 parallel run restarts only what had not finished. Every stage prints a `=== [pipeline] stage: <name> ===` banner so a
 supervising monitor can tell collection from reporting.
+
+**Capacity controls.** A live collection preflights disk and caps its worker pool *before*
+any container starts, driven by the `resources:` block in `benchmark/benchmark.yaml`:
+
+| `resources.` key | Default | Tunes |
+|---|---:|---|
+| `retention` | `keep` | `keep` holds every image for the whole run; `per-challenge` (`--image-retention per-challenge`) drops a challenge's image once its cells and grading finish — recommended for a large matrix. |
+| `allow_insufficient_disk` | `false` | `false` aborts a run whose images will not fit, printing the remedy list; `true` (`--allow-insufficient-disk`) proceeds anyway. |
+| `disk_safety_factor` | `1.5` | Compressed → uncompressed multiplier applied to registry image sizes (`--disk-safety-factor`). |
+| `disk_reserve_gib` | `10` | Free space to leave untouched on the docker root (`--disk-reserve-gib`). |
+| `assumed_image_gib` | `3` | Footprint assumed when neither the local store nor the registry yields a size. |
+| `prefetch` | `false` | Warm images ahead of the cell that needs them (`--prefetch`/`--no-prefetch`). |
+| `prefetch_workers` | `2` | Concurrent pulls during prefetch (`--prefetch-workers`). |
+| `prefetch_wait_timeout_s` | `600` | Finite bound on waiting for a prefetched image before the harness pulls it itself (`--prefetch-wait-timeout-s`) — a wait can never block forever. |
+| `container_memory_gib` | `1.5` | Per-container RAM bound used to cap `--workers` (`--container-memory-gib`). |
+| `memory_reserve_gib` | `2` | Host/docker RAM held back when capping workers (`--memory-reserve-gib`); the run refuses outright when not even one container fits. |
+
+An absent CLI flag inherits the `resources:` value. The block is **strictly validated**:
+an unknown key, an unknown `retention` value, or a non-numeric/negative numeric fails
+`python -m benchmark.validate_config` (exit 1) rather than silently falling back to a
+default. The pipeline's stamp stage opts into the same machinery with `--capacity`
+(a disk preflight of the pending instance images, optional prefetch, the `--stamp-workers`
+RAM cap, and per-instance image release).
 
 The four modules below stay independently runnable as **advanced / debug** entrypoints
 (`make benchmark-live`, `make offline-replay`, `make escalation-eval`,
