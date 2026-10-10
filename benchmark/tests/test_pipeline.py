@@ -609,6 +609,27 @@ class TestStandaloneFigureFreshness:
             corpus.write_text("challenge,model,pass\nc1,m1,false\n")
             assert pipeline.figure_digests((job,))[job.name] != before
 
+    def test_a_configured_free_overlay_is_part_of_the_digest(self, tmp_path: Path) -> None:
+        """`model_validity` and `collection_priority` price free rows through the overlay
+        registry (SHUNT_FREE_REGISTRY), so a figure drawn with an overlay is not the figure
+        drawn without one, and editing the overlay must re-stale it. Unconfigured, the digest
+        must be exactly the overlay-free one, so the committed manifest does not churn. The
+        overlay may live outside the repo (an operator's file), so that must digest too."""
+        job = next(j for j in pipeline.FIGURE_JOBS if j.half == "routing")
+        config.set_free_registry(None)
+        try:
+            bare = pipeline.figure_digests((job,))[job.name]
+            overlay = tmp_path / "overlay.yaml"
+            overlay.write_text("models: {}\n")
+            config.set_free_registry(overlay)
+            with_overlay = pipeline.figure_digests((job,))[job.name]
+            assert with_overlay != bare
+            overlay.write_text("models: {a: {}}\n")
+            assert pipeline.figure_digests((job,))[job.name] != with_overlay
+        finally:
+            config.set_free_registry(None)
+        assert pipeline.figure_digests((job,))[job.name] == bare
+
     # ------------------------------------------------------------------ instrument validity
     # The freshness gate can LIE: the pipeline used to record a CRASHED stage's digest as
     # fresh, so a FAILED render passed the staleness gate. A gate that can lie certifies

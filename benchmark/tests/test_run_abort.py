@@ -183,7 +183,7 @@ def test_run_one_cell_returns_a_rate_limited_sentinel(monkeypatch) -> None:
         raise RuntimeError("429 rate limit exceeded")
 
     monkeypatch.setattr(infer, "run_live_cell", fake_run_live_cell)
-    ctx = SimpleNamespace(work_dir=".", timeout=1, step_limit=1)
+    ctx = SimpleNamespace(work_dir=".", timeout=1, step_limit=1, capacity=None)
     result = run_matrix._run_one_cell(("c1", "m", "default"), ctx)  # type: ignore[arg-type]
     assert isinstance(result, run_matrix._RateLimited)
 
@@ -224,6 +224,8 @@ def _live_ctx() -> Any:
         timeout=1,
         step_limit=150,
         free_collection_models=frozenset(),
+        # _LiveContext.capacity (the disk/memory guard) defaults to None: no guard, no prefetch.
+        capacity=None,
     )
 
 
