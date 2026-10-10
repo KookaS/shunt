@@ -462,7 +462,7 @@
       "dpi": 150,
       "figsize": [
         13.5,
-        8.65
+        8.95
       ],
       "generator": "benchmark.routing.figures.universe",
       "goal": "Read this page as the boundary of the inference pool: these models have real measured outcomes, some of them on hundreds of cells, and the reason each is outside is printed rather than implied. A dominated benchmark model and a collection-only probe are not the same kind of absence.",
@@ -471,8 +471,8 @@
         "Free-channel rows were collected under a different campaign and their intervals are wide from thin coverage, not from measured weakness."
       ],
       "n": {
-        "free": 14,
-        "invalid_evidenced": 23
+        "free": 15,
+        "invalid_evidenced": 24
       },
       "notes": [
         "The predicate and the first-failing reason are not restated here \u2014 they are read from benchmark.routing.model_validity, the same source the model-validity figure draws.",
@@ -485,8 +485,9 @@
         "kimi-k2.5: not in the live pool \u2014 benchmark-only, triage DROP \u2014 121/500 challenges, 121 cells, paid, capability measured, triage DROP",
         "qwen3.7-plus: not in the live pool \u2014 benchmark-only, triage DROP \u2014 87/500 challenges, 87 cells, paid, capability measured, triage DROP",
         "qwen3.8-27b: collection-only promo probe \u2014 never enabled or routed \u2014 42/500 challenges, 42 cells, paid, capability not-ranked, triage not-triaged",
+        "deepseek-r1-distill-qwen-32b: collection-only free channel \u2014 never enabled or routed \u2014 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged",
         "deepseek-v4.1-flash: collection-only free channel \u2014 never enabled or routed \u2014 20/500 challenges, 20 cells, free, capability not-ranked, triage not-triaged",
-        "gemini-flash-lite-latest: collection-only free channel \u2014 never enabled or routed \u2014 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged",
+        "gemini-flash-lite-latest: collection-only free channel \u2014 never enabled or routed \u2014 2/500 challenges, 2 cells, free, capability not-ranked, triage not-triaged",
         "glm-4.7-flash: collection-only free channel \u2014 never enabled or routed \u2014 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged",
         "granite-4.0-h-micro: collection-only free channel \u2014 never enabled or routed \u2014 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged",
         "laguna-s-2.1: collection-only free channel \u2014 never enabled or routed \u2014 10/500 challenges, 10 cells, free, capability not-ranked, triage not-triaged",
@@ -495,15 +496,15 @@
         "llama-3.2-1b-instruct: collection-only free channel \u2014 never enabled or routed \u2014 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged",
         "llama-4-scout-17b-16e-instruct: collection-only free channel \u2014 never enabled or routed \u2014 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged",
         "mistral-small-3.1-24b-instruct: collection-only free channel \u2014 never enabled or routed \u2014 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged",
-        "muse-glimmer-30b: collection-only free channel \u2014 never enabled or routed \u2014 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged",
-        "nemotron-3-nano-omni-30b-a3b-reasoning: collection-only free channel \u2014 never enabled or routed \u2014 3/500 challenges, 3 cells, free, capability not-ranked, triage not-triaged",
+        "muse-glimmer-30b: collection-only free channel \u2014 never enabled or routed \u2014 4/500 challenges, 4 cells, free, capability not-ranked, triage not-triaged",
+        "nemotron-3-nano-omni-30b-a3b-reasoning: collection-only free channel \u2014 never enabled or routed \u2014 6/500 challenges, 6 cells, free, capability not-ranked, triage not-triaged",
         "nemotron-3.5-lightning: collection-only free channel \u2014 never enabled or routed \u2014 13/500 challenges, 15 cells, free, capability not-ranked, triage not-triaged",
         "step-3.7-flash: collection-only free channel \u2014 never enabled or routed \u2014 20/500 challenges, 20 cells, free, capability not-ranked, triage not-triaged"
       ],
       "price_sheet": null,
       "reading": "Every evidenced model that fails at least one inference criterion, on two axes. Panel A: verified-challenge coverage, with the measured-cell count printed; a row covering nothing draws a hatched zero stub, not a missing bar. Panel B: measured pass rate with a 95% Wilson interval, the mean billed cost per task printed beside it. A row with fewer than the provisional cell floor is drawn hatched and faded in both panels, so a thin sample is never read as a full measurement. Blue is a paid channel, orange a free one. Each row carries its first failing reason in the notes below.",
-      "size": "table_25",
-      "subtitle": "inference-invalid on committed evidence \u00b7 not selected for routing, not erased \u00b7 23 inference-invalid evidenced models (9 paid, 14 free) \u00b7 34 named \u00b7 27 evidenced (\u22651 measured outcome) \u00b7 23 invalid-with-outcome \u00b7 the 4 inference-valid models are on the model-validity figure",
+      "size": "table_26",
+      "subtitle": "inference-invalid on committed evidence \u00b7 not selected for routing, not erased \u00b7 24 inference-invalid evidenced models (9 paid, 15 free) \u00b7 35 named \u00b7 28 evidenced (\u22651 measured outcome) \u00b7 24 invalid-with-outcome \u00b7 the 4 inference-valid models are on the model-validity figure",
       "terms": [
         [
           "inference-invalid",
@@ -593,7 +594,7 @@
         "bin [0.2,0.4): predicted 0.372, observed 1.000 (n=3)",
         "bin [0.4,0.6): predicted 0.537, observed 0.647 (n=139)",
         "bin [0.6,0.8): predicted 0.712, observed 0.755 (n=465)",
-        "bin [0.8,1.0): predicted 0.897, observed 0.862 (n=647)"
+        "bin [0.8,1.0): predicted 0.899, observed 0.865 (n=660)"
       ],
       "price_sheet": null,
       "reading": "Left: the reliability diagram. x is the weighted neighbourhood success rate the shipped rule computes for a (task, model) pair; y is how often that pair actually passed. A calibrated predictor tracks the dashed diagonal. Bars carry 95% Wilson intervals and the count in each bin. The red line is the shipped 0.6 eligibility threshold. Middle: how those scores are distributed, so the threshold's position is visible geometry rather than a claim. Right: Brier skill score against the marginal pass rate \u2014 above zero means the neighbourhood rate beats simply knowing how often each model passes \u2014 with the shuffled-outcome null band and the human-difficulty-tag positive control on the same axis.",
@@ -770,7 +771,7 @@
       "price_sheet": null,
       "reading": "Panel A: each model at its blended token price (x, log \u2014 with a separate column at the left for locally-served rungs, which have no per-token list price at all and so cannot sit on a log axis; that column says nothing about what such a rung costs to run, which is UNDEFINED here and stated in the row's note) against its measured pass rate (y), with Wilson 95% whiskers. Marker area follows the square root of the active parameter count, the marker edge says whether the weights are hosted or local, and hue is the coarse total-size band. Panel B: one row per model, a hollow mark at total parameters and a filled mark at active parameters \u2014 the rule joining them IS the mixture-of-experts sparsity gap. A row whose name carries a dagger was measured outside this corpus under a different harness; its note below states which, and its height is not comparable cell-for-cell with the rows beside it.",
       "size": "wide_tall",
-      "subtitle": "one measured arm per model, nothing imputed \u00b7 Wilson 95% intervals \u00b7 6 models: the 4 inference-valid models' measured default-arm cells of results.csv, plus 2 out-of-corpus rung(s) (\u2020) \u00b7 30 excluded model(s) are named and explained in the model-validity figure \u2014 not drawn here \u00b7 1 at $0 (local) \u00b7 5 priced \u00b7 n per model 20\u2013200, unpaired task sets \u00b7 blend = 99% input / 1% output, the corpus's own 517,584,265:7,428,975 token split",
+      "subtitle": "one measured arm per model, nothing imputed \u00b7 Wilson 95% intervals \u00b7 6 models: the 4 inference-valid models' measured default-arm cells of results.csv, plus 2 out-of-corpus rung(s) (\u2020) \u00b7 31 excluded model(s) are named and explained in the model-validity figure \u2014 not drawn here \u00b7 1 at $0 (local) \u00b7 5 priced \u00b7 n per model 20\u2013200, unpaired task sets \u00b7 blend = 99% input / 1% output, the corpus's own 517,584,265:7,428,975 token split",
       "terms": [
         [
           "blended $/Mtok",
@@ -805,18 +806,18 @@
         "The x axis counts measured cells, not comparable task sets: models were not run on identical tasks, so two points at the same height are not a paired comparison.",
         "Free-channel points were collected under a different campaign from the paid corpus's, so their coverage is not comparable cell-for-cell and their intervals are wide from thin coverage, not from measured weakness.",
         "A named identity with no measured cell cannot be placed on panel A at all; panel B's first milestone accounts for it as the drop from named to evidenced.",
-        "Panel B's paid-channel milestone is the count of named identities with a paid channel (20); it is NOT the paid subset of the 27 evidenced identities, which is smaller (13). The milestones are separate filters, not a nested chain."
+        "Panel B's paid-channel milestone is the count of named identities with a paid channel (20); it is NOT the paid subset of the 28 evidenced identities, which is smaller (13). The milestones are separate filters, not a nested chain."
       ],
       "n": {
-        "evidenced": 27,
-        "free": 14,
-        "named": 34,
+        "evidenced": 28,
+        "free": 15,
+        "named": 35,
         "paid": 20,
         "valid": 4
       },
       "notes": [
         "The status taxonomy is READ from benchmark.routing.model_validity: hue is the channel and marker form the first-failing criterion or the evidence floor, so no reader has to decode a model from a colour.",
-        "panel B milestones: 34 named, 27 evidenced, 20 with a paid channel (of all named), 4 inference-valid; 13 of the evidenced identities are paid",
+        "panel B milestones: 35 named, 28 evidenced, 20 with a paid channel (of all named), 4 inference-valid; 13 of the evidenced identities are paid",
         "deepseek-v4-flash: paid, status valid \u2014 70.8% on n=219, $0.0080/task; 219 cells, 201/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid",
         "deepseek-v4-pro: paid, status valid \u2014 85.1% on n=201, $0.1376/task; 201 cells, 201/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid",
         "glm-5.2: paid, status valid \u2014 57.1% on n=84, $0.3429/task; 84 cells, 77/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid",
@@ -837,8 +838,9 @@
         "kimi-k2.5: paid, status invalid:live \u2014 49.6% on n=121, $0.1249/task; 121 cells, 121/500 challenges; not in the live pool \u2014 benchmark-only, triage DROP",
         "qwen3.7-plus: paid, status invalid:live \u2014 43.7% on n=87, $0.0801/task; 87 cells, 87/500 challenges; not in the live pool \u2014 benchmark-only, triage DROP",
         "qwen3.8-27b: paid, status invalid:live \u2014 52.4% on n=42, $0.0034/task; 42 cells, 42/500 challenges; collection-only promo probe \u2014 never enabled or routed",
+        "deepseek-r1-distill-qwen-32b: free, status free-only \u2014 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
         "deepseek-v4.1-flash: free, status free-only \u2014 95.0% on n=20, $0.0000/task; 20 cells, 20/500 challenges; collection-only free channel \u2014 never enabled or routed",
-        "gemini-flash-lite-latest: free, status free-only \u2014 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "gemini-flash-lite-latest: free, status free-only \u2014 50.0% on n=2, $0.0000/task; 2 cells, 2/500 challenges; collection-only free channel \u2014 never enabled or routed",
         "glm-4.7-flash: free, status free-only \u2014 100.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
         "granite-4.0-h-micro: free, status free-only \u2014 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
         "laguna-s-2.1: free, status free-only \u2014 80.0% on n=10, $0.0000/task; 10 cells, 10/500 challenges; collection-only free channel \u2014 never enabled or routed",
@@ -847,15 +849,15 @@
         "llama-3.2-1b-instruct: free, status free-only \u2014 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
         "llama-4-scout-17b-16e-instruct: free, status free-only \u2014 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
         "mistral-small-3.1-24b-instruct: free, status free-only \u2014 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
-        "muse-glimmer-30b: free, status free-only \u2014 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel \u2014 never enabled or routed",
-        "nemotron-3-nano-omni-30b-a3b-reasoning: free, status free-only \u2014 33.3% on n=3, $0.0000/task; 3 cells, 3/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "muse-glimmer-30b: free, status free-only \u2014 0.0% on n=4, $0.0000/task; 4 cells, 4/500 challenges; collection-only free channel \u2014 never enabled or routed",
+        "nemotron-3-nano-omni-30b-a3b-reasoning: free, status free-only \u2014 16.7% on n=6, $0.0000/task; 6 cells, 6/500 challenges; collection-only free channel \u2014 never enabled or routed",
         "nemotron-3.5-lightning: free, status free-only \u2014 20.0% on n=15, $0.0000/task; 15 cells, 13/500 challenges; collection-only free channel \u2014 never enabled or routed",
         "step-3.7-flash: free, status free-only \u2014 60.0% on n=20, $0.0000/task; 20 cells, 20/500 challenges; collection-only free channel \u2014 never enabled or routed"
       ],
       "price_sheet": null,
       "reading": "Panel A: one point per EVIDENCED canonical weights identity \u2014 x is its measured default-arm cell count on a log axis, y its measured pass rate with a 95% Wilson interval. The dashed vertical rule is the K-cell floor; a point to its left has too little measured evidence to clear the bar however high its rate. Hue is the CHANNEL (blue paid, orange free) \u2014 never a hue per model \u2014 and the marker FORM is the validity status: a star is inference-valid, and each other form is a first-failing criterion or an insufficient sample. Inference-valid and near-miss models are direct-labelled; a name the placement ladder cannot seat without overprinting is listed in the notes rather than drawn on a neighbour, and two markers at the same measured coordinate are separated with a short leader back to the true point. Panel B shows four milestones \u2014 named, evidenced, paid-channel, inference-valid \u2014 and panel B\u2032 counts, per criterion, how many named identities fail it (the categories overlap, so they do not sum to the milestones). The paid-channel bar counts ALL named identities with a paid channel, not only the evidenced ones, so it is a milestone and not a nested filter: the paid subset of the evidenced set is smaller, and the notes state it.",
       "size": "model_relevance",
-      "subtitle": "canonical weights identity \u00b7 hue = channel (paid/free) \u00b7 marker form = validity status \u00b7 no hue-per-model \u00b7 34 named \u00b7 27 evidenced (13 paid) \u00b7 20 paid channel \u00b7 14 free \u00b7 4 inference-valid \u00b7 coverage floor K=20 measured default-arm cells \u00b7 500 verified challenges",
+      "subtitle": "canonical weights identity \u00b7 hue = channel (paid/free) \u00b7 marker form = validity status \u00b7 no hue-per-model \u00b7 35 named \u00b7 28 evidenced (13 paid) \u00b7 20 paid channel \u00b7 15 free \u00b7 4 inference-valid \u00b7 coverage floor K=20 measured default-arm cells \u00b7 500 verified challenges",
       "terms": [
         [
           "canonical identity",
@@ -892,7 +894,7 @@
       "goal": "Read the valid rows first \u2014 they are the only models the other routing figures show. Then read panel B to see that the excluded models are excluded for DIFFERENT reasons: a dominated benchmark model, an unmeasured frontier slot, and a collection-only probe are not the same kind of absence and must not be collapsed into one.",
       "limitations": [
         "The criteria are order-independent only in the panel; the written reason reports the FIRST one a row fails, so a model that fails several shows only the first.",
-        "'Evidenced' has ONE definition here: at least one measured cell in either channel. So the 34-identity roster holds 27 evidenced identities, and the two counts differ on purpose \u2014 the roster also names live slots and collection-only listings with no committed measurement.",
+        "'Evidenced' has ONE definition here: at least one measured cell in either channel. So the 35-identity roster holds 28 evidenced identities, and the two counts differ on purpose \u2014 the roster also names live slots and collection-only listings with no committed measurement.",
         "The coverage cell count is the measured cells for the DECLARED default arm, falling back to a sole cached arm (the definition the universe's evidenced count reads). model_grid.png counts ONLY the strict declared arm, so its cell count can be smaller \u2014 this is why glm-5.2 shows 84 here and 21 there, and both labels say which definition they use.",
         "Free-channel coverage counts a handful of challenges and is not comparable with the paid corpus's; the two channels were collected under different campaigns.",
         "A free-only (collection-only) identity is never triaged or capability-ranked, so its triage and capability cells read 'n/a' rather than 'no'; the free channel \u2014 not a failed criterion \u2014 is what puts it outside the inference pool.",
@@ -900,10 +902,10 @@
         "This panel is the per-kind exclusion breakdown, not a second cumulative funnel. model_relevance.png carries the funnel (named to evidenced to paid to valid) and the pass-rate-vs-coverage plane; here panel B keeps each exclusion KIND distinct."
       ],
       "n": {
-        "evidenced": 27,
-        "free": 14,
-        "invalid": 30,
-        "models": 34,
+        "evidenced": 28,
+        "free": 15,
+        "invalid": 31,
+        "models": 35,
         "paid": 20,
         "valid": 4
       },
@@ -928,8 +930,9 @@
         "kimi-k2.5: invalid \u2014 not in the live pool \u2014 benchmark-only, triage DROP (channel paid, providers requesty, triage DROP, capability measured, 121 cells, 121/500 verified challenges)",
         "qwen3.7-plus: invalid \u2014 not in the live pool \u2014 benchmark-only, triage DROP (channel paid, providers requesty, triage DROP, capability measured, 87 cells, 87/500 verified challenges)",
         "qwen3.8-27b: invalid \u2014 collection-only promo probe \u2014 never enabled or routed (channel paid, providers explabs, triage not-triaged, capability not-ranked, 42 cells, 42/500 verified challenges)",
+        "deepseek-r1-distill-qwen-32b: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)",
         "deepseek-v4.1-flash: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers explabs, triage not-triaged, capability not-ranked, 20 cells, 20/500 verified challenges)",
-        "gemini-flash-lite-latest: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers google_ai_studio, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)",
+        "gemini-flash-lite-latest: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers google_ai_studio, triage not-triaged, capability not-ranked, 2 cells, 2/500 verified challenges)",
         "glm-4.7-flash: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)",
         "granite-4.0-h-micro: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)",
         "laguna-s-2.1: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers kilo_gateway, triage not-triaged, capability not-ranked, 10 cells, 10/500 verified challenges)",
@@ -938,15 +941,15 @@
         "llama-3.2-1b-instruct: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)",
         "llama-4-scout-17b-16e-instruct: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)",
         "mistral-small-3.1-24b-instruct: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)",
-        "muse-glimmer-30b: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers requesty, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)",
-        "nemotron-3-nano-omni-30b-a3b-reasoning: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers requesty, triage not-triaged, capability not-ranked, 3 cells, 3/500 verified challenges)",
+        "muse-glimmer-30b: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers requesty, triage not-triaged, capability not-ranked, 4 cells, 4/500 verified challenges)",
+        "nemotron-3-nano-omni-30b-a3b-reasoning: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers requesty, triage not-triaged, capability not-ranked, 6 cells, 6/500 verified challenges)",
         "nemotron-3.5-lightning: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers kilo_gateway, requesty, triage not-triaged, capability not-ranked, 15 cells, 13/500 verified challenges)",
         "step-3.7-flash: invalid \u2014 collection-only free channel \u2014 never enabled or routed (channel free, providers kilo_gateway, triage not-triaged, capability not-ranked, 20 cells, 20/500 verified challenges)"
       ],
       "price_sheet": null,
       "reading": "Panel A: one row per CANONICAL weights identity the committed evidence names (paid and free channels merged on `model_version`, never on a provider-prefixed listing id), one column per criterion \u2014 channel (paid or free), the serving provider(s), selected for inference (in the live pool), triage pass (KEEP or EXCEPTION), capability rank measured rather than a price prior, coverage at or above the K default-arm cell floor (the cell count is printed), and a paid channel. The last column is DISTINCT verified challenges covered (not the same quantity as the default-arm cell count in the coverage column: a challenge can contribute several cells), shaded by how much of the corpus the model holds. A green cell passes, a red one fails; a free-only row's triage and capability cells are NOT APPLICABLE and read 'n/a' on a neutral cell, because a collection-only identity is never triaged or capability-ranked, while its paid-channel cell stays 'no' \u2014 the fact that puts it outside the pool. The subtitle separates the roster ('canonical identities named') from 'evidenced' \u2014 at least one measured cell in either channel \u2014 because the roster also names slots no committed measurement covers. Panel B counts the identities by why they are out, keeping the free channel, the collection-only promo probes, the unmeasured live slots and the triage DROPs distinct.",
       "size": "model_validity",
-      "subtitle": "canonical weights identity \u00b7 provider is a label, never part of the name \u00b7 criteria: live, triage pass (KEEP/EXCEPTION), capability measured, coverage, paid channel \u00b7 4 inference-valid of 34 canonical identities named by committed evidence (20 paid, 14 free); 27 evidenced (\u22651 measured cell in either channel) \u00b7 coverage floor K=20 measured default-arm cells (declared default arm, sole-arm fallback)",
+      "subtitle": "canonical weights identity \u00b7 provider is a label, never part of the name \u00b7 criteria: live, triage pass (KEEP/EXCEPTION), capability measured, coverage, paid channel \u00b7 4 inference-valid of 35 canonical identities named by committed evidence (20 paid, 15 free); 28 evidenced (\u22651 measured cell in either channel) \u00b7 coverage floor K=20 measured default-arm cells (declared default arm, sole-arm fallback)",
       "terms": [
         [
           "canonical identity",
@@ -1290,8 +1293,8 @@
       ],
       "n": {
         "challenges": 500,
-        "free": 14,
-        "models": 34,
+        "free": 15,
+        "models": 35,
         "valid": 4
       },
       "notes": [
@@ -1316,8 +1319,9 @@
         "kimi-k2.5: 121/500 challenges, 121 measured cells, paid, not in the live pool \u2014 benchmark-only, triage DROP",
         "qwen3.7-plus: 87/500 challenges, 87 measured cells, paid, not in the live pool \u2014 benchmark-only, triage DROP",
         "qwen3.8-27b: 42/500 challenges, 42 measured cells, paid, collection-only promo probe \u2014 never enabled or routed",
+        "deepseek-r1-distill-qwen-32b: 1/500 challenges, 1 measured cells, free, collection-only free channel \u2014 never enabled or routed",
         "deepseek-v4.1-flash: 20/500 challenges, 20 measured cells, free, collection-only free channel \u2014 never enabled or routed",
-        "gemini-flash-lite-latest: 1/500 challenges, 1 measured cells, free, collection-only free channel \u2014 never enabled or routed",
+        "gemini-flash-lite-latest: 2/500 challenges, 2 measured cells, free, collection-only free channel \u2014 never enabled or routed",
         "glm-4.7-flash: 1/500 challenges, 1 measured cells, free, collection-only free channel \u2014 never enabled or routed",
         "granite-4.0-h-micro: 1/500 challenges, 1 measured cells, free, collection-only free channel \u2014 never enabled or routed",
         "laguna-s-2.1: 10/500 challenges, 10 measured cells, free, collection-only free channel \u2014 never enabled or routed",
@@ -1326,15 +1330,15 @@
         "llama-3.2-1b-instruct: 1/500 challenges, 1 measured cells, free, collection-only free channel \u2014 never enabled or routed",
         "llama-4-scout-17b-16e-instruct: 1/500 challenges, 1 measured cells, free, collection-only free channel \u2014 never enabled or routed",
         "mistral-small-3.1-24b-instruct: 1/500 challenges, 1 measured cells, free, collection-only free channel \u2014 never enabled or routed",
-        "muse-glimmer-30b: 1/500 challenges, 1 measured cells, free, collection-only free channel \u2014 never enabled or routed",
-        "nemotron-3-nano-omni-30b-a3b-reasoning: 3/500 challenges, 3 measured cells, free, collection-only free channel \u2014 never enabled or routed",
+        "muse-glimmer-30b: 4/500 challenges, 4 measured cells, free, collection-only free channel \u2014 never enabled or routed",
+        "nemotron-3-nano-omni-30b-a3b-reasoning: 6/500 challenges, 6 measured cells, free, collection-only free channel \u2014 never enabled or routed",
         "nemotron-3.5-lightning: 13/500 challenges, 15 measured cells, free, collection-only free channel \u2014 never enabled or routed",
         "step-3.7-flash: 20/500 challenges, 20 measured cells, free, collection-only free channel \u2014 never enabled or routed"
       ],
       "price_sheet": null,
       "reading": "One row per canonical weights identity the committed evidence names, one column per verified challenge, in the corpus's own sorted order. A blue cell is a paid channel's measured default-arm cell, an orange cell a free one, a pale cell no measured outcome. Vertical rules mark repository boundaries, and each row label carries its covered/total count. Rows are ordered inference-valid first (marked \u2605, above the green rule), then the paid collection, then the free collection.",
       "size": "universe_coverage",
-      "subtitle": "one row per canonical weights identity \u00b7 verified challenges as columns \u00b7 34 canonical models: 20 paid, 14 free \u00b7 4 inference-valid, 30 outside the pool \u00b7 34 named \u00b7 27 evidenced (\u22651 measured outcome) \u00b7 23 invalid-with-outcome \u00b7 500 verified challenges",
+      "subtitle": "one row per canonical weights identity \u00b7 verified challenges as columns \u00b7 35 canonical models: 20 paid, 15 free \u00b7 4 inference-valid, 31 outside the pool \u00b7 35 named \u00b7 28 evidenced (\u22651 measured outcome) \u00b7 24 invalid-with-outcome \u00b7 500 verified challenges",
       "terms": [
         [
           "canonical identity",
@@ -1357,7 +1361,7 @@
       "dpi": 150,
       "figsize": [
         13.5,
-        9.85
+        10.15
       ],
       "generator": "benchmark.routing.figures.universe",
       "goal": "Find the identities that are both cheap and high-pass: the free channel's rows sit far left, but their intervals are wide because their coverage is thin. The four starred rows are the ones the router may actually serve.",
@@ -1366,8 +1370,8 @@
         "Mean cost is over measured cells only and is not the list price the strategy figures rank on."
       ],
       "n": {
-        "evidenced": 27,
-        "free": 14,
+        "evidenced": 28,
+        "free": 15,
         "valid": 4
       },
       "notes": [
@@ -1385,8 +1389,9 @@
         "kimi-k2.5: 49.6% on n=121, $0.1249/task, paid, not in the live pool \u2014 benchmark-only, triage DROP",
         "qwen3.7-plus: 43.7% on n=87, $0.0801/task, paid, not in the live pool \u2014 benchmark-only, triage DROP",
         "qwen3.8-27b: 52.4% on n=42, $0.0034/task, paid, collection-only promo probe \u2014 never enabled or routed",
+        "deepseek-r1-distill-qwen-32b: 0.0% on n=1, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
         "deepseek-v4.1-flash: 95.0% on n=20, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
-        "gemini-flash-lite-latest: 0.0% on n=1, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
+        "gemini-flash-lite-latest: 50.0% on n=2, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
         "glm-4.7-flash: 100.0% on n=1, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
         "granite-4.0-h-micro: 0.0% on n=1, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
         "laguna-s-2.1: 80.0% on n=10, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
@@ -1395,15 +1400,15 @@
         "llama-3.2-1b-instruct: 0.0% on n=1, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
         "llama-4-scout-17b-16e-instruct: 0.0% on n=1, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
         "mistral-small-3.1-24b-instruct: 0.0% on n=1, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
-        "muse-glimmer-30b: 0.0% on n=1, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
-        "nemotron-3-nano-omni-30b-a3b-reasoning: 33.3% on n=3, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
+        "muse-glimmer-30b: 0.0% on n=4, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
+        "nemotron-3-nano-omni-30b-a3b-reasoning: 16.7% on n=6, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
         "nemotron-3.5-lightning: 20.0% on n=15, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed",
         "step-3.7-flash: 60.0% on n=20, $0.0000/task, free, collection-only free channel \u2014 never enabled or routed"
       ],
       "price_sheet": null,
       "reading": "Panel A: per canonical identity, the mean measured cost per task on a log axis. Each priced row is a dot at its cost \u2014 a dot carries position, the one thing a log axis reads honestly, where a bar's length would encode log(cost) and misstate every ratio. A `$0.0000 free` row (a genuinely free channel) and a `<$0.000001 paid` row (a paid mean that rounds below the axis floor) are distinct hatched stubs in a fixed column at the left, not bars and not each other. Panel B: the same identity's measured pass rate with a 95% Wilson interval, same row order, so cost and quality read across one line. Blue is a paid channel, orange a free one, and a star marks the inference-valid models.",
-      "size": "table_29",
-      "subtitle": "measured default-arm outcomes only \u00b7 blue paid, orange free \u00b7 \u2605 inference-valid \u00b7 27 evidenced models (13 paid, 14 free) \u00b7 4 inference-valid marked \u2605 \u00b7 34 named \u00b7 27 evidenced (\u22651 measured outcome) \u00b7 23 invalid-with-outcome",
+      "size": "table_30",
+      "subtitle": "measured default-arm outcomes only \u00b7 blue paid, orange free \u00b7 \u2605 inference-valid \u00b7 28 evidenced models (13 paid, 15 free) \u00b7 4 inference-valid marked \u2605 \u00b7 35 named \u00b7 28 evidenced (\u22651 measured outcome) \u00b7 24 invalid-with-outcome",
       "terms": [
         [
           "measured cost",

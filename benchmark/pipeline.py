@@ -871,6 +871,8 @@ def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
             # entirely unrelated to the rename. This is that reason.
             _REPO_ROOT / "src" / "shunt" / "config" / "models.yaml",
             _REPO_ROOT / "src" / "shunt" / "config" / "router.yaml",
+            # The free corpus — see the routing tuple below for why every half carries it.
+            config.free_results_csv_path(),
         )
     if half == "escalation":
         return (
@@ -893,9 +895,18 @@ def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
             # `_shipped_escalation()` reads the packaged router config, so a knob change
             # (escalate_after_n 2 -> 3) silently invalidates every escalation figure.
             _REPO_ROOT / "src" / "shunt" / "config" / "router.yaml",
+            # The free corpus — see the routing tuple below for why every half carries it.
+            config.free_results_csv_path(),
         )
     return (
         config.results_csv_path(),
+        # The free corpus is read beside results.csv by `model_universe.performance()`,
+        # `model_validity`, `model_coverage` and `collection_priority`, and every figure job's
+        # import closure reaches at least one of them. It is DATA, so the closure cannot see
+        # it: a re-harvested results_free.csv used to move the universe/validity figures while
+        # check-figures stayed green. `test_every_job_reading_the_free_corpus_digests_it`
+        # holds every half to this.
+        config.free_results_csv_path(),
         config.challenges_path(),
         _REPO_ROOT / "benchmark" / "benchmark.yaml",
         # The routing strategies and coverage read each model's canonical DEFAULT-ARM row
