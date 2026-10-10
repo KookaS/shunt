@@ -852,6 +852,20 @@ class FigureJob:
         return self.figures_dir if out.endswith(".png") else self.reports_dir
 
 
+def _free_inputs() -> tuple[Path, ...]:
+    """The free corpus, plus the free overlay registry when one is configured."""
+    # The free corpus is read beside results.csv by `model_universe.performance()`,
+    # `model_validity`, `model_coverage` and `collection_priority`, and every figure job's
+    # import closure reaches at least one of them. It is DATA, so the closure cannot see it:
+    # a re-harvested results_free.csv used to move the universe/validity figures while
+    # check-figures stayed green. `test_every_job_reading_the_free_corpus_digests_it` holds
+    # every half to this. The overlay (SHUNT_FREE_REGISTRY) prices those rows in the same
+    # modules, so a configured one is an input too; unconfigured it adds nothing, which keeps
+    # the default-environment digest — the committed manifest's — unchanged.
+    overlay = config.free_registry_path()
+    return (config.free_results_csv_path(), *((overlay,) if overlay is not None else ()))
+
+
 def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
     """The measured outcomes + task set a half's figures are derived from."""
     if half in ("inference", "demo"):
@@ -871,6 +885,8 @@ def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
             # entirely unrelated to the rename. This is that reason.
             _REPO_ROOT / "src" / "shunt" / "config" / "models.yaml",
             _REPO_ROOT / "src" / "shunt" / "config" / "router.yaml",
+            # The free corpus (+ overlay) — see `_free_inputs` for why every half carries it.
+            *_free_inputs(),
         )
     if half == "escalation":
         return (
@@ -893,9 +909,12 @@ def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
             # `_shipped_escalation()` reads the packaged router config, so a knob change
             # (escalate_after_n 2 -> 3) silently invalidates every escalation figure.
             _REPO_ROOT / "src" / "shunt" / "config" / "router.yaml",
+            # The free corpus (+ overlay) — see `_free_inputs` for why every half carries it.
+            *_free_inputs(),
         )
     return (
         config.results_csv_path(),
+        *_free_inputs(),
         config.challenges_path(),
         _REPO_ROOT / "benchmark" / "benchmark.yaml",
         # The routing strategies and coverage read each model's canonical DEFAULT-ARM row
@@ -1211,13 +1230,24 @@ ESCALATION_FIGURES: Final[tuple[FigureJob, ...]] = tuple(
 )
 
 
+def _digest_key(path: Path) -> str:
+    """A file's name inside a digest: repo-relative, or absolute for an out-of-repo input."""
+    # Only a configured free overlay can sit outside the repo (an operator's file); every
+    # in-repo key is unchanged, so no committed digest moves.
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(_REPO_ROOT))
+    except ValueError:
+        return resolved.as_posix()
+
+
 def _digest(paths: tuple[Path, ...]) -> str:
     """SHA-256 over the named files, directories expanded to their sorted *.py."""
     sha = hashlib.sha256()
     for path in paths:
         members = sorted(path.rglob("*.py")) if path.is_dir() else [path]
         for member in members:
-            sha.update(str(member.resolve().relative_to(_REPO_ROOT)).encode())
+            sha.update(_digest_key(member).encode())
             sha.update(member.read_bytes() if member.exists() else b"<missing>")
     return sha.hexdigest()
 

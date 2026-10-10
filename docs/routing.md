@@ -720,7 +720,7 @@ ADMISSIBLE: positive control +0.9875 clears chance band (>+0.6001) AND destroyed
 bin [0.2,0.4): predicted 0.372, observed 1.000 (n=3)
 bin [0.4,0.6): predicted 0.537, observed 0.647 (n=139)
 bin [0.6,0.8): predicted 0.712, observed 0.755 (n=465)
-bin [0.8,1.0): predicted 0.897, observed 0.862 (n=647)
+bin [0.8,1.0): predicted 0.899, observed 0.865 (n=660)
 
 **Limits.** The neighbour weight is similarity only. The shipped rule also multiplies by each neighbour's verification confidence, which is 1.0 for every cell in this corpus, so the two coincide here and could diverge on live traffic. 396/1267 scored cells (31.3%) are monotone-IMPUTED, not measured, and 390/396 of them are filled pass=True — imputation here is near-exclusively pass-filling (the ladder's fail branch fires rarely), so it almost never adds a failure. Every rate on this figure is biased UPWARD by that fill.
 
@@ -850,7 +850,7 @@ counted paths for panels B and D — kNN-semantic-tier: 173 of 181 scored task(s
 
 ![Only the measured live pool is inference-valid; the rest are named, not dropped](assets/figures/routing/model_validity.png)
 
-*canonical weights identity · provider is a label, never part of the name · criteria: live, triage pass (KEEP/EXCEPTION), capability measured, coverage, paid channel · 4 inference-valid of 34 canonical identities named by committed evidence (20 paid, 14 free); 27 evidenced (≥1 measured cell in either channel) · coverage floor K=20 measured default-arm cells (declared default arm, sole-arm fallback)*
+*canonical weights identity · provider is a label, never part of the name · criteria: live, triage pass (KEEP/EXCEPTION), capability measured, coverage, paid channel · 4 inference-valid of 35 canonical identities named by committed evidence (20 paid, 15 free); 28 evidenced (≥1 measured cell in either channel) · coverage floor K=20 measured default-arm cells (declared default arm, sole-arm fallback)*
 > **Caveat.** invalid = not selected on committed evidence, not that the model is weak
 **Reading.** Panel A: one row per CANONICAL weights identity the committed evidence names (paid and free channels merged on `model_version`, never on a provider-prefixed listing id), one column per criterion — channel (paid or free), the serving provider(s), selected for inference (in the live pool), triage pass (KEEP or EXCEPTION), capability rank measured rather than a price prior, coverage at or above the K default-arm cell floor (the cell count is printed), and a paid channel. The last column is DISTINCT verified challenges covered (not the same quantity as the default-arm cell count in the coverage column: a challenge can contribute several cells), shaded by how much of the corpus the model holds. A green cell passes, a red one fails; a free-only row's triage and capability cells are NOT APPLICABLE and read 'n/a' on a neutral cell, because a collection-only identity is never triaged or capability-ranked, while its paid-channel cell stays 'no' — the fact that puts it outside the pool. The subtitle separates the roster ('canonical identities named') from 'evidenced' — at least one measured cell in either channel — because the roster also names slots no committed measurement covers. Panel B counts the identities by why they are out, keeping the free channel, the collection-only promo probes, the unmeasured live slots and the triage DROPs distinct.
 
@@ -878,8 +878,9 @@ gpt-6-astra: invalid — collection-only promo probe — never enabled or routed
 kimi-k2.5: invalid — not in the live pool — benchmark-only, triage DROP (channel paid, providers requesty, triage DROP, capability measured, 121 cells, 121/500 verified challenges)
 qwen3.7-plus: invalid — not in the live pool — benchmark-only, triage DROP (channel paid, providers requesty, triage DROP, capability measured, 87 cells, 87/500 verified challenges)
 qwen3.8-27b: invalid — collection-only promo probe — never enabled or routed (channel paid, providers explabs, triage not-triaged, capability not-ranked, 42 cells, 42/500 verified challenges)
+deepseek-r1-distill-qwen-32b: invalid — collection-only free channel — never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)
 deepseek-v4.1-flash: invalid — collection-only free channel — never enabled or routed (channel free, providers explabs, triage not-triaged, capability not-ranked, 20 cells, 20/500 verified challenges)
-gemini-flash-lite-latest: invalid — collection-only free channel — never enabled or routed (channel free, providers google_ai_studio, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)
+gemini-flash-lite-latest: invalid — collection-only free channel — never enabled or routed (channel free, providers google_ai_studio, triage not-triaged, capability not-ranked, 2 cells, 2/500 verified challenges)
 glm-4.7-flash: invalid — collection-only free channel — never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)
 granite-4.0-h-micro: invalid — collection-only free channel — never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)
 laguna-s-2.1: invalid — collection-only free channel — never enabled or routed (channel free, providers kilo_gateway, triage not-triaged, capability not-ranked, 10 cells, 10/500 verified challenges)
@@ -888,19 +889,19 @@ ling-3-0-flash-fin: invalid — collection-only free channel — never enabled o
 llama-3.2-1b-instruct: invalid — collection-only free channel — never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)
 llama-4-scout-17b-16e-instruct: invalid — collection-only free channel — never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)
 mistral-small-3.1-24b-instruct: invalid — collection-only free channel — never enabled or routed (channel free, providers cloudflare_workers_ai, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)
-muse-glimmer-30b: invalid — collection-only free channel — never enabled or routed (channel free, providers requesty, triage not-triaged, capability not-ranked, 1 cells, 1/500 verified challenges)
-nemotron-3-nano-omni-30b-a3b-reasoning: invalid — collection-only free channel — never enabled or routed (channel free, providers requesty, triage not-triaged, capability not-ranked, 3 cells, 3/500 verified challenges)
+muse-glimmer-30b: invalid — collection-only free channel — never enabled or routed (channel free, providers requesty, triage not-triaged, capability not-ranked, 4 cells, 4/500 verified challenges)
+nemotron-3-nano-omni-30b-a3b-reasoning: invalid — collection-only free channel — never enabled or routed (channel free, providers requesty, triage not-triaged, capability not-ranked, 6 cells, 6/500 verified challenges)
 nemotron-3.5-lightning: invalid — collection-only free channel — never enabled or routed (channel free, providers kilo_gateway, requesty, triage not-triaged, capability not-ranked, 15 cells, 13/500 verified challenges)
 step-3.7-flash: invalid — collection-only free channel — never enabled or routed (channel free, providers kilo_gateway, triage not-triaged, capability not-ranked, 20 cells, 20/500 verified challenges)
 
-**Limits.** The criteria are order-independent only in the panel; the written reason reports the FIRST one a row fails, so a model that fails several shows only the first. 'Evidenced' has ONE definition here: at least one measured cell in either channel. So the 34-identity roster holds 27 evidenced identities, and the two counts differ on purpose — the roster also names live slots and collection-only listings with no committed measurement. The coverage cell count is the measured cells for the DECLARED default arm, falling back to a sole cached arm (the definition the universe's evidenced count reads). model_grid.png counts ONLY the strict declared arm, so its cell count can be smaller — this is why glm-5.2 shows 84 here and 21 there, and both labels say which definition they use. Free-channel coverage counts a handful of challenges and is not comparable with the paid corpus's; the two channels were collected under different campaigns. A free-only (collection-only) identity is never triaged or capability-ranked, so its triage and capability cells read 'n/a' rather than 'no'; the free channel — not a failed criterion — is what puts it outside the inference pool. A live slot with no committed measurement is flagged inference-invalid here, but it is a COVERAGE GAP, not evidence that the model is dominated — collect it and the verdict can change. This panel is the per-kind exclusion breakdown, not a second cumulative funnel. model_relevance.png carries the funnel (named to evidenced to paid to valid) and the pass-rate-vs-coverage plane; here panel B keeps each exclusion KIND distinct.
+**Limits.** The criteria are order-independent only in the panel; the written reason reports the FIRST one a row fails, so a model that fails several shows only the first. 'Evidenced' has ONE definition here: at least one measured cell in either channel. So the 35-identity roster holds 28 evidenced identities, and the two counts differ on purpose — the roster also names live slots and collection-only listings with no committed measurement. The coverage cell count is the measured cells for the DECLARED default arm, falling back to a sole cached arm (the definition the universe's evidenced count reads). model_grid.png counts ONLY the strict declared arm, so its cell count can be smaller — this is why glm-5.2 shows 84 here and 21 there, and both labels say which definition they use. Free-channel coverage counts a handful of challenges and is not comparable with the paid corpus's; the two channels were collected under different campaigns. A free-only (collection-only) identity is never triaged or capability-ranked, so its triage and capability cells read 'n/a' rather than 'no'; the free channel — not a failed criterion — is what puts it outside the inference pool. A live slot with no committed measurement is flagged inference-invalid here, but it is a COVERAGE GAP, not evidence that the model is dominated — collect it and the verdict can change. This panel is the per-kind exclusion breakdown, not a second cumulative funnel. model_relevance.png carries the funnel (named to evidenced to paid to valid) and the pass-rate-vs-coverage plane; here panel B keeps each exclusion KIND distinct.
 
 <!-- n: evidenced=27, free=14, invalid=30, models=34, paid=20, valid=4 --><!-- generated-by: benchmark.routing.figures.model_validity -->
 ### Which models clear the evidence bar — and why the rest fall short {#fig-model-relevance}
 
 ![Which models clear the evidence bar — and why the rest fall short](assets/figures/routing/model_relevance.png)
 
-*canonical weights identity · hue = channel (paid/free) · marker form = validity status · no hue-per-model · 34 named · 27 evidenced (13 paid) · 20 paid channel · 14 free · 4 inference-valid · coverage floor K=20 measured default-arm cells · 500 verified challenges*
+*canonical weights identity · hue = channel (paid/free) · marker form = validity status · no hue-per-model · 35 named · 28 evidenced (13 paid) · 20 paid channel · 15 free · 4 inference-valid · coverage floor K=20 measured default-arm cells · 500 verified challenges*
 > **Caveat.** a pass rate left of the K rule is not yet evidence; wide intervals are thin coverage
 **Reading.** Panel A: one point per EVIDENCED canonical weights identity — x is its measured default-arm cell count on a log axis, y its measured pass rate with a 95% Wilson interval. The dashed vertical rule is the K-cell floor; a point to its left has too little measured evidence to clear the bar however high its rate. Hue is the CHANNEL (blue paid, orange free) — never a hue per model — and the marker FORM is the validity status: a star is inference-valid, and each other form is a first-failing criterion or an insufficient sample. Inference-valid and near-miss models are direct-labelled; a name the placement ladder cannot seat without overprinting is listed in the notes rather than drawn on a neighbour, and two markers at the same measured coordinate are separated with a short leader back to the true point. Panel B shows four milestones — named, evidenced, paid-channel, inference-valid — and panel B′ counts, per criterion, how many named identities fail it (the categories overlap, so they do not sum to the milestones). The paid-channel bar counts ALL named identities with a paid channel, not only the evidenced ones, so it is a milestone and not a nested filter: the paid subset of the evidenced set is smaller, and the notes state it.
 
@@ -909,7 +910,7 @@ step-3.7-flash: invalid — collection-only free channel — never enabled or ro
 **Terms.** *canonical identity* — the weights slug (`model_version`), so the same weights served by several providers are ONE point and a provider prefix or `-free` marker is never a name *inference-valid* — in the live pool AND triage pass (KEEP/EXCEPTION) AND capability rank measured AND coverage >= K measured default-arm cells AND a paid channel *evidenced* — a canonical identity with at least one measured default-arm cell in either channel (paid or free); a named identity with no measured cell is a coverage gap, not a weak model *near-miss* — an evidenced identity at or above the K cell floor that is not inference-valid — enough measured evidence to be a candidate, kept out by a criterion rather than by a thin sample *measured pass rate* — passes over measured default-arm cells in either channel; the whisker is a 95% Wilson interval drawn symmetrically about the estimate, half-width = the larger Wilson arm, so it reads as uncertainty rather than as a bar from zero
 
 **Notes.** The status taxonomy is READ from benchmark.routing.model_validity: hue is the channel and marker form the first-failing criterion or the evidence floor, so no reader has to decode a model from a colour.
-panel B milestones: 34 named, 27 evidenced, 20 with a paid channel (of all named), 4 inference-valid; 13 of the evidenced identities are paid
+panel B milestones: 35 named, 28 evidenced, 20 with a paid channel (of all named), 4 inference-valid; 13 of the evidenced identities are paid
 deepseek-v4-flash: paid, status valid — 70.8% on n=219, $0.0080/task; 219 cells, 201/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid
 deepseek-v4-pro: paid, status valid — 85.1% on n=201, $0.1376/task; 201 cells, 201/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid
 glm-5.2: paid, status valid — 57.1% on n=84, $0.3429/task; 84 cells, 77/500 challenges; inference-valid: live, triage pass, capability measured, coverage OK, paid
@@ -930,8 +931,9 @@ gpt-6-astra: paid, status insufficient — 100.0% on n=4, $0.2294/task; 4 cells,
 kimi-k2.5: paid, status invalid:live — 49.6% on n=121, $0.1249/task; 121 cells, 121/500 challenges; not in the live pool — benchmark-only, triage DROP
 qwen3.7-plus: paid, status invalid:live — 43.7% on n=87, $0.0801/task; 87 cells, 87/500 challenges; not in the live pool — benchmark-only, triage DROP
 qwen3.8-27b: paid, status invalid:live — 52.4% on n=42, $0.0034/task; 42 cells, 42/500 challenges; collection-only promo probe — never enabled or routed
+deepseek-r1-distill-qwen-32b: free, status free-only — 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
 deepseek-v4.1-flash: free, status free-only — 95.0% on n=20, $0.0000/task; 20 cells, 20/500 challenges; collection-only free channel — never enabled or routed
-gemini-flash-lite-latest: free, status free-only — 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
+gemini-flash-lite-latest: free, status free-only — 50.0% on n=2, $0.0000/task; 2 cells, 2/500 challenges; collection-only free channel — never enabled or routed
 glm-4.7-flash: free, status free-only — 100.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
 granite-4.0-h-micro: free, status free-only — 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
 laguna-s-2.1: free, status free-only — 80.0% on n=10, $0.0000/task; 10 cells, 10/500 challenges; collection-only free channel — never enabled or routed
@@ -940,19 +942,19 @@ ling-3-0-flash-fin: free, status free-only — 100.0% on n=2, $0.0000/task; 2 ce
 llama-3.2-1b-instruct: free, status free-only — 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
 llama-4-scout-17b-16e-instruct: free, status free-only — 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
 mistral-small-3.1-24b-instruct: free, status free-only — 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
-muse-glimmer-30b: free, status free-only — 0.0% on n=1, $0.0000/task; 1 cells, 1/500 challenges; collection-only free channel — never enabled or routed
-nemotron-3-nano-omni-30b-a3b-reasoning: free, status free-only — 33.3% on n=3, $0.0000/task; 3 cells, 3/500 challenges; collection-only free channel — never enabled or routed
+muse-glimmer-30b: free, status free-only — 0.0% on n=4, $0.0000/task; 4 cells, 4/500 challenges; collection-only free channel — never enabled or routed
+nemotron-3-nano-omni-30b-a3b-reasoning: free, status free-only — 16.7% on n=6, $0.0000/task; 6 cells, 6/500 challenges; collection-only free channel — never enabled or routed
 nemotron-3.5-lightning: free, status free-only — 20.0% on n=15, $0.0000/task; 15 cells, 13/500 challenges; collection-only free channel — never enabled or routed
 step-3.7-flash: free, status free-only — 60.0% on n=20, $0.0000/task; 20 cells, 20/500 challenges; collection-only free channel — never enabled or routed
 
-**Limits.** The x axis counts measured cells, not comparable task sets: models were not run on identical tasks, so two points at the same height are not a paired comparison. Free-channel points were collected under a different campaign from the paid corpus's, so their coverage is not comparable cell-for-cell and their intervals are wide from thin coverage, not from measured weakness. A named identity with no measured cell cannot be placed on panel A at all; panel B's first milestone accounts for it as the drop from named to evidenced. Panel B's paid-channel milestone is the count of named identities with a paid channel (20); it is NOT the paid subset of the 27 evidenced identities, which is smaller (13). The milestones are separate filters, not a nested chain.
+**Limits.** The x axis counts measured cells, not comparable task sets: models were not run on identical tasks, so two points at the same height are not a paired comparison. Free-channel points were collected under a different campaign from the paid corpus's, so their coverage is not comparable cell-for-cell and their intervals are wide from thin coverage, not from measured weakness. A named identity with no measured cell cannot be placed on panel A at all; panel B's first milestone accounts for it as the drop from named to evidenced. Panel B's paid-channel milestone is the count of named identities with a paid channel (20); it is NOT the paid subset of the 28 evidenced identities, which is smaller (13). The milestones are separate filters, not a nested chain.
 
 <!-- n: evidenced=27, free=14, named=34, paid=20, valid=4 --><!-- generated-by: benchmark.routing.figures.model_relevance -->
 ### Every rung: what it costs, what it weighs, what it delivers {#fig-model-grid}
 
 ![Every rung: what it costs, what it weighs, what it delivers](assets/figures/routing/model_grid.png)
 
-*one measured arm per model, nothing imputed · Wilson 95% intervals · 6 models: the 4 inference-valid models' measured default-arm cells of results.csv, plus 2 out-of-corpus rung(s) (†) · 30 excluded model(s) are named and explained in the model-validity figure — not drawn here · 1 at $0 (local) · 5 priced · n per model 20–200, unpaired task sets · blend = 99% input / 1% output, the corpus's own 517,584,265:7,428,975 token split*
+*one measured arm per model, nothing imputed · Wilson 95% intervals · 6 models: the 4 inference-valid models' measured default-arm cells of results.csv, plus 2 out-of-corpus rung(s) (†) · 31 excluded model(s) are named and explained in the model-validity figure — not drawn here · 1 at $0 (local) · 5 priced · n per model 20–200, unpaired task sets · blend = 99% input / 1% output, the corpus's own 517,584,265:7,428,975 token split*
 > **Caveat.** Panel A's x axis is a list price per TOKEN, never a bill per solved task.
 **Reading.** Panel A: each model at its blended token price (x, log — with a separate column at the left for locally-served rungs, which have no per-token list price at all and so cannot sit on a log axis; that column says nothing about what such a rung costs to run, which is UNDEFINED here and stated in the row's note) against its measured pass rate (y), with Wilson 95% whiskers. Marker area follows the square root of the active parameter count, the marker edge says whether the weights are hosted or local, and hue is the coarse total-size band. Panel B: one row per model, a hollow mark at total parameters and a filled mark at active parameters — the rule joining them IS the mixture-of-experts sparsity gap. A row whose name carries a dagger was measured outside this corpus under a different harness; its note below states which, and its height is not comparable cell-for-cell with the rows beside it.
 
@@ -1048,7 +1050,7 @@ Panels A and B share one denominator: tasks with at least one inference-valid ce
 
 ![Every model's evidence on one grid — free and paid, valid and not](assets/figures/routing/universe_coverage.png)
 
-*one row per canonical weights identity · verified challenges as columns · 34 canonical models: 20 paid, 14 free · 4 inference-valid, 30 outside the pool · 34 named · 27 evidenced (≥1 measured outcome) · 23 invalid-with-outcome · 500 verified challenges*
+*one row per canonical weights identity · verified challenges as columns · 35 canonical models: 20 paid, 15 free · 4 inference-valid, 31 outside the pool · 35 named · 28 evidenced (≥1 measured outcome) · 24 invalid-with-outcome · 500 verified challenges*
 > **Caveat.** Coverage is an evidence status, not a quality score — a covered cell can fail.
 **Reading.** One row per canonical weights identity the committed evidence names, one column per verified challenge, in the corpus's own sorted order. A blue cell is a paid channel's measured default-arm cell, an orange cell a free one, a pale cell no measured outcome. Vertical rules mark repository boundaries, and each row label carries its covered/total count. Rows are ordered inference-valid first (marked ★, above the green rule), then the paid collection, then the free collection.
 
@@ -1077,8 +1079,9 @@ gpt-6-astra: 4/500 challenges, 4 measured cells, paid, collection-only promo pro
 kimi-k2.5: 121/500 challenges, 121 measured cells, paid, not in the live pool — benchmark-only, triage DROP
 qwen3.7-plus: 87/500 challenges, 87 measured cells, paid, not in the live pool — benchmark-only, triage DROP
 qwen3.8-27b: 42/500 challenges, 42 measured cells, paid, collection-only promo probe — never enabled or routed
+deepseek-r1-distill-qwen-32b: 1/500 challenges, 1 measured cells, free, collection-only free channel — never enabled or routed
 deepseek-v4.1-flash: 20/500 challenges, 20 measured cells, free, collection-only free channel — never enabled or routed
-gemini-flash-lite-latest: 1/500 challenges, 1 measured cells, free, collection-only free channel — never enabled or routed
+gemini-flash-lite-latest: 2/500 challenges, 2 measured cells, free, collection-only free channel — never enabled or routed
 glm-4.7-flash: 1/500 challenges, 1 measured cells, free, collection-only free channel — never enabled or routed
 granite-4.0-h-micro: 1/500 challenges, 1 measured cells, free, collection-only free channel — never enabled or routed
 laguna-s-2.1: 10/500 challenges, 10 measured cells, free, collection-only free channel — never enabled or routed
@@ -1087,8 +1090,8 @@ ling-3-0-flash-fin: 2/500 challenges, 2 measured cells, free, collection-only fr
 llama-3.2-1b-instruct: 1/500 challenges, 1 measured cells, free, collection-only free channel — never enabled or routed
 llama-4-scout-17b-16e-instruct: 1/500 challenges, 1 measured cells, free, collection-only free channel — never enabled or routed
 mistral-small-3.1-24b-instruct: 1/500 challenges, 1 measured cells, free, collection-only free channel — never enabled or routed
-muse-glimmer-30b: 1/500 challenges, 1 measured cells, free, collection-only free channel — never enabled or routed
-nemotron-3-nano-omni-30b-a3b-reasoning: 3/500 challenges, 3 measured cells, free, collection-only free channel — never enabled or routed
+muse-glimmer-30b: 4/500 challenges, 4 measured cells, free, collection-only free channel — never enabled or routed
+nemotron-3-nano-omni-30b-a3b-reasoning: 6/500 challenges, 6 measured cells, free, collection-only free channel — never enabled or routed
 nemotron-3.5-lightning: 13/500 challenges, 15 measured cells, free, collection-only free channel — never enabled or routed
 step-3.7-flash: 20/500 challenges, 20 measured cells, free, collection-only free channel — never enabled or routed
 
@@ -1099,7 +1102,7 @@ step-3.7-flash: 20/500 challenges, 20 measured cells, free, collection-only free
 
 ![What every free and paid model costs and delivers](assets/figures/routing/universe_economics.png)
 
-*measured default-arm outcomes only · blue paid, orange free · ★ inference-valid · 27 evidenced models (13 paid, 14 free) · 4 inference-valid marked ★ · 34 named · 27 evidenced (≥1 measured outcome) · 23 invalid-with-outcome*
+*measured default-arm outcomes only · blue paid, orange free · ★ inference-valid · 28 evidenced models (13 paid, 15 free) · 4 inference-valid marked ★ · 35 named · 28 evidenced (≥1 measured outcome) · 24 invalid-with-outcome*
 > **Caveat.** Panel A draws dots, not bars — a log axis reads position. Free $0 and paid sub-floor rows are separate hatched markers.
 **Reading.** Panel A: per canonical identity, the mean measured cost per task on a log axis. Each priced row is a dot at its cost — a dot carries position, the one thing a log axis reads honestly, where a bar's length would encode log(cost) and misstate every ratio. A `$0.0000 free` row (a genuinely free channel) and a `<$0.000001 paid` row (a paid mean that rounds below the axis floor) are distinct hatched stubs in a fixed column at the left, not bars and not each other. Panel B: the same identity's measured pass rate with a 95% Wilson interval, same row order, so cost and quality read across one line. Blue is a paid channel, orange a free one, and a star marks the inference-valid models.
 
@@ -1121,8 +1124,9 @@ gpt-6-astra: 100.0% on n=4, $0.2294/task, paid, collection-only promo probe — 
 kimi-k2.5: 49.6% on n=121, $0.1249/task, paid, not in the live pool — benchmark-only, triage DROP
 qwen3.7-plus: 43.7% on n=87, $0.0801/task, paid, not in the live pool — benchmark-only, triage DROP
 qwen3.8-27b: 52.4% on n=42, $0.0034/task, paid, collection-only promo probe — never enabled or routed
+deepseek-r1-distill-qwen-32b: 0.0% on n=1, $0.0000/task, free, collection-only free channel — never enabled or routed
 deepseek-v4.1-flash: 95.0% on n=20, $0.0000/task, free, collection-only free channel — never enabled or routed
-gemini-flash-lite-latest: 0.0% on n=1, $0.0000/task, free, collection-only free channel — never enabled or routed
+gemini-flash-lite-latest: 50.0% on n=2, $0.0000/task, free, collection-only free channel — never enabled or routed
 glm-4.7-flash: 100.0% on n=1, $0.0000/task, free, collection-only free channel — never enabled or routed
 granite-4.0-h-micro: 0.0% on n=1, $0.0000/task, free, collection-only free channel — never enabled or routed
 laguna-s-2.1: 80.0% on n=10, $0.0000/task, free, collection-only free channel — never enabled or routed
@@ -1131,8 +1135,8 @@ ling-3-0-flash-fin: 100.0% on n=2, $0.0000/task, free, collection-only free chan
 llama-3.2-1b-instruct: 0.0% on n=1, $0.0000/task, free, collection-only free channel — never enabled or routed
 llama-4-scout-17b-16e-instruct: 0.0% on n=1, $0.0000/task, free, collection-only free channel — never enabled or routed
 mistral-small-3.1-24b-instruct: 0.0% on n=1, $0.0000/task, free, collection-only free channel — never enabled or routed
-muse-glimmer-30b: 0.0% on n=1, $0.0000/task, free, collection-only free channel — never enabled or routed
-nemotron-3-nano-omni-30b-a3b-reasoning: 33.3% on n=3, $0.0000/task, free, collection-only free channel — never enabled or routed
+muse-glimmer-30b: 0.0% on n=4, $0.0000/task, free, collection-only free channel — never enabled or routed
+nemotron-3-nano-omni-30b-a3b-reasoning: 16.7% on n=6, $0.0000/task, free, collection-only free channel — never enabled or routed
 nemotron-3.5-lightning: 20.0% on n=15, $0.0000/task, free, collection-only free channel — never enabled or routed
 step-3.7-flash: 60.0% on n=20, $0.0000/task, free, collection-only free channel — never enabled or routed
 
@@ -1143,7 +1147,7 @@ step-3.7-flash: 60.0% on n=20, $0.0000/task, free, collection-only free channel 
 
 ![Outside the inference pool: what the other measured models deliver](assets/figures/routing/invalid_models.png)
 
-*inference-invalid on committed evidence · not selected for routing, not erased · 23 inference-invalid evidenced models (9 paid, 14 free) · 34 named · 27 evidenced (≥1 measured outcome) · 23 invalid-with-outcome · the 4 inference-valid models are on the model-validity figure*
+*inference-invalid on committed evidence · not selected for routing, not erased · 24 inference-invalid evidenced models (9 paid, 15 free) · 35 named · 28 evidenced (≥1 measured outcome) · 24 invalid-with-outcome · the 4 inference-valid models are on the model-validity figure*
 > **Caveat.** Invalid means not selected on this evidence — not that the model is weak.
 **Reading.** Every evidenced model that fails at least one inference criterion, on two axes. Panel A: verified-challenge coverage, with the measured-cell count printed; a row covering nothing draws a hatched zero stub, not a missing bar. Panel B: measured pass rate with a 95% Wilson interval, the mean billed cost per task printed beside it. A row with fewer than the provisional cell floor is drawn hatched and faded in both panels, so a thin sample is never read as a full measurement. Blue is a paid channel, orange a free one. Each row carries its first failing reason in the notes below.
 
@@ -1161,8 +1165,9 @@ gpt-6-astra: collection-only promo probe — never enabled or routed — 4/500 c
 kimi-k2.5: not in the live pool — benchmark-only, triage DROP — 121/500 challenges, 121 cells, paid, capability measured, triage DROP
 qwen3.7-plus: not in the live pool — benchmark-only, triage DROP — 87/500 challenges, 87 cells, paid, capability measured, triage DROP
 qwen3.8-27b: collection-only promo probe — never enabled or routed — 42/500 challenges, 42 cells, paid, capability not-ranked, triage not-triaged
+deepseek-r1-distill-qwen-32b: collection-only free channel — never enabled or routed — 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged
 deepseek-v4.1-flash: collection-only free channel — never enabled or routed — 20/500 challenges, 20 cells, free, capability not-ranked, triage not-triaged
-gemini-flash-lite-latest: collection-only free channel — never enabled or routed — 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged
+gemini-flash-lite-latest: collection-only free channel — never enabled or routed — 2/500 challenges, 2 cells, free, capability not-ranked, triage not-triaged
 glm-4.7-flash: collection-only free channel — never enabled or routed — 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged
 granite-4.0-h-micro: collection-only free channel — never enabled or routed — 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged
 laguna-s-2.1: collection-only free channel — never enabled or routed — 10/500 challenges, 10 cells, free, capability not-ranked, triage not-triaged
@@ -1171,8 +1176,8 @@ ling-3-0-flash-fin: collection-only free channel — never enabled or routed —
 llama-3.2-1b-instruct: collection-only free channel — never enabled or routed — 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged
 llama-4-scout-17b-16e-instruct: collection-only free channel — never enabled or routed — 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged
 mistral-small-3.1-24b-instruct: collection-only free channel — never enabled or routed — 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged
-muse-glimmer-30b: collection-only free channel — never enabled or routed — 1/500 challenges, 1 cells, free, capability not-ranked, triage not-triaged
-nemotron-3-nano-omni-30b-a3b-reasoning: collection-only free channel — never enabled or routed — 3/500 challenges, 3 cells, free, capability not-ranked, triage not-triaged
+muse-glimmer-30b: collection-only free channel — never enabled or routed — 4/500 challenges, 4 cells, free, capability not-ranked, triage not-triaged
+nemotron-3-nano-omni-30b-a3b-reasoning: collection-only free channel — never enabled or routed — 6/500 challenges, 6 cells, free, capability not-ranked, triage not-triaged
 nemotron-3.5-lightning: collection-only free channel — never enabled or routed — 13/500 challenges, 15 cells, free, capability not-ranked, triage not-triaged
 step-3.7-flash: collection-only free channel — never enabled or routed — 20/500 challenges, 20 cells, free, capability not-ranked, triage not-triaged
 

@@ -320,10 +320,11 @@ class TestOneEvidencedDefinition:
 
     def test_committed_evidenced_set_is_not_narrowed(self):
         # The strict-arm alternative would drop deepseek-v4.1-flash (declared arm absent) and
-        # move the evidenced count off the universe's 27. The labelled fallback keeps it.
+        # move the evidenced count off the universe's 28 (27 before the 2026-10-07 free harvest
+        # added deepseek-r1-distill-qwen-32b). The labelled fallback keeps it.
         rows = {r.model: r for r in model_validity.validity_census()}
         assert rows["deepseek-v4.1-flash"].cells > 0
-        assert sum(1 for r in rows.values() if r.cells > 0) == 27
+        assert sum(1 for r in rows.values() if r.cells > 0) == 28
         assert rows["glm-5.2"].cells == 84 and rows["glm-5.2"].valid is True
 
     def test_cell_count_definition_is_labelled(self):
