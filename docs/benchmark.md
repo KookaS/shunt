@@ -479,7 +479,9 @@ old PNG. The same gate also runs at **commit time** as the `SH017` pre-commit ho
 being re-recorded for it — is refused on the commit that would ship it, not surfaced later as a
 red `benchmark-integrity` job. The data a figure is fingerprinted against includes both corpora,
 `routing/results.csv` and the free corpus `routing/results_free.csv`, so re-harvesting either one
-re-stales the figures drawn from it. Fix a red `SH017` by re-running the certifying pipeline stage(s),
+re-stales the figures drawn from it — and, in every half, the curated identity file
+`routing/data/model_identity.yaml`, because model labels are canonicalised and merged through it
+at draw time, so a curated alias or merge re-stales every figure too. Fix a red `SH017` by re-running the certifying pipeline stage(s),
 e.g. `uv run --extra benchmark python -m benchmark.pipeline --from evaluate`; never by hand-editing
 `benchmark/routing/figure_inputs.json`.
 

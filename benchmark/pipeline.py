@@ -866,6 +866,15 @@ def _free_inputs() -> tuple[Path, ...]:
     return (config.free_results_csv_path(), *((overlay,) if overlay is not None else ()))
 
 
+# The curated identity file (`scan_free_models.IDENTITY_PATH`). It is read at FIGURE time:
+# `model_universe.resolve_identity` maps provider listing ids through its Tier-2 aliases and
+# `model_validity._version_aliases` merges `model_version` slugs through it, so a curated edit
+# re-labels and re-merges plotted models with no corpus or code change. Every figure job's import
+# closure reaches one of them (`test_every_job_reading_model_identity_digests_it`), so every half
+# carries it — DATA, which the closure alone cannot see.
+_MODEL_IDENTITY: Final[Path] = _ROUTING / "data" / "model_identity.yaml"
+
+
 def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
     """The measured outcomes + task set a half's figures are derived from."""
     if half in ("inference", "demo"):
@@ -887,6 +896,7 @@ def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
             _REPO_ROOT / "src" / "shunt" / "config" / "router.yaml",
             # The free corpus (+ overlay) — see `_free_inputs` for why every half carries it.
             *_free_inputs(),
+            _MODEL_IDENTITY,
         )
     if half == "escalation":
         return (
@@ -911,10 +921,12 @@ def _data_inputs(half: str = "routing") -> tuple[Path, ...]:
             _REPO_ROOT / "src" / "shunt" / "config" / "router.yaml",
             # The free corpus (+ overlay) — see `_free_inputs` for why every half carries it.
             *_free_inputs(),
+            _MODEL_IDENTITY,
         )
     return (
         config.results_csv_path(),
         *_free_inputs(),
+        _MODEL_IDENTITY,
         config.challenges_path(),
         _REPO_ROOT / "benchmark" / "benchmark.yaml",
         # The routing strategies and coverage read each model's canonical DEFAULT-ARM row
