@@ -609,6 +609,52 @@ class TestStandaloneFigureFreshness:
             corpus.write_text("challenge,model,pass\nc1,m1,false\n")
             assert pipeline.figure_digests((job,))[job.name] != before
 
+    def test_the_model_identity_file_is_part_of_every_halfs_data_digest(self) -> None:
+        """`model_identity.yaml` is read at FIGURE time — `model_universe.resolve_identity`
+        (Tier-2 aliases) and `model_validity._version_aliases` canonicalise every plotted
+        model label through it — so a curated merge or alias moved the labels, the lane
+        merges and the per-model universe/validity numbers while check-figures stayed green.
+        Every half draws through those modules, so every half must fingerprint it."""
+        from benchmark.routing.scripts.scan_free_models import IDENTITY_PATH
+
+        for half in pipeline.FIGURE_HALVES:
+            assert IDENTITY_PATH in pipeline._data_inputs(half), half
+
+    def test_every_job_reading_model_identity_digests_it(self) -> None:
+        """Structural guard: a producer whose import closure reaches a `load_identity(` call
+        site must fingerprint the identity file, or its figures outlive a curated edit."""
+        from benchmark.routing.scripts.scan_free_models import IDENTITY_PATH
+
+        reading = 0
+        for job in pipeline.FIGURE_JOBS:
+            seeds = [f for f in (pipeline._first_party_file(job.module),) if f is not None]
+            seeds.extend(p for p in pipeline._declared_files(job.inputs) if p.suffix == ".py")
+            closure = pipeline._import_closure(tuple(sorted(seeds)))
+            readers = [p for p in closure if "load_identity(" in p.read_text()]
+            if readers:
+                reading += 1
+                assert IDENTITY_PATH in pipeline._job_digest_paths(job), (job.name, readers[:3])
+        # Not vacuous: a rename of the call site must fail here, not pass with nothing checked.
+        assert reading > 0
+
+    @pytest.mark.parametrize("half", ["routing", "escalation", "inference", "demo"])
+    def test_a_model_identity_edit_moves_the_digest(
+        self, half: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Positive control: one changed byte in the identity file must change the digest of
+        a job in every half. The scratch file lives under the repo because `_digest` keys each
+        file by its repo-relative path."""
+        import tempfile
+
+        job = next(j for j in pipeline.FIGURE_JOBS if j.half == half)
+        with tempfile.TemporaryDirectory(dir=pipeline._REPO_ROOT) as scratch:
+            identity = Path(scratch) / "model_identity.yaml"
+            monkeypatch.setattr(pipeline, "_MODEL_IDENTITY", identity)
+            identity.write_text("models: {}\n")
+            before = pipeline.figure_digests((job,))[job.name]
+            identity.write_text("models: {a: {}}\n")
+            assert pipeline.figure_digests((job,))[job.name] != before
+
     def test_a_configured_free_overlay_is_part_of_the_digest(self, tmp_path: Path) -> None:
         """`model_validity` and `collection_priority` price free rows through the overlay
         registry (SHUNT_FREE_REGISTRY), so a figure drawn with an overlay is not the figure
@@ -1106,6 +1152,7 @@ class TestInferenceFigureJob:
             "models.yaml",
             "router.yaml",
             config.free_results_csv_path().name,
+            "model_identity.yaml",
         }
 
     def test_the_shipped_drawing_package_is_part_of_the_digest(self) -> None:

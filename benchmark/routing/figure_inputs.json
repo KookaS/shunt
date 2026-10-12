@@ -1,28 +1,28 @@
 {
   "cost_quality_headline": {
-    "inputs": "9e7103a5550ef6d45c2a8cce356812bef4309f07fce2c7df0a81d7917959d4cc",
+    "inputs": "fa0807e3282bf7cfa60b7b6cab6eb62dadf44a60a531c42d31375674abb5a3b3",
     "outputs": {
       "cost_quality_headline.png": "06c2da54ccd115627ba1d6af6ea981047a5d915ef36dabb3983dc9e2c73d511d"
     }
   },
   "plot_exploration": {
-    "inputs": "36f15d77f800e07db8f4a682ded34f1c19ccd9f2a9f407a7ba2b9f31b9ffecd2",
+    "inputs": "9c5d4e2f79019123a9c219fd8bddb9eb07a35de5b012b44fd5947c30e3e6b954",
     "outputs": {
       "exploration_cost.png": "01e3ccd38c02235cb2c1913f899a82e521383ae0aff7bd182f584f99ac83a179"
     }
   },
   "plot_knn_nulls": {
-    "inputs": "4cbc6ae253ef7742b890b25a92df7ab664a7a3a093724148117a569c340a2863",
+    "inputs": "c01744f55643e17d741f575603d46013e20faeff4d41ee775248e74b2cdf093d",
     "outputs": {
       "embedding_signal.png": "2163157662eacc8d96cccfbfd79d5f524062b3a69c60a3b03bb731c90d201109"
     }
   },
   "render_demo_figures": {
-    "inputs": "6ac1627caded63a5f5b707abe41f0976534a5a894a3367c50b6dc66ee669fc5a",
+    "inputs": "3e3752e34ce0e92f547197486eee6e7d4063ab86654796bc59b42aa87d3f974c",
     "outputs": {
       "inference_cost.png": "3dd574a07ea1eb71add4bcd84472318f10229e1e4591adc7ac00ff24e91afdaf",
       "inference_escalation.png": "193cfa295c50052e89b4e19890003c4e95d63d8e960eaf26cedc147cfa78f032",
-      "inference_model_grid.png": "3d564164b87d95c5617cf79518188a408ab15e0da77833b750270028341420d1",
+      "inference_model_grid.png": "3cad4aa22f3dfa559cd49e812af05df22089499700b8b44c2e118cb4b61f7819",
       "inference_neighbourhood.png": "2e4d15fbaf65a505f9263e38455c895f0bf1bc97b40c69738e5eda7c70ee8889",
       "inference_ope.png": "3a8e02a299e1ebe19f64b9d2b21359c57bbe84be7575547d2478d4e07758028f",
       "inference_policy.png": "7763640e731a7fd55c0ac3a6948fd8823db1adca72373f51f5bdc44bf5761d5b",
@@ -31,62 +31,62 @@
     }
   },
   "render_inference_figures": {
-    "inputs": "773080968668f81866941f9f3b8e2d9282219beb27580c8a8f5c103ccc676f34",
+    "inputs": "87de3035fc6e4ef8fc8d20ea35523f4610c9a86dcdb80d1e1b1aff79754267b8",
     "outputs": {
       "inference_cost.png": "b79ef33f13ab835acbd7659c0bf433bff687360831d04e85f027ffc706c6345b",
       "inference_escalation.png": "bb2f941d478824041b497e5164ad047027ee7bc35af8c02f4ca344a20e874ee2",
-      "inference_model_grid.png": "a3dd771bf4ef8a18310d315dcbb916655dcb98b8921aac24e371563a12d98894",
+      "inference_model_grid.png": "2349a2108bbab50d1ea9ccb6e0b49ac33b4dcc55af942cacab8568506ab9ce6f",
       "inference_neighbourhood.png": "39c5c006906f2bd03c9b357a6a5c8c39d4fc47bec804535422dae0d7d32d0d87",
       "inference_ope.png": "f91efec92ab0a805791d281ae8afb836436ee621cf063321b8a14f7a079a19e5",
       "inference_policy.png": "a742fd423bce3257d0bf1ae1daf15e84f0de55986cedb089cac7df362a5fdf1b",
-      "inference_strata.png": "25a19f5a2e89dd79a2abc2a2ddd1ead7fcfa40027c4472cc5d738745b12f830f",
+      "inference_strata.png": "8aaf2cebbf3180dad8d130e4bdfb8334cb34f10441e6d20748c8a7c8299f8479",
       "inference_unit_economics.png": "1593e90d7f3b3b48bb945734211d7261a0f3b16c0666713dc8c0b97d853c5593",
       "no_live_sessions.png": "3daa4df6d5de588303bdb8c4d6fc0e7ec755c9f22adeeba1e1a68f771164d3e6"
     }
   },
   "report": {
-    "inputs": "26f1d01e85c22ffbd58c93d0532e79a560c6a1d43fade7d4aec17ea5f7ede8cc",
+    "inputs": "b4b8e3c945cae7962f28ba0600846e8bf37120a2ee823af9d6ddb89f18092ebb",
     "outputs": {
-      "arm_manipulation.png": "874533aa2879c1aade837b4000a33ab645241809bd0edd090ab88578ac87de8b",
-      "cache_economics.png": "21613ae00e984dae733e0aa417110d86e868eae72234f9f16a6ce1991407a635",
-      "complementarity.png": "e9f49d57eca7165d25bd8df0b4707ebbd127fac37b86dff18fc20888df52f23a",
-      "cost_quality_frontier.png": "3c4b83e006199f9438c0180a31a6059a8b9b6c5ba650a72b4e3a35487a4eaabe",
-      "evidence_basis.png": "8b59838ba94d2945c52ca78abd0f27488b1700277a6b016fb6ce7952ac2220e9",
+      "arm_manipulation.png": "92668569021a7f43ae307ab325320dd7fc9330025b0f5cdaa56e7182289f8a6f",
+      "cache_economics.png": "d796eb7f9a88a785060adfcc72eea823b4d64b58c150624a112322258f39f7ae",
+      "complementarity.png": "869cdffcd2559b6403245e518c1644d5e46980098ae49353d5768ff6f5e942d4",
+      "cost_quality_frontier.png": "9f7333d0fe3a7c2a442f85053a8541f287feb6daf06488f23cc07755a9f03699",
+      "evidence_basis.png": "14d0b121bbceb04f25ae64b870f945c38bc0cbfc8c5e76ab56d24d51e3b16f9c",
       "invalid_models.png": "957eb742af7369032c4c86eef0d8981adbd787b4065fa79920e4dffd185fd6e1",
       "kill_gate.png": "e68f97aa23ebe10b6d8ba001fe36c755222d3f29a091a9241992458525167f96",
       "ladder_rungs.png": "7d13c6c144ccd46506f0e76c087c4c4f7a90f1af0b08a515a52109f55fb51b84",
       "live_gap.png": "05843b6c3b9fb33964784efee76eb600d0bf37af04ec5a459f8fcc5392c863a5",
-      "model_grid.png": "dbced26294fb3c70d6b0942cab4b3623c8bb1be9e3b54deb803120a06c33947c",
+      "model_grid.png": "8bc3b3a465edb2dc0bca395b41f62dbb6bb9191fd2bc8d532bf23c8882add883",
       "model_relevance.png": "c6d6fcaa7c13934df4b065a296860d59fb32641ffd18d5fee7f582583b96b23d",
       "model_validity.png": "f60fb797fadcfa79d1f96191716a81aa9713305baf2019a25523eabde24c4585",
-      "oracle_gap.png": "7c5ebf798bbcf89bd37af73a3d45d7e58f5076d3cf97e44603f51df38e9ee94a",
-      "pareto_dimensions.png": "d335564f38886b5e58205d90de0950f4b3fe6013d30976ef319191c2b9bfbe75",
+      "oracle_gap.png": "6f87138c1e02efe2e7f325e2159264d5adf222651234e5f98c89867956448316",
+      "pareto_dimensions.png": "3b692651d9e5721543a6044116d8756726e1757d0e8a429b84936e5fc08e2a02",
       "routing_decision_audit.png": "181dff4756111221b8edc4bf4bfb78004cab9ee52c5f9711faa797f323997043",
-      "task_difficulty.png": "8d339fe3d07aa69a2def275e8f7a5c9941d2b555fc70b825bf56cf05f2a0b40f",
+      "task_difficulty.png": "5b4a3b352c7a711e6435cc6691bf745814df88617a590289b1964b959ffa5b5f",
       "universe_coverage.png": "38b5300753332230e14ebe1125256dc8a3649f5de443aaa72ee6dee33efbadbd",
       "universe_economics.png": "70ccfc3851aedafbc6fa9cba1995735fc5b0fee8725652adfff5c0aeb1d325e0"
     }
   },
   "run_eval": {
-    "inputs": "02af9bf25cdbf691c5d23118ab32d4f273c8c39e665f0b331c4bee4167af37c8",
+    "inputs": "461ff93f6f6347646810327ef4fda2abf4fc26fb1acd368fa0b951158aa1d187",
     "outputs": {
-      "corpus_and_coverage.png": "53d73ef9d89eebb68a5462270797bcd02fb16ba9b74be2c3e3faf5fde77698ab",
+      "corpus_and_coverage.png": "73ad03a586c72d088e6a8372d3184be07f7fce23b869a3d6596540d5afd3e558",
       "escalation_budget.png": "8afa725867b794df7cdb063be99d5fbb68d1697b88ae4052dcde558f600a6faa",
-      "escalation_decision.png": "4d01a79deb7afdf2655e5d7d124a395fe1d9651b20d6de538fdd92ab3e3012e0",
+      "escalation_decision.png": "d2f4c13a42ce6919f7e01015047fa2c5bc5047d6f2e3c29e7ad24af4dba3f98a",
       "metrics.json": "928ad68d7968393bac00ccb729ec327210da53c58fe2a647a8b7847ee5e95077",
       "operating_point.png": "c72757f7c4cfab818afe9aec667ea86bfb2380a41fcc950611e774d7b68486b3",
       "policy_sweep.png": "62241a1e1dbc5420f9fc14b14fc180752b799908e12d9a1fed61626cb1a95663",
-      "session_value.png": "c7af4108820b237bb0f4f16440bf06497fa5a9ed238e43f3ee9226aab6b964d5"
+      "session_value.png": "47d60afabbf3f59907cdfe280539fdc678287ba2b1745f5a1a5d059993ddd41d"
     }
   },
   "threshold_sweep": {
-    "inputs": "83a9c11605b472e3bbda8012c1f0ca63928fa2d95f2a04ad679111d2b1af5646",
+    "inputs": "7ca07ca77637a873b77f39b4fbb4ca509bedfad65958f4586094c8df3eb719e2",
     "outputs": {
-      "sweep_regimes.png": "11901002eb8acdf22b832582380fb4226cfb038fae85d31c19aae9b41d1c264c"
+      "sweep_regimes.png": "4baf4cdab7e23e4b8a4c584d4a0953b243cca6319f36d82ab77153cf0c6e7a12"
     }
   },
   "viz_knn": {
-    "inputs": "6ae0bd4320cc43bf82c48161448ee52810a33e4d9bde8d2254daee00f2f190fd",
+    "inputs": "2c476a3256ace8bffa6ca58620b1dc2ba22f950eb48f2da859b96fb4bd4e0242",
     "outputs": {
       "knn_calibration.png": "5939d7239b527f9ce381aa290d475bdb63b2ea30c6bdda80ac70983554c45d13"
     }
