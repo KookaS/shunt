@@ -71,7 +71,7 @@ def test_nav_signpost() -> None:
     nav = _nav()
     assert nav[0] == ("Home", "index.md")
     assert nav[1] == ("Quickstart", "quickstart.md"), "Quickstart is not the entry right after Home"
-    assert [e for e in nav if e != ("Quickstart", "quickstart.md")] == PRIOR_NAV
+    assert [e for e in nav if e != ("Quickstart", "quickstart.md")] == list(PRIOR_NAV)
     assert all("#" not in target for _, target in nav), "a nav target carries a #fragment"
 
 
