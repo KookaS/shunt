@@ -201,22 +201,7 @@ What the platform is built to support today.
 
 ## Running
 
-Install from source — the package is not yet published on PyPI:
-
-```bash
-git clone https://github.com/KookaS/shunt.git
-cd shunt
-cp .env.example .env          # then add your provider keys
-pip install -e .              # or: uv sync — then `uv run shunt`
-shunt
-```
-
-Or with Docker, building the image from the checkout:
-
-```bash
-docker build -t shunt-router .
-docker run -p 127.0.0.1:8080:8080 --env-file .env shunt-router
-```
+See the [Quickstart](quickstart.md) to install from source or with Docker.
 
 Config: `SHUNT_PORT`, `SHUNT_HOST`. Provider keys are read from environment
 variables (e.g. `DEEPSEEK_API_KEY`, `REQUESTY_API_KEY`) by the OpenAI SDK client;

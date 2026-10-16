@@ -35,6 +35,7 @@ theme:
 
 nav:
   - Home: index.md
+  - Quickstart: quickstart.md
   - Architecture: architecture.md
   - Configuration: configuration.md
   - Feedback: feedback.md
