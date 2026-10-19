@@ -38,22 +38,33 @@ import sys
 from pathlib import Path
 
 #: The flow /work runs, in order, and each step's spec-kit command name.
-STEPS = (("specify", "speckit.specify"), ("clarify", "speckit.clarify"),
-         ("plan", "speckit.plan"), ("contract", "speckit.contract.feature"),
-         ("contract-root", "speckit.contract.root"),
-         ("checklist", "speckit.checklist"), ("tasks", "speckit.tasks"),
-         ("analyze", "speckit.analyze"), ("implement", "speckit.implement"),
-         ("converge", "speckit.converge"))
+STEPS = (
+    ("specify", "speckit.specify"),
+    ("clarify", "speckit.clarify"),
+    ("plan", "speckit.plan"),
+    ("contract", "speckit.contract.feature"),
+    ("contract-root", "speckit.contract.root"),
+    ("checklist", "speckit.checklist"),
+    ("tasks", "speckit.tasks"),
+    ("analyze", "speckit.analyze"),
+    ("implement", "speckit.implement"),
+    ("converge", "speckit.converge"),
+)
 #: Where each integration's renderer puts a command (spec-kit 1.2.0).
 LAYOUTS = {
     "claude": lambda c: Path(".claude/skills") / c.replace(".", "-") / "SKILL.md",
     "codex": lambda c: Path(".agents/skills") / c.replace(".", "-") / "SKILL.md",
     "opencode": lambda c: Path(".opencode/commands") / f"{c}.md",
 }
-TOOLS = (("CONTRACT_CLI", "contract.py"), ("CONTRACT_RUN", "contract_run.py"),
-         ("WORK_GATE", "work_gate.py"), ("SPEC_CHARTS", "spec_charts.py"),
-         ("SPEC_LINT", "check_spec_commit.py"), ("CHANGESET_CLI", "spec_changeset.py"),
-         ("DIFF_CARD", "spec_diff_card.py"))
+TOOLS = (
+    ("CONTRACT_CLI", "contract.py"),
+    ("CONTRACT_RUN", "contract_run.py"),
+    ("WORK_GATE", "work_gate.py"),
+    ("SPEC_CHARTS", "spec_charts.py"),
+    ("SPEC_LINT", "check_spec_commit.py"),
+    ("CHANGESET_CLI", "spec_changeset.py"),
+    ("DIFF_CARD", "spec_diff_card.py"),
+)
 
 
 def fail(msg: str) -> None:
@@ -122,8 +133,7 @@ def main(argv: list[str]) -> int:
     except (OSError, ValueError):
         active = ""
     sub = substrate(project)
-    out: dict = {"PROJECT_DIR": str(project), "AGENT": agent,
-                 "SUBSTRATE": str(sub) if sub else ""}
+    out: dict = {"PROJECT_DIR": str(project), "AGENT": agent, "SUBSTRATE": str(sub) if sub else ""}
     for key, name in TOOLS:
         path = sub / "scripts" / name if sub else None
         out[key] = str(path) if path and path.is_file() else ""
@@ -132,10 +142,13 @@ def main(argv: list[str]) -> int:
         BACKLOG_DIR=str(project / backlog) if backlog else "",
         BACKLOG_CLI=shutil.which("backlog") is not None,
         CATALOG=str(catalog) if catalog else "",
-        APPROVAL=marker.get("approval") if marker.get("approval") in ("auto", "warn", "required")
+        APPROVAL=marker.get("approval")
+        if marker.get("approval") in ("auto", "warn", "required")
         else "warn",
         ACTIVE_FEATURE=str(project / active) if active else "",
-        STEPS=steps, MISSING_STEPS=[s for s, f in steps.items() if not f])
+        STEPS=steps,
+        MISSING_STEPS=[s for s, f in steps.items() if not f],
+    )
     print(json.dumps(out))
     return 0
 

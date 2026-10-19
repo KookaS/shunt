@@ -57,8 +57,9 @@ def feature_paths(project: Path) -> dict:
     script = project / ".specify" / "scripts" / "bash" / "check-prerequisites.sh"
     if not script.is_file():
         fail(f"{script} is missing: spec-kit's shared scripts are not installed here")
-    proc = subprocess.run(["bash", str(script), "--json", "--paths-only"], cwd=project,
-                          capture_output=True, text=True)
+    proc = subprocess.run(
+        ["bash", str(script), "--json", "--paths-only"], cwd=project, capture_output=True, text=True
+    )
     if proc.returncode != 0:
         fail(proc.stderr.strip() or "check-prerequisites.sh failed")
     try:
@@ -89,10 +90,13 @@ def main(argv: list[str]) -> int:
             marker = {}
         backlog = marker.get("backlog_dir") if isinstance(marker, dict) else None
         if not backlog:
-            fail("this project has no backlog (no backlog_dir in .agentic-kit.json): root and "
-                 "branch contracts belong to backlog items")
-        out.update(BACKLOG_DIR=str(project / backlog),
-                   CONTRACTS_DIR=str(project / backlog / "contracts"))
+            fail(
+                "this project has no backlog (no backlog_dir in .agentic-kit.json): root and "
+                "branch contracts belong to backlog items"
+            )
+        out.update(
+            BACKLOG_DIR=str(project / backlog), CONTRACTS_DIR=str(project / backlog / "contracts")
+        )
     else:
         paths = feature_paths(project)
         fdir = Path(paths.get("FEATURE_DIR") or "")
@@ -106,13 +110,16 @@ def main(argv: list[str]) -> int:
         except ValueError:
             fail(f"the active feature {fdir} is outside the project {project}")
             raise AssertionError from None  # unreachable
-        out.update(FEATURE_DIR=str(fdir), UNIT_ID=unit,
-                   FEATURE_SPEC=paths.get("FEATURE_SPEC") or str(fdir / "spec.md"),
-                   IMPL_PLAN=paths.get("IMPL_PLAN") or str(fdir / "plan.md"),
-                   TASKS=paths.get("TASKS") or str(fdir / "tasks.md"),
-                   CONTRACT_FILE=str(fdir / "contract.yaml"),
-                   EVIDENCE_FILE=str(fdir / "evidence.jsonl"),
-                   HAS_CONTRACT=(fdir / "contract.yaml").is_file())
+        out.update(
+            FEATURE_DIR=str(fdir),
+            UNIT_ID=unit,
+            FEATURE_SPEC=paths.get("FEATURE_SPEC") or str(fdir / "spec.md"),
+            IMPL_PLAN=paths.get("IMPL_PLAN") or str(fdir / "plan.md"),
+            TASKS=paths.get("TASKS") or str(fdir / "tasks.md"),
+            CONTRACT_FILE=str(fdir / "contract.yaml"),
+            EVIDENCE_FILE=str(fdir / "evidence.jsonl"),
+            HAS_CONTRACT=(fdir / "contract.yaml").is_file(),
+        )
     print(json.dumps(out))
     return 0
 
