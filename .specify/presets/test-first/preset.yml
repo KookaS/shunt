@@ -1,0 +1,51 @@
+schema_version: "1.0"
+
+# Test-first by default, through spec-kit's own override stack (`specify preset`). Nothing
+# here edits a file spec-kit owns: the tasks template is REPLACED in the resolution stack,
+# the tasks and plan commands are WRAPPED (the core body is kept verbatim via
+# {CORE_TEMPLATE}), and the plan template gets an APPENDED section — so `specify
+# integration upgrade` refreshes the core files underneath and this layer still applies.
+preset:
+  id: "test-first"
+  name: "Test-first tasks with a task contract"
+  version: "1.1.0"
+  description: "Tests are mandatory and written first (seen failing before implementation); each user-story phase opens with its test tasks; tasks and plan reference the feature's contract.yaml."
+  author: "agentic"
+  license: "MIT"
+
+requires:
+  speckit_version: ">=1.2.0"
+  extensions:
+    - id: contract
+      version: ">=1.0.0"
+
+provides:
+  templates:
+    - type: "template"
+      name: "tasks-template"
+      file: "templates/tasks-template.md"
+      description: "Tasks template with mandatory, test-first phases tied to contract.yaml"
+      replaces: "tasks-template"
+
+    - type: "template"
+      name: "plan-template"
+      file: "templates/plan-template.md"
+      description: "Adds the Task contract section (tests and metrics the contract will carry)"
+      strategy: "append"
+
+    - type: "command"
+      name: "speckit.tasks"
+      file: "commands/speckit.tasks.md"
+      description: "Wrap tasks: test-first rules that supersede the core 'tests are optional' default"
+      strategy: "wrap"
+
+    - type: "command"
+      name: "speckit.plan"
+      file: "commands/speckit.plan.md"
+      description: "Wrap plan: name the next step (the task contract) before tasks"
+      strategy: "wrap"
+
+tags:
+  - "tdd"
+  - "test-first"
+  - "contracts"

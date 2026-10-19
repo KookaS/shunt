@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0",
+  "extensions": {
+    "contract": {
+      "version": "1.1.0",
+      "source": "local",
+      "manifest_hash": "sha256:5c6394f4f116abbc1fdca2c8968e1b30f22162296c084466aa987aaf2b9de418",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "claude": [
+          "speckit.contract.feature",
+          "speckit.contract",
+          "speckit.contract.root"
+        ],
+        "codex": [
+          "speckit.contract.feature",
+          "speckit.contract",
+          "speckit.contract.root"
+        ],
+        "opencode": [
+          "speckit.contract.feature",
+          "speckit.contract",
+          "speckit.contract.root"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-10-19T12:49:44.232422+00:00"
+    },
+    "work": {
+      "version": "1.3.5",
+      "source": "local",
+      "manifest_hash": "sha256:89c77f6f47f8b0b3e8a72e22e0199adf469c36910d84bf8ad011abc59b2bfef1",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "claude": [
+          "speckit.work.run",
+          "work"
+        ],
+        "codex": [
+          "speckit.work.run",
+          "work"
+        ],
+        "opencode": [
+          "speckit.work.run",
+          "work"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-10-19T12:49:45.816526+00:00"
+    }
+  }
+}

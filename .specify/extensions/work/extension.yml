@@ -1,0 +1,39 @@
+schema_version: "1.0"
+
+# The one entry point of the spec-kit flow: `/work <plain request>` drives every step —
+# backlog item → specify → clarify → plan → contract → checklist → tasks → analyze → the
+# completeness gate → the review card. At `auto` (the v6 default) it approves itself through
+# the machine gates and posts a Veto/Comment receipt; `warn`/`required` stop for the owner.
+# `/work continue` implements and proves it. The owner never types a step's name. Installed
+# by spec-kit itself (`specify extension add`), so the command is rendered per integration.
+extension:
+  id: work
+  name: "Work intake"
+  version: "1.3.5"
+  description: "One command from a plain request to an approval card: backlog item, spec, plan, contract with failing tests, tasks, completeness gate and review card; `continue` implements, converges and proves it."
+  author: agentic
+  license: MIT
+
+requires:
+  speckit_version: ">=1.2.0"
+  extensions:
+    - id: contract
+      version: ">=1.1.0"
+  tools:
+    - name: python3
+      required: true
+      description: "Runs the context script and the substrate's gate, contract CLI and card renderer"
+
+provides:
+  commands:
+    - name: speckit.work.run
+      file: commands/speckit.work.run.md
+      description: "From a plain request to an approval card (or, with `continue`, to proven done) — every spec-kit step run for you"
+      # What every driver advertises (spec-kit 1.2.0 always names a SKILL `speckit-<name>`):
+      # /speckit-work (Claude), $speckit-work (Codex), /work (opencode).
+      aliases: [work]
+
+tags:
+  - "intake"
+  - "orchestration"
+  - "contracts"

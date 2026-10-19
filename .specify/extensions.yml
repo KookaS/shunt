@@ -1,0 +1,16 @@
+installed:
+- contract
+- work
+settings:
+  auto_execute_hooks: true
+hooks:
+  after_plan:
+  - extension: contract
+    command: speckit.contract.feature
+    enabled: true
+    optional: true
+    priority: 10
+    prompt: Write the task contract (tests first, tiered metrics) before generating
+      tasks?
+    description: The task contract is the step between plan and tasks
+    condition: null

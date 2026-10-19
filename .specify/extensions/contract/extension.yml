@@ -1,0 +1,43 @@
+schema_version: "1.0"
+
+# The task-contract step of the spec-kit flow: specify → clarify → plan → CONTRACT → tasks →
+# analyze → implement → converge. Installed by spec-kit itself (`specify extension add`), so
+# its commands are rendered per integration by spec-kit's own registrar.
+extension:
+  id: contract
+  name: "Task contracts"
+  version: "1.1.0"
+  description: "Writes a feature's contract.yaml (tests written first and seen failing, metrics tiered from the spec's success criteria, abort path) and the root/branch contracts of backlog items."
+  author: agentic
+  license: MIT
+
+requires:
+  speckit_version: ">=1.2.0"
+  tools:
+    - name: python3
+      required: true
+      description: "Runs the context script and the substrate's contract CLI"
+
+provides:
+  commands:
+    - name: speckit.contract.feature
+      file: commands/speckit.contract.feature.md
+      description: "Write the feature's contract.yaml from spec.md and plan.md, validate it, and write its tests first (seen failing)"
+      # The short name every driver advertises: /speckit-contract (Claude), $speckit-contract
+      # (Codex), /speckit.contract (opencode).
+      aliases: [speckit.contract]
+    - name: speckit.contract.root
+      file: commands/speckit.contract.root.md
+      description: "Write the root or branch contract of a backlog item: north star, guardrails, kill criteria, pre-registration, budget, roll-up"
+
+hooks:
+  after_plan:
+    command: speckit.contract.feature
+    optional: true
+    prompt: "Write the task contract (tests first, tiered metrics) before generating tasks?"
+    description: "The task contract is the step between plan and tasks"
+
+tags:
+  - "tdd"
+  - "contracts"
+  - "metrics"

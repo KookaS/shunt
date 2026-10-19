@@ -56,6 +56,24 @@ everywhere with no path munging.
 reports pass/fail for code you aren't editing. Check with
 `uv run python -c "import shunt.models as m; print(m.__file__)"`.
 
+## Sessions — one worktree by default
+
+Code work never happens in the shared checkout. A session runs in a git worktree on a
+`session/*` / `feat/*` branch: the wrapper's `make opencode-wt` / `make claude-wt`
+creates one for both the wrapper and this repo, or — working here standalone — create one
+with `git worktree add` yourself. Branch off `main`, keep commits on the session branch,
+and never land on `main` yourself; only the owner merges. A worktree is also what makes
+`uv run` resolve `import shunt` to the tree you are actually editing (see above).
+
+## Commits — DCO sign-off
+
+This repo is DCO, not CLA (see `CONTRIBUTING.md`): **every commit must carry a
+`Signed-off-by: <name> <email>` trailer**, or the contribution is rejected. Commit with
+`-s` (`git commit -s`) so git emits it; the host's git identity must be set first (this
+checkout's is), or `-s` writes an unattributable trailer. A commit that lands without the
+trailer has to be amended and re-pushed before the PR can pass DCO — worktree branches
+are no exception.
+
 ## The rules — the *why* (the exact ceilings live in `pyproject.toml`; ruff + mypy enforce them)
 
 - **Types.** mypy `--strict` on `src/`; no untyped defs, no bare `dict`
