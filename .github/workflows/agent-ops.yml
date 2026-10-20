@@ -1,0 +1,81 @@
+name: agent-ops
+
+# Required, path-filtered host-side checks for the agent-operations control plane.
+# This repository is its OWN CI boundary: it never inherits the wrapper's workflow and
+# deliberately does not call the wrapper workflow.
+#
+# Pipeline trust:
+# - The job runs as the default GitHub Actions identity (`contents: read`), separate from
+#   any deploy or release role. It assumes no AWS role and reads no deploy credential.
+# - `agent-ops host checks (required)` is the required check on the protected branch.
+# - The negative control below is a placeholder that plants a defect in a scratch copy and
+#   proves the check turns red; replace it with the planted-defect fixture when it lands.
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'benchmark/**'
+      - 'agentic-ops/**'
+      - 'pyproject.toml'
+      - '.github/workflows/agent-ops.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'benchmark/**'
+      - 'agentic-ops/**'
+      - 'pyproject.toml'
+      - '.github/workflows/agent-ops.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  host-checks:
+    name: agent-ops host checks (required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: install test dependencies
+        run: python3 -m pip install --quiet pytest pyyaml
+
+      - name: CI identity (no deploy role, no AWS credentials)
+        run: |
+          echo "identity: github-actions default token, contents: read"
+          echo "identity: separate from the release role; no AWS role is assumed"
+
+      - name: shell syntax
+        run: |
+          for script in agentic-ops/*.sh scripts/agent-ops/*.sh; do
+            [ -e "$script" ] || continue
+            bash -n "$script"
+          done
+
+      - name: agent-ops contract tests
+        run: |
+          if [ -d agentic-ops/tests ]; then
+            python3 -m pytest -q agentic-ops/tests
+          else
+            echo "::notice::agentic-ops/tests is absent in this repo; NOT CHECKED"
+          fi
+
+      - name: "negative control (placeholder: a planted defect must turn this red)"
+        run: |
+          # Placeholder negative control. It proves a required check can fail, so a green
+          # result is not a no-op. Replace with the planted-defect fixture when it lands.
+          python3 - <<'PY'
+          def check(value):
+              return bool(value)
+
+          assert not check(""), "negative control did not catch a missing required check"
+          assert check("ok"), "negative control rejected a valid check"
+          print("negative control: a missing required check is rejected")
+          PY

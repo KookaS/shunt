@@ -1,0 +1,464 @@
+# Agent-ops flow definitions.
+#
+# A flow is data, not an orchestrator: the spec-kit work flow remains the executor.
+# Each step names the skill, prompt or delegate that performs it, what it must leave
+# behind, how it is verified, where a failure returns, and when it may be skipped.
+#
+# A step record (`spec/step_record.py`, schema `step-run/1`) uses the SAME status
+# vocabulary declared below. A step not reached is recorded as `not_run`; a step an
+# optional `skip_when` condition excused is `skipped`; an owner-approved exception is
+# `waived`. Tokens and cost may be absent on a record and never fail a step.
+schema: 1
+default_status: not_run
+statuses:
+  - pass
+  - fail
+  - partial
+  - not_run
+  - stale
+  - waived
+  - skipped
+  - abandoned
+
+flows:
+  delivery:
+    title: Delivery
+    purpose: >-
+      The default flow for a change that must ship: from a plain request through a
+      verified, reviewed outcome and a retrospective.
+    steps:
+      - id: idea
+        required: true
+        prompt: work
+        produces: "a backlog item (or a recorded assumption) linked to the serving objective"
+        verifier: "the unit has an objective and a parent in the work graph"
+        on_fail: "return_to: idea"
+        skip_when: "never"
+
+      - id: spec
+        required: true
+        skill: speckit-specify
+        produces: "specs/NNN-<slug>/spec.md with numbered requirements"
+        verifier: "the specify step's coverage check and the completeness gate"
+        on_fail: "return_to: spec"
+        skip_when: "never"
+
+      - id: metric
+        required: true
+        skill: speckit-clarify
+        produces: "metric rows with a source, threshold and direction"
+        verifier: "every threshold metric resolves through the catalogue or a measured baseline"
+        on_fail: "return_to: spec"
+        skip_when: "never"
+
+      - id: tests
+        required: true
+        skill: speckit-contract
+        produces: "failing tests and a recorded red run"
+        verifier: "the named test command exits non-zero before implementation"
+        on_fail: "return_to: tests"
+        skip_when: "never"
+
+      - id: design
+        required: false
+        skill: speckit-plan
+        produces: "specs/NNN-<slug>/plan.md with the chosen component boundaries"
+        verifier: "the plan names every new module and its consumer"
+        on_fail: "return_to: design"
+        skip_when: "the change is confined to one existing module and adds no new boundary"
+
+      - id: goals
+        required: true
+        skill: speckit-contract-root
+        produces: "contract.yaml objective, north star, guardrails, kill criteria and budget"
+        verifier: "the contract lints and names no invented threshold"
+        on_fail: "return_to: goals"
+        skip_when: "never"
+
+      - id: execute
+        required: true
+        skill: speckit-implement
+        produces: "production code, tests and docs for the unit"
+        verifier: "the unit's own test command exits zero"
+        on_fail: "return_to: execute"
+        skip_when: "never"
+
+      - id: test-pass
+        required: true
+        delegate: contract_run
+        produces: "a green contract run with its command and output recorded"
+        verifier: "contract_run exits zero for the unit"
+        on_fail: "return_to: execute"
+        skip_when: "never"
+
+      - id: code-review
+        required: true
+        skill: software-reviewer
+        produces: "a ship-or-fix verdict for the unit"
+        verifier: "the review names no blocking issue and routes to ship"
+        on_fail: "return_to: execute"
+        skip_when: "never"
+
+      - id: test-review
+        required: false
+        skill: software-auditor
+        produces: "a test-value audit of the unit's suite"
+        verifier: "the audit lists no bug-hiding test and no missing defect class"
+        on_fail: "return_to: tests"
+        skip_when: "the suite is unchanged since its last audit"
+
+      - id: arch-review
+        required: false
+        skill: software-designer
+        produces: "a placement and seam check for the change"
+        verifier: "no new module boundary lacks a second consumer or a cited requirement"
+        on_fail: "return_to: design"
+        skip_when: "the change adds no module, adapter, interface or new dependency"
+
+      - id: metric-check
+        required: false
+        delegate: contract_run
+        produces: "measured metric values compared with the contract thresholds"
+        verifier: "every threshold metric is within its stated bound"
+        on_fail: "return_to: execute"
+        skip_when: "the unit declares no threshold metric"
+
+      - id: spec-check
+        required: true
+        skill: speckit-analyze
+        produces: "specs/NNN-<slug>/analyze.md"
+        verifier: "no unresolved finding in the analysis report"
+        on_fail: "return_to: spec"
+        skip_when: "never"
+
+      - id: outcome
+        required: true
+        delegate: work_gate
+        produces: "the review card, approval record or WORK-DONE evidence"
+        verifier: "work_gate reports no blocker"
+        on_fail: "return_to: outcome"
+        skip_when: "never"
+
+      - id: retrospective
+        required: true
+        prompt: retrospective
+        produces: "a retrospective note and evidence rows for the unit"
+        verifier: "the note names every failed, not-run and waived step"
+        on_fail: "return_to: retrospective"
+        skip_when: "never"
+
+  spike:
+    title: Spike
+    purpose: >-
+      A time-boxed question answered with evidence, with no promise that the result
+      ships.
+    steps:
+      - id: question
+        required: true
+        prompt: work
+        produces: "a bounded question and a kill criterion"
+        verifier: "the question names what evidence would settle it"
+        on_fail: "return_to: question"
+        skip_when: "never"
+
+      - id: design
+        required: true
+        skill: speckit-plan
+        produces: "the cheapest experiment and its budget"
+        verifier: "the plan fits the budget and names its controls"
+        on_fail: "return_to: design"
+        skip_when: "never"
+
+      - id: execute
+        required: true
+        skill: research
+        produces: "the experiment run and its raw evidence"
+        verifier: "the run is replayable from the recorded inputs"
+        on_fail: "return_to: execute"
+        skip_when: "never"
+
+      - id: evidence
+        required: true
+        delegate: contract_run
+        produces: "a verdict against the kill criterion"
+        verifier: "the verdict cites the measured result"
+        on_fail: "return_to: execute"
+        skip_when: "never"
+
+      - id: outcome
+        required: true
+        delegate: work_gate
+        produces: "the review card with the verdict and its limits"
+        verifier: "work_gate reports no blocker"
+        on_fail: "return_to: outcome"
+        skip_when: "never"
+
+      - id: retrospective
+        required: true
+        prompt: retrospective
+        produces: "a retrospective note with the follow-on decision"
+        verifier: "the note names every failed, not-run and waived step"
+        on_fail: "return_to: retrospective"
+        skip_when: "never"
+
+  incident:
+    title: Incident
+    purpose: >-
+      Restore a broken service first, then leave a regression test and evidence behind.
+    steps:
+      - id: detect
+        required: true
+        prompt: incident
+        produces: "the observed symptom, impact and start time"
+        verifier: "the report names a reproducible trigger or a monitored signal"
+        on_fail: "return_to: detect"
+        skip_when: "never"
+
+      - id: triage
+        required: true
+        skill: software-auditor
+        produces: "the narrowest suspected fault and a reproduction"
+        verifier: "the reproduction fails on the affected revision"
+        on_fail: "return_to: triage"
+        skip_when: "never"
+
+      - id: mitigate
+        required: true
+        skill: speckit-implement
+        produces: "the smallest restoring change and its rollback point"
+        verifier: "the affected signal returns to its baseline"
+        on_fail: "return_to: mitigate"
+        skip_when: "never"
+
+      - id: tests
+        required: true
+        skill: speckit-contract
+        produces: "a regression test that fails without the mitigation"
+        verifier: "the test is red on the pre-fix revision and green after it"
+        on_fail: "return_to: tests"
+        skip_when: "never"
+
+      - id: test-pass
+        required: true
+        delegate: contract_run
+        produces: "a green suite covering the regression"
+        verifier: "contract_run exits zero"
+        on_fail: "return_to: mitigate"
+        skip_when: "never"
+
+      - id: outcome
+        required: true
+        delegate: work_gate
+        produces: "the incident record with cause, fix and follow-ups"
+        verifier: "work_gate reports no blocker"
+        on_fail: "return_to: outcome"
+        skip_when: "never"
+
+      - id: retrospective
+        required: true
+        prompt: retrospective
+        produces: "a retrospective naming the detection gap and the durable fix"
+        verifier: "the note names every failed, not-run and waived step"
+        on_fail: "return_to: retrospective"
+        skip_when: "never"
+
+  research:
+    title: Research
+    purpose: >-
+      A multi-source investigation that ends in a cited, bounded answer rather than code.
+    steps:
+      - id: question
+        required: true
+        prompt: work
+        produces: "a decision-ready question and its scope"
+        verifier: "the question names the decision it informs"
+        on_fail: "return_to: question"
+        skip_when: "never"
+
+      - id: sources
+        required: true
+        skill: deep-research
+        produces: "a source ledger and a stopping rule"
+        verifier: "every claim in the final answer traces to a source row"
+        on_fail: "return_to: sources"
+        skip_when: "never"
+
+      - id: method
+        required: true
+        skill: goal-shaper
+        produces: "the comparison criteria and the evidence threshold"
+        verifier: "the criteria are fixed before the sources are compared"
+        on_fail: "return_to: method"
+        skip_when: "never"
+
+      - id: execute
+        required: true
+        skill: research
+        produces: "the synthesis and its confidence limits"
+        verifier: "the synthesis distinguishes measured facts from inference"
+        on_fail: "return_to: execute"
+        skip_when: "never"
+
+      - id: evidence
+        required: true
+        delegate: contract_run
+        produces: "the cited answer stored as a durable artifact"
+        verifier: "the artifact's links resolve and its claims are traceable"
+        on_fail: "return_to: execute"
+        skip_when: "never"
+
+      - id: outcome
+        required: true
+        delegate: work_gate
+        produces: "the review card with the recommendation"
+        verifier: "work_gate reports no blocker"
+        on_fail: "return_to: outcome"
+        skip_when: "never"
+
+      - id: retrospective
+        required: true
+        prompt: retrospective
+        produces: "a retrospective naming what the research could not settle"
+        verifier: "the note names every failed, not-run and waived step"
+        on_fail: "return_to: retrospective"
+        skip_when: "never"
+
+  docs:
+    title: Documentation
+    purpose: >-
+      A documentation-only change: audit the claim, edit the page, verify every link and
+      keep the index complete.
+    steps:
+      - id: idea
+        required: true
+        prompt: work
+        produces: "the claim or page the change serves"
+        verifier: "the request names the reader and the outcome"
+        on_fail: "return_to: idea"
+        skip_when: "never"
+
+      - id: audit
+        required: true
+        prompt: docs-audit
+        produces: "the pages that make the claim and the pages that link to them"
+        verifier: "every affected page is in the change set"
+        on_fail: "return_to: audit"
+        skip_when: "never"
+
+      - id: edit
+        required: true
+        skill: software-developer
+        produces: "the corrected pages and any index entries"
+        verifier: "the docs link and table-of-contents gates exit zero"
+        on_fail: "return_to: edit"
+        skip_when: "never"
+
+      - id: test-pass
+        required: true
+        delegate: contract_run
+        produces: "a green docs check with the commands recorded"
+        verifier: "contract_run exits zero"
+        on_fail: "return_to: edit"
+        skip_when: "never"
+
+      - id: spec-check
+        required: false
+        skill: speckit-analyze
+        produces: "an analysis report when the change also edits a spec"
+        verifier: "no unresolved finding in the report"
+        on_fail: "return_to: edit"
+        skip_when: "no spec or contract file changed"
+
+      - id: outcome
+        required: true
+        delegate: work_gate
+        produces: "the review card or done evidence"
+        verifier: "work_gate reports no blocker"
+        on_fail: "return_to: outcome"
+        skip_when: "never"
+
+      - id: retrospective
+        required: true
+        prompt: retrospective
+        produces: "a retrospective entry for the documentation change"
+        verifier: "the note names every failed, not-run and waived step"
+        on_fail: "return_to: retrospective"
+        skip_when: "never"
+
+  catalogue-change:
+    title: Catalogue change
+    purpose: >-
+      A change to the metric catalogue, prompt registry or spec explorer: validate the
+      entry, keep lineage intact and prove every consumer still resolves it.
+    steps:
+      - id: request
+        required: true
+        prompt: work
+        produces: "the catalogue entry and the consumers that must agree"
+        verifier: "the request names the entry's owner and direction"
+        on_fail: "return_to: request"
+        skip_when: "never"
+
+      - id: validate
+        required: true
+        prompt: metric-lineage
+        produces: "a validated entry with unit, direction, source and baseline"
+        verifier: "the catalogue validator accepts the entry and its lineage"
+        on_fail: "return_to: validate"
+        skip_when: "never"
+
+      - id: edit
+        required: true
+        skill: software-developer
+        produces: "the catalogue or registry change plus any consumer update"
+        verifier: "every consumer resolves the entry by its stable id"
+        on_fail: "return_to: edit"
+        skip_when: "never"
+
+      - id: tests
+        required: true
+        skill: speckit-contract
+        produces: "a test for the new or changed entry"
+        verifier: "the test fails before the change and passes after it"
+        on_fail: "return_to: tests"
+        skip_when: "never"
+
+      - id: test-pass
+        required: true
+        delegate: contract_run
+        produces: "a green catalogue and consumer suite"
+        verifier: "contract_run exits zero"
+        on_fail: "return_to: edit"
+        skip_when: "never"
+
+      - id: metric-check
+        required: true
+        delegate: contract_run
+        produces: "measured values for every threshold that references the entry"
+        verifier: "every referencing contract is still within its bound"
+        on_fail: "return_to: edit"
+        skip_when: "never"
+
+      - id: spec-check
+        required: true
+        skill: speckit-analyze
+        produces: "an analysis report for the affected specs"
+        verifier: "no unresolved finding in the report"
+        on_fail: "return_to: edit"
+        skip_when: "never"
+
+      - id: outcome
+        required: true
+        delegate: work_gate
+        produces: "the review card or done evidence"
+        verifier: "work_gate reports no blocker"
+        on_fail: "return_to: outcome"
+        skip_when: "never"
+
+      - id: retrospective
+        required: true
+        prompt: retrospective
+        produces: "a retrospective entry for the catalogue change"
+        verifier: "the note names every failed, not-run and waived step"
+        on_fail: "return_to: retrospective"
+        skip_when: "never"

@@ -1,0 +1,59 @@
+# Portable agent-ops CI template. It names no host, no absolute path and no secret.
+# Copy it into the project's CI directory and replace each notice with the project's
+# own command. GitHub Actions is the example runner; the jobs are runner-neutral in
+# intent (checkout, run a shell step).
+name: agent-ops
+
+"on":
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  spec-contract-lint:
+    name: Spec and contract lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint specs and contracts
+        shell: bash
+        run: |
+          if [ -f scripts/check_contract.py ]; then
+            python3 scripts/check_contract.py
+          elif [ -f scripts/check_spec_commit.py ]; then
+            python3 scripts/check_spec_commit.py --lint
+          else
+            echo "::notice::no spec/contract lint entry point found; wire this job to the project's command"
+          fi
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run the project test command
+        shell: bash
+        run: |
+          if [ -f pyproject.toml ] || [ -f pytest.ini ] || [ -f tox.ini ]; then
+            python3 -m pytest -q
+          else
+            echo "::notice::no pytest configuration found; wire this job to the project's test command"
+          fi
+
+  step-record-verifier:
+    name: Step-record verifier (placeholder)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify step records
+        shell: bash
+        run: |
+          # PLACEHOLDER: replace with the installed step-record checker.
+          # Expected input: JSONL step-run/1 records from the unit's step log.
+          echo "::notice::step-record verification is not wired yet; run the step-record validator over the unit's step log"

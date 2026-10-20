@@ -1,0 +1,24 @@
+# Seeded once by the `agent-ops` kit. It becomes the project's own file; sync never
+# overwrites it. Fill in the central services and lane defaults below.
+#
+# NO SECRETS. Credentials belong in the host's secret mechanism, never in this file.
+repo: "shunt"
+project: "."
+
+central_services:
+  # Base URL of the control-plane service, when one is configured.
+  url: ""
+  # Object-store bucket for the step and issue archive, when one is configured.
+  bucket: ""
+  # Key prefix inside that bucket.
+  archive_prefix: "agent-ops/"
+
+lanes:
+  # Flow used when a lane does not name one.
+  default_flow: delivery
+  # Lane (epic) name applied when the work item does not carry one.
+  default_lane: ""
+  # A lane's write sets may run in parallel only when the graph validator agrees.
+  allow_parallel: true
+  require_write_sets: true
+  require_dag_validation: true
